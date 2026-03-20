@@ -1,5 +1,43 @@
 # 开发日志
 
+## 2026-03-21
+
+### Git版本控制 + GitHub远程仓库 + 项目文档完善
+
+**背景**: 建立完整的版本控制系统，配置GitHub远程仓库，完善项目文档
+
+**改进**:
+
+1. **Git版本控制初始化**:
+   - 创建 `.gitignore` 文件，排除敏感文件和构建产物
+   - 排除：`node_modules/`, `__pycache__/`, `.env`, `backups/`, `dist/`, `build/` 等
+   - 首次提交：`Initial commit: 桥牌叫牌练习系统 v1.8.2`
+
+2. **GitHub远程仓库配置**:
+   - 仓库地址：`https://github.com/fangoner/bridge-bidding-system`
+   - 配置远程origin并推送代码
+   - API密钥安全：`.env` 已被忽略，不会泄露
+
+3. **项目文档完善**:
+   - 添加 `README.md`：项目介绍、安装步骤、使用说明、项目结构
+   - 添加 `.env.example`：环境变量配置模板
+   - 更新备份skill：结合Git版本控制，包含终端和网页所有文件
+
+4. **备份策略优化**:
+   - Git：日常版本控制，记录每次修改
+   - 备份：重要节点存档，双重保险
+   - 备份内容：终端（后端）+ 网页（前端）+ 文档配置
+
+**修改文件**:
+- `.gitignore` (新建)
+- `README.md` (新建)
+- `.env.example` (添加到Git)
+- `.trae/skills/create-restore-point/skill.md`
+
+**备份位置**: `backups/backup_20260321_020337/`
+
+---
+
 ## 2026-03-19
 
 ### 恢复到 backup_20260318_pre_refactor

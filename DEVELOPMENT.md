@@ -419,6 +419,23 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 - **远程访问配置**
   - 支持`0.0.0.0`绑定
 
+### v1.19
+- **Git版本控制初始化**
+  - 创建 `.gitignore` 文件，排除敏感文件和构建产物
+  - 排除：`node_modules/`, `__pycache__/`, `.env`, `backups/`, `dist/`, `build/` 等
+  - 首次提交：`Initial commit: 桥牌叫牌练习系统 v1.8.2`
+- **GitHub远程仓库配置**
+  - 仓库地址：`https://github.com/fangoner/bridge-bidding-system`
+  - 配置远程origin并推送代码
+  - API密钥安全：`.env` 已被忽略，不会泄露
+- **项目文档完善**
+  - 添加 `README.md`：项目介绍、安装步骤、使用说明、项目结构
+  - 添加 `.env.example`：环境变量配置模板
+- **备份策略优化**
+  - Git：日常版本控制，记录每次修改
+  - 备份：重要节点存档，双重保险
+  - 备份内容：终端（后端）+ 网页（前端）+ 文档配置
+
 ### v1.18
 - **检验定约功能**
   - 新增`/api/analyze-contract`接口，调用Deep Finesse分析定约
