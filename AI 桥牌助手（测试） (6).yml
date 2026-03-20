@@ -1,0 +1,4278 @@
+app:
+  description: ''
+  icon: dccf5d2d-d3ff-430f-9e51-1e72a1f295df
+  icon_background: '#FFEAD5'
+  mode: advanced-chat
+  name: AI 桥牌助手（测试）
+  use_icon_as_answer_icon: true
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/deepseek:0.0.6@dd589dc093c8084925858034ab5ec1fdf0d33819f43226c2f8c4a749a9acbbb2
+    version: null
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/ollama:0.0.6@f430f3eb959f4863b1e87171544a8fec179441b90deda5693c85f07712d2a68c
+    version: null
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/volcengine_maas:0.0.20@aff2eaf766b1774519c3ca0e77de0b28c87b71cce6390b22a103518e8a5e4ae7
+    version: null
+kind: app
+version: 0.5.0
+workflow:
+  conversation_variables:
+  - description: ''
+    id: dfd2c372-6bff-4cd2-ba4a-57da990754c6
+    name: South_DIST
+    selector:
+    - conversation
+    - South_DIST
+    value: ''
+    value_type: string
+  - description: ''
+    id: 5aba6a44-c82c-40d7-8a1b-e37c13d30dfd
+    name: North_DIST
+    selector:
+    - conversation
+    - North_DIST
+    value: ''
+    value_type: string
+  - description: ''
+    id: 0145d9cd-4d9a-4e17-8d9f-28a8f8d6d0d8
+    name: West_DIST
+    selector:
+    - conversation
+    - West_DIST
+    value: ''
+    value_type: string
+  - description: ''
+    id: 1c884cb9-c985-460d-ac84-38e9e57bfd16
+    name: East_DIST
+    selector:
+    - conversation
+    - East_DIST
+    value: ''
+    value_type: string
+  - description: ''
+    id: cc5f8384-6dd3-4e65-a84a-0a1fcfb400ac
+    name: Latest_JF_Content
+    selector:
+    - conversation
+    - Latest_JF_Content
+    value: ''
+    value_type: string
+  - description: ''
+    id: af82bc26-43c6-4f0b-b26a-0cab76f33d9f
+    name: Bid
+    selector:
+    - conversation
+    - Bid
+    value: ''
+    value_type: string
+  - description: ''
+    id: 2b81c66b-f15f-46f9-8ca2-6655740d8a82
+    name: Output_Text
+    selector:
+    - conversation
+    - Output_Text
+    value: ''
+    value_type: string
+  - description: ''
+    id: f123c11f-6a43-4bb3-862e-ed670dff9df1
+    name: Updated_Bidding
+    selector:
+    - conversation
+    - Updated_Bidding
+    value: ''
+    value_type: string
+  - description: ''
+    id: 86058c6b-15a6-4f4d-9b96-be57e1cb6748
+    name: Updated_Bid_Meaning
+    selector:
+    - conversation
+    - Updated_Bid_Meaning
+    value: ''
+    value_type: string
+  - description: ''
+    id: 8161edd5-4203-457f-b8b8-f3a36f9276a6
+    name: Output_Deep_Finesse
+    selector:
+    - conversation
+    - Output_Deep_Finesse
+    value: ''
+    value_type: string
+  - description: ''
+    id: 95dfc45e-97fe-4860-afba-c2ba9a045490
+    name: Dealer
+    selector:
+    - conversation
+    - Dealer
+    value: ''
+    value_type: string
+  - description: ''
+    id: 89e2b0ad-7976-4f0f-a9d9-cea5ac21f95b
+    name: Bid_Meaning
+    selector:
+    - conversation
+    - Bid_Meaning
+    value: ''
+    value_type: string
+  - description: ''
+    id: ead70ba1-97a2-4563-b86f-0c8427ea95ae
+    name: Next_Bidder
+    selector:
+    - conversation
+    - Next_Bidder
+    value: ''
+    value_type: string
+  - description: 用来控制是正常循环还是提前退出循环后返回的情况。
+    id: 3f08c25b-8f41-4343-adc2-0e09737aad2d
+    name: Return_Flag
+    selector:
+    - conversation
+    - Return_Flag
+    value: 0
+    value_type: integer
+  - description: ''
+    id: b2d5dfef-0001-4f54-90ff-f5ff21c2ae13
+    name: East_HCP
+    selector:
+    - conversation
+    - East_HCP
+    value: 0
+    value_type: integer
+  - description: ''
+    id: f71887b0-4f80-4808-ac6d-8fbf1cd0cf90
+    name: North_HCP
+    selector:
+    - conversation
+    - North_HCP
+    value: 0
+    value_type: integer
+  - description: ''
+    id: 219ad8a1-9638-4824-8ef2-3f9c64cff2d6
+    name: West_HCP
+    selector:
+    - conversation
+    - West_HCP
+    value: 0
+    value_type: integer
+  - description: ''
+    id: 2788cdc4-74b4-485b-91fb-a3b3934bd8a1
+    name: South_HCP
+    selector:
+    - conversation
+    - South_HCP
+    value: 0
+    value_type: integer
+  - description: 人工叫牌位置
+    id: ce53b6dc-f191-4183-bd9a-ee2b808a6de4
+    name: Bidding_Place
+    selector:
+    - conversation
+    - Bidding_Place
+    value: ''
+    value_type: string
+  - description: 当前模式
+    id: 9bba2041-83c4-442e-8db4-8fb9fa4ef33f
+    name: Current_Mode
+    selector:
+    - conversation
+    - Current_Mode
+    value: ''
+    value_type: string
+  - description: ''
+    id: 0b8dc2a2-9f09-4be9-8361-4cf5cfaba12b
+    name: South
+    selector:
+    - conversation
+    - South
+    value: ''
+    value_type: string
+  - description: ''
+    id: 5eba2f8b-5cc7-4859-9cd4-2cb7c97937d2
+    name: West
+    selector:
+    - conversation
+    - West
+    value: ''
+    value_type: string
+  - description: ''
+    id: e59eddac-a4d8-4a73-892e-2a7aa7129c58
+    name: North
+    selector:
+    - conversation
+    - North
+    value: ''
+    value_type: string
+  - description: ''
+    id: 5493c29b-4f04-4274-a8e3-96b1b621170f
+    name: East
+    selector:
+    - conversation
+    - East
+    value: ''
+    value_type: string
+  - description: 已完成叫牌
+    id: 1bbfcd35-9e1d-431f-a41e-113def0ab56f
+    name: Bidding
+    selector:
+    - conversation
+    - Bidding
+    value: ''
+    value_type: string
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions: []
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - remote_url
+      - local_file
+      enabled: true
+      fileUploadConfig:
+        attachment_image_file_size_limit: 2
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        file_upload_limit: 20
+        image_file_batch_limit: 10
+        image_file_size_limit: 10
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 1
+    opening_statement: "你好，需要我帮你做什么？\n1. 简单叫牌练习：\n- 解释叫牌，示例： “1C-p-1D-p-1S-p-1NT”\n\
+      - 建议下一步叫牌，示例： “1C-p-1D-p-1S-p-? ，手牌：A32 654 987 KQJT\"\n\n2. 双人叫牌练习：\n- 输入“发牌“，可以自动发牌，让机器人在南北或东西方向自动叫牌。\n\
+      - 可以针对具体牌局练习叫牌。输入示例：\nK85 AT863 Q42 63\nJ73 72 8763 T954    \nQT94 5 KJT AQJ72\n\
+      A62 KQJ94 A95 K8\n默认顺序为南西北东\n- 输入”读牌” ，可以上传牌局图片，自动读取牌局数据。\n- 如果在用户输入字段选择人类叫牌位置，可以人工在任意位置参与双人叫牌。\n\
+      \n3. 四人叫牌叫牌练习：\n- 输入“发牌”，可以自动发牌，让机器人在四家位置自动叫牌。\n- 可以针对具体牌局练习叫牌，输入同双人叫牌。\n- 输入”读牌”\
+      \ ，可以上传牌局图片，自动读取牌局数据。\n- 如果在用户输入字段选择人类叫牌位置，可以人工在任意位置参与四人人叫牌。\n\n4. 如果要和AI对战，可以输入具体牌局，默认AI防守，用户坐庄，如需切换，可以在提示中明确指出，示例如下：\n\
+      打牌，AI坐庄，用户防守。牌局如下。牌例采用”Deep Finesse\"格式。：\nDeal: 1 K85 AT863 Q42 63\nContract:\
+      \ 4H-South J73 72 8763 T954 QT94 5 KJT AQJ72\nOnLead: West A62 KQJ94 A95 K8\n\
+      Lead: CT\n\n5. 桥牌工具：\n- 计算分数，选择”算分“。输入定约如”3NTx-4\"，即可计算分数。\n- 识别牌局照片。请上传牌局图片，并输入“读牌”。\n\
+      \n"
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      configs: []
+      enabled: false
+      type: ''
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        sourceType: code
+        targetType: knowledge-retrieval
+      id: 1741001805056-source-1740408729689-target
+      selected: false
+      source: '1741001805056'
+      sourceHandle: source
+      target: '1740408729689'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: answer
+      id: llm-source-answer-target
+      selected: false
+      source: llm
+      sourceHandle: source
+      target: answer
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: answer
+      id: 1743605848531-source-1743608325688-target
+      source: '1743605848531'
+      sourceHandle: source
+      target: '1743608325688'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: answer
+      id: 1746887129357-source-1746887265735-target
+      source: '1746887129357'
+      sourceHandle: source
+      target: '1746887265735'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: code
+        targetType: knowledge-retrieval
+      id: 1748839089510-source-1748839098113-target
+      source: '1748839089510'
+      sourceHandle: source
+      target: '1748839098113'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: code
+      id: 1749277997542-source-1748836555474-target
+      selected: false
+      source: '1749277997542'
+      sourceHandle: source
+      target: '1748836555474'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: 1740840773408-a23d9668-2d4a-40c7-bc72-7ed20c3ffa77-1752931579964-target
+      source: '1740840773408'
+      sourceHandle: a23d9668-2d4a-40c7-bc72-7ed20c3ffa77
+      target: '1752931579964'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: assigner
+        targetType: code
+      id: 1752932064360-source-1741001805056-target
+      source: '1752932064360'
+      sourceHandle: source
+      target: '1741001805056'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: 1740840773408-04a4d016-e65e-4d58-98f5-4b3aef9dae7a-1752932194060-target
+      source: '1740840773408'
+      sourceHandle: 04a4d016-e65e-4d58-98f5-4b3aef9dae7a
+      target: '1752932194060'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: assigner
+        targetType: llm
+      id: 1752932194060-source-1746887129357-target
+      source: '1752932194060'
+      sourceHandle: source
+      target: '1746887129357'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: 1740840773408-b8368f71-0a1e-47c0-be3a-e3b6ea5d6a62-1752933252025-target
+      source: '1740840773408'
+      sourceHandle: b8368f71-0a1e-47c0-be3a-e3b6ea5d6a62
+      target: '1752933252025'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: start
+        targetType: if-else
+      id: start-source-17529339529850-target
+      source: start
+      sourceHandle: source
+      target: '17529339529850'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: 17529339529850-true-1752934107926-target
+      source: '17529339529850'
+      sourceHandle: 'true'
+      target: '1752934107926'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: assigner
+        targetType: if-else
+      id: 1752934107926-source-1740840773408-target
+      source: '1752934107926'
+      sourceHandle: source
+      target: '1740840773408'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: 1740840773408-cd2d7046-a287-430c-9c27-a72d4b281f86-1752934165095-target
+      source: '1740840773408'
+      sourceHandle: cd2d7046-a287-430c-9c27-a72d4b281f86
+      target: '1752934165095'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: assigner
+        targetType: code
+      id: 1752934165095-source-1743605848531-target
+      source: '1752934165095'
+      sourceHandle: source
+      target: '1743605848531'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: if-else
+      id: 17529339529850-false-1740840773408-target
+      source: '17529339529850'
+      sourceHandle: 'false'
+      target: '1740840773408'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: loop
+        targetType: if-else
+      id: 1748838957795-source-1752937337025-target
+      source: '1748838957795'
+      sourceHandle: source
+      target: '1752937337025'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: assigner
+        targetType: if-else
+      id: 1752931579964-source-1752938339333-target
+      source: '1752931579964'
+      sourceHandle: source
+      target: '1752938339333'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: knowledge-retrieval
+        targetType: llm
+      id: 1740408729689-source-llm-target
+      source: '1740408729689'
+      sourceHandle: source
+      target: llm
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: 1740840773408-3cc914ca-d598-4d96-bab3-f84a8e1041b2-1754315677538-target
+      source: '1740840773408'
+      sourceHandle: 3cc914ca-d598-4d96-bab3-f84a8e1041b2
+      target: '1754315677538'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: assigner
+        targetType: if-else
+      id: 1754315677538-source-1752938339333-target
+      source: '1754315677538'
+      sourceHandle: source
+      target: '1752938339333'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: if-else
+      id: 1752938339333-true-1749277901896-target
+      source: '1752938339333'
+      sourceHandle: 'true'
+      target: '1749277901896'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: assigner
+      id: 1748836555474-source-1748838443301-target
+      source: '1748836555474'
+      sourceHandle: source
+      target: '1748838443301'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: loop-start
+        targetType: code
+      id: 1748838957795start-source-1748839089510-target
+      source: 1748838957795start
+      sourceHandle: source
+      target: '1748839089510'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInLoop: false
+        sourceType: assigner
+        targetType: answer
+      id: 1748838443301-source-1759974442500-target
+      source: '1748838443301'
+      sourceHandle: source
+      target: '1759974442500'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: answer
+        targetType: loop
+      id: 1759974442500-source-1748838957795-target
+      source: '1759974442500'
+      sourceHandle: source
+      target: '1748838957795'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: code
+        targetType: assigner
+      id: 1759904720169-source-1760028171478-target
+      source: '1759904720169'
+      sourceHandle: source
+      target: '1760028171478'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInLoop: false
+        sourceType: assigner
+        targetType: loop
+      id: 1752939504549-source-1748838957795-target
+      source: '1752939504549'
+      sourceHandle: source
+      target: '1748838957795'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: code
+      id: 1752938506231-source-1762950934179-target
+      source: '1752938506231'
+      sourceHandle: source
+      target: '1762950934179'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: code
+        targetType: answer
+      id: 1762950934179-source-1752938619215-target
+      source: '1762950934179'
+      sourceHandle: source
+      target: '1752938619215'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: answer
+        targetType: assigner
+      id: 1752938619215-source-1752939504549-target
+      source: '1752938619215'
+      sourceHandle: source
+      target: '1752939504549'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: assigner
+        targetType: llm
+      id: 1752933252025-source-1743749483681-target
+      source: '1752933252025'
+      sourceHandle: source
+      target: '1743749483681'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: llm
+      id: 1749277901896-fd6cac64-2c70-4a18-9f76-5a312dea58fc-17644989350490-target
+      source: '1749277901896'
+      sourceHandle: fd6cac64-2c70-4a18-9f76-5a312dea58fc
+      target: '17644989350490'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: code
+      id: 17644989350490-source-1748836555474-target
+      source: '17644989350490'
+      sourceHandle: source
+      target: '1748836555474'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: code
+        targetType: if-else
+      id: 1765711615939-source-1765382756645-target
+      source: '1765711615939'
+      sourceHandle: source
+      target: '1765382756645'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: if-else
+        targetType: code
+      id: 1765382756645-true-1763478518410-target
+      source: '1765382756645'
+      sourceHandle: 'true'
+      target: '1763478518410'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: if-else
+        targetType: code
+      id: 1765382756645-false-1759904720169-target
+      source: '1765382756645'
+      sourceHandle: 'false'
+      target: '1759904720169'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: llm
+      id: 1743749483681-source-17658985090040-target
+      source: '1743749483681'
+      sourceHandle: source
+      target: '17658985090040'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: answer
+      id: 17658985090040-source-1743749548001-target
+      source: '17658985090040'
+      sourceHandle: source
+      target: '1743749548001'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: assigner
+      id: 1740840773408-true-1752932064360-target
+      source: '1740840773408'
+      sourceHandle: 'true'
+      target: '1752932064360'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: code
+      id: 1749277901896-true-1748836555474-target
+      source: '1749277901896'
+      sourceHandle: 'true'
+      target: '1748836555474'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: llm
+      id: 1749277901896-false-1749277997542-target
+      source: '1749277901896'
+      sourceHandle: 'false'
+      target: '1749277997542'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: llm
+      id: 1752937337025-true-17663269317950-target
+      source: '1752937337025'
+      sourceHandle: 'true'
+      target: '17663269317950'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: answer
+      id: 17663269317950-source-1748839538649-target
+      source: '17663269317950'
+      sourceHandle: source
+      target: '1748839538649'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: assigner
+        targetType: answer
+      id: 1760028171478-source-1750597164827-target
+      source: '1760028171478'
+      sourceHandle: source
+      target: '1750597164827'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: if-else
+        targetType: llm
+      id: 1768576300814-true-1748839104409-target
+      source: '1768576300814'
+      sourceHandle: 'true'
+      target: '1748839104409'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: llm
+        targetType: assigner
+      id: 1748839104409-source-1768576463628-target
+      source: '1748839104409'
+      sourceHandle: source
+      target: '1768576463628'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: assigner
+        targetType: code
+      id: 1768576463628-source-1759904720169-target
+      source: '1768576463628'
+      sourceHandle: source
+      target: '1759904720169'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: if-else
+        targetType: assigner
+      id: 1768576300814-false-1768576623731-target
+      source: '1768576300814'
+      sourceHandle: 'false'
+      target: '1768576623731'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: assigner
+        targetType: code
+      id: 1768576623731-source-1759904720169-target
+      source: '1768576623731'
+      sourceHandle: source
+      target: '1759904720169'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: llm
+        targetType: assigner
+      id: 1768574373248-source-1768577547440-target
+      source: '1768574373248'
+      sourceHandle: source
+      target: '1768577547440'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: assigner
+        targetType: if-else
+      id: 1768577547440-source-1768576300814-target
+      source: '1768577547440'
+      sourceHandle: source
+      target: '1768576300814'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: code
+        targetType: if-else
+      id: 1763478518410-source-1768578309035-target
+      source: '1763478518410'
+      sourceHandle: source
+      target: '1768578309035'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: if-else
+        targetType: llm
+      id: 1768578309035-true-1748839104409-target
+      source: '1768578309035'
+      sourceHandle: 'true'
+      target: '1748839104409'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: if-else
+        targetType: llm
+      id: 1768578309035-false-1768574373248-target
+      source: '1768578309035'
+      sourceHandle: 'false'
+      target: '1768574373248'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: knowledge-retrieval
+        targetType: code
+      id: 1748839098113-source-1752304060086-target
+      source: '1748839098113'
+      sourceHandle: source
+      target: '1752304060086'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: code
+        targetType: assigner
+      id: 1752304060086-source-1768751131701-target
+      source: '1752304060086'
+      sourceHandle: source
+      target: '1768751131701'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        sourceType: assigner
+        targetType: code
+      id: 1768751131701-source-1765711615939-target
+      source: '1768751131701'
+      sourceHandle: source
+      target: '1765711615939'
+      targetHandle: target
+      type: custom
+      zIndex: 1002
+    - data:
+        isInLoop: false
+        sourceType: if-else
+        targetType: llm
+      id: 1752938339333-false-1752938506231-target
+      source: '1752938339333'
+      sourceHandle: 'false'
+      target: '1752938506231'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        selected: false
+        title: START
+        type: start
+        variables:
+        - default: 2D/2H/2S：自然阻击
+          label: 二阶开叫方案选择
+          max_length: 48
+          options:
+          - 2D：多功能，2H/S：麦德伯格，2NT：双低花
+          - 2D/2H/2S：自然阻击
+          required: true
+          type: select
+          variable: Deal_System
+        - default: 南
+          hint: ''
+          label: 庄家
+          max_length: 48
+          options:
+          - 南
+          - 西
+          - 北
+          - 东
+          placeholder: ''
+          required: true
+          type: select
+          variable: Dealer
+        - default: 无
+          hint: ''
+          label: 人类叫牌位置
+          max_length: 48
+          options:
+          - 无
+          - 南
+          - 西
+          - 北
+          - 东
+          placeholder: ''
+          required: true
+          type: select
+          variable: Human
+        - default: 双人叫牌
+          hint: ''
+          label: 想嘎哈？
+          max_length: 48
+          options:
+          - 双人叫牌
+          - 四人叫牌
+          - 读牌
+          - 算分
+          - 打牌
+          - 建议叫牌
+          - 解释叫牌
+          placeholder: ''
+          required: true
+          type: select
+          variable: Play_Mode
+      height: 186
+      id: start
+      position:
+        x: -2180.90859574603
+        y: 902.8095147690276
+      positionAbsolute:
+        x: -2180.90859574603
+        y: 902.8095147690276
+      selected: false
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - '1740408729689'
+          - result
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: false
+            size: 50
+        model:
+          completion_params: {}
+          mode: chat
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: 06e01bef-12de-4571-a0b2-5e9ce602c3ed
+          role: system
+          text: "你是一位桥牌大师，精通多种叫牌约定。作为我的桥牌助手，我将提供部分《JF实战—标准自然体系》的叫牌约定文档，请你严格按照该文档的具体约定，协助我完成以下某项任务：\n\
+            \n### 任务说明：\n1. **解释叫牌**  \n   我会提供一个完整的叫牌序列，比如（东）1NT-p-2C-p-2D，再如（西）（1C）-x-（xx）-1H。序列中有括号的叫品表示敌方叫品，说明存在争叫。序列最前面是开叫人方位，其他位置由你来按照顺时针方向（东南西北）来推算。然后请你根据《JF实战—标准自然体系》文档，逐步解释每一步叫牌的含义。\n\
+            \n2. **建议叫牌**  \n   我会提供一段叫牌序列和我的手牌。序列格式同任务1。手牌格式为“A23 456 789 TJQK\"\
+            ，顺序为黑桃，红心，方块，和草花。请你严格按照《JF实战—标准自然体系》文档，建议下一步我该叫什么牌。\n\n3. **练习叫牌**\n \
+            \  这个任务由你（AI）作为南家，我（用户）作为北家，来根据《JF实战—标准自然体系》来练习叫牌。  \n   首先我会提供给你南家的手牌（13张），而我自己作为北家持有北家手牌。你拿到手牌后，根据《JF实战—标准自然体系》文档，开始叫牌，提出开叫叫品，而我来应叫，提出应叫叫品。接下来你根据手牌情况和JF文档，决定是否再叫，我也依次做出决定，这样来回叫牌，直到决定最后的定约。手牌格式同任务2。\n\
+            \n---\n### JF体系\nJF文档中包括两类规则，第一类是明确的叫牌序列，第二类是通用的指导文字，例如XYZ约定，逆叫等等。在完成任务时优先使用第一类，如果没有明确的叫牌序列，可以参考第二类。如果两种类型都无法使用，你可以引用一般的自然叫牌约定。\n\
+            当叫牌过程存在争叫时，如无特别说明，双方都使用JF约定。下面JF文档中的“我方”，”对方“和”敌方“，既适用于开叫方，也适用于争叫方。请忽略JF文档中我方和敌方的区别，因为你是独立于牌局双方的桥牌解说人，目的是解释叫牌的过程，所以你要从双方的角度同时来参考JF文档，而不是把自己固定为文档中的我方。\n\
+            {{#context#}}\n---\n\n### 分析原则：\n请严格遵循以下原则分析叫牌进程：\n\n#### 1. **点力计算规范**（仅当提供具体牌例时需要计算）\
+            \  \n- **分项累加原则**：必须按♠→♥→♦→♣顺序列出每门花色的大牌点，格式如下：\n\n  | 花色 | 大牌列表 | 计算公式\
+            \ | 单独分值 |\n  |------|----------|----------|----------|\n  | ♠    | A\
+            \        | A=4      | 4        |\n  | ♥    | K+Q+J    | 3+2+1=6  | 6 \
+            \       |\n  | ♦    | A        | 4        | 4        |\n  | ♣    | K \
+            \       | 3        | 3        |\n  | **总计** |         | **4+6+4+3** |\
+            \ **17** |\n\n- **点力范围优先**：  \n  - 反复确认点力计算是否正确。  \n  - 开叫/再叫点力范围以文档明示为准（如1NT=15-17），禁止突破或假设跳点。\
+            \  \n  - 遇到模糊区间时主动标注：“根据文档第X节，此处点力范围为...”。\n\n#### 2. **人工约定叫识别**  \n\
+            - 每次分析叫牌时，优先确认是否涉及文档中定义的特殊约定叫。  \n- XYZ/转移/Splinter等人工叫品**必须优先识别**（如2♦在1♣-1♥-1NT后=XYZ逼局）。\n\
+            \n#### 3. **文档引用机制**  \n- **文档约定优先**：在分析叫牌时，优先查阅文档中是否有明确的约定叫定义。如果有，严格按照文档的约定解释。\
+            \  \n- **常规自然叫品约定仅作为参考**：如果文档未明确说明，才参考常见方法，并标注“此为逻辑推测，文档未明确定义”。  \n- 在回答前，反复核查是否遵循了文档的引用机制和逻辑一致性。\
+            \  \n- 关键结论尽量标注文档出处（如： “根据2.3节，3♦=♦套逼局”）。如果上下文未提及，不必编造引用章节。\n\n#### 4.\
+            \ **错误自检清单**  \n每次回答前请核查以下内容：  \n- [ ] 点力是否按A:4, K:3, Q:2, J:1计算？  \n\
+            - [ ] 点力范围是否突破？  \n- [ ] 人工约定是否误判为自然叫？  \n- [ ] 叫品逻辑是否自洽？  \n- [ ] 是否严格遵循文档约定？\
+            \  \n- [ ] 是否误用常见方法？  \n- [ ] 是否标注文档出处或逻辑推测？\n\n#### 5. **新增反例提示**：\n\"\
+            请特别注意以下高频错误（需主动规避）：\n- 扣叫跳过低级花色（如本例应4♣而非4♦）\n- 混淆Smolen与自然叫（如3♥在1NT后必为人工约定）\n\
+            - 误判速达原则适用条件（需先确认是否已有满贯兴趣）\n- 忽略Last Train约定叫的触发条件\"\n---\n\n### 示例回答格式：\n\
+            #### 任务1：解释叫牌序列  \n**叫牌序列**：1♣ - 1♥ - 1NT  \n**解释**：  \n1. 1♣：开叫1♣，表示至少12点，♣为5张以上套（根据文档第2.1节）。\
+            \  \n2. 1♥：应叫1♥，表示4张以上♥，6+点（根据文档第3.2节）。  \n3. 1NT：再叫1NT，表示15-17点，均型牌（根据文档第4.5节）。\
+            \  \n\n#### 任务2：建议下一步叫牌  \n**叫牌序列**：1♣ - 1♥ - 1NT  \n**手牌**：♠KQJ ♥A ♦QJ\
+            \ ♣KQJ  \n**建议**：  \n1. 计算点力：  \n   | 花色 | 大牌列表 | 计算公式 | 单独分值 |  \n  \
+            \ |------|----------|----------|----------|  \n   | ♠    | K+Q+J    |\
+            \ 3+2+1=6  | 6        |  \n   | ♥    | A        | 4        | 4       \
+            \ |  \n   | ♦    | Q+J      | 2+1=3    | 3        |  \n   | ♣    | K+Q+J\
+            \    | 3+2+1=6  | 6        |  \n   | **总计** |         | **6+4+3+6** |\
+            \ **19** |  \n2. 根据文档第5.2节，19点应跳叫2NT，表示18-19点均型牌。  \n**结论**：建议叫2NT。\n\n\
+            #### 任务3：建议开叫方式  \n**手牌**：♠AQJ ♥KQ ♦KJ ♣AQJ  \n**建议**：  \n1. 计算点力：  \n\
+            \   | 花色 | 大牌列表 | 计算公式 | 单独分值 |  \n   |------|----------|----------|----------|\
+            \  \n   | ♠    | A+Q+J    | 4+2+1=7  | 7        |  \n   | ♥    | K+Q \
+            \     | 3+2=5    | 5        |  \n   | ♦    | K+J      | 3+1=4    | 4 \
+            \       |  \n   | ♣    | A+Q+J    | 4+2+1=7  | 7        |  \n   | **总计**\
+            \ |         | **7+5+4+7** | **23** |  \n2. 根据文档第2.1节，23点应开叫2♣，表示强牌（22+点）。\
+            \  \n**结论**：建议开叫2♣。\n下面请北家叫牌。\n---\n\n请严格按照上述原则和格式完成任务，确保分析过程清晰、准确且符合文档约定。"
+        selected: false
+        title: LLM
+        type: llm
+        vision:
+          configs: null
+          enabled: false
+          variable_selector: null
+      height: 87
+      id: llm
+      position:
+        x: 735.3835931453324
+        y: 768.2733095335511
+      positionAbsolute:
+        x: 735.3835931453324
+        y: 768.2733095335511
+      selected: false
+      type: custom
+      width: 241
+    - data:
+        answer: '{{#llm.text#}}'
+        selected: false
+        title: ANSWER
+        type: answer
+      height: 102
+      id: answer
+      position:
+        x: 1142.140190796253
+        y: 768.2733095335511
+      positionAbsolute:
+        x: 1142.140190796253
+        y: 768.2733095335511
+      selected: false
+      type: custom
+      width: 241
+    - data:
+        dataset_ids:
+        - +f7K3UPQ3dkpDpbYXRHpyZGQPFgAwk3zSWRKXAbkjiZ1bDyHK88dMFn7Kk3158Zj
+        desc: ''
+        multiple_retrieval_config:
+          reranking_enable: false
+          reranking_mode: weighted_score
+          reranking_model:
+            model: netease-youdao/bce-reranker-base_v1
+            provider: langgenius/siliconflow/siliconflow
+          score_threshold: 0.98
+          top_k: 3
+          weights:
+            keyword_setting:
+              keyword_weight: 0.8
+            vector_setting:
+              embedding_model_name: bge-m3:latest
+              embedding_provider_name: langgenius/ollama/ollama
+              vector_weight: 0.2
+        query_attachment_selector: []
+        query_variable_selector:
+        - '1741001805056'
+        - result
+        retrieval_mode: multiple
+        selected: false
+        title: 知识检索
+        type: knowledge-retrieval
+      height: 89
+      id: '1740408729689'
+      position:
+        x: 323.57434274926396
+        y: 768.2733095335511
+      positionAbsolute:
+        x: 323.57434274926396
+        y: 768.2733095335511
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: is
+            id: 2a537775-6ae8-4991-97bc-ef151d1f17c6
+            value: 解释叫牌
+            varType: string
+            variable_selector:
+            - start
+            - Play_Mode
+          - comparison_operator: is
+            id: a0573ed6-651c-4d0a-84ab-5fb53b71d52b
+            value: 建议叫牌
+            varType: string
+            variable_selector:
+            - start
+            - Play_Mode
+          - comparison_operator: contains
+            id: 2689c58d-ab0c-41cb-8989-3585c23bd9d3
+            value: 解释建议
+            varType: string
+            variable_selector:
+            - conversation
+            - Current_Mode
+          id: 'true'
+          logical_operator: or
+        - case_id: cd2d7046-a287-430c-9c27-a72d4b281f86
+          conditions:
+          - comparison_operator: is
+            id: 87404ade-df2f-41f6-af7e-0b0f0da505d7
+            value: 算分
+            varType: string
+            variable_selector:
+            - start
+            - Play_Mode
+          - comparison_operator: contains
+            id: 4b9673f5-7585-489d-837a-aa313bb285fd
+            value: 算分
+            varType: string
+            variable_selector:
+            - conversation
+            - Current_Mode
+          id: cd2d7046-a287-430c-9c27-a72d4b281f86
+          logical_operator: or
+        - case_id: 04a4d016-e65e-4d58-98f5-4b3aef9dae7a
+          conditions:
+          - comparison_operator: is
+            id: 9d877618-c47c-4ea4-9208-3f9e151f07ee
+            value: 打牌
+            varType: string
+            variable_selector:
+            - start
+            - Play_Mode
+          - comparison_operator: contains
+            id: af42d552-aacd-4d42-b088-bdd6e13b13d7
+            value: 打牌
+            varType: string
+            variable_selector:
+            - conversation
+            - Current_Mode
+          id: 04a4d016-e65e-4d58-98f5-4b3aef9dae7a
+          logical_operator: or
+        - case_id: b8368f71-0a1e-47c0-be3a-e3b6ea5d6a62
+          conditions:
+          - comparison_operator: is
+            id: a89ea71c-1ca6-4e3c-9be3-662de0050d9b
+            value: 读牌
+            varType: string
+            variable_selector:
+            - start
+            - Play_Mode
+          - comparison_operator: contains
+            id: 4c888304-07ca-424f-8ea1-f65117df0485
+            value: 读牌
+            varType: string
+            variable_selector:
+            - conversation
+            - Current_Mode
+          id: b8368f71-0a1e-47c0-be3a-e3b6ea5d6a62
+          logical_operator: or
+        - case_id: a23d9668-2d4a-40c7-bc72-7ed20c3ffa77
+          conditions:
+          - comparison_operator: is
+            id: 557cb47d-a5e8-418d-b173-251018818352
+            value: 四人叫牌
+            varType: string
+            variable_selector:
+            - start
+            - Play_Mode
+          - comparison_operator: contains
+            id: be365c2d-6ac5-4351-bb56-fbb1dcd1f4f2
+            value: 四人叫牌
+            varType: string
+            variable_selector:
+            - conversation
+            - Current_Mode
+          id: a23d9668-2d4a-40c7-bc72-7ed20c3ffa77
+          logical_operator: or
+        - case_id: 3cc914ca-d598-4d96-bab3-f84a8e1041b2
+          conditions:
+          - comparison_operator: is
+            id: ea89104b-75e5-4120-bafb-70971987ef89
+            value: 双人叫牌
+            varType: string
+            variable_selector:
+            - start
+            - Play_Mode
+          - comparison_operator: contains
+            id: 6e2cf1f2-61a6-4f38-9626-cf3fcce613ac
+            value: 双人叫牌
+            varType: string
+            variable_selector:
+            - conversation
+            - Current_Mode
+          id: 3cc914ca-d598-4d96-bab3-f84a8e1041b2
+          logical_operator: or
+        desc: ''
+        selected: false
+        title: 条件分支
+        type: if-else
+      height: 545
+      id: '1740840773408'
+      position:
+        x: -983.4280659929555
+        y: 955.8095147690276
+      positionAbsolute:
+        x: -983.4280659929555
+        y: 955.8095147690276
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        code: "def main(input_text, second_level_opening) -> dict:\n    first_bid,\
+          \ second_bid, third_bid, fourth_bid, result =None, None, None, None, None\
+          \  # 初始化\n\n    if input_text == None: return { \"result\": \"花色开叫\" }\n\
+          \    \n    # 从输入文本中提取叫牌序列，同时处理中英文括号和破折号\n    import re\n    # 将中文括号替换为英文括号,同时去掉括号\n\
+          \    input_text = input_text.replace('（', '(').replace('）', ')')\n    input_text\
+          \ = input_text.replace('(', '').replace(')', '') \n    # 将中文破折号替换为英文破折号\n\
+          \    input_text = input_text.replace('—', '-').replace('－', '-')\n    \n\
+          \    # 按照破折号分割输入文本\n    parts = re.split(r'[-—－]', input_text)\n    bids\
+          \ = []\n    for part in parts:\n        # 在每个部分中提取叫牌\n        bid_match\
+          \ = re.search(r'\\(?\\s*(?:[1-7][CDHSN]T?|X{1,2}|pass|p)\\s*\\)?', part,\
+          \ re.IGNORECASE)\n        if bid_match:\n            bids.append(bid_match.group())\n\
+          \          \n    # 去掉bids中打头的所有“pass”\n    while bids and bids[0].strip()\
+          \ =='pass': bids.pop(0)\n    if len(bids) == 0: return { \"result\": \"\
+          花色开叫\" }     \n     \n    first_bid = bids[0] if len(bids) > 0 else None\n\
+          \    second_bid = bids[1] if len(bids) > 1 else None\n    third_bid = bids[2]\
+          \ if len(bids) > 2 else None\n    fourth_bid = bids[3] if len(bids) > 3\
+          \ else None\n    \n    if \"2D：多功能，2H/S：麦德伯格，2NT：双低花\" in second_level_opening\
+          \ and first_bid in ['2H', '2S','2D','2NT']:\n        if first_bid == '2D':\n\
+          \            result =  \"2D多功能开叫\"\n        elif first_bid in ['2H', '2S']:\n\
+          \            result =  \"2M麦德伯格\"\n        elif first_bid =='2NT':\n   \
+          \         result =  \"2NT双低花阻击\"\n    elif len(bids) == 1: result =  \"\
+          第二家争叫\"   \n    elif len(bids) == 2:  \n        # 如果没有争叫\n        if second_bid\
+          \ == \"pass\": result =  f\"{first_bid}开叫\" \n        # 处理争叫情况\n       \
+          \ else:\n            if first_bid == '1NT':\n                result =  \"\
+          我方开叫1NT\" \n            elif first_bid == '2C':\n                result\
+          \ = \"我方开叫2C\"  \n            elif first_bid[0] == '1':\n              \
+          \  if first_bid[1] in [\"C\",\"D\"]: result = \"我方开叫1低花\" \n           \
+          \     else: result =  \"我方开叫1高花\" \n            elif first_bid[0] in '2345'\
+          \ and first_bid != '2NT':\n                result =  \"我方开叫阻击\"\n      \
+          \      elif first_bid == \"2NT\":\n                result =  \"2NT均型强牌\"\
+          \n    elif len(bids) == 3: \n        if second_bid == \"pass\" and third_bid\
+          \ !=\"pass\": result =  \"第四家争叫\"  \n        elif second_bid == \"pass\"\
+          \ and third_bid ==\"pass\": result =  \"平衡位置的叫牌\"\n        else:\n     \
+          \       if first_bid[0] == \"1\" and first_bid != \"1NT\":\n           \
+          \     if second_bid == 'X': result =  \"技术性加倍以后\"\n                elif\
+          \ (second_bid.startswith('2') and second_bid[-1] == first_bid[-1]) or second_bid\
+          \ == '2NT':\n                    result =  \"Michaels扣叫与两套牌争叫\" \n     \
+          \           elif (second_bid == \"1NT\" and third_bid ==\"pass\"): result\
+          \ = \"1NT争叫\"\n                else: result =  \"普通争叫\"\n            elif\
+          \ first_bid[0] in '23456' and first_bid not in ['2NT','2C'] :\n        \
+          \        result = \"对抗对方阻击叫\"\n            elif first_bid == \"1NT\":\n\
+          \                result = \"对1NT开叫\"            \n            elif first_bid\
+          \ == \"2NT\":\n                result =  \"JF尚未实现\"\n            elif first_bid\
+          \ == \"2C\":\n                result = \"对精确1C和自然2C开叫\"\n    elif len(bids)\
+          \  == 4:\n        if second_bid == \"pass\" and fourth_bid == \"pass\":\
+          \ result = f\"{first_bid}-{third_bid}\" \n        elif third_bid != \"pass\"\
+          \ and (second_bid == \"pass\" or fourth_bid == \"pass\") : result = \"成局与满贯\"\
+          \n        else: result = \"JF约定 - End\"       \n    elif len(bids) == 5:\n\
+          \        if   second_bid ==\"1NT\" and third_bid ==\"pass\" and fourth_bid\
+          \ != \"pass\" and bids[4]==\"pass\": result = f\"{second_bid}-{fourth_bid}\"\
+          \n        elif second_bid != \"pass\" and third_bid == \"pass\" and fourth_bid\
+          \ != \"pass\":\n            result = \"成局与满贯\"\n        else: result = \"\
+          JF约定 - End\"  \n    elif len(bids) == 6:\n        if bids[4] != \"pass\"\
+          : result = \"成局与满贯\" \n        else: result = \"JF约定 - End\"         \n\
+          \    else: \n        result = \"JF约定 - End\"\n        \n    return {\n \
+          \       \"result\": result\n    } "
+        code_language: python3
+        desc: 叫牌序列提取
+        outputs:
+          result:
+            children: null
+            type: string
+        selected: false
+        title: 叫牌序列提取
+        type: code
+        variables:
+        - value_selector:
+          - sys
+          - query
+          variable: input_text
+        - value_selector:
+          - start
+          - Deal_System
+          variable: second_level_opening
+      height: 79
+      id: '1741001805056'
+      position:
+        x: -74.51953576420325
+        y: 768.2733095335511
+      positionAbsolute:
+        x: -74.51953576420325
+        y: 768.2733095335511
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        code: "import re\ndef main(contract_str: str)-> dict:\n    \"\"\"计算桥牌得分的主函数\"\
+          \"\"\n    # 1. 解析定约字符串\n    match = re.match(r'.*?(\\d+)([CDHSNT]+)([x]*)([+-]\\\
+          d+)?', contract_str)\n    if not match:\n        return {\n            \"\
+          result\": \"无效的定约格式，示例：5Hx+2, 3NT, 2Dxx-1\"\n        }\n    \n    level\
+          \ = int(match.group(1))\n    suit = match.group(2)\n    double_status =\
+          \ len(match.group(3))  # 0=未加倍,1=加倍,2=再加倍\n    result = match.group(4) or\
+          \ '=0'      # 默认为刚好完成\n    \n    # 解析结果\n    overtricks = int(result[1:])\
+          \ if result[0] == '+' else 0\n    undertricks = int(result[1:]) if result[0]\
+          \ == '-' else 0\n\n    # 2. 计算得分\n    def calculate(vulnerable):\n     \
+          \   # 基本分计算\n        base = 40 + 30*(level-1) if suit == 'NT' else level\
+          \ * {'C':20,'D':20,'H':30,'S':30}[suit]\n        actual_base = base * (1\
+          \ if double_status==0 else 2 if double_status==1 else 4)\n        \n   \
+          \     # 超墩/罚分计算\n        if undertricks > 0:\n            if double_status\
+          \ == 0:\n                score = undertricks * (100 if vulnerable else 50)\n\
+          \            else:\n                if vulnerable:\n                   \
+          \ score = 200 + 300*(undertricks-1)  # 有局加倍：第1墩200，后续300\n             \
+          \   else:\n                    # 无局加倍：第1墩100，第2-3墩200，第4+墩300\n        \
+          \            if undertricks == 1: score = 100\n                    elif\
+          \ undertricks <=3: score = 100 + 200*(undertricks-1)\n                 \
+          \   else: score = 100 + 400 + 300*(undertricks-3)\n                if double_status\
+          \ == 2: score *= 2  # 再加倍\n        else:\n            # 超墩分\n          \
+          \  if double_status == 0:\n                trick_value = 30 if suit == 'NT'\
+          \ else {'C':20,'D':20,'H':30,'S':30}[suit]\n                score = actual_base\
+          \ + overtricks * trick_value\n            else:\n                trick_value\
+          \ = 200 if vulnerable else 100\n                if double_status == 2: trick_value\
+          \ *= 2\n                score = actual_base + overtricks * trick_value\n\
+          \        \n        # 奖分计算\n        if actual_base >= 100:  # 成局\n      \
+          \      bonus = 500 if vulnerable else 300\n        else:\n            bonus\
+          \ = 50\n        \n        if level == 6: bonus += 750 if vulnerable else\
+          \ 500    # 小满贯\n        elif level == 7: bonus += 1500 if vulnerable else\
+          \ 1000 # 大满贯\n        \n        if double_status == 1: bonus += 50   # 加倍奖分\n\
+          \        elif double_status == 2: bonus += 100 # 再加倍奖分\n        \n     \
+          \   return -score if undertricks > 0 else score + bonus\n\n    # 3. 返回有局/无局结果\n\
+          \    return {\n        \"result\": '无局得分:'+ str(calculate(False)) + '  \
+          \  ' + '有局得分:' + str(calculate(True))\n    }"
+        code_language: python3
+        desc: 计算分数
+        outputs:
+          result:
+            children: null
+            type: string
+        selected: false
+        title: 计算分数
+        type: code
+        variables:
+        - value_selector:
+          - sys
+          - query
+          variable: contract_str
+      height: 79
+      id: '1743605848531'
+      position:
+        x: -74.51953576420325
+        y: 907.7514650641662
+      positionAbsolute:
+        x: -74.51953576420325
+        y: 907.7514650641662
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        answer: '{{#1743605848531.result#}}'
+        desc: ''
+        selected: false
+        title: 计分结果
+        type: answer
+        variables: []
+      height: 102
+      id: '1743608325688'
+      position:
+        x: 315.57434274926396
+        y: 907.7514650641662
+      positionAbsolute:
+        x: 315.57434274926396
+        y: 907.7514650641662
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: 读取牌局信息
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: false
+            size: 50
+        model:
+          completion_params: {}
+          mode: chat
+          name: Doubao-1.5-vision-pro-32k
+          provider: langgenius/volcengine_maas/volcengine_maas
+        prompt_template:
+        - id: e7f53cfa-2e92-4287-96a0-44075c9b61d3
+          role: system
+          text: '请从上传的桥牌牌局图片中读取四家牌手的手牌信息与叫牌序列。
+
+
+            规则1：对于读取牌面数字，将所有手牌中出现的数字 “10”，无论其在何种组合或位置，均严格且无一遗漏地替换为 “T”，但不对其他部分做任何修改。例如，“1095”
+            需替换为 “T95” ，“Q108” 需替换为 “QT8”，“A10564”需替换为“AT564” 等。例如：
+
+            如果读取的南家手牌为黑桃K、黑桃T、黑桃8、黑桃5，红心8、红心6、红心5，方块3，草花Q、草花T、草花8、草花4，那么对应的输出为KT85
+            865 3 KQT84 。
+
+
+            规则2：叫牌序列以如下格式显示，例如
+
+            (东)1C-(南)pass-(西)1H-(北)1S-(东)2S-(南)pass-(西)3H-(北)pass-(东)3S-(南)pass-(西)4C-(北)pass-(东)4D-(南)pass-(西)4H-(北)pass-
+
+
+            规则3 ：最后必须严格检查：
+
+            确保没有牌重复。
+
+            确保所有10都被替换为T。
+
+            确保没有数字0出现
+
+            确保每家都是13张牌。
+
+            确保每一行按照SHDC牌列
+
+            确保每一行中各花色严格用空格分开，且同花色内部没有空格。'
+        selected: false
+        structured_output_enabled: false
+        title: 牌局信息
+        type: llm
+        variables: []
+        vision:
+          configs:
+            detail: high
+            variable_selector:
+            - sys
+            - files
+          enabled: true
+      height: 115
+      id: '1743749483681'
+      position:
+        x: -74.51953576420325
+        y: 1196
+      positionAbsolute:
+        x: -74.51953576420325
+        y: 1196
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        answer: '{{#17658985090040.text#}}'
+        desc: 输出Deep Finesse格式
+        selected: false
+        title: Deep Finesse
+        type: answer
+        variables: []
+      height: 130
+      id: '1743749548001'
+      position:
+        x: 735.3835931453324
+        y: 1196
+      positionAbsolute:
+        x: 735.3835931453324
+        y: 1196
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: false
+            size: 50
+        model:
+          completion_params: {}
+          mode: chat
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: b5c333f7-c3e0-4ec2-bcf8-bad86d0e327d
+          role: system
+          text: "我建立了以下规则用于和AI进行交互式的桥牌游戏。\n用户和 AI 桥牌对局规则说明\n角色与责任划分\n用户作为庄家：\n承担主打定约的任务，是完成定约目标的核心决策者。\n\
+            拥有对南北两家所有出牌决策的控制权，AI 绝对不可代替用户进行南北两家的出牌指定。\nAI 作为防守方：\n负责操控东西两家进行防守出牌，首攻牌张已提前指定。\n\
+            在每次完成东或西家的出牌后，必须立即请用户给出相应的南或北家的出牌，待用户出牌后，AI 才能继续后续出牌。\n根据用户的出牌情况，运用最优策略选择东西家的防守出牌。\n\
+            出牌流程规范\nAI 的目标明确为阻止用户完成定约，而用户则需全力以赴完成定约。\n赢墩判定：按照牌的花色以及牌面大小来判定每一轮出牌的赢家。同一花色中，牌面大的一方赢得该墩；若花色不同，遵循桥牌的基本规则判定。\n\
+            出牌顺序：每一轮由上一轮的赢家率先出牌，随后按照顺时针方向依次循环出牌，可能的出牌顺序为西-北-东-南、北-东-南-西、东-南-西-北、南-西-北-东。\n\
+            交互方式：打牌全程必须采用交互形式，每一轮AI每一次出牌（包括首攻）后都要请用户出该轮次下一张牌，在用户出牌后AI才能出下一张牌，知道该轮出牌结束。\n\
+            垫牌规则：当玩家手中没有当前所出花色的牌时，必须垫出其他花色的牌。\n牌局状态更新要求\n每次出牌后：\n四家剩余牌张展示：分花色详细列出四家手中剩余的牌张，并且对已经出过的牌进行明确标注。\n\
+            当前墩完整记录：记录当前墩的全部出牌情况，包括每家出的牌以及该墩的赢家。\n剩余牌数验证：清晰展示每家剩余牌数，保证剩余牌数始终等于 13\
+            \ 减去已出墩数，方便玩家随时核对牌局进程。\n\n用户可以提示切换用户和AI角色，即AI作为庄家，用户作为防守方。如果用户没有提供具体牌局，则完成下列牌局。\n\
+            \n请按照以上规则，由用户作为庄家来完成以下牌局定约，AI不可以替用户决定南北两家的出牌，AI只要思考当前东家或西的出牌就行，不要提前考虑后续南北家出牌后的下一步：\n\
+            Deal: 1                                 A74 J7652 Q5 753\nContract: 4H-South\
+            \     T852 83 T974 A42                  Q93 4 AK863 Q986\nOnLead: West\
+            \                            KJ6 AKQT9 J2 KJT\nLead: DT  \n其中第一行手牌为北家，第二行左侧为西家手牌，右侧为东家手牌，第三行为南家手牌。"
+        selected: false
+        title: Ai打牌
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 87
+      id: '1746887129357'
+      position:
+        x: -74.51953576420325
+        y: 1043.2806000400624
+      positionAbsolute:
+        x: -74.51953576420325
+        y: 1043.2806000400624
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        answer: '{{#1746887129357.text#}}'
+        desc: ''
+        selected: false
+        title: 打牌过程
+        type: answer
+        variables: []
+      height: 102
+      id: '1746887265735'
+      position:
+        x: 323.57434274926396
+        y: 1043.2806000400624
+      positionAbsolute:
+        x: 323.57434274926396
+        y: 1043.2806000400624
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        code: "import random\nimport json\nimport re\nfrom collections import defaultdict\n\
+          \  \nclass BridgeDealer:\n    def __init__(self):\n        self.suits =\
+          \ [\"♠\", \"♥\", \"♦\", \"♣\"]\n        self.rank_order = [\"A\", \"K\"\
+          , \"Q\", \"J\", \"T\", \"9\", \"8\", \"7\", \"6\", \"5\", \"4\", \"3\",\
+          \ \"2\"]\n        self.deck = []\n        self.hands = {\n            \"\
+          East\": defaultdict(list),\n            \"South\": defaultdict(list),\n\
+          \            \"West\": defaultdict(list),\n            \"North\": defaultdict(list)\n\
+          \        }\n        self._generate_deck()\n        \n    def _generate_deck(self):\n\
+          \        \"\"\"生成标准52张牌\"\"\"\n        self.deck = [(suit, rank) for suit\
+          \ in self.suits for rank in self.rank_order]\n        \n    def _fisher_yates_shuffle(self,\
+          \ rounds=7):\n        \"\"\"执行多轮费雪耶茨洗牌\"\"\"\n        for _ in range(rounds):\n\
+          \            for i in range(len(self.deck)-1, 0, -1):\n                j\
+          \ = random.randint(0, i)\n                self.deck[i], self.deck[j] = self.deck[j],\
+          \ self.deck[i]\n                \n    def _deal_cards(self):\n        \"\
+          \"\"发牌核心逻辑（带实时校验）\"\"\"\n        players = [\"East\", \"South\", \"West\"\
+          , \"North\"]\n        counters = {p: 0 for p in players}\n        \n   \
+          \     for i, (suit, rank) in enumerate(self.deck):\n            target =\
+          \ players[i % 4]\n            if counters[target] >= 13:\n             \
+          \   raise ValueError(f\"玩家 {target} 已超过13张牌\")\n                \n     \
+          \       self.hands[target][suit].append(rank)\n            counters[target]\
+          \ += 1\n            \n        # 发牌后立即校验\n        if sum(counters.values())\
+          \ != 52:\n            raise ValueError(\"牌数不守恒\")\n            \n    def\
+          \ _sort_hands(self):\n        \"\"\"整理牌型并校验排序\"\"\"\n        for player\
+          \ in self.hands:\n            for suit in self.suits:\n                #\
+          \ 按指定顺序排序\n                sorted_ranks = sorted(\n                    self.hands[player][suit],\n\
+          \                    key=lambda x: self.rank_order.index(x)\n          \
+          \      )\n                self.hands[player][suit] = sorted_ranks\n    \
+          \            \n    def _validate_distribution(self):\n        \"\"\"六重验证体系\"\
+          \"\"\n        # 1. 总牌数校验\n        total = sum(len(r) for p in self.hands.values()\
+          \ for r in p.values())\n        assert total == 52, \"总牌数错误\"\n        \n\
+          \        # 2. 每家牌数校验\n        for player, hand in self.hands.items():\n\
+          \            assert sum(len(v) for v in hand.values()) == 13, f\"{player}\
+          \ 牌数错误\"\n            \n        # 3. 花色守恒校验\n        suit_counts = defaultdict(int)\n\
+          \        for hand in self.hands.values():\n            for suit, ranks in\
+          \ hand.items():\n                suit_counts[suit] += len(ranks)\n     \
+          \   for suit, count in suit_counts.items():\n            assert count ==\
+          \ 13, f\"{suit} 花色分布错误\"\n            \n        # 4. 唯一性校验\n        all_cards\
+          \ = set()\n        for hand in self.hands.values():\n            for suit,\
+          \ ranks in hand.items():\n                for r in ranks:\n            \
+          \        all_cards.add((suit, r))\n        assert len(all_cards) == 52,\
+          \ \"存在重复牌张\"\n        \n        print(\"✅ 所有校验通过\")\n        \n    def deal(self):\n\
+          \        \"\"\"执行完整发牌流程\"\"\"\n        self._fisher_yates_shuffle()\n  \
+          \      self._deal_cards()\n        self._sort_hands()\n        self._validate_distribution()\n\
+          \        return self.hands\n        \ndef format_hand(player_name, hand):\n\
+          \    suits = [\"♠\", \"♥\", \"♦\", \"♣\"]\n    cards = hand.split()\n  \
+          \  formatted_cards = [suits[i] + cards[i] for i in range(4)]\n    return\
+          \ \" \".join(formatted_cards)\n\ndef calculate_hcp(hand):\n    \"\"\"\n\
+          \    计算桥牌一手牌的大牌点（HCP）\n    :param hand: 字符串，例如 \"A32 654 987 KQJT\"（顺序：S,\
+          \ H, D, C）\n    :return: 大牌点（HCP）\n    \"\"\"\n    hcp_values = {'A': 4,\
+          \ 'K': 3, 'Q': 2, 'J': 1}\n    hcp = 0\n    # 移除空格，统一处理\n    hand = hand.replace(\"\
+          \ \", \"\")\n    # 使用正则表达式提取所有牌\n    cards = re.findall(r'[AKQJT98765432]',\
+          \ hand)\n    for card in cards:\n        hcp += hcp_values.get(card, 0)\
+          \  # 默认值为0\n    \n    return hcp\n\ndef calculate_distribution(hand: str)\
+          \ -> str:\n    \"\"\"\n    计算花色分布，输入示例 \"A32 654 987 KQJT\"（顺序：S, H, D,\
+          \ C）\n    返回格式 \"Sx-Hx-Dx-Cx\"\n    \"\"\"\n    parts = re.findall(r'[AKQJT98765432]+',\
+          \ hand)\n    if len(parts) < 4:\n        parts = hand.split()\n    parts\
+          \ += [''] * (4 - len(parts))\n    return f\"S{len(parts[0])}-H{len(parts[1])}-D{len(parts[2])}-C{len(parts[3])}\"\
+          \n\ndef main(Input_Deal: str, Input_Query: str, Dupai: str) -> dict:\n\n\
+          \    if Input_Deal is not None:\n        # 解析 JSON\n        data = json.loads(Input_Deal)\n\
+          \n        # 提取各家手牌\n        return {\n            \"East\": format_hand(\"\
+          东家\", data[\"东家手牌\"]), \n            \"South\": format_hand(\"南家\", data[\"\
+          南家手牌\"]),\n            \"West\":  format_hand(\"西家\", data[\"西家手牌\"]),\n\
+          \            \"North\":  format_hand(\"北家\", data[\"北家手牌\"]),\n        \
+          \    \"East_hcp\": calculate_hcp(data[\"东家手牌\"].replace(\" \", \"\")),\n\
+          \            \"South_hcp\": calculate_hcp(data[\"南家手牌\"].replace(\" \",\
+          \ \"\")),\n            \"West_hcp\": calculate_hcp(data[\"西家手牌\"].replace(\"\
+          \ \", \"\")),\n            \"North_hcp\": calculate_hcp(data[\"北家手牌\"].replace(\"\
+          \ \", \"\")),\n            \"East_dist\": calculate_distribution(data[\"\
+          东家手牌\"].replace(\" \", \"\")),\n            \"South_dist\": calculate_distribution(data[\"\
+          南家手牌\"].replace(\" \", \"\")),\n            \"West_dist\": calculate_distribution(data[\"\
+          西家手牌\"].replace(\" \", \"\")),\n            \"North_dist\": calculate_distribution(data[\"\
+          北家手牌\"].replace(\" \", \"\")),        \n        }\n\n    if Dupai is not\
+          \ None:\n        # 解析 JSON\n        data = json.loads(Dupai)\n\n       \
+          \ # 提取各家手牌\n        return {\n            \"East\": format_hand(\"东家\",\
+          \ data[\"东家手牌\"]), \n            \"South\": format_hand(\"南家\", data[\"\
+          南家手牌\"]),\n            \"West\":  format_hand(\"西家\", data[\"西家手牌\"]),\n\
+          \            \"North\":  format_hand(\"北家\", data[\"北家手牌\"]),\n        \
+          \    \"East_hcp\": calculate_hcp(data[\"东家手牌\"].replace(\" \", \"\")),\n\
+          \            \"South_hcp\": calculate_hcp(data[\"南家手牌\"].replace(\" \",\
+          \ \"\")),\n            \"West_hcp\": calculate_hcp(data[\"西家手牌\"].replace(\"\
+          \ \", \"\")),\n            \"North_hcp\": calculate_hcp(data[\"北家手牌\"].replace(\"\
+          \ \", \"\")),\n            \"East_dist\": calculate_distribution(data[\"\
+          东家手牌\"].replace(\" \", \"\")),\n            \"South_dist\": calculate_distribution(data[\"\
+          南家手牌\"].replace(\" \", \"\")),\n            \"West_dist\": calculate_distribution(data[\"\
+          西家手牌\"].replace(\" \", \"\")),\n            \"North_dist\": calculate_distribution(data[\"\
+          北家手牌\"].replace(\" \", \"\")),    \n        }\n\n    try:\n        dealer\
+          \ = BridgeDealer()\n        hands = dealer.deal()\n        hands_str = []\n\
+          \        for player, hand in hands.items():\n            display = \"\"\n\
+          \            for suit in [\"♠\", \"♥\", \"♦\", \"♣\"]:\n               \
+          \ cards = hand.get(suit, [])\n                if cards:\n              \
+          \      display += f\" {suit}{''.join(cards)}\"\n                else:\n\
+          \                    display += f\" {suit}-\"\n            hands_str.append(f\"\
+          {display}\")\n\n        hcps = [calculate_hcp(h) for h in hands_str]\n \
+          \       max_hcp = max(hcps)\n        # 80%概率让南家最大\n        if random.random()\
+          \ < 0.7:\n            south_idx = hcps.index(max_hcp)\n            # 交换南家和最大HCP家的手牌\n\
+          \            if south_idx != 1:\n                hands_str[1], hands_str[south_idx]\
+          \ = hands_str[south_idx], hands_str[1]\n                \n        return\
+          \ {\n            \"East\": hands_str[0], \n            \"South\": hands_str[1],\n\
+          \            \"West\":  hands_str[2],\n            \"North\":  hands_str[3],\n\
+          \            \"East_hcp\": calculate_hcp(hands_str[0]),\n            \"\
+          South_hcp\": calculate_hcp(hands_str[1]),\n            \"West_hcp\": calculate_hcp(hands_str[2]),\n\
+          \            \"North_hcp\": calculate_hcp(hands_str[3]),\n            \"\
+          East_dist\": calculate_distribution(hands_str[0]),\n            \"South_dist\"\
+          : calculate_distribution(hands_str[1]),\n            \"West_dist\": calculate_distribution(hands_str[2]),\
+          \ \n            \"North_dist\": calculate_distribution(hands_str[3]),  \
+          \                    \n        }\n    except Exception as e:\n        return\
+          \ {\n            \"Hands\": f\"发牌错误：{str(e)}\",\n        }\n           \
+          \ \n\n"
+        code_language: python3
+        desc: 如果没有输入牌局数据，就自动随机生成牌局
+        outputs:
+          East:
+            children: null
+            type: string
+          East_dist:
+            children: null
+            type: string
+          East_hcp:
+            children: null
+            type: number
+          North:
+            children: null
+            type: string
+          North_dist:
+            children: null
+            type: string
+          North_hcp:
+            children: null
+            type: number
+          South:
+            children: null
+            type: string
+          South_dist:
+            children: null
+            type: string
+          South_hcp:
+            children: null
+            type: number
+          West:
+            children: null
+            type: string
+          West_dist:
+            children: null
+            type: string
+          West_hcp:
+            children: null
+            type: number
+        selected: false
+        title: 自动发牌
+        type: code
+        variables:
+        - value_selector:
+          - '1749277997542'
+          - text
+          variable: Input_Deal
+        - value_selector:
+          - sys
+          - query
+          value_type: string
+          variable: Input_Query
+        - value_selector:
+          - '17644989350490'
+          - text
+          value_type: string
+          variable: Dupai
+      height: 95
+      id: '1748836555474'
+      position:
+        x: 735.3835931453324
+        y: 1363.8095147690276
+      positionAbsolute:
+        x: 735.3835931453324
+        y: 1363.8095147690276
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        desc: ''
+        items:
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1748836555474'
+          - South
+          variable_selector:
+          - conversation
+          - South
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1748836555474'
+          - East
+          variable_selector:
+          - conversation
+          - East
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1748836555474'
+          - North
+          variable_selector:
+          - conversation
+          - North
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1748836555474'
+          - West
+          variable_selector:
+          - conversation
+          - West
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1748836555474'
+          - South_hcp
+          variable_selector:
+          - conversation
+          - South_HCP
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1748836555474'
+          - West_hcp
+          variable_selector:
+          - conversation
+          - West_HCP
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1748836555474'
+          - North_hcp
+          variable_selector:
+          - conversation
+          - North_HCP
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1748836555474'
+          - East_hcp
+          variable_selector:
+          - conversation
+          - East_HCP
+          write_mode: over-write
+        - input_type: variable
+          operation: clear
+          value: ''
+          variable_selector:
+          - conversation
+          - Bidding
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - start
+          - Human
+          variable_selector:
+          - conversation
+          - Bidding_Place
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - start
+          - Dealer
+          variable_selector:
+          - conversation
+          - Next_Bidder
+          write_mode: over-write
+        - input_type: constant
+          operation: set
+          value: 0
+          variable_selector:
+          - conversation
+          - Return_Flag
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - start
+          - Dealer
+          variable_selector:
+          - conversation
+          - Dealer
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1748836555474'
+          - South_dist
+          variable_selector:
+          - conversation
+          - South_DIST
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1748836555474'
+          - North_dist
+          variable_selector:
+          - conversation
+          - North_DIST
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1748836555474'
+          - West_dist
+          variable_selector:
+          - conversation
+          - West_DIST
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1748836555474'
+          - East_dist
+          variable_selector:
+          - conversation
+          - East_DIST
+          write_mode: over-write
+        selected: false
+        title: 四家手牌，叫牌序列，叫牌位置等初始化
+        type: assigner
+        version: '2'
+      height: 499
+      id: '1748838443301'
+      position:
+        x: 1142.140190796253
+        y: 1363.8095147690276
+      positionAbsolute:
+        x: 1142.140190796253
+        y: 1363.8095147690276
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        break_conditions:
+        - comparison_operator: contains
+          id: aa98f3ac-8913-465b-889e-e8a3e3e3c4f1
+          value: -(东)pass-(南)pass-(西)pass
+          varType: string
+          variable_selector:
+          - conversation
+          - Bidding
+        - comparison_operator: contains
+          id: 36baaf1d-a579-4b7d-adea-1775ac17937b
+          value: -(北)pass-(东)pass-(南)pass
+          varType: string
+          variable_selector:
+          - conversation
+          - Bidding
+        - comparison_operator: contains
+          id: 86bc076a-88b2-4b72-bd8f-57871b7792c4
+          value: -(南)pass-(西)pass-(北)pass
+          varType: string
+          variable_selector:
+          - conversation
+          - Bidding
+        - comparison_operator: contains
+          id: af84c3c3-7042-4fc4-a162-7de566698630
+          value: -(西)pass-(北)pass-(东)pass
+          varType: string
+          variable_selector:
+          - conversation
+          - Bidding
+        - comparison_operator: '='
+          id: fce1a9e0-85ae-4fb8-9180-e1f288c4894a
+          value: '1'
+          varType: number
+          variable_selector:
+          - conversation
+          - Return_Flag
+        desc: ''
+        error_handle_mode: terminated
+        height: 892
+        logical_operator: or
+        loop_count: 35
+        loop_variables: []
+        selected: false
+        start_node_id: 1748838957795start
+        title: 循环
+        type: loop
+        width: 1827
+      height: 892
+      id: '1748838957795'
+      position:
+        x: 1894.0315375802747
+        y: 1363.8095147690276
+      positionAbsolute:
+        x: 1894.0315375802747
+        y: 1363.8095147690276
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 1827
+      zIndex: 1
+    - data:
+        desc: ''
+        isInLoop: true
+        selected: false
+        title: ''
+        type: loop-start
+      draggable: false
+      height: 48
+      id: 1748838957795start
+      parentId: '1748838957795'
+      position:
+        x: 24
+        y: 68
+      positionAbsolute:
+        x: 1918.0315375802747
+        y: 1431.8095147690276
+      selectable: false
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom-loop-start
+      width: 44
+      zIndex: 1002
+    - data:
+        code: "def main(input_text, second_level_opening) -> dict:\n    first_bid,\
+          \ second_bid, third_bid, fourth_bid, result =None, None, None, None, None\
+          \  # 初始化\n\n    if input_text == None: return { \"result\": \"花色开叫\" }\n\
+          \    \n    # 从输入文本中提取叫牌序列，同时处理中英文括号和破折号\n    import re\n    # 将中文括号替换为英文括号,同时去掉括号\n\
+          \    input_text = input_text.replace('（', '(').replace('）', ')')\n    input_text\
+          \ = input_text.replace('(', '').replace(')', '') \n    # 将中文破折号替换为英文破折号\n\
+          \    input_text = input_text.replace('—', '-').replace('－', '-')\n    \n\
+          \    # 按照破折号分割输入文本\n    parts = re.split(r'[-—－]', input_text)\n    bids\
+          \ = []\n    for part in parts:\n        # 在每个部分中提取叫牌\n        bid_match\
+          \ = re.search(r'\\(?\\s*(?:[1-7][CDHSN]T?|X{1,2}|pass|p)\\s*\\)?', part,\
+          \ re.IGNORECASE)\n        if bid_match:\n            bids.append(bid_match.group())\n\
+          \          \n    # 去掉bids中打头的所有“pass”\n    pass_time = 0\n    while bids\
+          \ and bids[0].strip() =='pass': \n        bids.pop(0)\n        pass_time\
+          \ += 1\n    if len(bids) == 0: return { \"result\": \"花色开叫\" }     \n  \
+          \   \n    first_bid = bids[0] if len(bids) > 0 else None\n    second_bid\
+          \ = bids[1] if len(bids) > 1 else None\n    third_bid = bids[2] if len(bids)\
+          \ > 2 else None\n    fourth_bid = bids[3] if len(bids) > 3 else None\n \
+          \   fifth_bid = bids[4] if len(bids) > 4 else None\n    sixth_bid = bids[5]\
+          \ if len(bids) > 5 else None\n    seventh_bid = bids[6] if len(bids) > 6\
+          \ else None\n    eighth_bid = bids[7] if len(bids) > 7 else None    \n \
+          \   \n    if \"2D：多功能，2H/S：麦德伯格，2NT：双低花\" in second_level_opening and first_bid\
+          \ in ['2H', '2S','2D','2NT']:\n        if first_bid == '2D':\n         \
+          \   result =  \"2D多功能开叫\"\n        elif first_bid in ['2H', '2S']:\n   \
+          \         result =  \"2M麦德伯格\"\n        elif first_bid =='2NT':\n      \
+          \      result =  \"2NT双低花阻击\"\n    elif len(bids) == 1: result =  \"第二家争叫\"\
+          \   \n    elif len(bids) == 2:  \n        # 如果没有争叫\n        if second_bid\
+          \ == \"pass\": \n            if pass_time in [2,3] and first_bid == \"1H\"\
+          :\n                result = \"第三四家开叫1H\"\n            elif pass_time in\
+          \ [2,3] and first_bid ==\"1S\":\n                result = \"第三四家开叫1S\" \
+          \  \n            else: \n                result =  f\"{first_bid}开叫\"  \
+          \        \n        # 处理争叫情况\n        else:\n            if first_bid ==\
+          \ '1NT':\n                result =  \"我方开叫1NT\" \n            elif first_bid\
+          \ == '2C':\n                result = \"我方开叫2C\"  \n            elif first_bid[0]\
+          \ == '1':\n                if first_bid[1] in [\"C\",\"D\"]: result = \"\
+          我方开叫1低花\" \n                else: result =  \"我方开叫1高花\" \n            elif\
+          \ first_bid[0] in '2345' and first_bid != '2NT':\n                result\
+          \ =  \"我方开叫阻击\"\n            elif first_bid == \"2NT\":\n              \
+          \  result =  \"2NT均型强牌\"\n    elif len(bids) == 3: \n        if second_bid\
+          \ == \"pass\" and third_bid !=\"pass\": result =  \"第四家争叫\"  \n        elif\
+          \ second_bid == \"pass\" and third_bid ==\"pass\": result =  \"平衡位置的叫牌\"\
+          \n        else:\n            if first_bid[0] == \"1\" and first_bid != \"\
+          1NT\":\n                if second_bid == 'X': result =  \"技术性加倍以后\"\n  \
+          \              elif (second_bid.startswith('2') and second_bid[-1] == first_bid[-1])\
+          \ or second_bid == '2NT':\n                    result =  \"Michaels扣叫与两套牌争叫\"\
+          \ \n                elif (second_bid == \"1NT\" and third_bid ==\"pass\"\
+          ): result = \"1NT争叫\"\n                else: result =  \"普通争叫\"\n      \
+          \      elif first_bid[0] in '23456' and first_bid not in ['2NT','2C'] :\n\
+          \                result = \"对抗对方阻击叫\"\n            elif first_bid == \"\
+          1NT\":\n                result = \"对1NT开叫\"            \n            elif\
+          \ first_bid == \"2NT\":\n                result =  \"JF尚未实现\"\n        \
+          \    elif first_bid == \"2C\":\n                result = \"对精确1C和自然2C开叫\"\
+          \n    elif len(bids)  == 4:\n        if second_bid == \"pass\" and fourth_bid\
+          \ == \"pass\": \n            if pass_time in [2,3] and first_bid == \"1H\"\
+          :\n                result = \"第三四家开叫1H\"\n            elif pass_time in\
+          \ [2,3] and first_bid ==\"1S\":\n                result = \"第三四家开叫1S\" \
+          \             \n            else: result = f\"{first_bid}-{third_bid}\"\
+          \ \n        elif third_bid != \"pass\" and (second_bid == \"pass\" or fourth_bid\
+          \ == \"pass\") : result = \"成局与满贯\"\n        else: result = \"自然叫牌\"   \
+          \    \n    elif len(bids) == 5:\n        if   second_bid ==\"1NT\" and third_bid\
+          \ ==\"pass\" and fourth_bid != \"pass\" and bids[4]==\"pass\": result =\
+          \ f\"{second_bid}-{fourth_bid}\"\n        elif second_bid != \"pass\" and\
+          \ third_bid == \"pass\" and fourth_bid != \"pass\":\n            result\
+          \ = \"成局与满贯\"\n        else: result = \"自然叫牌\"  \n    elif len(bids) ==\
+          \ 6:\n        if second_bid == \"pass\" and fourth_bid == \"pass\" and sixth_bid\
+          \ ==\"pass\": \n            if pass_time in [2,3] and first_bid == \"1H\"\
+          :\n                result = \"第三四家开叫1H\"\n            elif pass_time in\
+          \ [2,3] and first_bid ==\"1S\":\n                result = \"第三四家开叫1S\" \
+          \                     \n            else: result = f\"{first_bid}-{third_bid}\"\
+          \ \n        else : result = \"成局与满贯\" \n    elif len(bids) == 7:\n     \
+          \   if   second_bid ==\"1NT\" and third_bid ==\"pass\" and fourth_bid !=\
+          \ \"pass\" and fifth_bid ==\"pass\" and sixth_bid != \"pass\" and seventh_bid\
+          \ ==\"pass\" : result = f\"{second_bid}-{fourth_bid}\"\n        elif second_bid\
+          \ != \"pass\" and third_bid == \"pass\" and fourth_bid != \"pass\":\n  \
+          \          result = \"成局与满贯\"\n        else: result = \"自然叫牌\"  \n    elif\
+          \ len(bids) == 8:\n        if second_bid == \"pass\" and fourth_bid == \"\
+          pass\" and sixth_bid ==\"pass\" and eighth_bid == \"pass\": \n         \
+          \   if pass_time in [2,3] and first_bid == \"1H\":\n                result\
+          \ = \"第三四家开叫1H\"\n            elif pass_time in [2,3] and first_bid ==\"\
+          1S\":\n                result = \"第三四家开叫1S\"                      \n   \
+          \         else: result = f\"{first_bid}-{third_bid}\" \n        else : result\
+          \ = \"成局与满贯\" \n    else: \n        result = \"成局与满贯\"\n        \n    return\
+          \ {\n        \"result\": result\n    } "
+        code_language: python3
+        desc: ''
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        outputs:
+          result:
+            children: null
+            type: string
+        selected: false
+        title: 叫牌序列提取
+        type: code
+        variables:
+        - value_selector:
+          - conversation
+          - Bidding
+          variable: input_text
+        - value_selector:
+          - start
+          - Deal_System
+          variable: second_level_opening
+      height: 51
+      id: '1748839089510'
+      parentId: '1748838957795'
+      position:
+        x: 135.69873224015055
+        y: 66.74110112659218
+      positionAbsolute:
+        x: 2029.7302698204253
+        y: 1430.5506158956198
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        dataset_ids:
+        - +f7K3UPQ3dkpDpbYXRHpyZGQPFgAwk3zSWRKXAbkjiZ1bDyHK88dMFn7Kk3158Zj
+        desc: ''
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        multiple_retrieval_config:
+          reranking_enable: false
+          reranking_mode: weighted_score
+          reranking_model:
+            model: netease-youdao/bce-reranker-base_v1
+            provider: langgenius/siliconflow/siliconflow
+          score_threshold: 0.98
+          top_k: 3
+          weights:
+            keyword_setting:
+              keyword_weight: 0.8
+            vector_setting:
+              embedding_model_name: bge-m3:latest
+              embedding_provider_name: langgenius/ollama/ollama
+              vector_weight: 0.2
+        query_attachment_selector: []
+        query_variable_selector:
+        - '1748839089510'
+        - result
+        retrieval_mode: multiple
+        selected: false
+        title: 提取相关JF约定
+        type: knowledge-retrieval
+      height: 89
+      id: '1748839098113'
+      parentId: '1748838957795'
+      position:
+        x: 135.98555278253343
+        y: 187.99754304525027
+      positionAbsolute:
+        x: 2030.0170903628082
+        y: 1551.8070578142779
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - conversation
+          - Latest_JF_Content
+        desc: ''
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        model:
+          completion_params: {}
+          mode: chat
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
+        prompt_config:
+          jinja2_variables: []
+        prompt_template:
+        - edition_type: basic
+          id: 8bc05ac3-2be2-4a41-9ccf-433cb4929a0c
+          role: system
+          text: "你是一位世界级桥牌大师，擅长自然叫牌二盖一体系，目前使用该体系的一个变种“JF叫牌约定”参加比赛。\n\n### JF约定内容\n\
+            {{#context#}}\n\n### 任务：\n你作为{{#1763478518410.Player#}}家参与叫牌，你的队友是{{#1763478518410.Partner#}}家。你持有如下手牌，{{#1763478518410.Hand#}}（{{#1763478518410.HCP#}}，{{#1763478518410.DIST#}}），括号内为大牌点和花色分布，可以直接使用，不要再计算。根据当前叫牌序列{{#conversation.Bidding#}}和上面的<JF约定内容>，你将按照以下步骤做出叫牌决定：\n\
+            \n### 叫牌决策流程（必须严格遵循）：\n\n【第一阶段：叫牌位置与手牌分析】\n1. **确定叫牌位置**：\n   - IF (自己是首次叫牌)\
+            \ THEN 确认位置：开叫、争叫、应叫还是平衡叫。\n   - ELSE (自己是再叫) THEN 不必确认叫牌位置。\n2. **刚性手牌分析**（必须执行）：\n\
+            \   - 计算大牌点：严格按 A=4, K=3, Q=2, J=1 计算。暂不考虑牌型点。\n   - 分析分布：计算 S, H, D,\
+            \ C 四门花色的具体张数，形成 Sx-Hx-Dx-Cx 列表。\n   - 判断短门：\n          - IF (任一花色张数 ==\
+            \ 0) THEN 标记为“有缺门”。\n          - IF (任一花色张数 == 1) THEN 标记为“有单张”。\n   \
+            \       - IF (有缺门 OR 有单张) THEN 判定为“有单缺花色”。\n   - 记录高花：必须严格明确记录所有长度 >=4\
+            \ 张的 S 和 H 花色，与该花色强弱无关。\n   - 记录AK：必须严格明确记录所有的A和K并计算各自总数。\n\n【第二阶段：叫牌序列分析与配合探查】\n\
+            3. **分析叫牌历史**：\n   - 根据叫牌历史和队友{{#1763478518410.Partner#}}家叫品的含义，估算：\n\
+            \          - 可能的配合花色（8张以上高花 或 9张以上低花配合）。\n          - 联手总点力（如果已有花色配合，且目标为有将成局或满贯，可以加上牌型点）。\n\
+            4. **定约目标判定**：\n   - IF (估算联手总点力的上限 < 25点) THEN 目标为部分定约，准备及时止叫。\n   -\
+            \ IF (估算联手总点力的上限 ≥ 25点) THEN 视牌型情况和花色配合情况，通过维持叫牌进程或邀请进局，继续探查是否进局，但不能直接叫到成局。\n\
+            \   - IF (以下任一条件满足) THEN 进入逼局进程，目标为成局或满贯：\n          - 前期叫品明确为逼局（如2/1）。\n\
+            \          - 估算联手总点力下限 ≥ 25点，\n\n【第三阶段：逼局进程与满贯探查】\n5. **逼局进程下的策略**：\n\
+            \   - 有高花配合 (≥8张)，可以确定为将牌：\n          - 如果双方中的任何一方是所描述牌的极低限，则应该迅速选择进局的叫品（速达原则）。如果不选择进局叫品则说明还有余力，可以开始扣叫探查满贯，此时如果在：\n\
+            \               - 3阶将牌高花以下：描述牌型，比如，叫出未叫的长套（54xx），或者3张的第三套（5431牌型）\n  \
+            \             - 3阶将牌高花到4阶将牌高花之间：扣叫与满贯探查。\n   - 有低花配合 (≥9张) / 无配合：\n  \
+            \        - 优先探查3NT：确定逼局进程后，不要直接叫到3NT。首先在在2NT到3NT之间通过叫某个花色显示该花色有止张。叫新花可能表示对未叫花色的担忧。\n\
+            \          - IF (无法保证所有未叫花色有止张) THEN 考虑5阶低花进局和探查满贯。但需要联手总点力28点（包括牌型点），否则停在4阶低花（4C/4D）不入局。\n\
+            \   - 扣叫与满贯探查：如果存在配合花色和确定逼局进程，且在低花配合情况下，通过**止张分析**发现有花色缺乏止张，即可决定花色进局或试探满贯。此时首先检查自己点力，如果是自己上次叫牌点力范围的低限，执行**速达原则**，叫到花色成局。如果是高限，可以启动扣叫来试探满贯。初始目标为小满贯，并视叫牌进展决定放弃小满贯还是冲刺大满贯。\n\
+            \n【第四阶段：合格叫品列表和最终叫品决策】\n6. **叫品备选优先级（必须按此顺序查找匹配叫品）**：\n   - **JF约定内容**：首先在<JF约定内容>中寻找完全匹配的叫品。JF约定提供并讨论过的不合格叫品，不得在步骤2和3中重新讨论。\n\
+            \   - **队友最近叫品的后续建议**：如果JF约定无完全匹配，则考虑队友{{#1763478518410.Partner#}}家叫品所提供的后续建议。\n\
+            \   - **二盖一自然叫牌体系**：如果以上均无，且联手点力显示有望入局，可以参考标准二盖一体系的逻辑。但是不得考虑1和2中已经讨论过的叫品，即使该叫品满足标准二盖一的要求，也不准采用。如果不足入局点力，优先选择pass。\n\
+            \   - **开叫无将优先**：开叫时有多个合格选项时，无将（1NT或者2NT)优先。非开叫位置，选择优先顺序为高花>无将>低花\n  \
+            \ - **pass**：没有合格选项时选择pass。\n\n7. **刚性规则（必须执行）**：\n   - **严格条件匹配规则**：选择任何叫品前，必须确认同时满足：\n\
+            \          - 手牌点力 {{#1763478518410.HCP#}} 在该叫品要求范围（点力区间）内，必须严格遵守。特别是对于开叫，点力要求（如12-21点）都是绝对门槛。如果手牌点力低于最低要求（如11点），即使花色张数、牌型等其他条件全部符合，该叫品也绝对不合格，必须排除。后续叫牌时如果已经发现配合花色，可以通过合并计算牌型点和手牌点力作为总点力去匹配约定叫牌。\n\
+            \          - 手牌花色张数满足该叫品要求长度范围。禁止类似“通常6张H，但5张也可接受”这样的模糊匹配。\n   - **情形独立原则**：当叫品有多个情形时，必须对所有情形单独验证，禁止混合不同情形的条件。\n\
+            \   - **叫品递增规则**：禁止重复叫牌、降阶叫牌、同阶降花色叫牌。\n   - **禁止加倍违规**：禁止对同伴加倍、加倍后重新加倍、再加倍后再加倍。违规时强制PASS。\n\
+            \   - **复核AK和控制**：在涉及扣叫、关键张问叫或满贯试探前，必须明确列出你手牌{{#1763478518410.Hand#}}中实际持有的A、K数量，并与声称的控制进行交叉验证。任何不一致必须立即纠正并重新评估叫品。千万不要和队友{{#1763478518410.Partner#}}持有的AK和控制混淆。\n\
+            \   - **问叫和答叫规则**：问叫和答叫，比如4NT问关键张，只能在队友之间进行。对方问叫，己方不能按答叫规则加入答叫。\n   -\
+            \ **扣叫控制规则**：\n          1. 首先看点力：同伴发起扣叫后，表示同伴持有上次叫牌高限点力，如果从自己的牌力和叫牌历史发现联手总点力上限不足32点（含牌型点），执行速达原则，必须直接叫到成局定约并止叫，不得继续试探满贯。\n\
+            \          2. 够点再扣叫：如果联手总点力达到32点或者上限是开放的，必须从最经济的叫品依次扣叫有控制（A、K、单或缺）的花色，没有控制的花色只能跳过，不得扣叫。\n\
+            \          3. 扣叫查控制：开始扣叫过程后，每次都要判断是否控制已经齐全。一旦发现加上队友{{#1763478518410.Partner#}}叫过的控制花色后，4门花色控制已经齐全，应立即叫4NT问关键张，无需再扣。\n\
+            \          4. 失控即止叫：若发现队友{{#1763478518410.Partner#}}跳过一门花色控制，而自己也没有这门花色的控制，应立即叫回成局定约并止叫。\n\
+            \   - **4NT答叫后重点规则**：\n          1. 4NT问叫，同伴答叫后，如果合计超过4个关键张，且自己手中没有将牌Q，需要继续问Q，并根据答叫考虑下一步行动。如果自己手中已有将牌Q，就不需要再问，直接根据约定考虑下一步行动。\n\
+            \          2. 5NT问K时，如果手中K的花色高过满贯花色（比如有黑桃K，而满贯花色为红桃K），根据联手总点力决定是否答叫该花色的K。如果联手总点力小于37，直接叫小满贯并止叫，否则可以叫6阶该较高花色。如果手中K的花色低过过满贯花色（比如有草花K，而满贯花色为红桃K），可以直接叫6阶该花色，不限点力。\n\
+            \n\n\n### 输出格式要求：\n\n你**必须**严格按照以下JSON格式输出，这是唯一的输出格式。每个字段的值应为清晰的字符串，包含所有分析结论。\n\
+            \n{\n  “自己pass次数”: “根据实际叫牌序列统计的准确数字。若≥2次则必须标记为’弱牌，避免介入‘”,\n  “当前叫牌序列”:\
+            \ “{{#conversation.Bidding#}}”, 如果叫牌序列为空，就是第一家（庄家）开叫\n  “JF约定”: {{#1748839089510.result#}},\n\
+            \  “叫牌位置”: “如果是首次叫牌，首先确定自己叫牌位置，包括开叫/争叫/应叫/平衡位置，第二次及以后叫牌属于再叫位置”,\n  “手牌分析”:\
+            \ 执行**刚性手牌分析**，必须包含：手牌{{#1763478518410.Hand#}}；点力{{#1763478518410.HCP#}}；花色分布{{#1763478518410.DIST#}}；单张和缺门提示（如果某花色为1张（单张）或0张（缺门），必须严格明确标注）；高花提示（如有≥4张高花必须严格明确指出）”,\n\
+            \  “叫牌历史”: “基于\"{{#conversation.Bid_Meaning#}}\"描述叫牌进程和各方的可能意图，不要包括每个叫品的后续建议”,\n\
+            \  “队友后续建议”: “提取\"{{#conversation.Bid_Meaning#}}\"中队友{{#1763478518410.Partner#}}家最近叫牌历史所包含的后续建议”,\n\
+            \  “自己和队友配合花色张数合计”: “在确认配合花色前，每一次叫牌都必须基于叫牌历史估算队友{{#1763478518410.Partner#}}家的花色分布，然后检查所有花色来查找配合花色。绝不允许假设队友{{#1763478518410.Partner#}}家张数，必须从叫牌历史确定。当某花色合计≥8张（高花）或≥9张（低花）时确认为配合花色。需说明计算依据，如’自己4张S，队友开叫1S（承诺5+张），至少9张配合‘。绝对不允许以可能配合的理由作为叫品依据”,\n\
+            \  “牌型点”: “找到配合花色后，应根据上述‘牌型点计算规则’计算牌型点，并计入联手总点力。如果确认队友{{#1763478518410.Partner#}}家存在单缺，可以按照有一门单缺增加牌型点。如果尚未发现配合将牌，则写明’没有配合花色，暂不计算‘”,\n\
+            \  “自己和队友点力合计”: “基于叫牌历史估算队友{{#1763478518410.Partner#}}家的点力范围，然后计算联手总点力。如果已经计算牌型点，联手点力可以再加上牌型点。明确列出联手总点力上限和下限。”,\n\
+            \  “是否进局或试探满贯”: “根据**定约目标判定**，选择放弃进局，进入逼局，还是继续探索。如果确定进入逼局过程，启用**逼局进程下的策略**”,\n\
+            \  “止张分析”: “在决定选择NT定约时，无论是否进局或满贯（3NT及以上），还是部分定约（1NT和2NT) ，都必须检查四门花色止张情况，执行**止张分析规则**”,\n\
+            \  “扣叫控制”: “启动扣叫探索满贯后，每次准备扣叫前都要**复核AK和控制**，然后启用**扣叫控制规则**。如果JF约定中没有给出合格叫品，可以直接开始扣叫。扣叫开始后不要考虑其他自然约定。“\n\
+            \  “自己和队友关键张合计”: “确认探索有将满贯以后，执行**复核AK和控制**，根据自己所有A和K计算手中关键张：A的总数+1 （有将牌K），或者A的总数+0\
+            \ （无将牌K)；4NT关键张问叫启动后，根据答叫情况，估算联手持有的关键张总数，同时还要严格检查双方是否有将牌Q，然后根据**4NT答叫后重点规则**继续叫牌”,\n\
+            \n  “叫品筛选过程”: “描述筛选过程：\n      1. 筛选JF约定中的所有后续叫品。提取规则：在JF约定中沿当前叫牌序列{{#conversation.Bidding#}}定位到队友{{#1763478518410.Partner#}}家最近叫品，仅提取该叫品下通过更深一级缩进（'│-----├'）表示的叫品作为备选。和队友{{#1763478518410.Partner#}}家最近叫品处于同一缩进水平的叫品不是其后续叫品。如果没有提取到备选叫品，则以“队友建议”为准。如果队友建议中也没有提供具体叫品，则JF约定没有提供合格叫品。分析备选叫品前必须再次校验和队友{{#1763478518410.Partner#}}家最近叫品是否同一缩进水平。如果是同一缩进水平，不属于后续叫品，必须重新考虑。\n\
+            \      2. 根据**叫品备选优先级**顺序，使用 **刚性规则** 和 **情形独立原则** 逐一验证。 \n      3. 如果根据JF约定没有合格叫品，\n\
+            \        - A 如果点力核算上限不到进局水平，则必须停在最近的部分定约并止叫，即pass或者叫回最近的合计张数较多花色的叫品。\n\
+            \        - B 如果点力核算上限超过进局水平，但是队友{{#1763478518410.Partner#}}家最近叫品仅仅是邀请：\n\
+            \               -  如果自己点力是低限，则必须停在最近的部分定约，即pass或者叫回最近的合计张数较多花色的叫品。\n \
+            \               - 否则，接受邀请入局，选择最近的成局叫品并止叫\n       - C 如果已经确定进局，启用**逼局进程下的策略**来决定叫品\n\
+            \      4. 输出所有合格叫品列表及选择理由。格式参考：‘根据JF约定，X叫品要求…，我手牌满足/不满足…，因此合格/不合格。最终选择Y叫品。”,\n\
+            \n  “叫品选择”: “从筛选出的合格叫品中确定最终叫品。\n      1. 如果是开叫位置，优先选择无将（1NT/2NT) 。\n \
+            \     2. 非开叫和争叫位置，优先顺序为高花>无将>低花。\n      3. 如果不同合格叫品为同一花色，选择高阶花色叫品。\n \
+            \     4. 备选合格叫品中存在问叫叫品时要优先选择”。”,\n\n  “基本规则合规性”: “对最终选择叫品的合规性检查结果。必须确认：同时严格满足点力和花色范围；遵守叫品递增规则；无任何违规（重复叫牌、降阶、违规加倍等）。”,\n\
+            \n  “叫品含义及后续建议”: “严格按照JF约定（或者自然约定）来解释最终叫品的含义，包括其点力范围、承诺的花色长度、牌型类型，但是不能暴露自己的具体点力和具体花色张数。如果所选叫品来自JF约定内容，且该叫品下一行存在通过更深一级缩进（“│-----├ ”）表示的后续叫品，必须提取完整后续叫品供队友参考。如果下一行没有更深缩进，表示JF约定尚未提供后续叫品，这种情况下不需要也不可以自行生成后续建议，并明确说明“JF约定无后续建议”。输出后续叫品建议前必须再次校验和所选叫品是否同一缩进水平。如果是同一缩进水平，不属于后续叫品，必须重新考虑。采用自然约定不必提供后续建议”,\n\
+            \n  “完整叫牌序列”: “严格按照格式输出：’{{#conversation.Bidding#}}({{#1763478518410.Player#}})叫品-‘。使用英文括号，叫品花色用字母(S/H/D/C/NT)，非花色叫牌用pass/X/XX，pass要全部小写字母，末尾必须带‘-‘号。”\n\
+            }\n\n### 以下是必须严格遵守的通用桥牌基本规则：\n\n1. **叫品递增规则**：每轮叫品必须严格高于前一叫品（阶次更高，或同阶时花色等级更高，S\
+            \ > H > D >C），禁止重复、降阶或平级叫品。 反例： \n  - `3H` 后不可叫 `2NT`（降阶） \n  - `1D` 后不可叫\
+            \ `1D`（重复） \n  - `1S` 后不可叫 `1H`（同阶降花色）\n\n2. **加倍（X）的合法性规则**：\n  允许：对右手敌方的实质性叫品（非Pass）直接加倍。例：1♣\
+            \ – (1♥) - X\n  允许：对左手敌方的实质性叫品，在同伴和RHO均Pass后的平衡位置加倍。例：1♥ – Pass – Pass\
+            \ – X\n  禁止：在同伴叫牌，且右手敌方pass后加倍。错误例：1♦ (同伴) – Pass – X\n- 再加倍（XX）的合法性规则\n\
+               允许：仅当敌方加倍后使用。例：1♥ – （X） – XX\n   禁止：对同伴的加倍使用再加倍。\n   禁止：敌方未加倍时主动叫再加倍。\n\
+               禁止：对敌方的再加倍使用再加倍。\n\n3. **叫牌位置精确定义** \n只针对你的首次叫牌，第二次叫牌属于再叫位置）\n- 开叫位置：前面所有叫牌都是pass，或叫牌刚开始（第一位置）\n\
+            - 争叫位置：右手敌方为实质叫品（非pass）时，自己就处于争叫位置。\n- 应叫位置：同伴为实质叫品（非pass），后续敌方pass时，自己就处于应叫位置。\n\
+            - 平衡位置：左手敌方开叫后，队友和右手敌方均pass，此时你处于平衡位置。例如“1C-pass-pass-(轮你叫牌）”。\n\n4. **牌型表示**\n\
+            - 文档中通常用类似5332或者5-3-3-2的格式表示牌型，数字按顺序代表SHDC的张数。以此类推。\n- 文档中有时用54高花，55高花，或者55低花等类似格式表达高花或低花两套的张数。54高花：5H4S或者5S4H，55高花：5H5S，55低花：5D5C。以此类推。\n\
+            - 格式“数字+花色”如“4S”表示严格4张S，5张不合格。\n- 格式“数字+花色+‘+’”如“4+S”表示至少4张S。\n- 文字“x张以上”等同于“x+”。\n\
+            \n5. **止张分析规则**\n     1.  **触发时机**：任何考虑选择NT定约的时候。\n     2.  **评估原则**：**联手评估**。综合自己持牌与同伴叫品信息，判断每门花色能否抵挡敌方进攻。\n\
+            \     3.  **有效信息源（同伴侧）**：\n          *   直接叫NT（承诺均型止张）。\n          * \
+            \  扣叫（承诺A/K）。\n          *   应答NT试探时叫出新花色（承诺该花色止张）。\n          *   **注意**：同伴的**弱牌长套**花色（如弱二开叫、一阶高花）**不能**直接视为止张承诺。\n\
+            \     4.  **止张标准**：\n          *   **有**：联手有明确止张（如A、KQ、同伴已承诺控制）。\n   \
+            \       *   **疑似有**：联手有潜在止张（如Kx+同伴点力暗示）。\n          *   **无**：联手明显缺乏止张。\n\
+            \     5.  **决策门槛**：\n          *   **2NT及以上**：任何一门花色”无“止张或”疑似有“止张，都不可以选择NT作为最终叫品。\n\
+            \          *   **1NT**：仅允许一门花色为“无”。\n     6.  **输出格式**：\n          `“S:\
+            \ [有/疑似有/无] (依据)，H: …，D: …，C: …”`\n\n**示例**：`“S:有(A)，H:疑似有(Kx+同伴NT)，D:有(KQJ)，C:无(xxx且同伴未示强)”`\n\
+            \n6. **牌型点计算规则**：\n- **应用时机**：仅当将牌花色明确确定，且联手至少有8张配合时。\n- **计算标准**：\n \
+            \ - **8张将牌配合时，如果边花存在**：\n    - 缺门：+2点\n    - 单张：+1点\n    - 双张：不调整 (0点)\n\
+            \  - **9张（或以上）将牌配合时，如果边花存在**：\n    - 缺门：+5点\n    - 单张：+3点\n    - 双张：+1点\n\
+            \n7. **常见术语**\n- 高花：黑桃（S）和红心（H）\n- 低花：草花（ C）和方块（D）\n- 无将：NT\n- 单缺：某花色单缺是指该花色是单张（1张）或者是缺门（0张）。\n\
+            - 均型：没有6张及以上套，没有55双套，也没有单缺，否则都可以视为均型\n- 配合：搭档之间同一高花合计8+张，或者，同一低花合计9张以上。\n\
+            - 支持：加叫同伴高花，表示至少3张支持（如1♥-2♥）。加叫同伴低花，表示至少4张支持。支持不等于一定配合。\n- 首轮控制：某花色有A或者缺门\n\
+            - 次轮控制：某花色有K或者单张\n- 关键张：按照罗马关键张标准，共5个关键张：♠A、♥A、♦A、♣A + 将牌K，一共五个关键张。非将牌花色的K和所有花色的Q都不是关键张。\n\
+            - 扣叫：第一种含义， 低阶叫牌（2阶或3阶）时叫出敌方争叫的花色，表示支持同伴叫牌花色，并有10点以上实力。第二种含义，找到配合后叫新花色，表示显示控制（A/K或缺门），用于满贯试探或强牌信号。"
+        reasoning_format: tagged
+        selected: false
+        structured_output:
+          schema:
+            properties:
+              JF约定:
+                type: string
+              叫品含义及后续建议:
+                type: string
+              叫品筛选过程:
+                type: string
+              叫品选择:
+                type: string
+              叫牌位置:
+                type: string
+              叫牌历史:
+                type: string
+              基本规则合规性:
+                type: string
+              完整叫牌序列:
+                type: string
+              当前叫牌序列:
+                type: string
+              手牌分析:
+                type: string
+              扣叫控制:
+                type: string
+              是否进局或试探满贯:
+                type: string
+              止张分析:
+                type: string
+              牌型点:
+                type: string
+              自己pass次数:
+                type: string
+              自己和队友关键张合计:
+                type: string
+              自己和队友点力合计:
+                type: string
+              自己和队友配合花色张数合计:
+                type: string
+              队友后续建议:
+                type: string
+            required:
+            - 自己pass次数
+            - 当前叫牌序列
+            - JF约定
+            - 叫牌位置
+            - 手牌分析
+            - 叫牌历史
+            - 队友后续建议
+            - 自己和队友配合花色张数合计
+            - 牌型点
+            - 自己和队友点力合计
+            - 是否进局或试探满贯
+            - 止张分析
+            - 扣叫控制
+            - 自己和队友关键张合计
+            - 叫品筛选过程
+            - 叫品选择
+            - 基本规则合规性
+            - 叫品含义及后续建议
+            - 完整叫牌序列
+            type: object
+        structured_output_enabled: true
+        title: JF未约定和成局满贯叫牌
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 87
+      id: '1748839104409'
+      parentId: '1748838957795'
+      position:
+        x: 1034.4887592771233
+        y: 65
+      positionAbsolute:
+        x: 2928.520296857398
+        y: 1428.8095147690276
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        answer: '{{#17663269317950.text#}}'
+        desc: ''
+        selected: false
+        title: 直接回复 5
+        type: answer
+        variables: []
+      height: 102
+      id: '1748839538649'
+      position:
+        x: 3811.308722532522
+        y: 1807.6510916894165
+      positionAbsolute:
+        x: 3811.308722532522
+        y: 1807.6510916894165
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: start with
+            id: 98c98141-838a-4377-82f0-5a740d0cb802
+            value: 发牌
+            varType: string
+            variable_selector:
+            - sys
+            - query
+          id: 'true'
+          logical_operator: and
+        - case_id: fd6cac64-2c70-4a18-9f76-5a312dea58fc
+          conditions:
+          - comparison_operator: start with
+            id: 0c19bf0b-db16-46c2-b654-ac5a6838f549
+            value: 读牌
+            varType: string
+            variable_selector:
+            - sys
+            - query
+          id: fd6cac64-2c70-4a18-9f76-5a312dea58fc
+          logical_operator: and
+        desc: ''
+        selected: false
+        title: 条件分支
+        type: if-else
+      height: 171
+      id: '1749277901896'
+      position:
+        x: -86.51953576420325
+        y: 1461.1626756685887
+      positionAbsolute:
+        x: -86.51953576420325
+        y: 1461.1626756685887
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: 从输入牌局数据中读取四家手牌
+        model:
+          completion_params:
+            temperature: 0
+          mode: chat
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: 112832fd-b874-49bc-9c5f-0c144d142232
+          role: system
+          text: "你的任务是把东南西北四位牌手的手牌从输入的牌局中提取出来：\nK85 AT863 Q42 63\nJ73 72 8763 T954\
+            \ \nQT94 5 KJT AQJ72\nA62 KQJ94 A95 K8\n\n第一行是南家手牌\n第二行是西家手牌\n第三行是北家手牌\n\
+            第四行是东家手牌"
+        - id: 96d47610-aee7-4bbc-aae3-b9ece79ea886
+          role: user
+          text: '{{#sys.query#}}'
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              东家手牌:
+                type: string
+              北家手牌:
+                type: string
+              南家手牌:
+                type: string
+              西家手牌:
+                type: string
+            required:
+            - 南家手牌
+            - 西家手牌
+            - 北家手牌
+            - 东家手牌
+            type: object
+        structured_output_enabled: true
+        title: LLM 9
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 115
+      id: '1749277997542'
+      position:
+        x: 323.57434274926396
+        y: 1525.9911873856397
+      positionAbsolute:
+        x: 323.57434274926396
+        y: 1525.9911873856397
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        answer: '{{#1759904720169.Bidder#}} {{#1759904720169.Hand#}} {{#1759904720169.HCP#}}
+
+          {{#1759904720169.Text#}}
+
+          ----------------------------------------------------------------------------------------------------------------
+
+          '
+        desc: ''
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        selected: false
+        title: 直接回复 9
+        type: answer
+        variables: []
+      height: 207
+      id: '1750597164827'
+      parentId: '1748838957795'
+      position:
+        x: 1466.5076054946157
+        y: 663
+      positionAbsolute:
+        x: 3360.5391430748905
+        y: 2026.8095147690276
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        code: "def main(New_Context) -> dict:\n\n    Latest_JF_Content = \"\"\n\n\
+          \    if New_Context: \n        Latest_JF_Content = New_Context[0][\"content\"\
+          ]\n\n    return {\n        \"Latest_JF_Content\": Latest_JF_Content\n  \
+          \  }  "
+        code_language: python3
+        desc: ''
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        outputs:
+          Latest_JF_Content:
+            children: null
+            type: string
+        selected: false
+        title: 记录SN/WE各自约定
+        type: code
+        variables:
+        - value_selector:
+          - '1748839098113'
+          - result
+          value_type: array[object]
+          variable: New_Context
+      height: 51
+      id: '1752304060086'
+      parentId: '1748838957795'
+      position:
+        x: 139.53476474192212
+        y: 372.566262038981
+      positionAbsolute:
+        x: 2033.5663023221969
+        y: 1736.3757768080086
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        desc: ''
+        items:
+        - input_type: constant
+          operation: set
+          value: 四人叫牌
+          variable_selector:
+          - conversation
+          - Current_Mode
+          write_mode: over-write
+        selected: false
+        title: 四人叫牌
+        type: assigner
+        version: '2'
+      height: 83
+      id: '1752931579964'
+      position:
+        x: -471.83367288319164
+        y: 1363.8095147690276
+      positionAbsolute:
+        x: -471.83367288319164
+        y: 1363.8095147690276
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        desc: ''
+        items:
+        - input_type: constant
+          operation: set
+          value: 解释建议
+          variable_selector:
+          - conversation
+          - Current_Mode
+          write_mode: over-write
+        selected: false
+        title: 解释建议
+        type: assigner
+        version: '2'
+      height: 83
+      id: '1752932064360'
+      position:
+        x: -471.83367288319164
+        y: 768.2733095335511
+      positionAbsolute:
+        x: -471.83367288319164
+        y: 768.2733095335511
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        desc: ''
+        items:
+        - input_type: constant
+          operation: set
+          value: 打牌
+          variable_selector:
+          - conversation
+          - Current_Mode
+          write_mode: over-write
+        selected: false
+        title: 打牌
+        type: assigner
+        version: '2'
+      height: 83
+      id: '1752932194060'
+      position:
+        x: -471.83367288319164
+        y: 1043.2806000400624
+      positionAbsolute:
+        x: -471.83367288319164
+        y: 1043.2806000400624
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        desc: ''
+        items:
+        - input_type: constant
+          operation: set
+          value: 读牌
+          variable_selector:
+          - conversation
+          - Current_Mode
+          write_mode: over-write
+        selected: false
+        title: 读牌
+        type: assigner
+        version: '2'
+      height: 83
+      id: '1752933252025'
+      position:
+        x: -471.83367288319164
+        y: 1196
+      positionAbsolute:
+        x: -471.83367288319164
+        y: 1196
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: is
+            id: 2a537775-6ae8-4991-97bc-ef151d1f17c6
+            value: 建议叫牌
+            varType: string
+            variable_selector:
+            - start
+            - Play_Mode
+          - comparison_operator: is
+            id: a0573ed6-651c-4d0a-84ab-5fb53b71d52b
+            value: 解释叫牌
+            varType: string
+            variable_selector:
+            - start
+            - Play_Mode
+          - comparison_operator: is
+            id: b76d8911-4c3f-4970-b13f-073ffc361278
+            value: 双人叫牌
+            varType: string
+            variable_selector:
+            - start
+            - Play_Mode
+          - comparison_operator: is
+            id: 781b9ab5-ad97-4711-b361-755058ce2283
+            value: 算分
+            varType: string
+            variable_selector:
+            - start
+            - Play_Mode
+          - comparison_operator: is
+            id: 03cad227-2189-43f8-8f0a-02719ae53176
+            value: 打牌
+            varType: string
+            variable_selector:
+            - start
+            - Play_Mode
+          - comparison_operator: is
+            id: 929374aa-fcb1-4d83-801f-235962c0dea9
+            value: 读牌
+            varType: string
+            variable_selector:
+            - start
+            - Play_Mode
+          - comparison_operator: is
+            id: f6c9211d-39d0-462b-9249-de487decbbaf
+            value: 四人叫牌
+            varType: string
+            variable_selector:
+            - start
+            - Play_Mode
+          id: 'true'
+          logical_operator: or
+        desc: ''
+        selected: false
+        title: 条件分支 (1)
+        type: if-else
+      height: 279
+      id: '17529339529850'
+      position:
+        x: -1779.3403542969616
+        y: 923.8095147690276
+      positionAbsolute:
+        x: -1779.3403542969616
+        y: 923.8095147690276
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        desc: ''
+        items:
+        - input_type: variable
+          operation: clear
+          value: ''
+          variable_selector:
+          - conversation
+          - Current_Mode
+          write_mode: over-write
+        selected: false
+        title: 变量赋值 16
+        type: assigner
+        version: '2'
+      height: 83
+      id: '1752934107926'
+      position:
+        x: -1423.793051982874
+        y: 955.8095147690276
+      positionAbsolute:
+        x: -1423.793051982874
+        y: 955.8095147690276
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        desc: ''
+        items:
+        - input_type: constant
+          operation: set
+          value: 算分
+          variable_selector:
+          - conversation
+          - Current_Mode
+          write_mode: over-write
+        selected: false
+        title: 算分
+        type: assigner
+        version: '2'
+      height: 83
+      id: '1752934165095'
+      position:
+        x: -471.83367288319164
+        y: 907.7514650641662
+      positionAbsolute:
+        x: -471.83367288319164
+        y: 907.7514650641662
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: '='
+            id: f5af539d-e521-4fd8-b49f-14ae6dbca57e
+            numberVarType: constant
+            value: '0'
+            varType: number
+            variable_selector:
+            - conversation
+            - Return_Flag
+          id: 'true'
+          logical_operator: and
+        desc: ''
+        selected: false
+        title: 继续叫牌还是结束叫牌
+        type: if-else
+      height: 123
+      id: '1752937337025'
+      position:
+        x: 3811.308722532522
+        y: 1363.8095147690276
+      positionAbsolute:
+        x: 3811.308722532522
+        y: 1363.8095147690276
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: '='
+            id: 7afb0666-d31b-4d81-a38f-14e110ff22c2
+            value: '0'
+            varType: number
+            variable_selector:
+            - conversation
+            - Return_Flag
+          id: 'true'
+          logical_operator: and
+        desc: ''
+        selected: false
+        title: 条件分支
+        type: if-else
+      height: 123
+      id: '1752938339333'
+      position:
+        x: -471.83367288319164
+        y: 1573.3257015903582
+      positionAbsolute:
+        x: -471.83367288319164
+        y: 1573.3257015903582
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - conversation
+          - Latest_JF_Content
+        desc: 根据人类牌手叫牌内容，提取叫牌信息
+        model:
+          completion_params:
+            temperature: 0
+          mode: chat
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: e0d734da-7e04-43ef-a628-9127a2ab5625
+          role: system
+          text: "你**必须**严格按照以下JSON格式输出，这是唯一的输出格式。每个字段的值应为清晰的字符串，包含所有分析结论。\n\n{\n \
+            \ “当前叫牌序列”: “{{#conversation.Bidding#}}”, 如果叫牌序列为空，就是第一家（庄家）开叫 \n  “叫品筛选过程”:\
+            \ “从用户输入的叫牌信息“{{#sys.query#}}”中提取叫品。例如：1D, 2NT, pass, X, XX。绝对不能自作主张修改用户的叫牌”,\n\
+            \  “叫品选择”: “从筛选出的合格叫品中确定最终叫品。 “,\n  “叫品含义及后续建议”: “严格按照JF约定来解释最终叫品的含义，包括其点力范围、承诺的花色长度、牌型类型，但是不能暴露自己的具体点力和具体花色张数。如果所选叫品来自JF约定内容，且该叫品下一行存在通过更深一级缩进（“│-----├ ”）表示的后续叫品，必须提取完整后续叫品供队友参考。如果下一行没有更深缩进，表示JF约定尚未提供后续叫品，这种情况下不需要也不可以自行生成后续建议，并明确说明“JF约定无后续建议”。输出后续叫品建议前必须再次校验和所选叫品是否同一缩进水平。如果是同一缩进水平，不属于后续叫品，必须重新考虑”,\n\
+            \  “完整叫牌序列”: “严格按照格式输出：’{{#conversation.Bidding#}}({{#conversation.Bidding_Place#}})叫品选择-‘。使用英文括号，叫品花色用字母(S/H/D/C/NT)，非花色叫牌用pass/X/XX，pass要全部小写字母，末尾必须带‘-‘号。”\n\
+            }\n\n<JF约定内容>\n{{#context#}}\n</JF约定内容>"
+        - id: 5aab2e4a-0755-4585-ba38-354397ce9fea
+          role: user
+          text: ''
+        selected: false
+        structured_output:
+          schema:
+            properties:
+              叫品含义及后续建议:
+                type: string
+              叫品筛选过程:
+                type: string
+              叫品选择:
+                type: string
+              完整叫牌序列:
+                type: string
+              当前叫牌序列:
+                type: string
+            required:
+            - 当前叫牌序列
+            - 叫品筛选过程
+            - 叫品选择
+            - 叫品含义及后续建议
+            - 完整叫牌序列
+            type: object
+        structured_output_enabled: true
+        title: 提取人类叫牌含义和后续建议
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 115
+      id: '1752938506231'
+      position:
+        x: 323.57434274926396
+        y: 1787.4474956926842
+      positionAbsolute:
+        x: 323.57434274926396
+        y: 1787.4474956926842
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        answer: '{{#1752938506231.structured_output#}}
+
+          ----------------------------------------------------------------------------------------------------------------
+
+          '
+        desc: ''
+        selected: false
+        title: 直接回复
+        type: answer
+        variables: []
+      height: 150
+      id: '1752938619215'
+      position:
+        x: 1142.140190796253
+        y: 1787.4474956926842
+      positionAbsolute:
+        x: 1142.140190796253
+        y: 1787.4474956926842
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        desc: ''
+        items:
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1752938506231'
+          - structured_output
+          - 完整叫牌序列
+          variable_selector:
+          - conversation
+          - Bidding
+          write_mode: over-write
+        - input_type: constant
+          operation: set
+          value: 0
+          variable_selector:
+          - conversation
+          - Return_Flag
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1762950934179'
+          - Bid_Meaning
+          variable_selector:
+          - conversation
+          - Bid_Meaning
+          write_mode: over-write
+        selected: false
+        title: 变量赋值
+        type: assigner
+        version: '2'
+      height: 135
+      id: '1752939504549'
+      position:
+        x: 1532.74644458498
+        y: 1787.4474956926842
+      positionAbsolute:
+        x: 1532.74644458498
+        y: 1787.4474956926842
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        desc: ''
+        items:
+        - input_type: constant
+          operation: set
+          value: 双人叫牌
+          variable_selector:
+          - conversation
+          - Current_Mode
+          write_mode: over-write
+        selected: false
+        title: 双人叫牌
+        type: assigner
+        version: '2'
+      height: 83
+      id: '1754315677538'
+      position:
+        x: -471.83367288319164
+        y: 1787.4474956926842
+      positionAbsolute:
+        x: -471.83367288319164
+        y: 1787.4474956926842
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        code: "\ndef main(Text: str, South: str, South_HCP: int, North: str, North_HCP:\
+          \ int, West: str, West_HCP: int, East: str,East_HCP: int, Next_Bidder: str,\
+          \ Current_Mode: str, Bidding_Place: str, Bidding: str, Updated_Bidding:\
+          \ str, Updated_Bid_Meaning:str, Bid_Meaning:str, Dealer:str):\n    \n  \
+          \  Return_Flag = 0\n    Hand = \"\"\n    HCP = 0\n    Bidder =\"\"\n\n \
+          \   # 彻底修复：确保所有字符串参数都有默认值\n    def safe_str(value, default=\"\"):\n    \
+          \    return str(value) if value is not None else default\n    \n    Text\
+          \ = safe_str(Text)\n    Updated_Bid_Meaning = safe_str(Updated_Bid_Meaning)\n\
+          \    Updated_Bidding = safe_str(Updated_Bidding)\n    Bidding = safe_str(Bidding)\n\
+          \    Bid_Meaning = safe_str(Bid_Meaning)\n\n    if Next_Bidder == \"东\"\
+          \ : \n        Next_Bidder = \"南\"\n        if Bidding_Place == \"东\" : Bidder,\
+          \ Text, Hand, HCP, Bidding, Return_Flag = \"东\", \"请叫牌\", South, \"(\"+\
+          \ str(South_HCP) + \")\", Bidding, 1\n        elif Current_Mode != \"双人叫牌\"\
+          \ or (Current_Mode == \"双人叫牌\" and Dealer in [\"东\",\"西\"]): Bidder, Text,\
+          \ Hand, HCP, Bidding, Bid_Meaning= \"东\", Text, East, \"(\"+ str(East_HCP)\
+          \ + \")\", Updated_Bidding, Bid_Meaning + \"\\n(东)\"  + Updated_Bid_Meaning\n\
+          \        elif Dealer in [\"南\",\"北\"] : Bidder, Text, Hand, HCP, Bidding\
+          \ = \"\", \"\", \"\", \"\", Bidding + \"(东)pass-\"\n    elif Next_Bidder\
+          \ == \"南\" : \n        Next_Bidder = \"西\"\n        if Bidding_Place ==\
+          \ \"南\" : Bidder, Text, Hand, HCP, Bidding, Return_Flag  = \"南\", \"请叫牌\"\
+          , South, \"(\"+ str(South_HCP) + \")\", Bidding, 1\n        elif Current_Mode\
+          \ != \"双人叫牌\" or (Current_Mode == \"双人叫牌\" and Dealer in [\"南\",\"北\"]):\
+          \ Bidder, Text, Hand, HCP, Bidding, Bid_Meaning = \"南\", Text, South, \"\
+          (\"+ str(South_HCP)+ \")\", Updated_Bidding, Bid_Meaning + \"\\n(南)\" +\
+          \ Updated_Bid_Meaning\n        elif Dealer in [\"东\",\"西\"] : Bidder, Text,\
+          \ Hand, HCP, Bidding = \"\", \"\", \"\", \"\", Bidding + \"(南)pass-\"\n\
+          \    elif Next_Bidder == \"西\" :\n        Next_Bidder = \"北\"\n        if\
+          \ Bidding_Place == \"西\" : Bidder, Text, Hand, HCP, Bidding, Return_Flag\
+          \  = \"西\", \"请叫牌\", North, \"(\"+ str(North_HCP) + \")\", Bidding, 1\n\
+          \        elif Current_Mode != \"双人叫牌\"  or (Current_Mode == \"双人叫牌\" and\
+          \ Dealer in [\"东\",\"西\"]): Bidder, Text, Hand, HCP, Bidding, Bid_Meaning\
+          \ = \"西\", Text, West, \"(\"+ str(West_HCP) + \")\", Updated_Bidding, Bid_Meaning+\"\
+          \\n(西)\" + Updated_Bid_Meaning\n        elif Dealer in [\"南\",\"北\"] : Bidder,\
+          \ Text, Hand, HCP, Bidding = \"\", \"\", \"\", \"\", Bidding + \"(西)pass-\"\
+          \n    elif Next_Bidder == \"北\" : \n        Next_Bidder = \"东\"\n      \
+          \  if Bidding_Place == \"北\" : Bidder, Text, Hand, HCP, Bidding, Return_Flag\
+          \  = \"北\", \"请叫牌\", North, \"(\"+ str(North_HCP) + \")\", Bidding, 1\n\
+          \        elif Current_Mode != \"双人叫牌\"  or (Current_Mode == \"双人叫牌\" and\
+          \ Dealer in [\"南\",\"北\"]): Bidder, Text, Hand, HCP, Bidding, Bid_Meaning\
+          \ = \"北\", Text, North, \"(\"+ str(North_HCP) + \")\", Updated_Bidding,\
+          \ Bid_Meaning + \"\\n(北)\" + Updated_Bid_Meaning\n        elif Dealer in\
+          \ [\"东\",\"西\"]: Bidder, Text, Hand, HCP, Bidding = \"\", \"\", \"\", \"\
+          \", Bidding + \"(北)pass-\"\n    \n    # 最终安全检查\n    Text = safe_str(Text)\n\
+          \    Hand = safe_str(Hand) \n    HCP = safe_str(HCP)\n    Bidder = safe_str(Bidder)\n\
+          \    Bidding = safe_str(Bidding)\n    Next_Bidder = safe_str(Next_Bidder)\n\
+          \    Bid_Meaning = safe_str(Bid_Meaning)\n        \n    return {\n     \
+          \   \"Text\": Text,\n        \"Hand\": Hand,\n        \"HCP\" : HCP,\n \
+          \       \"Bidder\" : Bidder,\n        \"Bidding\" : Bidding,\n        \"\
+          Next_Bidder\" : Next_Bidder,\n        \"Bid_Meaning\" : Bid_Meaning,\n \
+          \       \"Return_Flag\" : Return_Flag\n    }\n"
+        code_language: python3
+        desc: 根据叫牌人数和叫牌位置，确定输出显示的内容
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        outputs:
+          Bid_Meaning:
+            children: null
+            type: string
+          Bidder:
+            children: null
+            type: string
+          Bidding:
+            children: null
+            type: string
+          HCP:
+            children: null
+            type: string
+          Hand:
+            children: null
+            type: string
+          Next_Bidder:
+            children: null
+            type: string
+          Return_Flag:
+            children: null
+            type: number
+          Text:
+            children: null
+            type: string
+        selected: false
+        title: 整理输出内容
+        type: code
+        variables:
+        - value_selector:
+          - conversation
+          - Output_Text
+          value_type: string
+          variable: Text
+        - value_selector:
+          - conversation
+          - South
+          value_type: string
+          variable: South
+        - value_selector:
+          - conversation
+          - North
+          value_type: string
+          variable: North
+        - value_selector:
+          - conversation
+          - West
+          value_type: string
+          variable: West
+        - value_selector:
+          - conversation
+          - East
+          value_type: string
+          variable: East
+        - value_selector:
+          - conversation
+          - East_HCP
+          value_type: number
+          variable: East_HCP
+        - value_selector:
+          - conversation
+          - North_HCP
+          value_type: number
+          variable: North_HCP
+        - value_selector:
+          - conversation
+          - West_HCP
+          value_type: number
+          variable: West_HCP
+        - value_selector:
+          - conversation
+          - South_HCP
+          value_type: number
+          variable: South_HCP
+        - value_selector:
+          - conversation
+          - Next_Bidder
+          value_type: string
+          variable: Next_Bidder
+        - value_selector:
+          - conversation
+          - Current_Mode
+          value_type: string
+          variable: Current_Mode
+        - value_selector:
+          - conversation
+          - Bidding_Place
+          value_type: string
+          variable: Bidding_Place
+        - value_selector:
+          - conversation
+          - Bidding
+          value_type: string
+          variable: Bidding
+        - value_selector:
+          - conversation
+          - Updated_Bidding
+          value_type: string
+          variable: Updated_Bidding
+        - value_selector:
+          - conversation
+          - Updated_Bid_Meaning
+          value_type: string
+          variable: Updated_Bid_Meaning
+        - value_selector:
+          - conversation
+          - Bid_Meaning
+          value_type: string
+          variable: Bid_Meaning
+        - value_selector:
+          - conversation
+          - Dealer
+          value_type: string
+          variable: Dealer
+      height: 95
+      id: '1759904720169'
+      parentId: '1748838957795'
+      position:
+        x: 1023.1240318465075
+        y: 775
+      positionAbsolute:
+        x: 2917.155569426782
+        y: 2138.8095147690274
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        answer: '{{#conversation.Dealer#}}家开叫：
+
+          ----------------------------------------------------------------------------------------------------------------
+
+
+          '
+        selected: false
+        title: 直接回复 10
+        type: answer
+        variables: []
+      height: 151
+      id: '1759974442500'
+      position:
+        x: 1532.74644458498
+        y: 1363.8095147690276
+      positionAbsolute:
+        x: 1532.74644458498
+        y: 1363.8095147690276
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        isInIteration: false
+        isInLoop: true
+        items:
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1759904720169'
+          - Bidding
+          variable_selector:
+          - conversation
+          - Bidding
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1759904720169'
+          - Next_Bidder
+          variable_selector:
+          - conversation
+          - Next_Bidder
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1759904720169'
+          - Bid_Meaning
+          variable_selector:
+          - conversation
+          - Bid_Meaning
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1759904720169'
+          - Return_Flag
+          variable_selector:
+          - conversation
+          - Return_Flag
+          write_mode: over-write
+        loop_id: '1748838957795'
+        selected: false
+        title: 变量赋值 23
+        type: assigner
+        version: '2'
+      height: 161
+      id: '1760028171478'
+      parentId: '1748838957795'
+      position:
+        x: 1480.6328253895654
+        y: 65
+      positionAbsolute:
+        x: 3374.66436296984
+        y: 1428.8095147690276
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        code: "\ndef main(Bidding_Place: str, X_Bid_Meaning: str, Bid_Meaning: str):\n\
+          \    return {\n        \"Bid_Meaning\": Bid_Meaning + \"\\n(\"+Bidding_Place+\"\
+          )\" + X_Bid_Meaning\n    }\n"
+        code_language: python3
+        desc: 将人类牌手叫牌解释添加到叫牌历史
+        outputs:
+          Bid_Meaning:
+            children: null
+            type: string
+        selected: false
+        title: 更新叫牌历史
+        type: code
+        variables:
+        - value_selector:
+          - conversation
+          - Bidding_Place
+          value_type: string
+          variable: Bidding_Place
+        - value_selector:
+          - '1752938506231'
+          - structured_output
+          - 叫品含义及后续建议
+          value_type: object
+          variable: X_Bid_Meaning
+        - value_selector:
+          - conversation
+          - Bid_Meaning
+          value_type: string
+          variable: Bid_Meaning
+      height: 79
+      id: '1762950934179'
+      position:
+        x: 735.3835931453324
+        y: 1787.4474956926842
+      positionAbsolute:
+        x: 735.3835931453324
+        y: 1787.4474956926842
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        code: "\ndef main(South: str, South_HCP: int, South_DIST: str, North: str,\
+          \ North_HCP: int, North_DIST: str, West: str, West_HCP: int, West_DIST:\
+          \ str, East: str,East_HCP: int, East_DIST: str, Next_Bidder: str):\n\n \
+          \   if Next_Bidder == \"东\" : \n        Hand, HCP, DIST, Player, Partner\
+          \ = East, East_HCP, East_DIST, \"东\",\"西\"\n    elif Next_Bidder == \"南\"\
+          \ : \n        Hand, HCP, DIST, Player, Partner = South, South_HCP, South_DIST,\
+          \ \"南\",\"北\"\n    elif Next_Bidder == \"西\" :\n        Hand, HCP, DIST,\
+          \ Player, Partner = West, West_HCP, West_DIST, \"西\",\"东\"\n    elif Next_Bidder\
+          \ == \"北\" : \n        Hand, HCP, DIST, Player, Partner = North, North_HCP,\
+          \ North_DIST, \"北\",\"南\"\n\n    return {\n        \"Hand\": Hand,\n   \
+          \     \"HCP\" : HCP,\n        \"DIST\" : DIST,\n        \"Player\" : Player,\n\
+          \        \"Partner\" : Partner\n    }\n"
+        code_language: python3
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        outputs:
+          DIST:
+            children: null
+            type: string
+          HCP:
+            children: null
+            type: number
+          Hand:
+            children: null
+            type: string
+          Partner:
+            children: null
+            type: string
+          Player:
+            children: null
+            type: string
+        selected: false
+        title: 设置LLM叫牌环境
+        type: code
+        variables:
+        - value_selector:
+          - conversation
+          - East
+          value_type: string
+          variable: East
+        - value_selector:
+          - conversation
+          - East_HCP
+          value_type: number
+          variable: East_HCP
+        - value_selector:
+          - conversation
+          - North
+          value_type: string
+          variable: North
+        - value_selector:
+          - conversation
+          - North_HCP
+          value_type: number
+          variable: North_HCP
+        - value_selector:
+          - conversation
+          - South_HCP
+          value_type: number
+          variable: South_HCP
+        - value_selector:
+          - conversation
+          - South
+          value_type: string
+          variable: South
+        - value_selector:
+          - conversation
+          - West
+          value_type: string
+          variable: West
+        - value_selector:
+          - conversation
+          - West_HCP
+          value_type: number
+          variable: West_HCP
+        - value_selector:
+          - conversation
+          - Next_Bidder
+          value_type: string
+          variable: Next_Bidder
+        - value_selector:
+          - conversation
+          - South_DIST
+          value_type: string
+          variable: South_DIST
+        - value_selector:
+          - conversation
+          - North_DIST
+          value_type: string
+          variable: North_DIST
+        - value_selector:
+          - conversation
+          - West_DIST
+          value_type: string
+          variable: West_DIST
+        - value_selector:
+          - conversation
+          - East_DIST
+          value_type: string
+          variable: East_DIST
+      height: 51
+      id: '1763478518410'
+      parentId: '1748838957795'
+      position:
+        x: 542.1186913698521
+        y: 65
+      positionAbsolute:
+        x: 2436.150228950127
+        y: 1428.8095147690276
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: 从牌局图片中读取牌局信息
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: false
+            size: 50
+        model:
+          completion_params: {}
+          mode: chat
+          name: Doubao-1.5-vision-pro-32k
+          provider: langgenius/volcengine_maas/volcengine_maas
+        prompt_template:
+        - id: e7f53cfa-2e92-4287-96a0-44075c9b61d3
+          role: system
+          text: '任务：显示各家手牌，顺序（行）严格要求为南西北东手牌，每一行花色次序严格按照黑桃（S），红心（H），方块（D），草花（C）排列。同一花色按从大到小牌列。花色之间必须用空格分开（"S
+            H D C")。对于牌面数字，将所有手牌中出现的数字 “10”，无论其在何种组合或位置，均严格且无一遗漏地替换为 “T”，但不对其他部分做任何修改。例如，“1095”
+            需替换为 “T95” ，“Q108” 需替换为 “QT8”，“A10564”需替换为“AT564” 等。
+
+
+            南家手牌
+
+            西家手牌
+
+            北家手牌
+
+            东家手牌
+
+
+            最终输出只包含手牌内容，示例如下：
+
+            KT85 865 3 KQT84
+
+            Q AT93 QJ985 632
+
+            A74 Q74 AK76 AJ5
+
+            J9632 KJ2 T42 97
+
+
+            最后必须严格检查：
+
+            确保没有牌重复。
+
+            确保所有10都被替换为T。
+
+            确保没有数字0出现
+
+            确保每家都是13张牌。
+
+            确保每一行按照SHDC牌列
+
+            确保每一行中各花色严格用空格分开，且同花色内部没有空格。
+
+            示例：
+
+            如果南家手牌为黑桃K、黑桃T、黑桃8、黑桃5，红心8、红心6、红心5，方块3，草花Q、草花T、草花8、草花4，那么对应的输出为KT85 865
+            3 KQT84 。'
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              东家手牌:
+                type: string
+              北家手牌:
+                type: string
+              南家手牌:
+                type: string
+              西家手牌:
+                type: string
+            required:
+            - 南家手牌
+            - 西家手牌
+            - 北家手牌
+            - 东家手牌
+            type: object
+        structured_output_enabled: true
+        title: 读牌
+        type: llm
+        variables: []
+        vision:
+          configs:
+            detail: high
+            variable_selector:
+            - sys
+            - files
+          enabled: true
+      height: 115
+      id: '17644989350490'
+      position:
+        x: 323.57434274926396
+        y: 1363.8095147690276
+      positionAbsolute:
+        x: 323.57434274926396
+        y: 1363.8095147690276
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: is
+            id: ed0512f2-2bbb-44bd-9ecc-8b5c0afcbf6f
+            value: true
+            varType: boolean
+            variable_selector:
+            - '1765711615939'
+            - AI_Bidding
+          id: 'true'
+          logical_operator: and
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        selected: false
+        title: 条件分支 10
+        type: if-else
+      height: 123
+      id: '1765382756645'
+      parentId: '1748838957795'
+      position:
+        x: 132.70457400370424
+        y: 747
+      positionAbsolute:
+        x: 2026.736111583979
+        y: 2110.8095147690274
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        code: "def main(Next_Bidder: str, Current_Mode: str, Bidding_Place: str, Dealer:\
+          \ str):\n    \"\"\"判断是否应该由AI叫牌\"\"\"\n    \n    if \"双人叫牌\" in Current_Mode:\n\
+          \        # 双人叫牌模式：检查下一个叫牌人是否与庄家在同一组\n        dealer_groups = {\n       \
+          \     \"南\": [\"南\", \"北\"],\n            \"北\": [\"南\", \"北\"], \n    \
+          \        \"东\": [\"东\", \"西\"],\n            \"西\": [\"东\", \"西\"]\n   \
+          \     }\n        \n        # 如果下一个叫牌人在庄家组中，且不是当前叫牌位置\n        if Next_Bidder\
+          \ in dealer_groups[Dealer] and Next_Bidder != Bidding_Place:\n         \
+          \   return {\"AI_Bidding\": True}\n    else:\n        # 普通模式：只需检查下一个叫牌人不是当前叫牌位置\n\
+          \        if Next_Bidder != Bidding_Place:\n            return {\"AI_Bidding\"\
+          : True}\n    \n    return {\"AI_Bidding\": False}"
+        code_language: python3
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        outputs:
+          AI_Bidding:
+            children: null
+            type: boolean
+        selected: false
+        title: 确定是否通过LLM叫牌
+        type: code
+        variables:
+        - value_selector:
+          - conversation
+          - Dealer
+          value_type: string
+          variable: Dealer
+        - value_selector:
+          - conversation
+          - Next_Bidder
+          value_type: string
+          variable: Next_Bidder
+        - value_selector:
+          - conversation
+          - Bidding_Place
+          value_type: string
+          variable: Bidding_Place
+        - value_selector:
+          - conversation
+          - Current_Mode
+          value_type: string
+          variable: Current_Mode
+      height: 51
+      id: '1765711615939'
+      parentId: '1748838957795'
+      position:
+        x: 140.32314954841831
+        y: 647.3873880682738
+      positionAbsolute:
+        x: 2034.354687128693
+        y: 2011.1969028373014
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0
+          mode: chat
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: ab475a4d-5726-4174-aa41-cf6fe0d020d7
+          role: system
+          text: "你是一个桥牌文本排版与校验引擎。\n请基于给定的手牌信息与叫牌序列，生成标准文本桥牌布局和叫牌布局，并严格遵守格式与逻辑规则。\n\
+            \n各家手牌以及叫牌过程从{{#1743749483681.text#}}中提取。分别输出以下三种格式：\n\n示例1（图形化布局，具体要求如下）\n\
+            矩形牌桌：用 +-------+ 明确画出矩形边界，四角对齐。\n数据完整：保留所有手牌和叫牌信息（包括点数和花色符号）。\n对齐优化：\n\
+            东西家手牌与矩形边界横向对齐。\n南北家手牌居中，上下对称。\n\n叫牌过程：叫牌过程必须包含完整叫牌序列中的所有叫品，包括开始牌手的 Pass。填充顺序以庄家（首位叫牌者）为起点，严格按照桥牌固定顺序循环：南\
+            \ → 西 → 北 → 东 → （重复）。输出采用按轮次分行的表格布局：\n每一行表示一轮叫牌，每一列表示一个固定位置（South / West\
+            \ / North / East）。\n每个位置的叫品必须在该位置列正下方填充。比如东家叫品，必须在东（East）列正下方。\n在第一行中，尚未轮到的方位不得用\
+            \ Pass 或任何叫品进行填充，比如，东家开叫，第一行南，西，北必须留空，他们的叫品只能从第二行开始填充。只有在轮到该方位叫牌时，才允许填写其叫品（包括\
+            \ Pass）。\n开叫人位置填充好以后，后续叫牌必须按行依次填充，一行填满后才能换下一行继续填充。\n当出现合法的三家连续 Pass后，叫牌过程结束，后续位置不再填充。\n\
+            \n                North (18)\n                ♠ A74\n                ♥\
+            \ Q74\n                ♦ AK76\n                ♣ AJ5\n        +-----------------------+\n\
+            West (9)|                       |East (5)\n♠ Q     |                 \
+            \      |    ♠ J9632\n♥ AT93  |                       |    ♥ KJ2\n♦ QJ985\
+            \ |                       |    ♦ T42\n♣ 632   |                      \
+            \ |    ♣ 97\n        +-----------------------+\n                South\
+            \ (8)\n                ♠ KT85\n                ♥ 865\n               \
+            \ ♦ 3\n                ♣ KQT84\n\nSouth    West    North    East\n---------------------------------\n\
+            Pass     Pass    1♦       Pass\n1♠       Pass    2NT      Pass\n3♣   \
+            \    3♦      3NT      Pass\nPass     Pass\n\n示例2（紧凑型布局，顺序严格要求为南西北东）\n\
+            KT85 865 3 KQT84\nQ AT93 QJ985 632\nA74 Q74 AK76 AJ5\nJ9632 KJ2 T42 97\n\
+            \n示例3 （deep fine 格式，使用字母代表花色，不要用花色符号）\nDeal: 1                       \
+            \          A74 Q74 AK76 AJ5\nContract: 3NT-North     Q AT93 QJ985 632\
+            \                  J9632 KJ2 T42 97\nOnLead: East                    \
+            \        KT85 865 3 KQT84\nLead: S3\n要求：\n1. 合约位置（Declarer）判定\n- 以“第一次叫出最终合约花色的一方”为准\n\
+            - 不以最后一次叫品为准\n2. OnLead 判定\n- OnLead 必须是 Declarer 左手方（LHO）\n3. 首攻（Lead）校验\n\
+            - Lead 牌必须确实存在于 OnLead 手牌中\n- 若首攻与 OnLead 手牌不一致，必须纠正"
+        selected: false
+        title: LLM 5 (1)
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 87
+      id: '17658985090040'
+      position:
+        x: 323.57434274926396
+        y: 1196
+      positionAbsolute:
+        x: 323.57434274926396
+        y: 1196
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0
+          mode: chat
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: ab475a4d-5726-4174-aa41-cf6fe0d020d7
+          role: system
+          text: "你是一个桥牌文本排版与校验引擎。\n请基于给定的手牌信息与叫牌序列，生成标准文本桥牌布局和叫牌布局，并严格遵守格式与逻辑规则。\n\
+            \n各家手牌：\n南家{{#conversation.South#}}（{{#conversation.South_HCP#}}）\n西家{{#conversation.West#}}（{{#conversation.West_HCP#}}）\n\
+            北家{{#conversation.North#}}（{{#conversation.North_HCP#}}）\n东家{{#conversation.East#}}（{{#conversation.East_HCP#}}）\n\
+            以及叫牌过程{{#conversation.Bidding#}}。分别输出以下三种格式 ：\n\n示例1（图形化布局，具体要求如下）\n矩形牌桌：用 +-------+ 明确画出矩形边界，四角对齐。\n\
+            数据完整：保留所有手牌和叫牌信息（包括点数和花色符号）。\n注意：如果是双人叫牌（{{#conversation.Current_Mode#}}），只要显示{{#conversation.Dealer#}}和队友的手牌，不必显示其他两家的手牌。只适用于示例1\n\
+            对齐优化：\n东西家手牌与矩形边界横向对齐。\n南北家手牌居中，上下对称。\n\n叫牌过程：叫牌过程必须包含完整叫牌序列中的所有叫品，包括开始牌手的\
+            \ Pass。填充顺序以庄家（首位叫牌者）为起点，严格按照桥牌固定顺序循环：南 → 西 → 北 → 东 → （重复）。输出采用按轮次分行的表格布局：\n\
+            每一行表示一轮叫牌，每一列表示一个固定方位（South / West / North / East）\n在第一行中，尚未轮到的方位不得用 Pass\
+            \ 或任何叫品进行填充，比如，东家开叫，南，西，北必须留空。只有在轮到该方位叫牌时，才允许填写其叫品（包括 Pass）。\n当出现合法的三家连续\
+            \ Pass后，叫牌过程结束，后续位置不再填充。\n\n                North (18)\n             \
+            \   ♠ A74\n                ♥ Q74\n                ♦ AK76\n           \
+            \     ♣ AJ5\n        +-----------------------+\nWest (9)|            \
+            \           |East (5)\n♠ Q     |                       |    ♠ J9632\n\
+            ♥ AT93  |                       |    ♥ KJ2\n♦ QJ985 |                \
+            \       |    ♦ T42\n♣ 632   |                       |    ♣ 97\n      \
+            \  +-----------------------+\n                South (8)\n            \
+            \    ♠ KT85\n                ♥ 865\n                ♦ 3\n            \
+            \    ♣ KQT84\n\nSouth    West    North    East\n---------------------------------\n\
+            Pass     Pass    1♦       Pass\n1♠       Pass    2NT      Pass\n3♣   \
+            \    3♦      3NT      Pass\nPass     Pass\n\n示例2（紧凑型布局，顺序严格要求为南西北东）\n\
+            KT85 865 3 KQT84\nQ AT93 QJ985 632\nA74 Q74 AK76 AJ5\nJ9632 KJ2 T42 97\n\
+            \n示例3 （deep finesse 格式，使用字母代表花色，不要用花色符号）\nDeal: 1                    \
+            \             A74 Q74 AK76 AJ5\nContract: 3NT-North     Q AT93 QJ985 632\
+            \                  J9632 KJ2 T42 97\nOnLead: East                    \
+            \        KT85 865 3 KQT84\nLead: S3\n要求：\n1. 合约位置（Declarer）判定\n- 以“第一次叫出最终合约花色的一方”为准\n\
+            - 不以最后一次叫品为准\n2. OnLead 判定\n- OnLead 必须是 Declarer 左手方（LHO）\n3. 首攻（Lead）校验\n\
+            - Lead 牌必须确实存在于 OnLead 手牌中\n- 若首攻与 OnLead 手牌不一致，必须纠正"
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              示例1:
+                type: string
+              示例2:
+                type: string
+              示例3:
+                type: string
+            required:
+            - 示例1
+            - 示例2
+            - 示例3
+            type: object
+        structured_output_enabled: false
+        title: 显示牌局数据和叫牌结果
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 87
+      id: '17663269317950'
+      position:
+        x: 3811.308722532522
+        y: 1573.3257015903582
+      positionAbsolute:
+        x: 3811.308722532522
+        y: 1573.3257015903582
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+    - data:
+        author: 范轶
+        desc: ''
+        height: 359
+        selected: false
+        showAuthor: true
+        text: '{"root":{"children":[{"children":[{"detail":0,"format":0,"mode":"normal","style":"font-size:
+          14px;","text":"准备牌局：","type":"text","version":1}],"direction":null,"format":"","indent":0,"type":"paragraph","version":1,"textStyle":"font-size:
+          14px;","textFormat":0},{"children":[{"children":[{"detail":0,"format":0,"mode":"normal","style":"font-size:
+          14px;","text":"包括从图片读牌，","type":"text","version":1}],"direction":null,"format":"","indent":0,"type":"listitem","version":1,"textStyle":"font-size:
+          14px;","value":1},{"children":[{"detail":0,"format":0,"mode":"normal","style":"font-size:
+          14px;","text":"自动生成随机牌局，","type":"text","version":1}],"direction":null,"format":"","indent":0,"type":"listitem","version":1,"textStyle":"font-size:
+          14px;","value":2},{"children":[{"detail":0,"format":0,"mode":"normal","style":"font-size:
+          14px;","text":"直接输入牌局","type":"text","version":1}],"direction":null,"format":"","indent":0,"type":"listitem","version":1,"textStyle":"font-size:
+          14px;","value":3}],"direction":null,"format":"","indent":0,"type":"list","version":1,"textStyle":"font-size:
+          14px;","listType":"bullet","start":1,"tag":"ul"}],"direction":null,"format":"","indent":0,"type":"root","version":1,"textStyle":"font-size:
+          14px;"}}'
+        theme: green
+        title: ''
+        type: ''
+        width: 1154
+      height: 359
+      id: '1767975191550'
+      position:
+        x: -121.78075745759611
+        y: 1335.2065314480571
+      positionAbsolute:
+        x: -121.78075745759611
+        y: 1335.2065314480571
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom-note
+      width: 1154
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - '1752304060086'
+          - Latest_JF_Content
+        desc: JF约定中没有合适叫品或者没有后续叫品时，在下一个LLM中重新叫牌
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: 3ca0eb49-2390-41d8-93d1-2f75b4e83909
+          role: system
+          text: "你是一位世界级桥牌大师，擅长自然叫牌二盖一体系，目前使用该体系的一个变种“JF叫牌约定”参加比赛。\n\n### JF约定内容\n\
+            {{#context#}}\n\n### 任务：\n你作为{{#1763478518410.Player#}}家参与叫牌，你的队友是{{#1763478518410.Partner#}}家。你持有如下手牌，{{#1763478518410.Hand#}}（{{#1763478518410.HCP#}}，{{#1763478518410.DIST#}}），括号内为大牌点和花色分布，可以直接使用，不要再计算。根据当前叫牌序列{{#conversation.Bidding#}}和上面的<JF约定内容>，你将按照以下步骤做出叫牌决定：\n\
+            \n### 叫牌决策流程（必须严格遵循）：\n\n【第一阶段：叫牌位置与手牌分析】\n1. **确定叫牌位置**：\n   - IF (自己是首次叫牌)\
+            \ THEN 确认位置：开叫、争叫、应叫还是平衡叫。\n   - ELSE (自己是再叫) THEN 不必确认叫牌位置。\n2. **刚性手牌分析**（必须执行）：\n\
+            \   - 计算大牌点：严格按 A=4, K=3, Q=2, J=1 计算。暂不考虑牌型点。\n   - 分析分布：计算 S, H, D,\
+            \ C 四门花色的具体张数，形成 Sx-Hx-Dx-Cx 列表。\n   - 判断短门：\n          - IF (任一花色张数 ==\
+            \ 0) THEN 标记为“有缺门”。\n          - IF (任一花色张数 == 1) THEN 标记为“有单张”。\n   \
+            \       - IF (有缺门 OR 有单张) THEN 判定为“有单缺花色”。\n   - 记录高花：必须严格明确记录所有长度 >=4\
+            \ 张的 S 和 H 花色，与该花色强弱无关。\n   - 记录AK：必须严格明确记录所有的A和K并计算各自总数。\n\n3. **刚性规则（必须执行）**：\n\
+            \   - **严格条件匹配规则**：选择任何叫品前，必须确认同时满足：\n          - 手牌点力在该叫品要求范围（点力区间）内，必须严格遵守。特别是对于开叫，点力要求（如12-21点）都是绝对门槛。如果手牌点力低于最低要求（如11点），即使花色张数、牌型等其他条件全部符合，该叫品也绝对不合格，必须排除。\n\
+            \          - 手牌花色张数满足该叫品要求长度范围。禁止类似“通常6张H，但5张也可接受”这样的模糊匹配。\n   - **情形独立原则**：当叫品有多个情形时，必须对所有情形单独验证，禁止混合不同情形。\n\
+            \   - **叫品递增规则**：禁止重复叫牌、降阶叫牌、同阶降花色叫牌。\n   - **禁止加倍违规**：禁止对同伴加倍、加倍后重新加倍、再加倍后再加倍。违规时强制PASS。\n\
+            \n### 输出格式要求：\n\n你**必须**严格按照以下JSON格式输出，这是唯一的输出格式。每个字段的值应为清晰的字符串，包含所有分析结论。\n\
+            \n{\n  “自己pass次数”: “根据实际叫牌序列统计的准确数字。若≥2次则必须标记为’弱牌，避免介入‘”,\n  “当前叫牌序列”:\
+            \ “{{#conversation.Bidding#}}”, 如果叫牌序列为空，就是第一家（庄家）开叫\n  “JF约定”: {{#1748839089510.result#}},\n\
+            \  “叫牌位置”: “确定自己叫牌位置，包括开叫/争叫/应叫/平衡位置开叫。第二次及以后叫牌属于再叫位置”,\n\n  “手牌分析”: 执行**刚性手牌分析**，必须包含：手牌{{#1763478518410.Hand#}}；点力{{#1763478518410.HCP#}}；花色分布{{#1763478518410.DIST#}}；单张和缺门提示（如果某花色为1张（单张）或0张（缺门），必须严格明确标注）；高花提示（如有≥4张高花必须严格明确指出）”,\n\
+            \n  “叫牌历史”: “基于\"{{#conversation.Bid_Meaning#}}\"描述叫牌进程和各方的可能意图，不要包括每个叫品的后续建议”,\n\
+            \  “队友建议”: “提取\"{{#conversation.Bid_Meaning#}}\"中队友{{#1763478518410.Partner#}}家最近叫牌历史所包含的后续建议”,\n\
+            \n  “叫品筛选过程”: “描述筛选过程：\n   1.  筛选JF约定中的所有后续叫品。提取规则：在JF约定中沿当前叫牌序列{{#conversation.Bidding#}}定位到队友{{#1763478518410.Partner#}}家最近叫品，仅提取该叫品下通过更深一级缩进（'│-----├'）表示的叫品作为备选。和队友{{#1763478518410.Partner#}}家最近叫品处于同一缩进水平的叫品不是其后续叫品。如果没有提取到备选叫品，则以“队友建议”为准。如果队友建议中也没有提供具体叫品，则JF约定没有提供合格叫品。分析备选叫品前必须再次校验和队友{{#1763478518410.Partner#}}家最近叫品是否同一缩进水平。如果是同一缩进水平，不属于后续叫品，必须重新考虑\n\
+            \   2. 使用 **刚性规则**和**情形独立原则**逐一验证提取到的叫品\n   3. 输出所有合格叫品列表及选择理由。格式参考： ‘根据JF约定，X叫品要求…，我手牌满足/不满足…，因此合格/不合格。最终选择Y叫品。\n\
+            \   4. 如果没有任何合格叫品，建议输出”JF无合格叫品“ ”,\n\n  “叫品选择”: “从筛选出的合格叫品中确定最终叫品。\n \
+            \  1. 如果是开叫位置，优先选择无将（1NT/2NT) 。\n   2. 非开叫和争叫位置，阶数相同时，优先顺序为高花>无将>低花。阶数不同时选择低阶叫品，节省叫牌空间。\n\
+            \   3. 如果不同合格叫品为同一花色，选择高阶花色叫品。\n   4. 备选合格叫品中存在问叫叫品时要优先选择”。\n   5. 如果根据JF约定没有合格叫品，明确声明并严格输出‘JF无合格叫品’。\n\
+            \   6. 如果JF约定中明确包括pass, x, xx，且判定为合格叫品，都可以认为是有效叫品，不得改为输出‘JF无合格叫品‘。“,\n\
+            \n  “基本规则合规性”: “对最终选择叫品的合规性检查结果。必须确认：同时严格满足点力和花色范围；遵守叫品递增规则；无任何违规（重复叫牌、降阶、违规加倍等）。”,\n\
+            \  “叫品含义及后续建议”: “严格按照JF约定来解释最终叫品的含义，包括其点力范围、承诺的花色长度、牌型类型，但是不能暴露自己的具体点力和具体花色张数。如果所选叫品来自JF约定内容，且该叫品下一行存在通过更深一级缩进（“│-----├ ”）表示的后续叫品，必须提取完整后续叫品供队友参考。如果下一行没有更深缩进，表示JF约定尚未提供后续叫品，这种情况下不需要也不可以自行生成后续建议，并明确说明“JF约定无后续建议”。输出后续叫品建议前必须再次校验和所选叫品是否同一缩进水平。如果是同一缩进水平，不属于后续叫品，必须重新考虑”,\n\
+            \n  “完整叫牌序列”: “严格按照格式输出：’{{#conversation.Bidding#}}({{#1763478518410.Player#}})叫品-‘。使用英文括号，叫品花色用字母(S/H/D/C/NT)，非花色叫牌用pass/X/XX，pass要全部小写字母，末尾必须带‘-‘号。”\n\
+            }\n\n### 以下是必须严格遵守的通用桥牌基本规则：\n1. **叫牌位置精确定义** \n只针对你的首次叫牌，第二次叫牌属于再叫位置）\n\
+            - 开叫位置：前面所有叫牌都是pass，或叫牌刚开始（第一位置）\n- 争叫位置：右手敌方为实质叫品（非pass）时，自己就处于争叫位置。\n\
+            - 应叫位置：同伴为实质叫品（非pass），后续敌方pass时，自己就处于应叫位置。\n- 平衡位置：左手敌方开叫后，队友和右手敌方均pass，此时你处于平衡位置。例如“1C-pass-pass-(轮你叫牌）”。\n\
+            \n2. **加倍（X）的合法性规则**：\n  允许：对右手敌方的实质性叫品（非Pass）直接加倍。例：1♣ – (1♥) - X\n  允许：对左手敌方的实质性叫品，在同伴和RHO均Pass后的平衡位置加倍。例：1♥\
+            \ – Pass – Pass – X\n  禁止：在同伴叫牌，且右手敌方pass后加倍。错误例：1♦ (同伴) – Pass – X\n\
+            - 再加倍（XX）的合法性规则\n   允许：仅当敌方加倍后使用。例：1♥ – （X） – XX\n   禁止：对同伴的加倍使用再加倍。\n\
+               禁止：敌方未加倍时主动叫再加倍。\n   禁止：对敌方的再加倍使用再加倍。\n\n3. **牌型表示**\n- 文档中通常用类似5332或者5-3-3-2的格式表示牌型，数字按顺序代表SHDC的张数。以此类推。\n\
+            - 文档中有时用54高花，55高花，或者55低花等类似格式表达高花或低花两套的张数。54高花：5H4S或者5S4H，55高花：5H5S，55低花：5D5C。以此类推。\n\
+            - 格式“数字+花色”如“4S”表示严格4张S，5张不合格。\n- 格式“数字+花色+‘+’”如“4+S”表示至少4张S。\n- 文字“x张以上”等同于“x+”。\n\
+            \n4. **常见术语**\n- 高花：黑桃（S）和红心（H）\n- 低花：草花（ C）和方块（D）\n- 无将：NT\n- 单缺：某花色单缺是指该花色是单张（1张）或者是缺门（0张）。\n\
+            - 均型：没有6张及以上套，没有55双套，也没有单缺，否则都可以视为均型\n- 配合：搭档之间同一高花合计8+张，或者，同一低花合计9张以上。\n\
+            - 支持：加叫同伴高花，表示至少3张支持（如1♥-2♥）。加叫同伴低花，表示至少4张支持。支持不等于一定配合。\n- 首轮控制：某花色有A或者缺门\n\
+            - 次轮控制：某花色有K或者单张\n- 关键张：按照罗马关键张标准，共5个关键张：♠A、♥A、♦A、♣A + 将牌K，一共五个关键张。非将牌花色的K和所有花色的Q都不是关键张。\n\
+            - 扣叫：第一种含义， 低阶叫牌（2阶或3阶）时叫出敌方争叫的花色，表示支持同伴叫牌花色，并有10点以上实力。第二种含义，找到配合后叫新花色，表示显示控制（A/K或缺门），用于满贯试探或强牌信号。"
+        selected: false
+        structured_output:
+          schema:
+            properties:
+              JF约定:
+                type: string
+              叫品含义及后续建议:
+                type: string
+              叫品筛选过程:
+                type: string
+              叫品选择:
+                type: string
+              叫牌位置:
+                type: string
+              叫牌历史:
+                type: string
+              基本规则合规性:
+                type: string
+              完整叫牌序列:
+                type: string
+              当前叫牌序列:
+                type: string
+              手牌分析:
+                type: string
+              自己pass次数:
+                type: string
+              队友建议:
+                type: string
+            required:
+            - 自己pass次数
+            - 当前叫牌序列
+            - JF约定
+            - 叫牌位置
+            - 手牌分析
+            - 叫品筛选过程
+            - 叫品选择
+            - 基本规则合规性
+            - 叫品含义及后续建议
+            - 完整叫牌序列
+            - 叫牌历史
+            - 队友建议
+            type: object
+        structured_output_enabled: true
+        title: JF约定叫牌
+        type: llm
+        vision:
+          enabled: false
+      height: 131
+      id: '1768574373248'
+      parentId: '1748838957795'
+      position:
+        x: 532.4815393946878
+        y: 364.32790143150714
+      positionAbsolute:
+        x: 2426.5130769749626
+        y: 1728.1374162005347
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: contains
+            id: cd454a03-d1f1-46ec-875f-8b5120c693ca
+            value: JF无合格叫品
+            varType: string
+            variable_selector:
+            - conversation
+            - Bid
+          id: 'true'
+          logical_operator: and
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        selected: false
+        title: 条件分支 7
+        type: if-else
+      height: 123
+      id: '1768576300814'
+      parentId: '1748838957795'
+      position:
+        x: 538.0497344477053
+        y: 702.4955775568933
+      positionAbsolute:
+        x: 2432.08127202798
+        y: 2066.3050923259207
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        items:
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1748839104409'
+          - text
+          variable_selector:
+          - conversation
+          - Output_Text
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1748839104409'
+          - structured_output
+          - 完整叫牌序列
+          variable_selector:
+          - conversation
+          - Updated_Bidding
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1748839104409'
+          - structured_output
+          - 叫品含义及后续建议
+          variable_selector:
+          - conversation
+          - Updated_Bid_Meaning
+          write_mode: over-write
+        loop_id: '1748838957795'
+        selected: false
+        title: 变量赋值 11
+        type: assigner
+        version: '2'
+      height: 135
+      id: '1768576463628'
+      parentId: '1748838957795'
+      position:
+        x: 1035.1172795343196
+        y: 220.89895612190276
+      positionAbsolute:
+        x: 2929.1488171145943
+        y: 1584.7084708909304
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        items:
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1768574373248'
+          - text
+          variable_selector:
+          - conversation
+          - Output_Text
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1768574373248'
+          - structured_output
+          - 完整叫牌序列
+          variable_selector:
+          - conversation
+          - Updated_Bidding
+          write_mode: over-write
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1768574373248'
+          - structured_output
+          - 叫品含义及后续建议
+          variable_selector:
+          - conversation
+          - Updated_Bid_Meaning
+          write_mode: over-write
+        loop_id: '1748838957795'
+        selected: false
+        title: 变量赋值 12
+        type: assigner
+        version: '2'
+      height: 135
+      id: '1768576623731'
+      parentId: '1748838957795'
+      position:
+        x: 1030.0725335151778
+        y: 404.60618081961866
+      positionAbsolute:
+        x: 2924.1040710954526
+        y: 1768.4156955886463
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        items:
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1768574373248'
+          - structured_output
+          - 叫品选择
+          variable_selector:
+          - conversation
+          - Bid
+          write_mode: over-write
+        loop_id: '1748838957795'
+        selected: false
+        title: 变量赋值 13
+        type: assigner
+        version: '2'
+      height: 83
+      id: '1768577547440'
+      parentId: '1748838957795'
+      position:
+        x: 537.246606532698
+        y: 563.1960391542118
+      positionAbsolute:
+        x: 2431.2781441129728
+        y: 1927.0055539232394
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: contains
+            id: 3cb741a2-6484-4e6a-8743-1398d3fa67a1
+            value: JF无合格叫品
+            varType: string
+            variable_selector:
+            - conversation
+            - Bid
+          id: 'true'
+          logical_operator: and
+        isInIteration: false
+        isInLoop: true
+        loop_id: '1748838957795'
+        selected: false
+        title: 条件分支 8
+        type: if-else
+      height: 123
+      id: '1768578309035'
+      parentId: '1748838957795'
+      position:
+        x: 537.4714802865979
+        y: 189.47238592197323
+      positionAbsolute:
+        x: 2431.5030178668726
+        y: 1553.2819006910008
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    - data:
+        isInIteration: false
+        isInLoop: true
+        items:
+        - input_type: variable
+          operation: over-write
+          value:
+          - '1752304060086'
+          - Latest_JF_Content
+          variable_selector:
+          - conversation
+          - Latest_JF_Content
+          write_mode: over-write
+        loop_id: '1748838957795'
+        selected: false
+        title: 变量赋值 14
+        type: assigner
+        version: '2'
+      height: 83
+      id: '1768751131701'
+      parentId: '1748838957795'
+      position:
+        x: 138.53193738309164
+        y: 494.32447041861883
+      positionAbsolute:
+        x: 2032.5634749633664
+        y: 1858.1339851876464
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 241
+      zIndex: 1002
+    viewport:
+      x: -780.4360060566282
+      y: -613.1258922657769
+      zoom: 0.5743491774985183
+  rag_pipeline_variables: []

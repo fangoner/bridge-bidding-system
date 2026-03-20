@@ -24,6 +24,7 @@ backups/
 .vscode/
 *.swp
 *.swo
+.claude/
 
 # OS
 .DS_Store
@@ -40,8 +41,11 @@ test_output/
 # Release builds
 release_*/
 
-# Large files (optional - uncomment if needed)
-# Deep Finesse 2014 v2/
+# Screenshots (temporary)
+screenshots/
+
+# Third-party tools
+Deep Finesse 2014 v2/
 
 # Temporary files
 *.tmp
