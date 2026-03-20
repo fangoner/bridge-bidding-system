@@ -1,0 +1,4 @@
+openai>=1.0.0
+python-docx>=0.8.11
+volcengine-python-sdk>=1.0.0
+pyinstaller>=6.0.0

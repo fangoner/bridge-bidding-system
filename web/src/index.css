@@ -1,0 +1,211 @@
+/* Global CSS with design tokens for bridge bidding system */
+/* CSS custom properties are defined here for use throughout the app */
+
+:root {
+  /* Import design tokens as CSS custom properties */
+  --color-primary-main: #2e7d32;
+  --color-primary-light: #4caf50;
+  --color-primary-dark: #1b5e20;
+  --color-secondary-main: #1976d2;
+  --color-secondary-light: #42a5f5;
+  --color-secondary-dark: #1565c0;
+  --color-suit-spades: #000000;
+  --color-suit-hearts: #d32f2f;
+  --color-suit-diamonds: #ff9800;
+  --color-suit-clubs: #388e3c;
+  --color-suit-notrump: #5d4037;
+  --color-error: #d32f2f;
+  --color-warning: #ed6c02;
+  --color-info: #0288d1;
+  --color-success: #2e7d32;
+  --color-background-default: #f5f5f5;
+  --color-background-paper: #ffffff;
+  --color-background-table: #1b5e20;
+  --color-text-primary: rgba(0, 0, 0, 0.87);
+  --color-text-secondary: rgba(0, 0, 0, 0.6);
+  --color-text-disabled: rgba(0, 0, 0, 0.38);
+  --color-border-light: rgba(0, 0, 0, 0.12);
+  --color-border-medium: rgba(0, 0, 0, 0.24);
+  --color-border-heavy: rgba(0, 0, 0, 0.36);
+
+  --spacing-unit: 8px;
+  --spacing-xs: calc(var(--spacing-unit) * 0.5);   /* 4px */
+  --spacing-sm: var(--spacing-unit);              /* 8px */
+  --spacing-md: calc(var(--spacing-unit) * 2);    /* 16px */
+  --spacing-lg: calc(var(--spacing-unit) * 3);    /* 24px */
+  --spacing-xl: calc(var(--spacing-unit) * 4);    /* 32px */
+  --spacing-xxl: calc(var(--spacing-unit) * 6);   /* 48px */
+  --spacing-xxxl: calc(var(--spacing-unit) * 8);  /* 64px */
+
+  --font-family-system: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-family-monospace: "Courier New", Courier, monospace;
+  --font-family-serif: Georgia, "Times New Roman", Times, serif;
+
+  --font-size-xs: 0.75rem;    /* 12px */
+  --font-size-sm: 0.875rem;   /* 14px */
+  --font-size-md: 1rem;       /* 16px */
+  --font-size-lg: 1.125rem;   /* 18px */
+  --font-size-xl: 1.25rem;    /* 20px */
+  --font-size-xxl: 1.5rem;    /* 24px */
+  --font-size-xxxl: 2rem;     /* 32px */
+
+  --font-weight-light: 300;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
+
+  --border-radius-xs: 4px;
+  --border-radius-sm: 8px;
+  --border-radius-md: 12px;
+  --border-radius-lg: 16px;
+  --border-radius-xl: 24px;
+  --border-radius-round: 50%;
+
+  --shadow-0: none;
+  --shadow-1: 0px 2px 1px -1px rgba(0,0,0,0.2),0px 1px 1px 0px rgba(0,0,0,0.14),0px 1px 3px 0px rgba(0,0,0,0.12);
+  --shadow-2: 0px 3px 1px -2px rgba(0,0,0,0.2),0px 2px 2px 0px rgba(0,0,0,0.14),0px 1px 5px 0px rgba(0,0,0,0.12);
+  --shadow-3: 0px 3px 3px -2px rgba(0,0,0,0.2),0px 3px 4px 0px rgba(0,0,0,0.14),0px 1px 8px 0px rgba(0,0,0,0.12);
+  --shadow-4: 0px 2px 4px -1px rgba(0,0,0,0.2),0px 4px 5px 0px rgba(0,0,0,0.14),0px 1px 10px 0px rgba(0,0,0,0.12);
+  --shadow-6: 0px 3px 5px -1px rgba(0,0,0,0.2),0px 6px 10px 0px rgba(0,0,0,0.14),0px 1px 18px 0px rgba(0,0,0,0.12);
+  --shadow-8: 0px 5px 5px -3px rgba(0,0,0,0.2),0px 8px 10px 1px rgba(0,0,0,0.14),0px 3px 14px 2px rgba(0,0,0,0.12);
+  --shadow-12: 0px 7px 8px -4px rgba(0,0,0,0.2),0px 12px 17px 2px rgba(0,0,0,0.14),0px 5px 22px 4px rgba(0,0,0,0.12);
+  --shadow-16: 0px 8px 10px -5px rgba(0,0,0,0.2),0px 16px 24px 2px rgba(0,0,0,0.14),0px 6px 30px 5px rgba(0,0,0,0.12);
+  --shadow-24: 0px 11px 15px -7px rgba(0,0,0,0.2),0px 24px 38px 3px rgba(0,0,0,0.14),0px 9px 46px 8px rgba(0,0,0,0.12);
+
+  --animation-fast: 150ms;
+  --animation-normal: 250ms;
+  --animation-slow: 350ms;
+
+  /* Base styles */
+  font-family: var(--font-family-system);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-normal);
+  font-weight: var(--font-weight-regular);
+  color: var(--color-text-primary);
+  background-color: var(--color-background-default);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Dark mode support (optional - can be enabled later) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-background-default: #121212;
+    --color-background-paper: #1e1e1e;
+    --color-text-primary: rgba(255, 255, 255, 0.87);
+    --color-text-secondary: rgba(255, 255, 255, 0.6);
+    --color-text-disabled: rgba(255, 255, 255, 0.38);
+    --color-border-light: rgba(255, 255, 255, 0.12);
+    --color-border-medium: rgba(255, 255, 255, 0.24);
+    --color-border-heavy: rgba(255, 255, 255, 0.36);
+  }
+}
+
+/* Reset and base styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: var(--color-background-default);
+}
+
+#root {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Typography utility classes */
+.text-primary {
+  color: var(--color-text-primary);
+}
+
+.text-secondary {
+  color: var(--color-text-secondary);
+}
+
+.text-disabled {
+  color: var(--color-text-disabled);
+}
+
+.text-error {
+  color: var(--color-error);
+}
+
+.text-warning {
+  color: var(--color-warning);
+}
+
+.text-info {
+  color: var(--color-info);
+}
+
+.text-success {
+  color: var(--color-success);
+}
+
+/* Suit color classes */
+.suit-spades {
+  color: var(--color-suit-spades);
+}
+
+.suit-hearts {
+  color: var(--color-suit-hearts);
+}
+
+.suit-diamonds {
+  color: var(--color-suit-diamonds);
+}
+
+.suit-clubs {
+  color: var(--color-suit-clubs);
+}
+
+.suit-notrump {
+  color: var(--color-suit-notrump);
+}
+
+/* Focus styles for accessibility */
+:focus-visible {
+  outline: 2px solid var(--color-secondary-main);
+  outline-offset: 2px;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-background-default);
+  border-radius: var(--border-radius-sm);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-medium);
+  border-radius: var(--border-radius-sm);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-heavy);
+}
+
+/* Selection styling */
+::selection {
+  background-color: rgba(25, 118, 210, 0.2);
+  color: var(--color-text-primary);
+}

@@ -1,0 +1,701 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+桥牌叫牌练习系统 - Web API服务
+"""
+
+import sys
+import os
+from pathlib import Path
+from typing import Dict, List, Optional
+from enum import Enum
+
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from bridge.dealer import BridgeDealer, Hand, Position, POSITION_ORDER, DealMode, parse_deal_input, parse_hand_string
+from bridge.bidding import (
+    extract_retrieval_keyword,
+    get_partner_position,
+    get_position_name,
+    get_next_position,
+)
+from bridge.output_format import generate_all_outputs
+from bridge.deep_finesse import analyze_with_deep_finesse, parse_df_deal, df_format_to_hand
+from bridge.bidding_service import BiddingService
+from knowledge.loader import JFLoader, JFRetriever
+from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT
+from llm.deepseek_client import DeepSeekClient
+from llm.doubao_client import DoubaoVisionClient
+from utils.screenshot import BridgeScreenshotCapture
+from config import JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM, DEFAULT_FALLBACK_MODEL, DEFAULT_MAIN_PROMPT_MODEL
+
+app = FastAPI(title="桥牌叫牌练习系统 API", version="1.0.0")
+
+# 允许前端跨域访问
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 全局变量 - 无状态的可共享
+jf_loader = JFLoader(JF_CONVENTION_FILE)
+jf_segments = jf_loader.load()
+jf_retriever = JFRetriever(jf_segments)
+llm_client = DeepSeekClient(fallback_model=DEFAULT_FALLBACK_MODEL, main_prompt_model=DEFAULT_MAIN_PROMPT_MODEL)
+vision_client = DoubaoVisionClient()
+screenshot_capture = BridgeScreenshotCapture()
+
+
+class GameMode(str, Enum):
+    PAIR = "双人叫牌"
+    FOUR = "四人叫牌"
+
+
+class DealRequest(BaseModel):
+    mode: str = "free"  # free, weak_twos, strong_twos, preemptive, gambling_3nt
+
+
+class DealResponse(BaseModel):
+    hands: Dict[str, dict]
+    dealer: str
+
+
+class BidRequest(BaseModel):
+    hand: dict
+    bidding_sequence: str
+    position: str
+    deal_system: str = DEFAULT_DEAL_SYSTEM
+    bid_history: str = ""
+    use_fallback: bool = False
+
+
+class BidResponse(BaseModel):
+    bid: str
+    meaning: str
+    selection_process: str
+    use_fallback: bool = False
+    full_output: Optional[dict] = None
+
+
+class AnalyzeRequest(BaseModel):
+    bidding_sequence: str
+    deal_system: str = DEFAULT_DEAL_SYSTEM
+    position: Optional[str] = None
+
+
+class AnalyzeResponse(BaseModel):
+    keyword: str
+    content: str
+
+
+class HumanBidRequest(BaseModel):
+    bidding_sequence: str
+    position: str
+    user_input: str
+    deal_system: str = DEFAULT_DEAL_SYSTEM
+
+
+class HumanBidResponse(BaseModel):
+    bid: str
+    meaning: str
+    full_output: Optional[dict] = None
+
+
+class OutputFormatsRequest(BaseModel):
+    hands: Dict[str, dict]
+    bidding_sequence: str
+    dealer: str
+    game_mode: str = "四人叫牌"
+    human_position: Optional[str] = None
+
+
+class OutputFormatsResponse(BaseModel):
+    compact: str
+    deep_finesse: str
+
+
+def hand_to_dict(hand: Hand) -> dict:
+    """将Hand对象转换为字典"""
+    return {
+        "spades": hand.spades,
+        "hearts": hand.hearts,
+        "diamonds": hand.diamonds,
+        "clubs": hand.clubs,
+        "hcp": hand.hcp,
+        "distribution": hand.distribution,
+        "display": hand.to_display_string()
+    }
+
+
+@app.get("/")
+async def root():
+    return {"message": "桥牌叫牌练习系统 API", "version": "1.0.0"}
+
+
+@app.post("/api/deal", response_model=DealResponse)
+async def deal(request: DealRequest):
+    """发牌接口"""
+    try:
+        mode_map = {
+            "free": DealMode.FREE,
+            "game": DealMode.GAME,
+            "slam": DealMode.SLAM,
+        }
+        deal_mode = mode_map.get(request.mode, DealMode.FREE)
+        
+        dealer = BridgeDealer(deal_mode)
+        hands = dealer.deal()
+        
+        hands_dict = {}
+        for pos, hand in hands.items():
+            hands_dict[get_position_name(pos)] = hand_to_dict(hand)
+        
+        return DealResponse(
+            hands=hands_dict,
+            dealer="南"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/analyze", response_model=AnalyzeResponse)
+async def analyze(request: AnalyzeRequest):
+    """分析叫牌序列，提取关键字"""
+    try:
+        keyword = extract_retrieval_keyword(
+            request.bidding_sequence,
+            request.deal_system,
+            request.position
+        )
+        
+        partner_name = get_partner_position(request.position) if request.position else "北"
+        result = jf_retriever.retrieve_with_preprocess(keyword, request.bidding_sequence, partner_name)
+        
+        return AnalyzeResponse(
+            keyword=keyword,
+            content=result.get("original_content", "")
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/human-bid", response_model=HumanBidResponse)
+async def human_bid(request: HumanBidRequest):
+    """人类叫牌接口 - 获取叫品含义"""
+    try:
+        print(f"[DEBUG] 收到人类叫牌请求: position={request.position}, user_input={request.user_input}, bidding_sequence={request.bidding_sequence}")
+        
+        bidding_service = BiddingService(llm_client, jf_retriever)
+        result = bidding_service.human_bid(
+            user_input=request.user_input,
+            position=request.position,
+            bidding_sequence=request.bidding_sequence,
+            deal_system=request.deal_system,
+            verbose=True
+        )
+        
+        bid = result.get("选定叫品", request.user_input).strip()
+        meaning = result.get("叫品含义", "")
+        
+        return HumanBidResponse(
+            bid=bid,
+            meaning=meaning,
+            full_output=result
+        )
+    except Exception as e:
+        print(f"[ERROR] 人类叫牌失败: {str(e)}")
+        bid = request.user_input.strip().upper()
+        if bid == "P":
+            bid = "pass"
+        return HumanBidResponse(
+            bid=bid,
+            meaning=f"获取叫品含义失败: {str(e)}"
+        )
+
+
+@app.post("/api/bid", response_model=BidResponse)
+async def bid(request: BidRequest):
+    """AI叫牌接口"""
+    try:
+        print(f"[DEBUG] 收到叫牌请求: position={request.position}, hand={request.hand}, bidding_sequence={request.bidding_sequence}")
+        
+        hand_info = request.hand
+        hand_display = hand_info.get('display', '')
+        hcp = hand_info.get('hcp', 0)
+        distribution = hand_info.get('distribution', '')
+        
+        class SimpleHand:
+            def __init__(self, display, hcp, dist):
+                self._display = display
+                self.hcp = hcp
+                self.distribution = dist
+            
+            def to_display_string(self):
+                return self._display
+        
+        hand = SimpleHand(hand_display, hcp, distribution)
+        
+        bidding_service = BiddingService(llm_client, jf_retriever)
+        bidding_service.use_fallback = request.use_fallback
+        bidding_service.set_bid_meanings(request.bid_history if request.bid_history else "")
+        
+        result = bidding_service.ai_bid(
+            hand=hand,
+            position=request.position,
+            bidding_sequence=request.bidding_sequence,
+            deal_system=request.deal_system,
+            verbose=True
+        )
+        
+        bid = result.get("选定叫品") or "pass"
+        meaning = result.get("叫品含义") or result.get("叫品含义及后续建议") or ""
+        selection_process = result.get("叫品筛选过程") or ""
+        
+        print(f"[DEBUG] 最终叫品: {bid}, 含义: {meaning}")
+        
+        return BidResponse(
+            bid=bid,
+            meaning=meaning,
+            selection_process=selection_process,
+            use_fallback=bidding_service.use_fallback,
+            full_output=result
+        )
+    except Exception as e:
+        print(f"[ERROR] 叫牌失败: {str(e)}")
+        return BidResponse(
+            bid="pass",
+            meaning=f"叫牌失败: {str(e)}",
+            selection_process="出错",
+            full_output=None
+        )
+
+
+@app.get("/api/health")
+async def health_check():
+    """健康检查接口"""
+    return {"status": "healthy", "jf_segments_loaded": len(jf_segments)}
+
+
+@app.post("/api/reload-jf")
+async def reload_jf_segments():
+    """重新加载约定片段"""
+    global jf_segments, jf_retriever
+    try:
+        jf_segments = jf_loader.load()
+        jf_retriever = JFRetriever(jf_segments)
+        return {"status": "success", "jf_segments_loaded": len(jf_segments)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/output-formats", response_model=OutputFormatsResponse)
+async def get_output_formats(request: OutputFormatsRequest):
+    """获取其他输出格式（紧凑格式和Deep Finesse格式）"""
+    try:
+        # 将字典转换回Hand对象
+        position_map = {
+            "南": Position.SOUTH,
+            "西": Position.WEST,
+            "北": Position.NORTH,
+            "东": Position.EAST
+        }
+        
+        hands = {}
+        for pos_name, hand_data in request.hands.items():
+            pos = position_map.get(pos_name)
+            if pos:
+                hand = Hand(
+                    spades=hand_data.get("spades", ""),
+                    hearts=hand_data.get("hearts", ""),
+                    diamonds=hand_data.get("diamonds", ""),
+                    clubs=hand_data.get("clubs", "")
+                )
+                hands[pos] = hand
+        
+        # 获取庄家位置
+        dealer_pos = position_map.get(request.dealer, Position.SOUTH)
+        
+        # 获取人类位置
+        human_pos = None
+        if request.human_position:
+            human_pos = position_map.get(request.human_position)
+        
+        # 叫牌序列格式已经是 (南)1S-(西)pass 格式，无需转换
+        bidding_str = request.bidding_sequence
+        
+        # 生成输出格式
+        _, compact, deep_finesse = generate_all_outputs(
+            hands=hands,
+            bidding_str=bidding_str,
+            dealer=dealer_pos,
+            mode=request.game_mode,
+            human_position=human_pos
+        )
+        
+        return OutputFormatsResponse(
+            compact=compact,
+            deep_finesse=deep_finesse
+        )
+    except Exception as e:
+        print(f"[ERROR] 获取输出格式失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class AnalyzeContractRequest(BaseModel):
+    deep_finesse_format: str
+
+
+class AnalyzeContractResponse(BaseModel):
+    success: bool
+    contract: Optional[str] = None
+    declarer: Optional[str] = None
+    message: Optional[str] = None
+    error: Optional[str] = None
+    deal_file: Optional[str] = None
+
+
+@app.post("/api/analyze-contract", response_model=AnalyzeContractResponse)
+async def analyze_contract(request: AnalyzeContractRequest):
+    """检验定约接口 - 调用Deep Finesse分析"""
+    try:
+        df_deal = parse_df_deal(request.deep_finesse_format)
+        
+        if not df_deal["north"] or not df_deal["south"]:
+            return AnalyzeContractResponse(
+                success=False,
+                error="解析Deep Finesse格式失败"
+            )
+        
+        hands_dict = {
+            "北": df_format_to_hand(df_deal['north']),
+            "西": df_format_to_hand(df_deal['west']) if df_deal['west'] else "",
+            "南": df_format_to_hand(df_deal['south']),
+            "东": df_format_to_hand(df_deal['east']) if df_deal['east'] else ""
+        }
+        
+        result = analyze_with_deep_finesse(
+            hands=hands_dict,
+            contract=df_deal['contract'],
+            declarer=df_deal['declarer'],
+            onlead=df_deal['onlead'],
+            lead=df_deal['lead']
+        )
+        
+        return AnalyzeContractResponse(
+            success=result.get("success", False),
+            contract=result.get("contract"),
+            declarer=result.get("declarer"),
+            message=result.get("message"),
+            error=result.get("error"),
+            deal_file=result.get("deal_file")
+        )
+    except Exception as e:
+        print(f"[ERROR] 检验定约失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class CustomDealRequest(BaseModel):
+    input_text: str
+
+
+class CustomDealResponse(BaseModel):
+    hands: Dict[str, dict]
+    dealer: str
+    success: bool
+    message: Optional[str] = None
+
+
+def convert_10_to_T(hand_str: str) -> str:
+    import re
+    result = re.sub(r'([♠♥♦♣])10', r'\1T', hand_str)
+    result = re.sub(r'([♠♥♦♣SsHhDdCc])10', r'\1T', result)
+    result = result.replace('10', 'T')
+    return result
+
+
+@app.post("/api/custom-deal", response_model=CustomDealResponse)
+async def custom_deal(request: CustomDealRequest):
+    """自定义牌局接口"""
+    try:
+        lines = [l.strip() for l in request.input_text.strip().split("\n") if l.strip()]
+        
+        if any(line.strip().startswith("Deal:") for line in lines):
+            df_result = parse_df_deal(request.input_text)
+            hands = {}
+            
+            if df_result.get("north"):
+                hands[Position.NORTH] = parse_hand_string(df_format_to_hand(df_result["north"]))
+            if df_result.get("west"):
+                hands[Position.WEST] = parse_hand_string(df_format_to_hand(df_result["west"]))
+            if df_result.get("east"):
+                hands[Position.EAST] = parse_hand_string(df_format_to_hand(df_result["east"]))
+            if df_result.get("south"):
+                hands[Position.SOUTH] = parse_hand_string(df_format_to_hand(df_result["south"]))
+            
+            if len(hands) == 4:
+                hands_dict = {}
+                for pos, hand in hands.items():
+                    hands_dict[get_position_name(pos)] = hand_to_dict(hand)
+                return CustomDealResponse(
+                    hands=hands_dict,
+                    dealer="南",
+                    success=True,
+                    message="牌局已加载（Deep Finesse格式）"
+                )
+            else:
+                return CustomDealResponse(
+                    hands={},
+                    dealer="南",
+                    success=False,
+                    message=f"牌局解析不完整，缺少 {4 - len(hands)} 家手牌"
+                )
+        elif len(lines) == 4:
+            input_text = convert_10_to_T(request.input_text)
+            hands = parse_deal_input(input_text)
+            if hands:
+                hands_dict = {}
+                for pos, hand in hands.items():
+                    hands_dict[get_position_name(pos)] = hand_to_dict(hand)
+                return CustomDealResponse(
+                    hands=hands_dict,
+                    dealer="南",
+                    success=True,
+                    message="牌局已加载"
+                )
+            else:
+                return CustomDealResponse(
+                    hands={},
+                    dealer="南",
+                    success=False,
+                    message="牌局解析失败，请检查格式"
+                )
+        else:
+            return CustomDealResponse(
+                hands={},
+                dealer="南",
+                success=False,
+                message=f"需要输入4行标准格式或Deep Finesse格式，当前输入了{len(lines)}行"
+            )
+    except Exception as e:
+        print(f"[ERROR] 自定义牌局失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return CustomDealResponse(
+            hands={},
+            dealer="南",
+            success=False,
+            message=f"解析失败: {str(e)}"
+        )
+
+
+class ImageDealRequest(BaseModel):
+    image_path: str
+
+
+class ImageDealResponse(BaseModel):
+    hands: Dict[str, dict]
+    dealer: str
+    success: bool
+    message: Optional[str] = None
+    bidding_sequence: Optional[str] = None
+    contract: Optional[str] = None
+    page_type: Optional[str] = None
+
+
+@app.post("/api/image-deal", response_model=ImageDealResponse)
+async def image_deal(request: ImageDealRequest):
+    """从图片读取牌局接口"""
+    try:
+        import os
+        image_path = request.image_path.strip('"\'')
+        
+        if not os.path.exists(image_path):
+            return ImageDealResponse(
+                hands={},
+                dealer="南",
+                success=False,
+                message=f"文件不存在: {image_path}"
+            )
+        
+        result = vision_client.read_cards_from_image(image_path)
+        
+        if "error" in result:
+            return ImageDealResponse(
+                hands={},
+                dealer="南",
+                success=False,
+                message=f"识别失败: {result['error']}"
+            )
+        
+        hands = {}
+        position_map = {
+            "南家手牌": Position.SOUTH,
+            "西家手牌": Position.WEST,
+            "北家手牌": Position.NORTH,
+            "东家手牌": Position.EAST
+        }
+        
+        for key, pos in position_map.items():
+            hand_str = result.get(key)
+            if hand_str and hand_str != "null":
+                hand_str_clean = convert_10_to_T(hand_str)
+                hand_str_clean = hand_str_clean.replace("♠", " ").replace("♥", " ").replace("♦", " ").replace("♣", " ")
+                hands[pos] = parse_hand_string(hand_str_clean)
+        
+        if len(hands) == 4:
+            hands_dict = {}
+            for pos, hand in hands.items():
+                hands_dict[get_position_name(pos)] = hand_to_dict(hand)
+            
+            bidding = result.get("叫牌序列")
+            bidding_str = None
+            if bidding and bidding != "null":
+                if isinstance(bidding, list):
+                    formatted_bids = []
+                    for item in bidding:
+                        if ":" in item:
+                            pos, bid = item.split(":", 1)
+                            formatted_bids.append(f"({pos}){bid}")
+                        else:
+                            formatted_bids.append(item)
+                    bidding_str = "-".join(formatted_bids) + "-"
+                else:
+                    bidding_str = bidding
+            
+            return ImageDealResponse(
+                hands=hands_dict,
+                dealer="南",
+                success=True,
+                message="牌局已加载",
+                bidding_sequence=bidding_str,
+                contract=result.get("当前定约"),
+                page_type=result.get("页面类型", "未知")
+            )
+        else:
+            return ImageDealResponse(
+                hands={},
+                dealer="南",
+                success=False,
+                message=f"部分手牌识别成功，共{len(hands)}家"
+            )
+    except Exception as e:
+        print(f"[ERROR] 图片识别失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return ImageDealResponse(
+            hands={},
+            dealer="南",
+            success=False,
+            message=f"识别失败: {str(e)}"
+        )
+
+
+class ScreenshotDealResponse(BaseModel):
+    hands: Dict[str, dict]
+    dealer: str
+    success: bool
+    message: Optional[str] = None
+    screenshot_path: Optional[str] = None
+    bidding_sequence: Optional[str] = None
+    contract: Optional[str] = None
+    page_type: Optional[str] = None
+
+
+@app.post("/api/screenshot-deal", response_model=ScreenshotDealResponse)
+async def screenshot_deal():
+    """从Edge浏览器截屏读取牌局接口"""
+    try:
+        result = screenshot_capture.capture_and_analyze("edge")
+        
+        if "error" in result:
+            return ScreenshotDealResponse(
+                hands={},
+                dealer="南",
+                success=False,
+                message=result['error'],
+                screenshot_path=result.get("screenshot_path")
+            )
+        
+        hands = {}
+        position_map = {
+            "南": Position.SOUTH,
+            "西": Position.WEST,
+            "北": Position.NORTH,
+            "东": Position.EAST
+        }
+        
+        for pos_name, en_pos in position_map.items():
+            hand_str = result.get(f"{pos_name}家手牌")
+            if hand_str and hand_str != "null":
+                hand_str_clean = convert_10_to_T(hand_str)
+                hand_str_clean = hand_str_clean.replace("♠", " ").replace("♥", " ").replace("♦", " ").replace("♣", " ")
+                hands[en_pos] = parse_hand_string(hand_str_clean)
+        
+        if len(hands) == 4:
+            hands_dict = {}
+            for pos, hand in hands.items():
+                hands_dict[get_position_name(pos)] = hand_to_dict(hand)
+            
+            bidding = result.get("叫牌序列")
+            bidding_str = None
+            if bidding and bidding != "null":
+                if isinstance(bidding, list):
+                    formatted_bids = []
+                    for item in bidding:
+                        if ":" in item:
+                            pos, bid = item.split(":", 1)
+                            formatted_bids.append(f"({pos}){bid}")
+                        else:
+                            formatted_bids.append(item)
+                    bidding_str = "-".join(formatted_bids) + "-"
+                else:
+                    bidding_str = bidding
+            
+            return ScreenshotDealResponse(
+                hands=hands_dict,
+                dealer="南",
+                success=True,
+                message="牌局已加载",
+                screenshot_path=result.get("screenshot_path"),
+                bidding_sequence=bidding_str,
+                contract=result.get("当前定约"),
+                page_type=result.get("页面类型", "未知")
+            )
+        else:
+            return ScreenshotDealResponse(
+                hands={},
+                dealer="南",
+                success=False,
+                message=f"部分手牌识别成功，共{len(hands)}家",
+                screenshot_path=result.get("screenshot_path")
+            )
+    except Exception as e:
+        print(f"[ERROR] 截屏识别失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return ScreenshotDealResponse(
+            hands={},
+            dealer="南",
+            success=False,
+            message=f"截屏识别失败: {str(e)}"
+        )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

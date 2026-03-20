@@ -1,0 +1,95 @@
+from docx import Document
+from typing import List, Dict
+from pathlib import Path
+
+
+class JFLoader:
+    def __init__(self, file_path: Path):
+        self.file_path = file_path
+        self.segments: List[Dict[str, str]] = []
+        
+    def load(self) -> List[Dict[str, str]]:
+        doc = Document(self.file_path)
+        
+        current_segment = []
+        empty_count = 0
+        
+        for para in doc.paragraphs:
+            text = para.text.strip()
+            if not text:
+                empty_count += 1
+                if empty_count >= 2 and current_segment:
+                    segment_text = "\n".join(current_segment)
+                    self.segments.append({
+                        "content": segment_text,
+                        "keywords": self._extract_keywords(segment_text)
+                    })
+                    current_segment = []
+            else:
+                if empty_count >= 2 and current_segment:
+                    segment_text = "\n".join(current_segment)
+                    self.segments.append({
+                        "content": segment_text,
+                        "keywords": self._extract_keywords(segment_text)
+                    })
+                    current_segment = []
+                current_segment.append(text)
+                empty_count = 0
+        
+        if current_segment:
+            segment_text = "\n".join(current_segment)
+            self.segments.append({
+                "content": segment_text,
+                "keywords": self._extract_keywords(segment_text)
+            })
+        
+        return self.segments
+    
+    def _extract_keywords(self, text: str) -> List[str]:
+        keywords = []
+        lines = text.split("\n")
+        
+        for i, line in enumerate(lines[:3]):
+            line = line.strip()
+            if line:
+                keywords.append(line)
+        
+        return keywords
+
+
+class JFRetriever:
+    def __init__(self, segments: List[Dict[str, str]]):
+        self.segments = segments
+        self.keyword_index: Dict[str, int] = {}
+        self._build_index()
+    
+    def _build_index(self):
+        for i, segment in enumerate(self.segments):
+            content = segment["content"]
+            lines = content.split("\n")
+            
+            for j, line in enumerate(lines[:3]):
+                line = line.strip()
+                if line and line not in self.keyword_index:
+                    self.keyword_index[line] = i
+    
+    def retrieve(self, query: str) -> str:
+        if query in self.keyword_index:
+            return self.segments[self.keyword_index[query]]["content"]
+        
+        for keyword, idx in self.keyword_index.items():
+            if query == keyword:
+                return self.segments[idx]["content"]
+        
+        for keyword, idx in self.keyword_index.items():
+            if query in keyword or keyword in query:
+                return self.segments[idx]["content"]
+        
+        for i, segment in enumerate(self.segments):
+            if query in segment["content"]:
+                return segment["content"]
+        
+        return ""
+    
+    def list_keywords(self) -> List[str]:
+        return list(self.keyword_index.keys())

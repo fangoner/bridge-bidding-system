@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment
+.env
+.env.local
+.venv/
+venv/
+
+# Build outputs
+dist/
+build/
+.vite/
+*.spec
+
+# Backups
+backups/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test outputs
+test_output/
+.pytest_cache/
+
+# Release builds
+release_*/
+
+# Large files (optional - uncomment if needed)
+# Deep Finesse 2014 v2/
+
+# Temporary files
+*.tmp
+*.temp
+bidding_history.json
