@@ -2,39 +2,54 @@
 
 ## 2026-03-21
 
-### Git版本控制 + GitHub远程仓库 + 项目文档完善
+### 桌面版布局优化 + 项目清理
 
-**背景**: 建立完整的版本控制系统，配置GitHub远程仓库，完善项目文档
+**背景**: 优化桌面版界面布局，清理项目冗余文件
 
 **改进**:
 
-1. **Git版本控制初始化**:
+1. **桌面版布局优化** (`web/src/App.jsx`, `web/src/components/BiddingControls.jsx`):
+   - 修复重复JF约定片段面板问题
+   - 调整牌桌尺寸：宽度700px，高度750px
+   - 对齐"当前牌局"和"叫牌细节"面板标题高度
+   - 关闭叫牌细节后，叫牌控制和JF约定面板移至右侧，垂直排列
+   - 叫品按钮重排：每行10个叫品，紧凑布局
+   - 7阶叫品与1、3、5阶对齐，X/XX/Pass与2、4、6阶对齐
+   - 添加分割线分隔按钮和面板区域
+
+2. **手机版修复** (`web/src/components/MobileDraggableContainer.jsx`):
+   - 删除重复"更多格式"面板
+
+3. **项目清理**:
+   - 删除tests目录40个调试临时文件（debug_*.py, check_*.py, find_*.py等）
+   - 保留30个正式测试文件（test_*.py）
+   - 删除根目录临时文件（package.json, bidding_history.json等）
+   - 更新.gitignore：排除screenshots/, Deep Finesse 2014 v2/, .claude/
+
+4. **Git版本控制初始化**:
    - 创建 `.gitignore` 文件，排除敏感文件和构建产物
-   - 排除：`node_modules/`, `__pycache__/`, `.env`, `backups/`, `dist/`, `build/` 等
    - 首次提交：`Initial commit: 桥牌叫牌练习系统 v1.8.2`
 
-2. **GitHub远程仓库配置**:
+5. **GitHub远程仓库配置**:
    - 仓库地址：`https://github.com/fangoner/bridge-bidding-system`
-   - 配置远程origin并推送代码
    - API密钥安全：`.env` 已被忽略，不会泄露
 
-3. **项目文档完善**:
+6. **项目文档完善**:
    - 添加 `README.md`：项目介绍、安装步骤、使用说明、项目结构
    - 添加 `.env.example`：环境变量配置模板
    - 更新备份skill：结合Git版本控制，包含终端和网页所有文件
 
-4. **备份策略优化**:
-   - Git：日常版本控制，记录每次修改
-   - 备份：重要节点存档，双重保险
-   - 备份内容：终端（后端）+ 网页（前端）+ 文档配置
-
 **修改文件**:
-- `.gitignore` (新建)
-- `README.md` (新建)
-- `.env.example` (添加到Git)
+- `web/src/App.jsx`
+- `web/src/components/BiddingControls.jsx`
+- `web/src/components/CardTable.jsx`
+- `web/src/components/MobileDraggableContainer.jsx`
+- `.gitignore`
+- `README.md`
+- `.env.example`
 - `.trae/skills/create-restore-point/skill.md`
 
-**备份位置**: `backups/backup_20260321_020337/`
+**备份位置**: `backups/backup_20260321_023723/`
 
 ---
 
