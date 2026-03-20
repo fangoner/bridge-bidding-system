@@ -7,18 +7,32 @@ description: "Creates a backup restore point before major changes. Invoke when u
 
 When invoked, this skill creates a backup of the current codebase state.
 
+## Version Control Strategy
+
+本项目使用 **Git + 备份** 双重版本控制：
+
+1. **Git**: 日常版本控制，记录每次修改
+2. **备份**: 重要节点存档，防止意外丢失
+
 ## Backup Location
 
 - `backups/backup_YYYYMMDD_HHMMSS/` - Timestamped backup folder
+- 或 `backups/backup_vX.X.X/` - 版本标签备份
 
 ## Process
 
-1. **Create backup folder**:
+1. **Git提交（推荐先执行）**:
+   ```bash
+   git add .
+   git commit -m "描述本次修改"
+   ```
+
+2. **创建备份文件夹**:
    - Name format: `backup_YYYYMMDD_HHMMSS`
    - Location: `backups/` directory
    - Example: `backups/backup_20260308_234500`
 
-2. **Copy key files and directories**:
+3. **Copy key files and directories**:
 
    **终端（后端）文件:**
    - `main.py`
@@ -43,16 +57,19 @@ When invoked, this skill creates a backup of the current codebase state.
    - `JF实战_标准自然 - Rev 3.2.docx` (JF约定文档)
    - `.trae/skills/` directory (所有skill定义)
 
-3. **Report backup summary**:
+4. **Report backup summary**:
    - Backup location
    - Files copied
    - Total size
+   - Git commit hash (if available)
 
 ## Example Output
 
 ```
 创建恢复点
 ==========
+
+Git状态: 已提交 (abc1234)
 
 备份位置: backups/backup_20260308_234500/
 
@@ -93,7 +110,19 @@ User: "我要做大改动，先备份"
 
 ## Restore
 
-To restore from a backup:
+### 从Git恢复:
+```bash
+# 查看历史
+git log --oneline
+
+# 恢复到某个版本
+git checkout <commit-hash>
+
+# 或回退
+git reset --hard <commit-hash>
+```
+
+### 从备份恢复:
 ```
 Copy files from backups/backup_YYYYMMDD_HHMMSS/ back to project root
 ```
@@ -118,8 +147,11 @@ backups/
 ## Notes
 
 - All backups are stored in `backups/` directory
-- Backup folder is excluded from git (if .gitignore includes backups/)
+- Backup folder is excluded from git (in .gitignore)
 - Does not backup: __pycache__, .env, node_modules, venv, dist, build
 - Keep only recent backups to save disk space
 - Consider deleting old backups periodically
-- **重要**: 备份包含终端（后端）和网页（前端）所有关键文件，可完整恢复项目
+- **重要**: 
+  - Git用于日常版本控制，可回退到任意历史版本
+  - 备份用于重要节点存档，双重保险
+  - 大改动前建议先Git commit，再创建备份
