@@ -1,22 +1,7 @@
 import React from 'react';
-import { Box } from '@mui/material';
+import { Box, Button, CircularProgress } from '@mui/material';
 import HandDisplay from './HandDisplay';
 
-/**
- * CardTable component for desktop-optimized bridge card table display
- *
- * @param {Object} props
- * @param {Object} props.hands - Object with keys '北', '南', '东', '西' containing hand objects
- * @param {string} props.currentBidder - Current bidding position
- * @param {string|null} props.humanPosition - Human player position or null for observer mode
- * @param {string} props.dealer - Dealer position
- * @param {string} props.gameMode - 'four' or 'pair'
- * @param {boolean} props.showPartnerHand - Whether to show partner's hand (pair mode)
- * @param {boolean} props.showAIHands - Whether to show AI hands (four mode)
- * @param {boolean} props.showOpponentHands - Whether to show opponent hands (pair mode)
- * @param {Function} props.getPartnerPosition - Function to get partner position
- * @param {Function} props.renderBiddingTable - Function to render bidding table (optional)
- */
 function CardTable({
   hands,
   currentBidder,
@@ -28,6 +13,13 @@ function CardTable({
   showOpponentHands,
   getPartnerPosition,
   renderBiddingTable,
+  checkBiddingComplete,
+  outputFormats,
+  outputFormatsLoading,
+  handleAnalyzeContract,
+  analyzeLoading,
+  colorScheme,
+  currentBiddingPosition,
 }) {
   if (!hands) return null;
 
@@ -36,38 +28,70 @@ function CardTable({
   const east = hands['东'];
   const west = hands['西'];
 
-  // Determine if hand content should be shown
+  const scheme = colorScheme || {
+    table: {
+      background: 'linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%)',
+      border: '3px solid rgba(255, 255, 255, 0.5)',
+      centerBg: 'rgba(255, 255, 255, 0.95)',
+    },
+    button: {
+      primary: '#1976d2',
+      primaryHover: '#1565c0',
+      text: 'white',
+    },
+  };
+
   const shouldShowHandContent = (position) => {
-    // Observer mode: show all hands
     if (!humanPosition) {
       return true;
     }
-
-    // Human player's own hand always shown
     if (position === humanPosition) {
       return true;
     }
-
-    // Four-player mode
     if (gameMode === 'four') {
-      // Other players' hands based on showAIHands setting
       return showAIHands;
     }
-
-    // Pair mode
     if (gameMode === 'pair') {
       const partnerPosition = getPartnerPosition(humanPosition);
-
-      // Partner's hand based on showPartnerHand setting
       if (position === partnerPosition) {
         return showPartnerHand;
       }
-
-      // Opponent's hand based on showOpponentHands setting
       return showOpponentHands;
     }
-
     return true;
+  };
+
+  const renderHandWithStatus = (hand, position, sxProps) => {
+    const isCurrentlyBidding = currentBiddingPosition === position;
+    return (
+      <Box sx={{ ...sxProps, position: 'relative' }}>
+        {isCurrentlyBidding && (
+          <Box sx={{
+            position: 'absolute',
+            top: 10,
+            right: 8,
+            zIndex: 100,
+            bgcolor: 'rgba(0, 0, 0, 0.5)',
+            borderRadius: '50%',
+            p: 0.5,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}>
+            <CircularProgress size={14} sx={{ color: '#ffeb3b' }} />
+          </Box>
+        )}
+        <HandDisplay
+          hand={hand}
+          position={position}
+          isActive={currentBidder === position}
+          isHuman={humanPosition === position}
+          isDealer={dealer === position}
+          isPartner={humanPosition && getPartnerPosition(humanPosition) === position}
+          showContent={shouldShowHandContent(position)}
+        />
+      </Box>
+    );
   };
 
   return (
@@ -76,26 +100,46 @@ function CardTable({
       flexDirection: 'column',
       alignItems: 'center',
       padding: { xs: 1, md: 2 },
-      background: 'linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%)',
+      background: scheme.table.background,
       borderRadius: 2,
       boxShadow: 8,
       minHeight: { xs: 350, md: 600 },
       width: '100%',
+      position: 'relative',
     }}>
-      {/* North hand */}
-      <Box className="north-hand" sx={{ marginBottom: { xs: 1, md: 2 } }}>
-        <HandDisplay
-          hand={north}
-          position="北"
-          isActive={currentBidder === '北'}
-          isHuman={humanPosition === '北'}
-          isDealer={dealer === '北'}
-          isPartner={humanPosition && getPartnerPosition(humanPosition) === '北'}
-          showContent={shouldShowHandContent('北')}
-        />
-      </Box>
+      {checkBiddingComplete && checkBiddingComplete() && (
+        <Box sx={{
+          position: 'absolute',
+          top: 8,
+          right: 8,
+          zIndex: 10,
+        }}>
+          {outputFormatsLoading && <CircularProgress size={20} sx={{ mr: 1, color: 'white' }} />}
+          <Button
+            variant="contained"
+            size="small"
+            onClick={handleAnalyzeContract}
+            disabled={!outputFormats?.deep_finesse || analyzeLoading}
+            startIcon={analyzeLoading ? <CircularProgress size={16} /> : null}
+            sx={{
+              bgcolor: scheme.button.primary,
+              color: scheme.button.text,
+              '&:hover': {
+                bgcolor: scheme.button.primaryHover,
+              },
+              '&.Mui-disabled': {
+                bgcolor: 'rgba(255,255,255,0.5)',
+                color: 'rgba(0,0,0,0.4)',
+              }
+            }}
+          >
+            检验定约
+          </Button>
+        </Box>
+      )}
 
-      {/* Middle row: West + Table + East */}
+      {renderHandWithStatus(north, '北', { marginBottom: { xs: 1, md: 2 } })}
+
       <Box className="middle-row" sx={{
         display: 'flex',
         justifyContent: 'center',
@@ -106,30 +150,18 @@ function CardTable({
         gap: { xs: 1, md: 3 },
         flex: 1,
       }}>
-        {/* West hand */}
-        <Box className="west-hand">
-          <HandDisplay
-            hand={west}
-            position="西"
-            isActive={currentBidder === '西'}
-            isHuman={humanPosition === '西'}
-            isDealer={dealer === '西'}
-            isPartner={humanPosition && getPartnerPosition(humanPosition) === '西'}
-            showContent={shouldShowHandContent('西')}
-          />
-        </Box>
+        {renderHandWithStatus(west, '西', {})}
 
-        {/* Table center with bidding table */}
         <Box className="table-center">
           <Box className="table-border" sx={{
             width: { xs: 200, md: 280 },
             minHeight: { xs: 150, md: 280 },
-            border: '3px solid rgba(255, 255, 255, 0.5)',
+            border: scheme.table.border,
             borderRadius: 2,
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
-            background: 'rgba(255, 255, 255, 0.95)',
+            background: scheme.table.centerBg,
             padding: { xs: 1, md: 2 },
             overflowY: 'auto',
             maxHeight: { xs: 200, md: 400 },
@@ -142,32 +174,10 @@ function CardTable({
           </Box>
         </Box>
 
-        {/* East hand */}
-        <Box className="east-hand">
-          <HandDisplay
-            hand={east}
-            position="东"
-            isActive={currentBidder === '东'}
-            isHuman={humanPosition === '东'}
-            isDealer={dealer === '东'}
-            isPartner={humanPosition && getPartnerPosition(humanPosition) === '东'}
-            showContent={shouldShowHandContent('东')}
-          />
-        </Box>
+        {renderHandWithStatus(east, '东', {})}
       </Box>
 
-      {/* South hand */}
-      <Box className="south-hand" sx={{ marginTop: { xs: 1, md: 2 } }}>
-        <HandDisplay
-          hand={south}
-          position="南"
-          isActive={currentBidder === '南'}
-          isHuman={humanPosition === '南'}
-          isDealer={dealer === '南'}
-          isPartner={humanPosition && getPartnerPosition(humanPosition) === '南'}
-          showContent={shouldShowHandContent('南')}
-        />
-      </Box>
+      {renderHandWithStatus(south, '南', { marginTop: { xs: 1, md: 2 } })}
     </Box>
   );
 }

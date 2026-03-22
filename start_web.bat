@@ -1,7 +1,7 @@
 @echo off
 cd /d "%~dp0"
 
-start /b python -m uvicorn api.main:app --host 0.0.0.0 --port 8003 >nul 2>&1
+start /b "C:\Users\Fanyi\AppData\Local\Programs\Python\Python313\python.exe" uvicorn api.main:app --host 0.0.0.0 --port 8003 >nul 2>&1
 
 timeout /t 3 /nobreak >nul
 

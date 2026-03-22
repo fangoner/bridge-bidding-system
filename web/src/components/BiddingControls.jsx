@@ -6,35 +6,10 @@ import {
   Button,
   TextField,
   Alert,
-  CircularProgress,
   Divider,
+  CircularProgress,
 } from '@mui/material';
 
-/**
- * BiddingControls component for desktop-optimized bidding controls
- *
- * @param {Object} props
- * @param {Object} props.hands - Hands object (to check if exists)
- * @param {string} props.currentBidder - Current bidding position
- * @param {string|null} props.humanPosition - Human player position or null
- * @param {string} props.gameMode - 'four' or 'pair'
- * @param {Function} props.checkBiddingComplete - Function that returns true if bidding is complete
- * @param {Function} props.addBid - Function to add a bid
- * @param {Function} props.getJFSuggestion - Function to get JF suggestion
- * @param {Function} props.getFinalContract - Function to get final contract
- * @param {Object|null} props.bidSuggestion - Bid suggestion object
- * @param {boolean} props.suggestionLoading - Loading state for suggestion
- * @param {boolean} props.aiLoading - AI loading state
- * @param {boolean} props.stopBidding - Whether bidding is stopped
- * @param {Function} props.isInPassedPartnership - Function to check if position is in passed partnership
- * @param {string} props.customBidMeaning - Custom bid meaning text
- * @param {Function} props.setCustomBidMeaning - Function to set custom bid meaning
- * @param {Object|null} props.outputFormats - Output formats object
- * @param {boolean} props.outputFormatsLoading - Loading state for output formats
- * @param {Function} props.handleAnalyzeContract - Function to analyze contract
- * @param {boolean} props.analyzeLoading - Loading state for contract analysis
- * @param {boolean} props.isVerticalLayout - Whether to use vertical layout (stacked panels)
- */
 function BiddingControls({
   hands,
   currentBidder,
@@ -46,15 +21,10 @@ function BiddingControls({
   getFinalContract,
   bidSuggestion,
   suggestionLoading,
-  aiLoading,
   stopBidding,
   isInPassedPartnership,
   customBidMeaning,
   setCustomBidMeaning,
-  outputFormats,
-  outputFormatsLoading,
-  handleAnalyzeContract,
-  analyzeLoading,
   isVerticalLayout = false,
 }) {
   if (!hands) return null;
@@ -119,11 +89,11 @@ function BiddingControls({
               alignItems: isVerticalLayout ? undefined : 'center',
               justifyContent: isVerticalLayout ? 'center' : undefined,
               '& .MuiButton-root': {
-                minWidth: isVerticalLayout ? '40px' : '44px',
-                width: isVerticalLayout ? '40px' : '44px',
-                height: isVerticalLayout ? '24px' : '30px',
-                padding: isVerticalLayout ? '2px 5px' : '4px 7px',
-                fontSize: isVerticalLayout ? '0.75rem' : '0.8rem',
+                minWidth: isVerticalLayout ? '40px' : { xs: '46px', md: '44px' },
+                width: isVerticalLayout ? '40px' : { xs: '46px', md: '44px' },
+                height: isVerticalLayout ? '24px' : { xs: '40px', md: '30px' },
+                padding: isVerticalLayout ? '2px 5px' : { xs: '4px 8px', md: '4px 7px' },
+                fontSize: isVerticalLayout ? '0.75rem' : { xs: '0.85rem', md: '0.8rem' },
                 fontWeight: 500,
                 flexShrink: 0,
               }
@@ -199,10 +169,9 @@ function BiddingControls({
               </Alert>
             )}
 
-            {humanPosition !== null && !isHumanTurn && (
-              <Alert severity="info" sx={{ mt: isVerticalLayout ? 1 : 2, py: isVerticalLayout ? 0.5 : undefined, display: 'flex', alignItems: 'center', gap: 2 }}>
-                {aiLoading ? <CircularProgress size={isVerticalLayout ? 16 : 20} /> : null}
-                {stopBidding ? '叫牌已暂停' : (aiLoading ? 'AI正在叫牌...' : '等待AI叫牌...')}
+            {humanPosition !== null && !isHumanTurn && stopBidding && (
+              <Alert severity="info" sx={{ mt: isVerticalLayout ? 1 : 2, py: isVerticalLayout ? 0.5 : undefined }}>
+                叫牌已暂停
               </Alert>
             )}
           </>
@@ -281,82 +250,6 @@ function BiddingControls({
               </Alert>
             )}
           </Box>
-        </Paper>
-      )}
-
-      {/* Right: More output formats panel (after bidding complete) */}
-      {checkBiddingComplete() && (
-        <Paper elevation={2} sx={{
-          p: 2,
-          flex: isVerticalLayout ? '1 1 auto' : '1 1 auto',
-          height: isVerticalLayout ? 'auto' : '420px',
-          minWidth: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          minHeight: isVerticalLayout ? 0 : 'auto',
-        }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexShrink: 0, flexWrap: 'wrap', gap: 1 }}>
-            <Typography variant="h6">
-              更多格式
-            </Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              {outputFormatsLoading && <CircularProgress size={20} />}
-              <Button
-                variant="contained"
-                size="small"
-                onClick={handleAnalyzeContract}
-                disabled={!outputFormats?.deep_finesse || analyzeLoading}
-                startIcon={analyzeLoading ? <CircularProgress size={16} /> : null}
-              >
-                检验定约
-              </Button>
-            </Box>
-          </Box>
-
-          {outputFormats ? (
-            <Box sx={{ flex: 1, overflow: 'auto', maxWidth: '100%', minWidth: 0, minHeight: 0 }}>
-              <Typography variant="subtitle2" sx={{ mt: 1, mb: 1, color: '#1976d2', fontWeight: 'bold' }}>
-                简单格式
-              </Typography>
-              <Box sx={{ p: 1.5, background: '#fafafa', borderRadius: 1, border: '1px solid #e0e0e0', mb: 2, overflow: 'auto', maxWidth: '100%' }}>
-                <Typography variant="body2" component="pre" sx={{
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  margin: 0,
-                  fontFamily: 'monospace',
-                  fontSize: '0.75rem',
-                  maxWidth: '100%',
-                }}>
-                  {outputFormats.compact}
-                </Typography>
-              </Box>
-
-              <Typography variant="subtitle2" sx={{ mt: 2, mb: 1, color: '#1976d2', fontWeight: 'bold' }}>
-                Deep Finesse格式
-              </Typography>
-              <Box sx={{ p: 1.5, background: '#fafafa', borderRadius: 1, border: '1px solid #e0e0e0', overflow: 'auto', maxWidth: '100%' }}>
-                <Typography variant="body2" component="pre" sx={{
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  margin: 0,
-                  fontFamily: 'monospace',
-                  fontSize: '0.75rem',
-                  maxWidth: '100%',
-                }}>
-                  {outputFormats.deep_finesse}
-                </Typography>
-              </Box>
-            </Box>
-          ) : (
-            <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 }}>
-              {outputFormatsLoading ? (
-                <Typography variant="body2" color="text.secondary">加载中...</Typography>
-              ) : (
-                <Typography variant="body2" color="text.secondary">无数据</Typography>
-              )}
-            </Box>
-          )}
         </Paper>
       )}
     </Box>
