@@ -37,6 +37,13 @@ from llm.doubao_client import DoubaoVisionClient
 from utils.screenshot import BridgeScreenshotCapture
 from config import JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM, DEFAULT_FALLBACK_MODEL, DEFAULT_MAIN_PROMPT_MODEL
 
+try:
+    from endplay_integration import analyze_all_contracts_endplay
+    ENDPLAY_AVAILABLE = True
+except ImportError:
+    ENDPLAY_AVAILABLE = False
+    print("警告: endplay_integration 模块不可用，双明手分析功能不可用")
+
 app = FastAPI(title="桥牌叫牌练习系统 API", version="1.0.0")
 
 # 允许前端跨域访问
@@ -689,10 +696,70 @@ async def screenshot_deal():
         import traceback
         traceback.print_exc()
         return ScreenshotDealResponse(
-            hands={},
-            dealer="南",
+                hands={},
+                dealer="南",
+                success=False,
+                message=f"截屏识别失败: {str(e)}"
+            )
+
+
+class DoubleDummyRequest(BaseModel):
+    hands: Dict[str, dict]
+
+
+class DoubleDummyResponse(BaseModel):
+    success: bool
+    table_data: Optional[Dict] = None
+    error: Optional[str] = None
+
+
+@app.post("/api/double-dummy", response_model=DoubleDummyResponse)
+async def double_dummy_analysis(request: DoubleDummyRequest):
+    """双明手分析接口"""
+    if not ENDPLAY_AVAILABLE:
+        return DoubleDummyResponse(
             success=False,
-            message=f"截屏识别失败: {str(e)}"
+            error="双明手分析功能不可用，请确保已安装 endplay 库"
+        )
+    
+    try:
+        position_map = {
+            "南": Position.SOUTH,
+            "西": Position.WEST,
+            "北": Position.NORTH,
+            "东": Position.EAST
+        }
+        
+        hands_dict = {}
+        
+        for pos_name, hand_data in request.hands.items():
+            hand = Hand(
+                spades=hand_data.get("spades", ""),
+                hearts=hand_data.get("hearts", ""),
+                diamonds=hand_data.get("diamonds", ""),
+                clubs=hand_data.get("clubs", "")
+            )
+            hands_dict[pos_name] = hand.to_simple_string()
+        
+        result = analyze_all_contracts_endplay(hands_dict)
+        
+        if result.get("success"):
+            return DoubleDummyResponse(
+                success=True,
+                table_data=result.get("results")
+            )
+        else:
+            return DoubleDummyResponse(
+                success=False,
+                error=result.get("error", "分析失败")
+            )
+    except Exception as e:
+        print(f"[ERROR] 双明手分析失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return DoubleDummyResponse(
+            success=False,
+            error=f"分析失败: {str(e)}"
         )
 
 

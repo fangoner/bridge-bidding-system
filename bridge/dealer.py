@@ -51,7 +51,11 @@ class Hand:
         return " ".join(suits)
     
     def to_simple_string(self) -> str:
-        return f"{self.spades} {self.hearts} {self.diamonds} {self.clubs}"
+        spades = self.spades if self.spades else "-"
+        hearts = self.hearts if self.hearts else "-"
+        diamonds = self.diamonds if self.diamonds else "-"
+        clubs = self.clubs if self.clubs else "-"
+        return f"{spades} {hearts} {diamonds} {clubs}"
 
 
 class BridgeDealer:

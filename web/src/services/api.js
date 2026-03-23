@@ -158,4 +158,15 @@ export const screenshotDeal = async () => {
   }
 };
 
+// 双明手分析
+export const doubleDummyAnalysis = async (hands) => {
+  try {
+    const response = await api.post('/api/double-dummy', { hands });
+    return response.data;
+  } catch (error) {
+    console.error('双明手分析失败:', error);
+    throw error;
+  }
+};
+
 export default api;

@@ -13,6 +13,7 @@ import {
   MenuItem,
   FormControlLabel,
   Checkbox,
+  Switch,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -29,7 +30,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import HistoryIcon from '@mui/icons-material/History'
-import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, screenshotDeal } from './services/api'
+import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, screenshotDeal, doubleDummyAnalysis } from './services/api'
 import HandDisplay from './components/HandDisplay'
 import CardTable from './components/CardTable'
 import BiddingControls from './components/BiddingControls'
@@ -121,6 +122,11 @@ function App() {
   const [imageDealOpen, setImageDealOpen] = useState(false) // 图片牌局对话框
   const [customDealText, setCustomDealText] = useState('') // 自定义牌局文本
   const [imagePath, setImagePath] = useState('') // 图片路径
+  
+  // 双明手分析
+  const [showDoubleDummy, setShowDoubleDummy] = useState(false) // 显示双明手结果
+  const [doubleDummyResult, setDoubleDummyResult] = useState(null) // 双明手分析结果
+  const [doubleDummyLoading, setDoubleDummyLoading] = useState(false) // 加载中
 
   // 检查API状态
   useEffect(() => {
@@ -220,6 +226,9 @@ function App() {
     setBiddingStarted(true)
     setHistoryDialogOpen(false)
     setOutputFormats(null) // 重置输出格式
+    setIsNewDeal(false) // 标记为历史记录加载，显示"重新叫牌"
+    setShowDoubleDummy(false) // 切换到显示叫牌过程
+    setDoubleDummyResult(null) // 清除双明手结果
     
     // 加载历史记录后获取更多输出格式
     if (record.hands && record.biddingSequence && record.biddingSequence.length > 0) {
@@ -267,6 +276,8 @@ function App() {
       setStopBidding(false) // 重置停止叫牌状态
       setPassedPartnership(null) // 重置已pass的搭档
       setUseFallback(false) // 重置备用提示词状态
+      setShowDoubleDummy(false) // 重置双明手显示状态
+      setDoubleDummyResult(null) // 重置双明手结果
     } catch (err) {
       setError('发牌失败，请检查API服务是否正常运行')
     } finally {
@@ -291,6 +302,8 @@ function App() {
         setStopBidding(false)
         setPassedPartnership(null)
         setUseFallback(false)
+        setShowDoubleDummy(false)
+        setDoubleDummyResult(null)
       } else {
         setError(data.message || '牌局解析失败')
       }
@@ -318,6 +331,8 @@ function App() {
         setStopBidding(false)
         setPassedPartnership(null)
         setUseFallback(false)
+        setShowDoubleDummy(false)
+        setDoubleDummyResult(null)
       } else {
         setError(data.message || '图片识别失败')
       }
@@ -345,6 +360,8 @@ function App() {
         setStopBidding(false)
         setPassedPartnership(null)
         setUseFallback(false)
+        setShowDoubleDummy(false)
+        setDoubleDummyResult(null)
       } else {
         setError(data.message || '截屏识别失败')
       }
@@ -831,6 +848,34 @@ function App() {
       alert('检验定约失败，请检查Deep Finesse是否正确安装')
     } finally {
       setAnalyzeLoading(false)
+    }
+  }
+
+  // 双明手分析
+  const handleDoubleDummy = async () => {
+    if (!hands) return
+    
+    setDoubleDummyLoading(true)
+    try {
+      const result = await doubleDummyAnalysis(hands)
+      if (result.success) {
+        setDoubleDummyResult(result.table_data)
+      } else {
+        alert(`双明手分析失败: ${result.error}`)
+      }
+    } catch (err) {
+      console.error('双明手分析失败:', err)
+      alert('双明手分析失败，请检查endplay是否正确安装')
+    } finally {
+      setDoubleDummyLoading(false)
+    }
+  }
+
+  // 切换显示双明手结果
+  const toggleDoubleDummy = (checked) => {
+    setShowDoubleDummy(checked)
+    if (checked && hands) {
+      handleDoubleDummy()
     }
   }
 
@@ -1356,9 +1401,17 @@ function App() {
                     当前牌局
                   </Typography>
                   <FormControlLabel
-                    control={<Checkbox />}
-                    label=""
-                    sx={{ visibility: 'hidden', ml: 1 }}
+                    control={
+                      <Switch 
+                        checked={showDoubleDummy}
+                        onChange={(e) => toggleDoubleDummy(e.target.checked)}
+                        disabled={!isBiddingComplete()}
+                        size="small"
+                        sx={{ transform: 'scale(0.8)', transformOrigin: 'center' }}
+                      />
+                    }
+                    label={showDoubleDummy ? "显示叫牌结果" : "显示小房子"}
+                    sx={{ ml: 1, mr: 0, '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
                   />
                 </Box>
                 <FormControl size="small" sx={{ minWidth: 150, visibility: 'hidden' }}>
@@ -1387,6 +1440,9 @@ function App() {
                   analyzeLoading={analyzeLoading}
                   colorScheme={currentColorScheme}
                   currentBiddingPosition={currentBiddingPosition}
+                  showDoubleDummy={showDoubleDummy}
+                  doubleDummyResult={doubleDummyResult}
+                  doubleDummyLoading={doubleDummyLoading}
                 />
               </Box>
             </Paper>
@@ -1737,9 +1793,24 @@ function App() {
                       width: '100%',
                       minHeight: '400px'
                     }}>
-                      <Typography variant="h6" gutterBottom align="center">
-                        当前牌局
-                      </Typography>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
+                        <Typography variant="h6">
+                          当前牌局
+                        </Typography>
+                        <FormControlLabel
+                          control={
+                            <Switch 
+                              checked={showDoubleDummy}
+                              onChange={(e) => toggleDoubleDummy(e.target.checked)}
+                              disabled={!isBiddingComplete()}
+                              size="small"
+                              sx={{ transform: 'scale(0.8)', transformOrigin: 'center' }}
+                            />
+                          }
+                          label={<span style={{ fontSize: '0.75rem' }}>{showDoubleDummy ? "显示叫牌结果" : "显示小房子"}</span>}
+                          sx={{ mr: 0 }}
+                        />
+                      </Box>
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
                         <CardTable
                           hands={hands}
@@ -1759,6 +1830,9 @@ function App() {
                           analyzeLoading={analyzeLoading}
                           colorScheme={currentColorScheme}
                           currentBiddingPosition={currentBiddingPosition}
+                          showDoubleDummy={showDoubleDummy}
+                          doubleDummyResult={doubleDummyResult}
+                          doubleDummyLoading={doubleDummyLoading}
                         />
                       </Box>
                     </Paper>
@@ -1788,7 +1862,7 @@ function App() {
                       </Box>
                       
                       {aiBiddingHistory.length > 0 && !simpleDisplayMode && (
-                        <FormControl size="small" sx={{ mb: 2, minWidth: 200, flexShrink: 0 }}>
+                        <FormControl size="small" sx={{ mb: 2, minWidth: 200, flexShrink: 0, '& .MuiInputBase-input': { fontSize: '1.25rem' }, '& .MuiInputLabel-root': { fontSize: '1.25rem' } }}>
                           <InputLabel>选择叫牌记录</InputLabel>
                           <Select
                             value={selectedBiddingIndex}

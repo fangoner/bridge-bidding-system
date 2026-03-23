@@ -32,6 +32,14 @@ from config import JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM, SHOW_FULL_LLM_OUTPUT
 from utils.history import HistoryManager
 from utils.screenshot import BridgeScreenshotCapture
 
+# 导入 endplay 集成模块
+try:
+    from endplay_integration import analyze_all_contracts_endplay, format_dd_results
+    ENDPLAY_INTEGRATION_AVAILABLE = True
+except ImportError:
+    ENDPLAY_INTEGRATION_AVAILABLE = False
+    print("注意: endplay_integration 模块导入失败，批量双明手分析功能不可用")
+
 
 class GameMode(Enum):
     PAIR = "双人叫牌"
@@ -656,7 +664,7 @@ def print_menu():
     print("2. 设置", flush=True)
     print("3. 显示当前牌局", flush=True)
     print("4. 开始叫牌", flush=True)
-    print("5. 分析定约可行性（Deep Finesse）", flush=True)
+    print("5. 定约分析", flush=True)
     print("6. 记录/查看历史记录", flush=True)
     print("7. 测试叫牌序列关键词和预处理", flush=True)
     print("8. 重新加载约定片段", flush=True)
@@ -1538,6 +1546,27 @@ def _analyze_with_fallback(game: BiddingGame):
     print(format_analysis_result(result), flush=True)
 
 
+def contract_analysis_menu(game: BiddingGame):
+    print("\n" + "=" * 60)
+    print("定约分析")
+    print("=" * 60)
+    print("1. 分析定约可行性（Deep Finesse）")
+    print("2. 批量双明手分析（endplay）")
+    print("0. 返回")
+    print("=" * 60)
+    
+    choice = input("请选择: ").strip()
+    
+    if choice == "1":
+        analyze_contract(game)
+    elif choice == "2":
+        batch_double_dummy_analysis(game)
+    elif choice == "0":
+        return
+    else:
+        print("无效选择")
+
+
 def analyze_contract(game: BiddingGame):
     print("\n分析定约可行性")
     print("1. 使用当前牌局和叫牌序列分析")
@@ -1661,6 +1690,53 @@ def analyze_contract(game: BiddingGame):
         print("无效选择")
 
 
+def batch_double_dummy_analysis(game):
+    """
+    批量双明手分析 - 显示每个玩家在每门花色上坐庄的最高可完成定约
+    """
+    print("\n" + "=" * 60)
+    print("批量双明手分析（endplay）")
+    print("=" * 60)
+
+    if not ENDPLAY_INTEGRATION_AVAILABLE:
+        print("endplay 集成模块不可用")
+        print("请确保已安装 endplay 库: pip install endplay")
+        print("并且 endplay_integration.py 文件存在")
+        return
+
+    if not game.hands:
+        print("尚未发牌，请先发牌或输入牌局")
+        return
+
+    hands_dict = {}
+    hcp_dict = {}
+    for position, hand in game.hands.items():
+        pos_name = position.value
+        hands_dict[pos_name] = hand.to_simple_string()
+        hcp_dict[pos_name] = hand.hcp
+
+    print("当前牌局:")
+    for pos, hand_str in hands_dict.items():
+        print(f"  {pos}: {hand_str}")
+
+    print("\n正在计算双明手分析...")
+
+    try:
+        result = analyze_all_contracts_endplay(hands_dict, hcp_dict)
+
+        if result.get("success"):
+            print(result.get("formatted_output", "分析完成，但未找到格式化输出"))
+        else:
+            print(f"分析失败: {result.get('error', '未知错误')}")
+            if "traceback" in result:
+                print(f"错误详情: {result['traceback']}")
+
+    except Exception as e:
+        print(f"分析过程中出现异常: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+
 def main():
     global SHOW_FULL_LLM_OUTPUT
     print("正在初始化...", flush=True)
@@ -1697,7 +1773,7 @@ def main():
             else:
                 print("尚未发牌，请先发牌或输入牌局")
         elif choice == "5":
-            analyze_contract(game)
+            contract_analysis_menu(game)
         elif choice == "6":
             view_history(game)
         elif choice == "7":

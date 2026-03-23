@@ -1,6 +1,85 @@
 # 开发日志
 
+## 2026-03-24
+
+### 网页版双明手分析显示优化
+
+**背景**: 将双明手分析结果集成到牌桌中央的叫牌过程框内，使用与叫牌过程相同的表格格式显示
+
+**改进**:
+
+1. **双明手结果显示格式**:
+   - 创建`DoubleDummyTable.jsx`组件，使用与`BiddingTable`相同的表格格式
+   - 顶端显示玩家位置（南西北东），下方显示各花色最高可完成定约
+   - 所有单元格统一使用浅蓝色背景
+   - 移除HCP显示，只保留定约信息
+
+2. **切换控件优化**:
+   - 将Checkbox改为Switch控件，更适合切换场景
+   - Switch控件缩小到80%大小
+   - 标题动态切换："显示小房子" ↔ "显示叫牌结果"
+
+3. **叫牌细节面板优化**:
+   - 下拉框字体大小与标题一致
+
+4. **历史记录加载优化**:
+   - 加载历史记录后按钮显示"重新叫牌"
+   - 自动切换到显示叫牌过程
+   - 清除双明手结果
+
+5. **双明手分析刷新**:
+   - 每次切换显示时重新分析，确保结果与当前牌局同步
+
+**修改文件**:
+- `api/main.py`: 修改API返回结构化数据
+- `web/src/App.jsx`: Switch控件、历史记录加载、字体大小
+- `web/src/components/DoubleDummyTable.jsx`: 新增组件
+- `web/src/components/CardTable.jsx`: 集成DoubleDummyTable
+
+---
+
 ## 2026-03-22
+
+### 双明手分析功能集成（endplay）
+
+**背景**: 集成endplay库实现批量双明手分析，可计算每个玩家在每门花色上坐庄的最高可完成定约
+
+**新增功能**:
+
+1. **endplay集成模块** (`endplay_integration.py`):
+   - 手牌格式转换：项目手牌格式 → PBN格式 → endplay Deal对象
+   - `analyze_all_contracts_endplay()`: 批量计算所有庄家-将牌组合的最高可完成定约
+   - `analyze_specific_contract()`: 分析特定定约能否完成
+   - 结果格式化输出：表格形式展示4庄家×5将牌的定约矩阵
+
+2. **主程序集成** (`main.py`):
+   - 新增菜单选项"9. 批量双明手分析（endplay）"
+   - 支持对当前牌局或输入牌局进行双明手分析
+   - 自动检测endplay库是否安装
+
+3. **测试文件**:
+   - `test_endplay.py`: endplay库安装和基本功能测试
+   - `test_dealer.py`: 发牌模块测试
+   - `test_empty_suit.py`: 空花色处理测试
+   - `test_random_deal.py`: 随机发牌测试
+   - `test_simple.py`: 简单功能测试
+   - `test_final.py`: 最终集成测试
+   - `test_fix.py`: 修复测试
+   - `demo_table.py`: 双明手表演示
+
+4. **Hand类增强** (`bridge/dealer.py`):
+   - `to_simple_string()`: 输出简单格式手牌字符串，支持空花色显示为"-"
+
+**依赖**:
+- 需要安装endplay库: `pip install endplay`
+
+**修改文件**:
+- `endplay_integration.py` (新增)
+- `main.py`
+- `bridge/dealer.py`
+- 多个测试文件 (新增)
+
+---
 
 ### 提示词与JF约定优化 - 满贯探查规则整合
 

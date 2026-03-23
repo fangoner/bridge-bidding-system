@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Button, CircularProgress } from '@mui/material';
 import HandDisplay from './HandDisplay';
+import DoubleDummyTable from './DoubleDummyTable';
 
 function CardTable({
   hands,
@@ -20,6 +21,9 @@ function CardTable({
   analyzeLoading,
   colorScheme,
   currentBiddingPosition,
+  showDoubleDummy,
+  doubleDummyResult,
+  doubleDummyLoading,
 }) {
   if (!hands) return null;
 
@@ -166,7 +170,19 @@ function CardTable({
             overflowY: 'auto',
             maxHeight: { xs: 200, md: 400 },
           }}>
-            {renderBiddingTable ? renderBiddingTable() : (
+            {showDoubleDummy ? (
+              doubleDummyLoading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
+                  <CircularProgress size={24} />
+                </Box>
+              ) : doubleDummyResult ? (
+                <DoubleDummyTable tableData={doubleDummyResult} />
+              ) : (
+                <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
+                  无分析结果
+                </div>
+              )
+            ) : renderBiddingTable ? renderBiddingTable() : (
               <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
                 等待叫牌...
               </div>
