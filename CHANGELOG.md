@@ -1,5 +1,88 @@
 # 开发日志
 
+## 2026-03-25
+
+### 统一终端版和网页版记录格式（未完成，已回滚）
+
+**背景**: 尝试统一终端版和网页版的历史记录格式，使两者可以互相加载对方的记录
+
+**目标**:
+1. 统一 `aiBiddingHistory` 格式
+2. 简化 `finalContract` 格式（移除冗余的搭档信息）
+3. 统一 `biddingSequence` 格式（字符串格式）
+
+**修改尝试**:
+
+1. **终端版修改** (`main.py`):
+   - 添加 `ai_bidding_history` 初始化和记录逻辑
+   - 每次AI叫牌保存详细信息
+
+2. **LLM客户端修改** (`llm/deepseek_client.py`):
+   - 返回 `raw_output` 原始LLM输出
+
+3. **网页版修改** (`web/src/App.jsx`):
+   - 统一 `aiBiddingHistory` 格式
+   - 添加 `biddingSequence` 字符串转数组的转换逻辑
+   - 添加 `finalContract` 格式兼容处理
+
+**遇到的问题**:
+
+1. **网页版白屏问题**:
+   - 原因：代码中存在使用旧格式 `record.result.bid` 的重复代码
+   - 修复：删除重复代码，统一使用新格式 `record.bid`
+
+2. **加载历史记录后不显示手牌和点力**:
+   - 原因：历史记录的 `hands` 是字符串格式，但 `HandDisplay` 组件期望对象格式
+   - 未解决：需要转换 `hands` 格式或修改保存格式
+
+3. **历史记录文件格式不兼容**:
+   - 原因：新格式使用 camelCase（如 `biddingSequence`），旧代码使用 snake_case（如 `bidding_sequence`）
+   - 临时解决：删除历史记录文件
+
+**最终结果**:
+- 使用 `git restore` 回滚所有修改到上次提交状态
+- 删除了不兼容的历史记录文件 `bidding_history.json`
+- 终端版和网页版记录管理保持分开
+
+**统一格式设计（供参考）**:
+```json
+{
+  "id": "20260325002338",
+  "timestamp": "2026-03-25 00:23:38",
+  "hands": { "北": "...", "西": "...", "南": "...", "东": "..." },
+  "biddingSequence": "(南)1NT-(西)pass-(北)pass-(东)pass",
+  "dealer": "南",
+  "gameMode": "双人叫牌",
+  "humanPosition": "",
+  "aiBiddingHistory": [
+    {
+      "position": "南",
+      "bid": "1NT",
+      "meaning": "15-17点，均型或准均型牌...",
+      "raw_output": "{完整JSON输出...}"
+    }
+  ],
+  "finalContract": "1NT (南家)",
+  "note": "",
+  "declarer": "南"
+}
+```
+
+**待解决问题**:
+1. `hands` 格式：字符串 vs 对象
+2. 字段命名：camelCase vs snake_case
+3. 网页版加载历史记录时的格式转换
+
+**修改文件（已回滚）**:
+- `api/main.py`
+- `llm/deepseek_client.py`
+- `main.py`
+- `utils/history.py`
+- `web/src/App.jsx`
+- `web/src/services/api.js`
+
+---
+
 ## 2026-03-24
 
 ### 网页版双明手分析显示优化
