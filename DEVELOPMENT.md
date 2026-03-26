@@ -406,6 +406,9 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
   - 创建本地恢复点`backup_20260326_225200/`
 - **叫牌案例记录**
   - 新增case-028：东家4C扣叫错误案例
+- **文档全面更新**
+  - 使用`.trae/skills/update-changelog` skill更新CHANGELOG和DEVELOPMENT
+  - 补充从v1.0到v1.24的完整版本历史
 
 ### v1.23
 - **网页版双明手分析显示优化**

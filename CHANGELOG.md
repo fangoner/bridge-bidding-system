@@ -2,7 +2,68 @@
 
 ## 2026-03-26
 
-### 双明手分析Bug修复 + 备份系统完善
+### 双明手分析Bug修复 + 备份系统完善 + 文档全面更新
+
+**背景**: 修复endplay库双明手分析结果错误问题，完善项目备份系统，更新完整版本历史
+
+**改进**:
+
+1. **双明手分析行列映射修复** (`endplay_integration.py`):
+   - 问题：endplay的`calc_dd_table`返回顺序为S,H,D,C,NT，原代码顺序错误导致所有将牌数据错位
+   - 修复：修正`trump_order`为`["S", "H", "D", "C", "NT"]`
+   - 结果：CLI和Web双明手分析结果正确
+
+2. **备用模型切换功能** (`bridge/bidding_service.py`, `llm/deepseek_client.py`):
+   - 主提示词失败时自动切换到备用提示词
+   - 备用提示词使用更高温度(0.5)进行自然推理
+   - 确保总是返回有效叫品
+
+3. **启动脚本优化** (`start_web.bat`, `start_backend.bat`):
+   - 添加`--reload`参数支持热重载
+   - 修复uvicorn启动命令格式
+
+4. **叫牌案例记录** (`bidding-cases/case-028.json`):
+   - 记录东家4C扣叫错误案例
+   - 问题：未确认将牌配合就急于扣叫
+   - 正确做法：先叫3S确认将牌配合
+
+5. **本地备份系统完善** (`.trae/skills/create-restore-point/SKILL.md`):
+   - 补充遗漏的备份文件：tests/、启动脚本、打包配置等
+   - 案例数据加入备份范围
+   - 更新skill文档备份清单
+
+6. **Git版本控制更新**:
+   - 添加`bidding-cases/`到Git跟踪
+   - 推送29个案例文件到远程仓库
+   - 创建本地恢复点：`backups/backup_20260326_225200/`
+
+7. **CHANGELOG和DEVELOPMENT文档全面更新**:
+   - 补充从v1.0到v1.24的完整版本历史
+   - 使用`.trae/skills/update-changelog` skill规范文档格式
+
+**修改文件**:
+- `endplay_integration.py`
+- `bridge/bidding_service.py`
+- `llm/deepseek_client.py`
+- `start_web.bat`, `start_backend.bat`
+- `bidding-cases/` (29个案例文件)
+- `.gitignore`
+- `.trae/skills/create-restore-point/SKILL.md`
+- `CHANGELOG.md`
+- `DEVELOPMENT.md`
+
+**Git提交**:
+- `6e15f95`: 修复双明手分析行列映射错误，添加备用模型切换功能，优化启动脚本
+- `c03793a`: 添加bidding-cases到Git跟踪，更新create-restore-point skill备份范围
+- `2b30812`: 更新CHANGELOG和DEVELOPMENT文档，记录v1.24版本变更
+
+**标签**: `v1.24`
+
+---
+
+## 2026-03-25
+
+### 历史记录导入导出功能（原始需求，未实现）
 
 **背景**: 修复endplay库双明手分析结果错误问题，完善项目备份系统
 
