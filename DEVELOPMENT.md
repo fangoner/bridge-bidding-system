@@ -390,7 +390,24 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 
 ## 版本历史
 
-### v1.23 (当前版本)
+### v1.24 (当前版本)
+- **双明手分析Bug修复**
+  - 修复`endplay_integration.py`中`trump_order`顺序错误（应为S,H,D,C,NT）
+  - 解决所有将牌数据错位问题，CLI和Web结果一致
+- **备用模型切换功能**
+  - 主提示词失败时自动切换到备用提示词
+  - 备用提示词使用temp=0.5进行自然推理
+- **启动脚本优化**
+  - 添加`--reload`参数支持热重载
+  - 修复uvicorn启动命令
+- **备份系统完善**
+  - 案例数据`bidding-cases/`加入Git跟踪（29个案例）
+  - 更新`create-restore-point` skill备份范围
+  - 创建本地恢复点`backup_20260326_225200/`
+- **叫牌案例记录**
+  - 新增case-028：东家4C扣叫错误案例
+
+### v1.23
 - **网页版双明手分析显示优化**
   - 创建`DoubleDummyTable.jsx`组件，使用与叫牌过程相同的表格格式
   - 将Checkbox改为Switch控件，更适合切换场景
@@ -407,6 +424,7 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
   - 主程序新增菜单选项"9. 批量双明手分析"
   - Hand类新增`to_simple_string()`方法支持空花色显示
   - 新增多个测试文件验证功能
+  - **v1.24修复**：修正`trump_order`顺序为S,H,D,C,NT（与endplay的Denom枚举一致）
 
 ### v1.21
 - **提示词与JF约定优化 - 满贯探查规则整合**

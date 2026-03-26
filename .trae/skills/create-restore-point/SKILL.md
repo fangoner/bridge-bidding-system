@@ -70,6 +70,9 @@ When invoked, this skill creates a backup of the current codebase state.
    - `update_release.bat`, `update_release.ps1`
    - `fix-terminal.ps1`, `claude-deepseek.bat`
    - `installer.iss`, `build.spec`
+   
+   **案例数据:**
+   - `bidding-cases/` directory (叫牌案例库，包含 case-XXX.json 和 cases-index.json)
 
 4. **Report backup summary**:
    - Backup location
