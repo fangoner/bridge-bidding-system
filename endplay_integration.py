@@ -164,8 +164,10 @@ def analyze_all_contracts_endplay(hands: Union[Dict, Deal], hcp_dict: Dict = Non
         print("双明手表计算完成")
 
         # 定义顺序映射
+        # 注意：table_list 的行顺序与 Denom 枚举一致: S=0, H=1, D=2, C=3, NT=4
+        # 列顺序与 Player 枚举一致: N=0, E=1, S=2, W=3
         declarer_order = ["北", "东", "南", "西"]
-        trump_order = ["NT", "S", "H", "D", "C"]
+        trump_order = ["S", "H", "D", "C", "NT"]
 
         results = {}
 
@@ -221,10 +223,10 @@ def format_dd_results(results: Dict, hcp_dict: Dict = None) -> str:
     lines.append("=" * 60)
 
     trump_display = {
-        "C": "C",
-        "D": "D",
-        "H": "H",
         "S": "S",
+        "H": "H",
+        "D": "D",
+        "C": "C",
         "NT": "NT"
     }
 

@@ -30,7 +30,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import HistoryIcon from '@mui/icons-material/History'
-import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, screenshotDeal, doubleDummyAnalysis } from './services/api'
+import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, screenshotDeal, doubleDummyAnalysis, getFallbackModel, setFallbackModel } from './services/api'
 import HandDisplay from './components/HandDisplay'
 import CardTable from './components/CardTable'
 import BiddingControls from './components/BiddingControls'
@@ -43,6 +43,7 @@ import './App.css'
 const BIDDING_RECORDS_KEY = 'bridge_bidding_records'
 const PANEL_ORDER_KEY = 'bridge_panel_order'
 const COLOR_SCHEME_KEY = 'bridge_color_scheme'
+const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
 const DEFAULT_PANEL_ORDER = ['cardTable', 'biddingDetails', 'biddingControls', 'jfSuggestion']
 
 function App() {
@@ -104,6 +105,15 @@ function App() {
   const [useFallback, setUseFallback] = useState(false) // 是否使用备用提示词
   const [dealMode, setDealMode] = useState('free') // 发牌模式：free/game/slam
   const [showSettings, setShowSettings] = useState(false) // 显示设置面板
+  const [fallbackModel, setFallbackModelState] = useState(() => {
+    // 从 localStorage 读取保存的备用模型配置，默认使用 deepseek-chat
+    try {
+      const saved = localStorage.getItem(FALLBACK_MODEL_KEY)
+      return saved || 'deepseek-chat'
+    } catch {
+      return 'deepseek-chat'
+    }
+  })
   
   // 更多输出格式
   const [showMoreFormats, setShowMoreFormats] = useState(false) // 显示更多格式
@@ -132,7 +142,29 @@ function App() {
   useEffect(() => {
     checkApiStatus()
     loadBiddingRecords()
+    syncFallbackModel()
   }, [])
+
+  // 同步备用模型到后端
+  const syncFallbackModel = async () => {
+    try {
+      await setFallbackModel(fallbackModel)
+    } catch (err) {
+      console.error('同步备用模型失败:', err)
+    }
+  }
+
+  // 处理备用模型变更
+  const handleFallbackModelChange = async (event) => {
+    const newModel = event.target.value
+    setFallbackModelState(newModel)
+    localStorage.setItem(FALLBACK_MODEL_KEY, newModel)
+    try {
+      await setFallbackModel(newModel)
+    } catch (err) {
+      console.error('设置备用模型失败:', err)
+    }
+  }
 
   // 保存面板顺序到localStorage
   useEffect(() => {
@@ -586,8 +618,8 @@ function App() {
       
       console.log(`AI叫牌: ${currentBidder}家, 手牌:`, currentHand, '叫牌序列:', biddingStr, '叫牌历史:', bidHistory)
       
-      // 调用AI叫牌API
-      const result = await aiBid(currentHand, biddingStr, currentBidder, '2D/2H/2S：自然阻击', bidHistory, useFallback)
+      // 调用AI叫牌API，传递备用模型参数
+      const result = await aiBid(currentHand, biddingStr, currentBidder, '2D/2H/2S：自然阻击', bidHistory, useFallback, fallbackModel)
       
       // 更新useFallback状态
       if (result.use_fallback !== undefined) {
@@ -1370,6 +1402,29 @@ function App() {
           >
             从Edge浏览器截屏
           </Button>
+        </Box>
+
+        <Divider sx={{ my: 2 }} />
+
+        <Typography variant="h6" gutterBottom>
+          AI模型设置
+        </Typography>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: { xs: 2, md: 3 }, alignItems: 'center' }}>
+          <FormControl sx={{ minWidth: 200 }}>
+            <InputLabel>备用AI模型</InputLabel>
+            <Select
+              value={fallbackModel}
+              label="备用AI模型"
+              onChange={handleFallbackModelChange}
+              size="small"
+            >
+              <MenuItem value="deepseek-chat">DeepSeek Chat (快/便宜)</MenuItem>
+              <MenuItem value="deepseek-reasoner">DeepSeek Reasoner (推理强)</MenuItem>
+            </Select>
+          </FormControl>
+          <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 400 }}>
+            当主提示词无法给出合格叫品时，系统会自动切换到备用提示词。Reasoner模型推理能力更强但速度较慢。
+          </Typography>
         </Box>
       </Paper>
       )}

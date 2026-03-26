@@ -57,17 +57,48 @@ export const reloadJF = async () => {
   }
 };
 
-// AI叫牌
-export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H/2S：自然阻击', bidHistory = '', useFallback = false) => {
+// 获取备用模型配置
+export const getFallbackModel = async () => {
   try {
-    const response = await api.post('/api/bid', {
+    const response = await api.get('/api/fallback-model');
+    return response.data;
+  } catch (error) {
+    console.error('获取备用模型配置失败:', error);
+    throw error;
+  }
+};
+
+// 设置备用模型
+export const setFallbackModel = async (fallbackModel) => {
+  try {
+    const response = await api.post('/api/fallback-model', {
+      fallback_model: fallbackModel
+    });
+    return response.data;
+  } catch (error) {
+    console.error('设置备用模型失败:', error);
+    throw error;
+  }
+};
+
+// AI叫牌
+export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H/2S：自然阻击', bidHistory = '', useFallback = false, fallbackModel = null) => {
+  try {
+    const requestData = {
       hand,
       bidding_sequence: biddingSequence,
       position,
       deal_system: dealSystem,
       bid_history: bidHistory,
       use_fallback: useFallback
-    });
+    };
+    
+    // 如果指定了备用模型，添加到请求中
+    if (fallbackModel) {
+      requestData.fallback_model = fallbackModel;
+    }
+    
+    const response = await api.post('/api/bid', requestData);
     return response.data;
   } catch (error) {
     console.error('AI叫牌失败:', error);

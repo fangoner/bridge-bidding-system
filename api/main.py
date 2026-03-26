@@ -85,6 +85,16 @@ class BidRequest(BaseModel):
     deal_system: str = DEFAULT_DEAL_SYSTEM
     bid_history: str = ""
     use_fallback: bool = False
+    fallback_model: Optional[str] = None  # 备用模型选择：deepseek-chat 或 deepseek-reasoner
+
+
+class FallbackModelRequest(BaseModel):
+    fallback_model: str  # deepseek-chat 或 deepseek-reasoner
+
+
+class FallbackModelResponse(BaseModel):
+    fallback_model: str
+    message: str
 
 
 class BidResponse(BaseModel):
@@ -231,6 +241,34 @@ async def human_bid(request: HumanBidRequest):
         )
 
 
+@app.get("/api/fallback-model")
+async def get_fallback_model():
+    """获取当前备用模型配置"""
+    return {
+        "fallback_model": llm_client.fallback_model,
+        "available_models": ["deepseek-chat", "deepseek-reasoner"]
+    }
+
+
+@app.post("/api/fallback-model", response_model=FallbackModelResponse)
+async def set_fallback_model(request: FallbackModelRequest):
+    """设置备用模型"""
+    valid_models = ["deepseek-chat", "deepseek-reasoner"]
+    if request.fallback_model not in valid_models:
+        raise HTTPException(
+            status_code=400,
+            detail=f"无效的模型名称。有效选项: {', '.join(valid_models)}"
+        )
+    
+    # 更新全局 llm_client 的备用模型
+    llm_client.fallback_model = request.fallback_model
+    
+    return FallbackModelResponse(
+        fallback_model=request.fallback_model,
+        message=f"备用模型已设置为: {request.fallback_model}"
+    )
+
+
 @app.post("/api/bid", response_model=BidResponse)
 async def bid(request: BidRequest):
     """AI叫牌接口"""
@@ -253,6 +291,11 @@ async def bid(request: BidRequest):
         
         hand = SimpleHand(hand_display, hcp, distribution)
         
+        # 如果请求中指定了备用模型，临时更新 llm_client
+        original_fallback = llm_client.fallback_model
+        if request.fallback_model:
+            llm_client.fallback_model = request.fallback_model
+        
         bidding_service = BiddingService(llm_client, jf_retriever)
         bidding_service.use_fallback = request.use_fallback
         bidding_service.set_bid_meanings(request.bid_history if request.bid_history else "")
@@ -271,6 +314,10 @@ async def bid(request: BidRequest):
         
         print(f"[DEBUG] 最终叫品: {bid}, 含义: {meaning}")
         
+        # 恢复原始备用模型设置
+        if request.fallback_model:
+            llm_client.fallback_model = original_fallback
+        
         return BidResponse(
             bid=bid,
             meaning=meaning,
@@ -280,6 +327,9 @@ async def bid(request: BidRequest):
         )
     except Exception as e:
         print(f"[ERROR] 叫牌失败: {str(e)}")
+        # 恢复原始备用模型设置
+        if request.fallback_model:
+            llm_client.fallback_model = original_fallback
         return BidResponse(
             bid="pass",
             meaning=f"叫牌失败: {str(e)}",
@@ -765,4 +815,4 @@ async def double_dummy_analysis(request: DoubleDummyRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8003)
