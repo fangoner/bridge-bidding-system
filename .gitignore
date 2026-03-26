@@ -51,3 +51,6 @@ Deep Finesse 2014 v2/
 *.tmp
 *.temp
 bidding_history.json
+
+# Bidding cases (tracked - do not ignore)
+# bidding-cases/  # Uncomment to ignore, currently tracked

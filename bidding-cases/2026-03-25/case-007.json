@@ -1,0 +1,28 @@
+{
+  "id": "case-007",
+  "date": "2026-03-25",
+  "timestamp": "2026-03-25T23:31:44.193686",
+  "hand": {
+    "spades": "98",
+    "hearts": "AKJ4",
+    "diamonds": "A98",
+    "clubs": "AJ54",
+    "hcp": 17
+  },
+  "bidding_sequence": [
+    "1S",
+    "3C"
+  ],
+  "llm_bid": "3H",
+  "correct_bid": null,
+  "discussion_summary": "这个叫牌分析有几个问题：",
+  "discussion_content": "这个叫牌分析有几个问题：\n## 主要问题\n### 1. 对\"加倍\"的理解错误\n**这是错误的！**\n### 2. 正确的叫品选择\n原因：\n### 3. 3H的问题\nAI选择3H的问题：\nJF约定中加倍的点力范围定义可能不够清晰，导致AI误判。实际上在敌方阻击叫后，加倍是强牌的标准处理方式之一，不应该被排除。\n",
+  "tags": [
+    "1S opening",
+    "game invitation",
+    "slam bidding",
+    "game contract"
+  ],
+  "convention": "JF",
+  "source": "historical discussion"
+}

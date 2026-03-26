@@ -1,0 +1,33 @@
+{
+  "id": "case-018",
+  "date": "2026-03-25",
+  "timestamp": "2026-03-25T23:31:46.104082",
+  "hand": {
+    "spades": "AKQT84",
+    "hearts": "K3",
+    "diamonds": "KJ",
+    "clubs": "AJ3",
+    "hcp": 21
+  },
+  "bidding_sequence": [
+    "2NT",
+    "pass",
+    "3C",
+    "pass",
+    "3S",
+    "pass",
+    "4H",
+    "pass"
+  ],
+  "llm_bid": "5C",
+  "correct_bid": "4H",
+  "discussion_summary": "问题在于AI没有正确理解：",
+  "discussion_content": "问题在于AI没有正确理解：\n这是备用提示词的逻辑问题。需要我修改提示词吗？\n",
+  "tags": [
+    "slam bidding",
+    "wrong principle",
+    "game contract"
+  ],
+  "convention": "JF",
+  "source": "historical discussion"
+}

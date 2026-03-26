@@ -1,0 +1,43 @@
+{
+  "id": "case-001",
+  "date": "2026-03-25",
+  "timestamp": "2026-03-25T23:22:55.590631",
+  "hand": {
+    "spades": "J5",
+    "hearts": "KQJ7",
+    "diamonds": "JT94",
+    "clubs": "KQ7",
+    "hcp": 13
+  },
+  "position": {
+    "dealer": "South",
+    "vulnerability": "None",
+    "seat": "South"
+  },
+  "bidding_sequence": [
+    "1D",
+    "pass",
+    "1S",
+    "pass",
+    "1NT",
+    "pass",
+    "2C",
+    "pass",
+    "2D",
+    "pass",
+    "2S",
+    "pass"
+  ],
+  "llm_bid": "3NT",
+  "correct_bid": "2NT",
+  "discussion_summary": "南家13点中限牌力，面对2S邀请叫应选2NT接受邀请，而非直接3NT进局。",
+  "discussion_content": "【问题分析】南家持♠J5 ♥KQJ7 ♦JT94 ♣KQ7(13点均型)，面对北家2S邀请叫(10-12点，5+张S)。LLM选择3NT进局存在三个问题：1)点力计算过于乐观，只看点力上限25点而忽视下限23点未达成局门槛；2)忽略了将牌配合问题，黑桃仅7张配合不够8张；3)13点为中限而非上限，标准做法是2NT接受邀请，让北家持上限(12点)时决定是否继续。",
+  "tags": [
+    "1D opening",
+    "Jacoby transfer",
+    "game invitation",
+    "overbid"
+  ],
+  "convention": "JF",
+  "source": "user discussion"
+}

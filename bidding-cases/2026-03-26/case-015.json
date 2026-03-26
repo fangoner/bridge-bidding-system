@@ -1,0 +1,30 @@
+{
+  "id": "case-015",
+  "date": "2026-03-26",
+  "timestamp": "2026-03-26T00:20:08.654962",
+  "hand": {
+    "spades": "Q82",
+    "hearts": "Q97",
+    "diamonds": "Q732",
+    "clubs": "Q95"
+  },
+  "hcp": 21,
+  "position": "再叫",
+  "jf_convention": "成局与满贯",
+  "bidding_sequence": [
+    "(南)1H",
+    "(西)2D",
+    "(北)2H",
+    "(东)pass",
+    "(南)4NT",
+    "(西)pass",
+    "(北)5S"
+  ],
+  "llm_bid": "5S",
+  "correct_bid": null,
+  "discussion_summary": "**北家手牌关键张计算：**\n- 关键张定义：4个A + 将牌K（♥K）= 5个关键张\n- 北家：无A，无♥K → **0个关键张**\n- 北家有将牌Q（♥Q）",
+  "discussion_content": "",
+  "tags": [],
+  "convention": "JF",
+  "source": "historical discussion"
+}

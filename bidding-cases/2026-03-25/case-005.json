@@ -1,0 +1,34 @@
+{
+  "id": "case-005",
+  "date": "2026-03-25",
+  "timestamp": "2026-03-25T23:31:43.865261",
+  "hand": {
+    "spades": "2",
+    "hearts": "A96",
+    "diamonds": "95432",
+    "clubs": "AK93",
+    "hcp": 11
+  },
+  "bidding_sequence": [
+    "pass",
+    "pass",
+    "1S",
+    "pass",
+    "2D",
+    "pass",
+    "2H",
+    "pass"
+  ],
+  "llm_bid": "3H",
+  "correct_bid": "1S",
+  "discussion_summary": "这个叫牌过程分析得很好，但我发现几个可以讨论的点：",
+  "discussion_content": "南家有5张♦(95432)和4张♣(AK93)，选择应叫2D是对的（选择最长套）。但♣的质量更好(AK93 vs 95432)，如果考虑后续发展，2C可能也不错。不过标准做法是应叫最长套，所以2D没问题。\n### 2. 3H邀请的问题\n**这里有个逻辑问题**：\n- 11点+单张♠的牌型，pass开叫是正确的\nAI说\"合计至少7张♥，未达到8张高花配合\"，这是正确的。但实际上：\n联手23-32点，邀请是正确的选择。北家如果是高限（16-18点）可以接受邀请进局4H。\n**总结**：这个叫牌过程基本合理，AI的分析也正确。唯一可以改进的是配合判断可能过于保守（实际上可能有8张♥配合）。\n",
+  "tags": [
+    "1S opening",
+    "game invitation",
+    "slam bidding",
+    "game contract"
+  ],
+  "convention": "JF",
+  "source": "historical discussion"
+}

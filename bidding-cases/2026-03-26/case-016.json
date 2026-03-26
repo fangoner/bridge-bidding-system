@@ -1,0 +1,30 @@
+{
+  "id": "case-016",
+  "date": "2026-03-26",
+  "timestamp": "2026-03-26T00:20:08.655553",
+  "hand": {
+    "spades": "AQT5",
+    "hearts": "KQ9",
+    "diamonds": "T962",
+    "clubs": "87"
+  },
+  "hcp": 21,
+  "position": "再叫",
+  "jf_convention": "1H-3D",
+  "bidding_sequence": [
+    "(南)1H",
+    "(西)pass",
+    "(北)3D",
+    "(东)pass",
+    "(南)3H",
+    "(西)pass",
+    "(北)pass"
+  ],
+  "llm_bid": "pass",
+  "correct_bid": null,
+  "discussion_summary": "叫牌存在问题，需要分析",
+  "discussion_content": "",
+  "tags": [],
+  "convention": "JF",
+  "source": "historical discussion"
+}

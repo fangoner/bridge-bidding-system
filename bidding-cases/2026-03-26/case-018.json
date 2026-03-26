@@ -1,0 +1,27 @@
+{
+  "id": "case-018",
+  "date": "2026-03-26",
+  "timestamp": "2026-03-26T00:20:08.656976",
+  "hand": {
+    "spades": "QT42",
+    "hearts": "J53",
+    "diamonds": "Q872",
+    "clubs": "J4"
+  },
+  "hcp": null,
+  "position": null,
+  "jf_convention": null,
+  "bidding_sequence": [
+    "pass",
+    "1N",
+    "pass",
+    "pass"
+  ],
+  "llm_bid": "pass",
+  "correct_bid": null,
+  "discussion_summary": "叫牌存在问题，需要分析",
+  "discussion_content": "",
+  "tags": [],
+  "convention": "JF",
+  "source": "historical discussion"
+}

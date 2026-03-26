@@ -1,0 +1,39 @@
+{
+  "id": "case-006",
+  "date": "2026-03-25",
+  "timestamp": "2026-03-25T23:31:44.027719",
+  "hand": {
+    "spades": "AKJ",
+    "hearts": "QJ95",
+    "diamonds": "QT654",
+    "clubs": "6",
+    "hcp": 13
+  },
+  "bidding_sequence": [
+    "1D",
+    "2C",
+    "3C",
+    "pass",
+    "4D",
+    "pass",
+    "4H",
+    "pass",
+    "4NT",
+    "pass",
+    "5H",
+    "pass"
+  ],
+  "llm_bid": "pass",
+  "correct_bid": "5D",
+  "discussion_summary": "这个叫牌过程有一个重要问题：",
+  "discussion_content": "这个叫牌过程有一个重要问题：\n## 问题分析\n**关键问题**：南家在RKCB问叫后选择了pass，但实际上应该叫**5D**停在成局定约。\n### 错误原因\nAI的分析中有这个错误判断：\n**这是错误的！** 在RKCB（罗马关键张问叫）约定中，问叫人收到答叫后，如果决定停在成局，**可以叫回将牌花色**，这不受普通叫品递增规则的限制。这是约定叫的特殊规则。\n### 正确的处理\n要我更新提示词来修复这个问题吗？\n",
+  "tags": [
+    "1D opening",
+    "game invitation",
+    "slam bidding",
+    "game contract",
+    "rule violation"
+  ],
+  "convention": "JF",
+  "source": "historical discussion"
+}

@@ -1,0 +1,29 @@
+{
+  "id": "case-002",
+  "date": "2026-03-25",
+  "timestamp": "2026-03-25T23:31:43.316309",
+  "hand": {
+    "spades": "832",
+    "hearts": "3",
+    "diamonds": "AKJ987",
+    "clubs": "Q43",
+    "hcp": 10
+  },
+  "bidding_sequence": [
+    "1D",
+    "X"
+  ],
+  "llm_bid": "4D",
+  "correct_bid": null,
+  "discussion_summary": "分析这个叫牌过程的问题：",
+  "discussion_content": "分析这个叫牌过程的问题：\n## 问题1：速达原则误用\n正确做法：先XX示强（10点以上），然后探索满贯可能性\n## 问题2：未正确引用JF约定\n## 问题3：低花反加叫规则未遵守\n## 建议修改提示词\n需要我修改提示词来解决这个问题吗？\n",
+  "tags": [
+    "1D opening",
+    "1H opening",
+    "1S opening",
+    "game invitation",
+    "wrong principle"
+  ],
+  "convention": "JF",
+  "source": "historical discussion"
+}

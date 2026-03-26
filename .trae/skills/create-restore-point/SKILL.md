@@ -37,11 +37,14 @@ When invoked, this skill creates a backup of the current codebase state.
    **终端（后端）文件:**
    - `main.py`
    - `config.py`
+   - `run.py`
+   - `endplay_integration.py`
    - `api/` directory (API接口)
    - `bridge/` directory (桥牌逻辑)
    - `knowledge/` directory (知识库)
    - `llm/` directory (LLM调用)
    - `utils/` directory (工具函数)
+   - `tests/` directory (测试文件)
    
    **网页（前端）文件:**
    - `web/src/` directory (所有React组件和样式)
@@ -51,11 +54,22 @@ When invoked, this skill creates a backup of the current codebase state.
    - `web/index.html`
    
    **文档和配置:**
+   - `README.md`
    - `CHANGELOG.md`
    - `DEVELOPMENT.md`
    - `CLAUDE.md`
+   - `LICENSE.txt`
+   - `requirements.txt`
+   - `.gitignore`
    - `JF实战_标准自然 - Rev 3.2.docx` (JF约定文档)
    - `.trae/skills/` directory (所有skill定义)
+   
+   **脚本和打包:**
+   - `build.bat`, `build_release.bat`
+   - `start_web.bat`, `start_backend.bat`, `start_terminal.bat`
+   - `update_release.bat`, `update_release.ps1`
+   - `fix-terminal.ps1`, `claude-deepseek.bat`
+   - `installer.iss`, `build.spec`
 
 4. **Report backup summary**:
    - Backup location

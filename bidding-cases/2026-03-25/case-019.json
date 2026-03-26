@@ -1,0 +1,34 @@
+{
+  "id": "case-019",
+  "date": "2026-03-25",
+  "timestamp": "2026-03-25T23:31:46.240304",
+  "hand": {
+    "spades": "953",
+    "hearts": "AQ54",
+    "diamonds": "A85",
+    "clubs": "K96",
+    "hcp": 13
+  },
+  "bidding_sequence": [
+    "2NT",
+    "pass",
+    "3C",
+    "pass",
+    "3S",
+    "pass",
+    "4H",
+    "pass",
+    "4NT",
+    "pass"
+  ],
+  "llm_bid": "5C",
+  "correct_bid": null,
+  "discussion_summary": "问题在于AI漏算了♥A。北家手牌：♠953 ♥AQ54 ♦A85 ♣K96",
+  "discussion_content": "问题在于AI漏算了♥A。北家手牌：♠953 ♥AQ54 ♦A85 ♣K96\n问题在于AI只检查了♦A，漏掉了♥A。需要强调必须逐门花色检查：\n",
+  "tags": [
+    "slam bidding",
+    "game contract"
+  ],
+  "convention": "JF",
+  "source": "historical discussion"
+}

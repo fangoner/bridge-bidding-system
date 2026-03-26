@@ -1,0 +1,36 @@
+{
+  "id": "case-014",
+  "date": "2026-03-26",
+  "timestamp": "2026-03-26T00:20:08.654262",
+  "hand": {
+    "spades": "AKJ",
+    "hearts": "QJ95",
+    "diamonds": "QT654",
+    "clubs": "6"
+  },
+  "hcp": 21,
+  "position": "再叫",
+  "jf_convention": "成局与满贯",
+  "bidding_sequence": [
+    "(南)1D",
+    "(西)2C",
+    "(北)3C",
+    "(东)pass",
+    "(南)4D",
+    "(西)pass",
+    "(北)4H",
+    "(东)pass",
+    "(南)4NT",
+    "(西)pass",
+    "(北)5H",
+    "(东)pass",
+    "(南)pass"
+  ],
+  "llm_bid": "pass",
+  "correct_bid": "**5D**停在成局定约。",
+  "discussion_summary": "**叫牌序列**：`(南)1D-(西)2C-(北)3C-(东)pass-(南)4D-(西)pass-(北)4H-(东)pass-(南)4NT-(西)pass-(北)5H-(东)pass-(南)pass...",
+  "discussion_content": "",
+  "tags": [],
+  "convention": "JF",
+  "source": "historical discussion"
+}

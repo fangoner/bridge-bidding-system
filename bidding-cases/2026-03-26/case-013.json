@@ -1,0 +1,27 @@
+{
+  "id": "case-013",
+  "date": "2026-03-26",
+  "timestamp": "2026-03-26T00:20:08.653615",
+  "hand": {
+    "spades": "A532",
+    "hearts": "KT",
+    "diamonds": "AK54",
+    "clubs": "KQ8"
+  },
+  "hcp": 21,
+  "position": "再叫",
+  "jf_convention": "开叫人的再叫",
+  "bidding_sequence": [
+    "(南)1D",
+    "(西)1H",
+    "(北)1S",
+    "(东)2H(南)2H"
+  ],
+  "llm_bid": "2H",
+  "correct_bid": null,
+  "discussion_summary": "叫牌序列：(南)1D-(西)1H-(北)1S-(东)2H",
+  "discussion_content": "",
+  "tags": [],
+  "convention": "JF",
+  "source": "historical discussion"
+}

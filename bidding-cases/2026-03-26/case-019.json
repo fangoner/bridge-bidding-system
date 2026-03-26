@@ -1,0 +1,30 @@
+{
+  "id": "case-019",
+  "date": "2026-03-26",
+  "timestamp": "2026-03-26T00:20:08.691976",
+  "hand": {
+    "spades": "J65",
+    "hearts": "QJT76",
+    "diamonds": "8732",
+    "clubs": "Q"
+  },
+  "hcp": 21,
+  "position": "再叫",
+  "jf_convention": "成局与满贯",
+  "bidding_sequence": [
+    "(南)1S",
+    "(西)pass",
+    "(北)1NT",
+    "(东)pass",
+    "(南)2NT",
+    "(西)pass",
+    "(北)3S"
+  ],
+  "llm_bid": "3S",
+  "correct_bid": null,
+  "discussion_summary": "**手牌实际情况**:\n- ♠J65: 3张\n- ♥QJT76: 5张\n- ♦8732: 4张\n- ♣Q: **1张** ← 明显是单张",
+  "discussion_content": "",
+  "tags": [],
+  "convention": "JF",
+  "source": "historical discussion"
+}

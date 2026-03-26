@@ -1,0 +1,32 @@
+{
+  "id": "case-024",
+  "date": "2026-03-26",
+  "source": "historical_document",
+  "hand": "♠93 ♥JT865 ♦AK ♣A632",
+  "hand_parsed": {
+    "spades": "93",
+    "hearts": "JT865",
+    "diamonds": "AK",
+    "clubs": "A632"
+  },
+  "hcp": 12,
+  "position": "开叫",
+  "bidding_sequence": [
+    "1H",
+    "PASS",
+    "1S",
+    "PASS",
+    "2C",
+    "PASS",
+    "3H",
+    "PASS"
+  ],
+  "llm_bid": "PASS",
+  "correct_bid": null,
+  "discussion_summary": "用户质疑叫牌选择",
+  "tags": [
+    "historical",
+    "error"
+  ],
+  "created_at": "2026-03-26T00:25:01.796224"
+}

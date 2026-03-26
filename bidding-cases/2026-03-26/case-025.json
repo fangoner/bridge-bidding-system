@@ -1,0 +1,23 @@
+{
+  "id": "case-025",
+  "date": "2026-03-26",
+  "source": "historical_document",
+  "hand": "♠AT5 ♥97 ♦AKT75 ♣9543253",
+  "hand_parsed": {
+    "spades": "AT5",
+    "hearts": "97",
+    "diamonds": "AKT75",
+    "clubs": "9543253"
+  },
+  "hcp": 11,
+  "position": "Unknown",
+  "bidding_sequence": [],
+  "llm_bid": "PASS",
+  "correct_bid": null,
+  "discussion_summary": "问题在于LLM在括号内仍然使用了较长的描述，而不是极简的描述。",
+  "tags": [
+    "historical",
+    "error"
+  ],
+  "created_at": "2026-03-26T00:25:01.797356"
+}

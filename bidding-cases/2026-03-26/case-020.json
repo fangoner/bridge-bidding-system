@@ -1,0 +1,32 @@
+{
+  "id": "case-020",
+  "date": "2026-03-26",
+  "timestamp": "2026-03-26T00:20:08.692946",
+  "hand": {
+    "spades": "AKQT84",
+    "hearts": "K3",
+    "diamonds": "KJ",
+    "clubs": "AJ3"
+  },
+  "hcp": 21,
+  "position": "再叫位置",
+  "jf_convention": "成局与满贯",
+  "bidding_sequence": [
+    "(南)2NT",
+    "(西)pass",
+    "(北)3C",
+    "(东)pass",
+    "(南)3S",
+    "(西)pass",
+    "(北)4H",
+    "(东)pass",
+    "(南)5C"
+  ],
+  "llm_bid": "5C",
+  "correct_bid": null,
+  "discussion_summary": "叫牌存在问题，需要分析",
+  "discussion_content": "",
+  "tags": [],
+  "convention": "JF",
+  "source": "historical discussion"
+}
