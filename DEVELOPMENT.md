@@ -390,7 +390,34 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 
 ## 版本历史
 
-### v1.24 (当前版本)
+### v1.25 (当前版本)
+- **历史记录多选功能**
+  - 每条记录前添加复选框，支持多选
+  - 点击记录行即可选择/取消选择
+  - 选中记录高亮显示
+  - 全选/取消全选按钮
+- **导出导入增强**
+  - 导出时可选导出部分记录（选中时只导出选中的）
+  - 导入支持多条记录合并，自动去重
+  - 导出文件包含完整 `aiBiddingHistory` 数组
+- **AI详细输出记录**
+  - 每条记录保存AI叫牌的 `full_output`
+  - 包含手牌分析、叫牌历史、叫品筛选过程
+- **操作按钮统一**
+  - 移除每条记录单独的按钮
+  - 所有操作按钮集中在底部
+- **截图功能改进**
+  - 直接触发系统截图工具（Win+Shift+S）
+  - 5秒延迟后自动读取剪贴板
+- **FormData上传修复**
+  - 移除多余的 `Content-Type` header
+- **新增叫牌案例**
+  - case-029：6-5双高套竞争叫牌
+  - case-030：竞争叫牌中跳叫自己花色
+- **新增Skill**
+  - `bridge-bidding-recorder`：叫牌案例记录skill
+
+### v1.24
 - **双明手分析Bug修复**
   - 修复`endplay_integration.py`中`trump_order`顺序错误（应为S,H,D,C,NT）
   - 解决所有将牌数据错位问题，CLI和Web结果一致

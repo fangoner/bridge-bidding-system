@@ -1,5 +1,64 @@
 # 开发日志
 
+## 2026-04-05
+
+### 历史记录多选导出导入 + AI详细输出记录
+
+**改进**:
+
+1. **历史记录多选功能** (`web/src/App.jsx`):
+   - 每条记录前添加复选框，支持多选
+   - 点击记录行即可选择/取消选择
+   - 选中记录高亮显示
+   - 全选/取消全选按钮
+
+2. **导出导入增强** (`web/src/App.jsx`):
+   - 导出时可选导出部分记录（选中时只导出选中的）
+   - 导入支持多条记录合并，自动去重
+   - 导出文件包含完整 `aiBiddingHistory` 数组
+
+3. **AI详细输出记录** (`web/src/App.jsx`):
+   - 每条记录保存AI叫牌的 `full_output`（手牌分析、叫牌历史、叫品筛选过程）
+   - 通过"加载"功能可查看完整AI输出
+
+4. **操作按钮统一** (`web/src/App.jsx`):
+   - 移除每条记录单独的按钮
+   - 所有操作按钮集中在底部
+   - 加载/编辑注释：仅选中1条时可用
+   - 删除：选中≥1条时可用，显示数量
+
+5. **截图功能改进** (`utils/screenshot.py`, `api/main.py`):
+   - 直接触发系统截图工具（Win+Shift+S）
+   - 5秒延迟后自动读取剪贴板
+   - 简化用户操作流程
+
+6. **FormData上传修复** (`web/src/services/api.js`):
+   - 移除多余的 `Content-Type: multipart/form-data` header
+   - 让浏览器自动设置正确的boundary
+
+7. **新增叫牌案例** (`bidding-cases/`):
+   - case-029：6-5双高套竞争叫牌（Pass过于保守）
+   - case-030：竞争叫牌中跳叫自己花色过于激进
+
+8. **新增Skill** (`.trae/skills/bridge-bidding-recorder/`):
+   - 叫牌案例记录skill，支持手动激活记录案例
+
+**修改文件**:
+- `web/src/App.jsx`
+- `web/src/services/api.js`
+- `utils/screenshot.py`
+- `api/main.py`
+- `bidding-cases/cases-index.json`
+- `bidding-cases/2026-04-02/case-029.json`
+- `bidding-cases/2026-04-03/case-030.json`
+- `.trae/skills/bridge-bidding-recorder/`
+
+**Git提交**: `55a8b1a`
+
+**本地恢复点**: `backups/backup_20260405_102835/`
+
+---
+
 ## 2026-03-28
 
 ### 设置面板重构 + 图片发牌文件上传
