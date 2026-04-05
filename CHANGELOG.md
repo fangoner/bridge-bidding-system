@@ -1,6 +1,57 @@
 # 开发日志
 
-## 2026-03-26
+## 2026-03-28
+
+### 设置面板重构 + 图片发牌文件上传
+
+**改进**:
+
+1. **设置面板分组重构** (`web/src/App.jsx`):
+   - 将设置面板分为"叫牌设置"和"发牌设置"两个独立组
+   - 两组之间用竖线 (`Divider`) 分隔，布局更清晰
+   - 叫牌设置：模式、发牌人、人类位置、备用模型
+   - 发牌设置：发牌方式、自定义、图片、截屏按钮
+
+2. **按钮样式统一** (`web/src/App.jsx`):
+   - 字体大小统一为 `0.875rem`（与下拉框一致）
+   - 边框颜色统一为 `rgba(0, 0, 0, 0.23)`
+   - 高度统一为 `40px`，内边距统一
+   - 移除文字大写转换 (`textTransform: 'none'`)
+
+3. **图片发牌改为文件上传** (`web/src/App.jsx`, `web/src/services/api.js`, `api/main.py`):
+   - 前端：添加"浏览..."按钮，使用文件选择器选取图片
+   - API服务：使用 `FormData` 上传文件
+   - 后端：使用 `UploadFile` 接收文件，保存到临时目录处理后自动清理
+   - 解决浏览器安全限制导致的文件路径问题
+   - 依赖：安装 `python-multipart` 包支持文件上传
+
+---
+
+### 右侧面板合并重构（桌面版 + 手机版）
+
+**背景**: 将叫牌控制、JF约定面板、叫牌细节合并为统一右侧面板，根据叫牌状态智能切换显示内容。
+
+**改进**:
+
+1. **桌面版右侧面板重构** (`web/src/App.jsx`):
+   - 删除原 `showAIBiddingOutput` 条件分支的双布局结构
+   - 删除原第二行独立的 `BiddingControls` 组件
+   - 统一为单一 Paper（750px），根据叫牌状态切换：
+     - **人类回合（叫牌进行中）**：上部显示叫牌控制，下部显示JF约定片段（flex:1，可滚动）
+     - **AI回合（叫牌进行中）**：切换显示叫牌细节（可随时查看AI叫牌过程）
+     - **叫牌结束**：显示叫牌细节
+     - **观察者模式**（humanPosition=null）：`showAIBiddingOutput` 开关仍有效，控制是否显示叫牌细节
+
+2. **手机版面板重构** (`web/src/App.jsx`):
+   - `biddingDetails` 面板改为统一面板，与桌面版相同的切换逻辑
+   - `biddingControls` 面板隐藏（return null），叫牌控制已整合到 biddingDetails
+   - 人类回合时面板高度自适应（auto + minHeight:500px），叫牌细节时固定400px
+
+3. **BiddingControls 组件扩展** (`web/src/components/BiddingControls.jsx`):
+   - 新增 `hideJFPanel` prop（默认 false）
+   - 当 `hideJFPanel=true` 时不渲染 JF约定 Paper，便于父组件独立控制 JF约定面板位置
+
+
 
 ### 双明手分析Bug修复 + 备份系统完善 + 文档全面更新
 
@@ -61,6 +112,81 @@
 
 ---
 
+## 2026-03-27
+
+### 历史记录共享功能尝试（失败，已回滚）
+
+**背景**: 用户希望CLI端和Web端能够共享历史记录，实现导入导出功能
+
+**尝试的修改**:
+
+1. **后端API** (`api/main.py`):
+   - 添加历史记录CRUD接口 (`/api/records`)
+   - `RecordCreateRequest` / `RecordResponse` 数据模型
+   - 使用 `HistoryManager` 管理记录存储
+
+2. **CLI端** (`main.py`):
+   - 添加 `ai_bidding_history` 列表记录每次叫牌详情
+   - 修改保存历史记录逻辑，传递详细历史
+   - 导入功能支持从JSON文件导入
+
+3. **BiddingService** (`bridge/bidding_service.py`):
+   - 添加 `bid_history` 列表
+   - 添加 `_record_bid_history()` 方法
+   - 在 `ai_bid()` / `_fallback_bid()` / `human_bid()` 中记录
+
+4. **Web端** (`web/src/App.jsx`):
+   - 导出功能：将 hands 对象转为字符串，finalContract 转为字符串
+   - 导入功能：调用后端API添加记录
+   - 加载记录时解析 bid_meaning 和 ai_bidding_history
+
+5. **HistoryManager** (`utils/history.py`):
+   - 添加 `ai_bidding_history` 字段到 `BiddingRecord`
+   - 修改 `add_record()` 支持新字段
+
+**遇到的问题**:
+
+1. **Web端导入422错误**:
+   - 原因：导入时 hands 格式不匹配，某些必需字段缺失默认值
+   - 尝试修复：添加 hands 格式转换，为字段提供默认值
+
+2. **CLI端加载记录失败**:
+   - 错误：`'dict' object has no attribute 'replace'`
+   - 原因：CLI端期望 hands 是字符串格式，但Web端保存的可能是对象格式
+   - 位置：`main.py` line 924, `utils/history.py` line 135
+
+3. **数据格式不兼容**:
+   - CLI端和Web端的 hands 存储格式不一致
+   - CLI端：字符串 `"♠AQ ♥QJ93 ♦853 ♣AQ76"`
+   - Web端：对象 `{spades, hearts, diamonds, clubs, hcp, display}`
+   - 虽然导出时进行了转换，但导入/加载时仍出现问题
+
+**根本原因**:
+- CLI端和Web端的数据模型差异太大
+- 需要大量的格式转换逻辑，容易出错
+- 两边同时修改导致复杂度倍增
+
+**最终结果**:
+- 使用 `git checkout` 回滚所有修改
+- CLI端和Web端保持记录隔离状态
+- CLI端：文件系统 `bidding_history.json`
+- Web端：浏览器 localStorage `biddingRecords`
+
+**经验教训**:
+1. 跨平台数据共享需要预先设计统一的数据模型
+2. 不应该在两边同时修改，应该先统一后端格式
+3. 导入导出功能应该基于统一的后端API，而不是直接操作文件
+
+**回滚的文件**:
+- `api/main.py`
+- `bridge/bidding_service.py`
+- `main.py`
+- `utils/history.py`
+- `web/src/App.jsx`
+- `web/src/services/api.js`
+
+---
+
 ## 2026-03-25
 
 ### 历史记录导入导出功能（原始需求，未实现）
@@ -83,7 +209,7 @@
 - 两者格式不同，无法互通
 
 **待实现**:
-1. 设计统一的记录格式（见下方）
+1. 设计统一的记录格式
 2. 终端版添加导入/导出菜单选项
 3. 网页版添加导入/导出按钮
 4. 格式转换逻辑

@@ -16,7 +16,7 @@ if sys.platform == 'win32':
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -34,7 +34,7 @@ from knowledge.loader import JFLoader, JFRetriever
 from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT
 from llm.deepseek_client import DeepSeekClient
 from llm.doubao_client import DoubaoVisionClient
-from utils.screenshot import BridgeScreenshotCapture
+from utils.screenshot import BridgeScreenshotCapture, trigger_screenshot_shortcut, read_clipboard_image
 from config import JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM, DEFAULT_FALLBACK_MODEL, DEFAULT_MAIN_PROMPT_MODEL
 
 try:
@@ -222,7 +222,11 @@ async def human_bid(request: HumanBidRequest):
             verbose=True
         )
         
-        bid = result.get("选定叫品", request.user_input).strip()
+        # 人类叫牌时，直接使用用户输入的叫品，而不是LLM返回的"选定叫品"
+        # 避免LLM解析错误导致显示的叫品与实际不符
+        bid = request.user_input.strip()
+        if bid.upper() == "P":
+            bid = "pass"
         meaning = result.get("叫品含义", "")
         
         return HumanBidResponse(
@@ -560,10 +564,6 @@ async def custom_deal(request: CustomDealRequest):
         )
 
 
-class ImageDealRequest(BaseModel):
-    image_path: str
-
-
 class ImageDealResponse(BaseModel):
     hands: Dict[str, dict]
     dealer: str
@@ -575,23 +575,34 @@ class ImageDealResponse(BaseModel):
 
 
 @app.post("/api/image-deal", response_model=ImageDealResponse)
-async def image_deal(request: ImageDealRequest):
+async def image_deal(image: bytes = File(..., description="图片文件")):
     """从图片读取牌局接口"""
     try:
         import os
-        image_path = request.image_path.strip('"\'')
+        import tempfile
         
-        if not os.path.exists(image_path):
-            return ImageDealResponse(
-                hands={},
-                dealer="南",
-                success=False,
-                message=f"文件不存在: {image_path}"
-            )
+        print(f"[INFO] 收到图片上传请求，大小: {len(image)} bytes")
         
-        result = vision_client.read_cards_from_image(image_path)
+        # 保存上传的文件到临时目录
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp:
+            tmp.write(image)
+            image_path = tmp.name
+        
+        print(f"[INFO] 图片已保存到临时文件: {image_path}")
+        
+        try:
+            print(f"[INFO] 开始调用vision_client识别图片...")
+            result = vision_client.read_cards_from_image(image_path)
+            print(f"[INFO] vision_client返回结果: {result}")
+        finally:
+            # 清理临时文件
+            if os.path.exists(image_path):
+                os.unlink(image_path)
         
         if "error" in result:
+            print(f"[ERROR] 图片识别失败: {result['error']}")
+            if "raw_response" in result:
+                print(f"[ERROR] 原始响应: {result['raw_response']}")
             return ImageDealResponse(
                 hands={},
                 dealer="南",
@@ -607,6 +618,8 @@ async def image_deal(request: ImageDealRequest):
             "东家手牌": Position.EAST
         }
         
+        validation_errors = []
+        
         for key, pos in position_map.items():
             hand_str = result.get(key)
             if hand_str and hand_str != "null":
@@ -614,7 +627,12 @@ async def image_deal(request: ImageDealRequest):
                 hand_str_clean = hand_str_clean.replace("♠", " ").replace("♥", " ").replace("♦", " ").replace("♣", " ")
                 hands[pos] = parse_hand_string(hand_str_clean)
         
-        if len(hands) == 4:
+        for pos, hand in hands.items():
+            total_cards = len(hand.spades) + len(hand.hearts) + len(hand.diamonds) + len(hand.clubs)
+            if total_cards != 13:
+                validation_errors.append(f"{get_position_name(pos)}手牌有{total_cards}张，不是13张")
+        
+        if len(hands) == 4 and not validation_errors:
             hands_dict = {}
             for pos, hand in hands.items():
                 hands_dict[get_position_name(pos)] = hand_to_dict(hand)
@@ -644,12 +662,22 @@ async def image_deal(request: ImageDealRequest):
                 page_type=result.get("页面类型", "未知")
             )
         else:
-            return ImageDealResponse(
-                hands={},
-                dealer="南",
-                success=False,
-                message=f"部分手牌识别成功，共{len(hands)}家"
-            )
+            if validation_errors:
+                error_msg = "; ".join(validation_errors)
+                print(f"[WARN] 手牌验证失败: {error_msg}")
+                return ImageDealResponse(
+                    hands={},
+                    dealer="南",
+                    success=False,
+                    message=f"手牌验证失败: {error_msg}"
+                )
+            else:
+                return ImageDealResponse(
+                    hands={},
+                    dealer="南",
+                    success=False,
+                    message=f"部分手牌识别成功，共{len(hands)}家"
+                )
     except Exception as e:
         print(f"[ERROR] 图片识别失败: {str(e)}")
         import traceback
@@ -751,6 +779,124 @@ async def screenshot_deal():
                 success=False,
                 message=f"截屏识别失败: {str(e)}"
             )
+
+
+class TriggerScreenshotResponse(BaseModel):
+    success: bool
+    message: str
+    screenshot_path: Optional[str] = None
+
+
+@app.post("/api/trigger-screenshot")
+async def trigger_screenshot():
+    """触发系统截屏快捷键"""
+    success = trigger_screenshot_shortcut()
+    if success:
+        return {"success": True, "message": "截屏已触发，请在截屏工具中选择区域后点击识别"}
+    else:
+        return {"success": False, "message": "触发截屏失败"}
+
+
+@app.post("/api/read-clipboard")
+async def read_clipboard():
+    """从剪贴板读取截图"""
+    try:
+        result = read_clipboard_image()
+        if result is None:
+            return {"success": False, "message": "剪贴板中没有图片，请先截屏"}
+        
+        image_data, fmt = result
+        import tempfile
+        import os
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{fmt}') as tmp:
+            tmp.write(image_data)
+            image_path = tmp.name
+        
+        print(f"[INFO] 截图已保存到: {image_path}")
+
+        result = vision_client.read_cards_from_image(image_path)
+        print(f"[DEBUG] vision_client返回结果: {result}")
+        
+        os.unlink(image_path)
+        
+        if "error" in result:
+            return {
+                "success": False,
+                "message": f"识别失败: {result['error']}"
+            }
+        
+        validation_errors = []
+        hands = {}
+        position_map = {
+            "南家手牌": Position.SOUTH,
+            "西家手牌": Position.WEST,
+            "北家手牌": Position.NORTH,
+            "东家手牌": Position.EAST
+        }
+        
+        for key, pos in position_map.items():
+            hand_str = result.get(key)
+            if hand_str and hand_str != "null":
+                hand_str_clean = convert_10_to_T(hand_str)
+                hand_str_clean = hand_str_clean.replace("♠", " ").replace("♥", " ").replace("♦", " ").replace("♣", " ")
+                hands[pos] = parse_hand_string(hand_str_clean)
+        
+        for pos, hand in hands.items():
+            total_cards = len(hand.spades) + len(hand.hearts) + len(hand.diamonds) + len(hand.clubs)
+            if total_cards != 13:
+                validation_errors.append(f"{get_position_name(pos)}手牌有{total_cards}张，不是13张")
+        
+        if len(hands) == 4 and not validation_errors:
+            hands_dict = {}
+            for pos, hand in hands.items():
+                hands_dict[get_position_name(pos)] = hand_to_dict(hand)
+            
+            bidding = result.get("叫牌序列")
+            bidding_str = None
+            if bidding and bidding != "null":
+                if isinstance(bidding, list):
+                    formatted_bids = []
+                    for item in bidding:
+                        if ":" in item:
+                            pos, bid = item.split(":", 1)
+                            formatted_bids.append(f"({pos}){bid}")
+                        else:
+                            formatted_bids.append(item)
+                    bidding_str = "-".join(formatted_bids) + "-"
+                else:
+                    bidding_str = bidding
+            
+            return {
+                "success": True,
+                "message": "牌局已加载",
+                "hands": hands_dict,
+                "dealer": "南",
+                "bidding_sequence": bidding_str,
+                "contract": result.get("当前定约"),
+                "page_type": result.get("页面类型", "未知")
+            }
+        else:
+            if validation_errors:
+                error_msg = "; ".join(validation_errors)
+                return {
+                    "success": False,
+                    "message": f"手牌验证失败: {error_msg}"
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": f"部分手牌识别成功，共{len(hands)}家"
+                }
+                
+    except Exception as e:
+        print(f"[ERROR] 读取剪贴板失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "message": f"读取剪贴板失败: {str(e)}"
+        }
 
 
 class DoubleDummyRequest(BaseModel):

@@ -1,8 +1,20 @@
 {
   "version": "1.0",
-  "total_cases": 28,
-  "last_updated": "2026-03-26T21:53:00",
+  "total_cases": 30,
+  "last_updated": "2026-04-03T22:54:11",
   "cases": [
+    {
+      "id": "case-030",
+      "date": "2026-04-03",
+      "tags": ["1H opening", "competitive auction", "overbid", "jump bid", "6-5 double suit"],
+      "brief": "南家6张♥持13点，同伴2S逼叫一轮，LLM选择3H过于激进（暗示16+点），实际13点。正确选择是pass。"
+    },
+    {
+      "id": "case-029",
+      "date": "2026-04-02",
+      "tags": ["competitive auction", "6-5 double suit", "underbid", "balance position", "pass too conservative"],
+      "brief": "南家6-5双高套（♠6张+♥5张）持9点，LLM选择Pass过于保守。应积极竞争2S或2H，6-5双套牌型价值被低估。"
+    },
     {
       "id": "case-028",
       "date": "2026-03-26",
@@ -291,15 +303,21 @@
     }
   ],
   "tag_statistics": {
+    "competitive auction": 2,
+    "6-5 double suit": 2,
+    "underbid": 2,
+    "overbid": 2,
+    "balance position": 1,
+    "pass too conservative": 1,
     "1D opening": 4,
-    "Jacoby transfer": 1,
-    "game invitation": 7,
-    "overbid": 1,
     "1H opening": 3,
     "1S opening": 4,
+    "Jacoby transfer": 1,
+    "game invitation": 7,
     "wrong principle": 2,
     "rule violation": 2,
     "slam bidding": 7,
-    "game contract": 6
+    "game contract": 6,
+    "jump bid": 1
   }
 }

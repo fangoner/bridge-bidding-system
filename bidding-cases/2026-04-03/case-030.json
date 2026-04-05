@@ -1,0 +1,25 @@
+{
+  "id": "case-030",
+  "date": "2026-04-03",
+  "timestamp": "2026-04-03T22:54:11",
+  "hand": {
+    "spades": "J6",
+    "hearts": "AKQ863",
+    "diamonds": "Q96",
+    "clubs": "J6",
+    "hcp": 13
+  },
+  "position": {
+    "dealer": "South",
+    "vulnerability": "None",
+    "seat": "South"
+  },
+  "bidding_sequence": ["1H", "2C", "2S", "pass", "3H"],
+  "llm_bid": "3H",
+  "correct_bid": "pass",
+  "discussion_summary": "南家6张♥套持13点，在敌方2C争叫后同伴2S逼叫一轮。LLM选择3H过于激进，JF体系中跳叫自己花色暗示16+点强牌，实际仅13点。2H不合规（2H<2S），3NT点力不够且♣无止张。正确选择是pass，接受2S定约。",
+  "discussion_content": "叫牌序列分析：\n- (南)1H：12-21点，5+张红心\n- (西)2C：11点以上，5+张草花争叫\n- (北)2S：逼叫一轮，5+张黑桃，邀请实力（10+点）\n- (东)pass\n- (南)3H ← LLM选择\n\n问题分析：\n1. 3H过于激进：跳叫自己花色暗示强牌16+，实际13点\n2. 叫品合规性：2H < 2S不合规；必须叫3阶或以上\n3. 3NT不可行：♣无止张（敌方开叫2C），且点力不够（23-28 < 25）\n4. 正确选择：pass - 联手点力不足成局，应接受2S部分定约\n\n教训：\n- 不能用跳叫描述牌型，JF体系中3H有特定含义\n- 6-5双套在竞争环境下难以准确表达\n- 点力不足时应pass，不强行叫品",
+  "tags": ["1H opening", "competitive auction", "overbid", "jump bid", "6-5 double suit"],
+  "convention": "JF",
+  "source": "user discussion"
+}

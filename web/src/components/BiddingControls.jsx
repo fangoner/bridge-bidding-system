@@ -26,6 +26,7 @@ function BiddingControls({
   customBidMeaning,
   setCustomBidMeaning,
   isVerticalLayout = false,
+  hideJFPanel = false,
 }) {
   if (!hands) return null;
 
@@ -199,8 +200,8 @@ function BiddingControls({
       </Paper>
       )}
 
-      {/* Middle: JF suggestion panel - show when human is playing and bidding not complete */}
-      {humanPosition !== null && !checkBiddingComplete() && (
+      {/* Middle: JF suggestion panel - show when human is playing and bidding not complete, and hideJFPanel is false */}
+      {!hideJFPanel && humanPosition !== null && !checkBiddingComplete() && (
         <Paper elevation={2} sx={{
           p: 2,
           flex: isVerticalLayout ? '1 1 auto' : '1 1 auto',

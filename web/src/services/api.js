@@ -166,11 +166,11 @@ export const customDeal = async (inputText) => {
 };
 
 // 从图片读取牌局
-export const imageDeal = async (imagePath) => {
+export const imageDeal = async (imageFile) => {
   try {
-    const response = await api.post('/api/image-deal', {
-      image_path: imagePath
-    });
+    const formData = new FormData();
+    formData.append('image', imageFile);
+    const response = await axios.post(`${API_BASE_URL}/api/image-deal`, formData);
     return response.data;
   } catch (error) {
     console.error('图片识别牌局失败:', error);
@@ -185,6 +185,28 @@ export const screenshotDeal = async () => {
     return response.data;
   } catch (error) {
     console.error('截屏识别牌局失败:', error);
+    throw error;
+  }
+};
+
+// 触发系统截屏
+export const triggerScreenshot = async () => {
+  try {
+    const response = await api.post('/api/trigger-screenshot');
+    return response.data;
+  } catch (error) {
+    console.error('触发截屏失败:', error);
+    throw error;
+  }
+};
+
+// 从剪贴板读取截图并识别
+export const readClipboardDeal = async () => {
+  try {
+    const response = await api.post('/api/read-clipboard');
+    return response.data;
+  } catch (error) {
+    console.error('读取剪贴板失败:', error);
     throw error;
   }
 };

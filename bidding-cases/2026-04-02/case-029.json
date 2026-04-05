@@ -1,0 +1,25 @@
+{
+  "id": "case-029",
+  "date": "2026-04-02",
+  "timestamp": "2026-04-02T23:19:22",
+  "hand": {
+    "spades": "AT8543",
+    "hearts": "AJ753",
+    "diamonds": "7",
+    "clubs": "3",
+    "hcp": 9
+  },
+  "position": {
+    "dealer": "West",
+    "vulnerability": "None",
+    "seat": "South"
+  },
+  "bidding_sequence": ["1C", "pass", "pass", "1S", "2C", "2D", "pass", "pass"],
+  "llm_bid": "pass",
+  "correct_bid": "2S or 2H",
+  "discussion_summary": "南家6-5双高套牌型，LLM给出Pass过于保守。虽仅9点，但6-5双套牌型价值被低估，应积极竞争。敌方在打2C定约，南家有单张♣且未支持敌方，应考虑自己拿墩能力。",
+  "discussion_content": "叫牌序列分析：\n- (西)1C：12-21点，至少3张草花\n- (北)pass：弱牌，不参与\n- (东)pass：弱牌\n- (南)1S：平衡位置争叫，6-15点，5+张黑桃\n- (西)2C：6+张草花，强牌\n- (北)2D：有方块长套，10+点\n- (东)pass\n- (南)pass ← LLM选择\n\n问题分析：\n1. 低估牌型价值：6-5双套（6张♠+5张♥）有拿墩潜力\n2. 错过竞争机会：敌方2C定约有单张♣配合差\n3. 未利用高花套：2S或2H都是合理竞争叫\n4. 过于依赖点力：9+10=19点但牌型点未计算\n\n建议叫品：\n- 2S：自己6张套，进攻性\n- 2H：5张♥套，敌方未叫高花\n- 2NT：询问队友高花止张",
+  "tags": ["competitive auction", "6-5 double suit", "underbid", "balance position", "pass too conservative"],
+  "convention": "JF",
+  "source": "user discussion"
+}
