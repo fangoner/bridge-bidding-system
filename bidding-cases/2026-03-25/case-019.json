@@ -26,8 +26,10 @@
   "discussion_summary": "问题在于AI漏算了♥A。北家手牌：♠953 ♥AQ54 ♦A85 ♣K96",
   "discussion_content": "问题在于AI漏算了♥A。北家手牌：♠953 ♥AQ54 ♦A85 ♣K96\n问题在于AI只检查了♦A，漏掉了♥A。需要强调必须逐门花色检查：\n",
   "tags": [
-    "slam bidding",
-    "game contract"
+    "calculation-error",
+    "slam",
+    "2NT-opening",
+    "RKCB"
   ],
   "convention": "JF",
   "source": "historical discussion"

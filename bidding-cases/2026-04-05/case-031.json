@@ -1,0 +1,28 @@
+{
+  "id": "case-031",
+  "date": "2026-04-05",
+  "timestamp": "2026-04-05T15:25:00",
+  "hand": {
+    "spades": "A8763",
+    "hearts": "-",
+    "diamonds": "KJ2",
+    "clubs": "KJ983",
+    "hcp": 12,
+    "distribution": "5-0-3-5"
+  },
+  "position": {
+    "dealer": "South",
+    "vulnerability": "Unknown",
+    "seat": "West",
+    "role": "Second seat overcall"
+  },
+  "bidding_sequence": ["(南)1S"],
+  "llm_bid": "2S",
+  "correct_bid": "2C",
+  "discussion_summary": "Michaels扣叫约定理解错误。AI认为对1S扣叫2S表示'5张S+5张低花'，实际上JF约定规定对1M开叫扣叫表示'另外高花+1低花55以上'，即对1S扣叫2S应表示5张H+5张未知低花。手牌H缺门，不满足迈克尔斯扣叫要求，正确叫品是2C自然争叫。",
+  "discussion_content": "【问题分析】\n\n**手牌情况**：西家持牌♠A8763 ♥- ♦KJ2 ♣KJ983，12点，5-0-3-5牌型\n\n**叫牌序列**：(南)1S - ?\n\n**AI错误选择**：2S（迈克尔斯扣叫）\n\n**AI错误理解**：\n- AI认为：对1S扣叫2S表示'5张S + 5张低花'\n- AI分析：'手牌S5张，C5张，因此有S5C5双套，满足5-5要求'\n\n**JF约定正确内容**（13.8.1 Michaels扣叫）：\n```\n对自然1C/D，精确1D以后，扣叫表示双高花 55 以上\n对1M 开叫扣叫表示另外高花带1低花 55 以上\n```\n\n**正确理解**：\n| 敌方开叫 | 扣叫叫品 | Michaels含义 |\n|---------|---------|-------------|\n| 1C/1D | 2C/2D | 双高花 55 以上 |\n| 1H | 2H | 5张♠ + 5张未知低花 |\n| 1S | 2S | **5张♥ + 5张未知低花** |\n\n**为什么2S不合格**：\n1. 迈克尔斯扣叫对1S开叫需要5张H，手牌H缺门\n2. 不满足'另外高花+低花55以上'的要求\n\n**为什么2C是正确叫品**：\n1. 自然争叫，显示5+张草花好套\n2. 12点满足争叫点力要求（7+点）\n3. 草花5张满足张数要求\n\n**其他叫品分析**：\n- 技术性加倍：不合格，因为H缺门，不满足'未叫花色都有3张以上'的要求\n- 2NT（不寻常2NT）：不合格，需要H和D两套低花55，手牌H缺门\n\n【关键教训】\n1. Michaels扣叫对高花开叫的含义是'另外高花+低花'，不是'开叫高花+低花'\n2. AI需要准确理解JF约定中的扣叫定义，不能自行解释\n3. 约定理解错误属于严重问题，需要在提示词中强调引用原文",
+  "tags": ["convention-error", "competitive", "1S-opening", "Michaels", "two-suiter", "overcall"],
+  "convention": "JF",
+  "source": "user discussion",
+  "severity": "high"
+}

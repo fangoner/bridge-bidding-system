@@ -30,7 +30,7 @@
   "correct_bid": "**5D**停在成局定约。",
   "discussion_summary": "**叫牌序列**：`(南)1D-(西)2C-(北)3C-(东)pass-(南)4D-(西)pass-(北)4H-(东)pass-(南)4NT-(西)pass-(北)5H-(东)pass-(南)pass...",
   "discussion_content": "",
-  "tags": [],
+  "tags": ["underbid", "slam", "1D-opening", "rebid"],
   "convention": "JF",
   "source": "historical discussion"
 }

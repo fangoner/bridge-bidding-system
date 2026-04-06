@@ -1,5 +1,6 @@
-import React from 'react';
-import { Box, Button, CircularProgress } from '@mui/material';
+import React, { useState } from 'react';
+import { Box, Button, CircularProgress, TextField, ToggleButton, ToggleButtonGroup, Typography, IconButton, Tooltip } from '@mui/material';
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import HandDisplay from './HandDisplay';
 import DoubleDummyTable from './DoubleDummyTable';
 
@@ -24,7 +25,28 @@ function CardTable({
   showDoubleDummy,
   doubleDummyResult,
   doubleDummyLoading,
+  biddingTotalTime,
+  positionRoles,
+  onPositionRoleChange,
+  onDealerChange,
+  onClearAllHands,
+  setHands,
+  biddingStarted,
+  startBidding,
 }) {
+  const [handInputs, setHandInputs] = useState({
+    '南': '',
+    '北': '',
+    '东': '',
+    '西': ''
+  })
+  const [inputErrors, setInputErrors] = useState({
+    '南': '',
+    '北': '',
+    '东': '',
+    '西': ''
+  })
+
   if (!hands) return null;
 
   const north = hands['北'];
@@ -44,6 +66,75 @@ function CardTable({
       text: 'white',
     },
   };
+
+  const isAIPosition = (position) => {
+    return positionRoles && positionRoles[position] === 'ai'
+  }
+
+  const hasHand = (position) => {
+    const hand = hands[position]
+    return hand && (hand.spades || hand.hearts || hand.diamonds || hand.clubs)
+  }
+
+  const parseHandInput = (input) => {
+    const suits = input.trim().split(/\s+/)
+    if (suits.length !== 4) {
+      return { valid: false, error: '请输入4个花色，用空格分隔' }
+    }
+    
+    const validCards = /^[AKQJTakqjt2-9\-]+$/
+    for (const suit of suits) {
+      if (suit !== '-' && !validCards.test(suit)) {
+        return { valid: false, error: '包含无效字符' }
+      }
+    }
+    
+    const calculateHCP = (cards) => {
+      let hcp = 0
+      for (const card of cards.toUpperCase()) {
+        if (card === 'A') hcp += 4
+        else if (card === 'K') hcp += 3
+        else if (card === 'Q') hcp += 2
+        else if (card === 'J') hcp += 1
+      }
+      return hcp
+    }
+    
+    const spades = suits[0] === '-' ? '' : suits[0].toUpperCase()
+    const hearts = suits[1] === '-' ? '' : suits[1].toUpperCase()
+    const diamonds = suits[2] === '-' ? '' : suits[2].toUpperCase()
+    const clubs = suits[3] === '-' ? '' : suits[3].toUpperCase()
+    
+    return {
+      valid: true,
+      hand: {
+        spades,
+        hearts,
+        diamonds,
+        clubs,
+        hcp: calculateHCP(spades + hearts + diamonds + clubs)
+      }
+    }
+  }
+
+  const handleHandInputChange = (position, value) => {
+    setHandInputs(prev => ({ ...prev, [position]: value }))
+    setInputErrors(prev => ({ ...prev, [position]: '' }))
+  }
+
+  const handleHandInputSubmit = (position) => {
+    const result = parseHandInput(handInputs[position])
+    if (!result.valid) {
+      setInputErrors(prev => ({ ...prev, [position]: result.error }))
+      return
+    }
+    
+    setHands(prev => ({
+      ...prev,
+      [position]: result.hand
+    }))
+    setHandInputs(prev => ({ ...prev, [position]: '' }))
+  }
 
   const shouldShowHandContent = (position) => {
     if (!humanPosition) {
@@ -67,6 +158,11 @@ function CardTable({
 
   const renderHandWithStatus = (hand, position, sxProps) => {
     const isCurrentlyBidding = currentBiddingPosition === position;
+    const isAI = isAIPosition(position)
+    const hasHandData = hasHand(position)
+    const showInput = isAI && !hasHandData && !biddingStarted
+    const isHuman = positionRoles && positionRoles[position] === 'human'
+    
     return (
       <Box sx={{ ...sxProps, position: 'relative' }}>
         {isCurrentlyBidding && (
@@ -85,15 +181,106 @@ function CardTable({
             <CircularProgress size={14} sx={{ color: '#ffeb3b' }} />
           </Box>
         )}
-        <HandDisplay
-          hand={hand}
-          position={position}
-          isActive={currentBidder === position}
-          isHuman={humanPosition === position}
-          isDealer={dealer === position}
-          isPartner={humanPosition && getPartnerPosition(humanPosition) === position}
-          showContent={shouldShowHandContent(position)}
-        />
+        
+        <Box sx={{
+          bgcolor: 'rgba(255, 255, 255, 0.95)',
+          borderRadius: 1,
+          p: 1,
+          width: 155,
+          height: 165,
+          boxShadow: 2,
+          display: 'flex',
+          flexDirection: 'column',
+        }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+            <Typography 
+              variant="subtitle2" 
+              sx={{ 
+                fontWeight: 'bold', 
+                fontSize: '0.85rem',
+                cursor: onDealerChange && !biddingStarted ? 'pointer' : 'default',
+                '&:hover': onDealerChange && !biddingStarted ? { color: 'primary.main' } : {}
+              }}
+              onClick={() => onDealerChange && !biddingStarted && onDealerChange(position)}
+            >
+              {position}家
+              {dealer === position && ' *'}
+              {hasHandData && hand && hand.hcp !== undefined && !showInput && ` (${hand.hcp}H)`}
+            </Typography>
+            {onPositionRoleChange && (
+              <ToggleButtonGroup
+                value={positionRoles[position]}
+                exclusive
+                onChange={(e, newRole) => {
+                  if (newRole !== null) {
+                    onPositionRoleChange(position, newRole)
+                  }
+                }}
+                size="small"
+                sx={{ height: 22 }}
+              >
+                <ToggleButton value="ai" sx={{ px: 0.5, py: 0, fontSize: '0.7rem', minWidth: 30 }}>
+                  AI
+                </ToggleButton>
+                <ToggleButton value="human" sx={{ px: 0.5, py: 0, fontSize: '0.7rem', minWidth: 30 }}>
+                  人类
+                </ToggleButton>
+              </ToggleButtonGroup>
+            )}
+          </Box>
+          
+          {showInput ? (
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+              <TextField
+                size="small"
+                placeholder="♠ ♥ ♦ ♣ 空格分隔"
+                value={handInputs[position]}
+                onChange={(e) => handleHandInputChange(position, e.target.value)}
+                error={!!inputErrors[position]}
+                helperText={inputErrors[position] || '如: AKQJ - 987 654'}
+                fullWidth
+                multiline
+                maxRows={2}
+                sx={{ 
+                  '& .MuiInputBase-input': { fontSize: '0.75rem', padding: '4px' },
+                  '& .MuiFormHelperText-root': { fontSize: '0.6rem', margin: '2px 0 0 0' }
+                }}
+              />
+              <Button 
+                size="small" 
+                variant="contained" 
+                sx={{ mt: 0.5, fontSize: '0.7rem', py: 0.3 }}
+                onClick={() => handleHandInputSubmit(position)}
+                disabled={!handInputs[position].trim()}
+              >
+                确认
+              </Button>
+            </Box>
+          ) : isHuman && !hasHandData ? (
+            <Box sx={{ 
+              flex: 1,
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              color: 'text.secondary'
+            }}>
+              <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>未知</Typography>
+            </Box>
+          ) : (
+            <Box sx={{ flex: 1 }}>
+              <HandDisplay
+                hand={hand}
+                position={position}
+                isActive={currentBidder === position}
+                isHuman={isHuman}
+                isDealer={dealer === position}
+                isPartner={humanPosition && getPartnerPosition(humanPosition) === position}
+                showContent={shouldShowHandContent(position)}
+                hideTitle={true}
+              />
+            </Box>
+          )}
+        </Box>
       </Box>
     );
   };
@@ -111,14 +298,52 @@ function CardTable({
       width: '100%',
       position: 'relative',
     }}>
+      {onClearAllHands && (!biddingStarted || (checkBiddingComplete && checkBiddingComplete())) && (
+        <Box sx={{
+          position: 'absolute',
+          top: 8,
+          left: 8,
+          zIndex: 10,
+        }}>
+          <Tooltip title="清除所有手牌">
+            <IconButton
+              size="small"
+              onClick={onClearAllHands}
+              sx={{
+                bgcolor: 'rgba(255, 255, 255, 0.9)',
+                '&:hover': { bgcolor: 'rgba(255, 255, 255, 1)' }
+              }}
+            >
+              <DeleteSweepIcon />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      )}
+      
       {checkBiddingComplete && checkBiddingComplete() && (
         <Box sx={{
           position: 'absolute',
           top: 8,
           right: 8,
           zIndex: 10,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
         }}>
-          {outputFormatsLoading && <CircularProgress size={20} sx={{ mr: 1, color: 'white' }} />}
+          {biddingTotalTime !== null && (
+            <Box sx={{
+              bgcolor: 'rgba(0, 0, 0, 0.6)',
+              color: 'white',
+              px: 1.5,
+              py: 0.5,
+              borderRadius: 1,
+              fontSize: '0.85rem',
+              fontWeight: 'medium',
+            }}>
+              ⏱ {Math.floor(biddingTotalTime / 60)}:{(biddingTotalTime % 60).toString().padStart(2, '0')}
+            </Box>
+          )}
+          {outputFormatsLoading && <CircularProgress size={20} sx={{ color: 'white' }} />}
           <Button
             variant="contained"
             size="small"
@@ -154,7 +379,7 @@ function CardTable({
         gap: { xs: 1, md: 3 },
         flex: 1,
       }}>
-        {renderHandWithStatus(west, '西', {})}
+        {renderHandWithStatus(west, '西', { marginLeft: { xs: -1, md: -3 } })}
 
         <Box className="table-center">
           <Box className="table-border" sx={{
@@ -190,7 +415,7 @@ function CardTable({
           </Box>
         </Box>
 
-        {renderHandWithStatus(east, '东', {})}
+        {renderHandWithStatus(east, '东', { marginRight: { xs: -1, md: -3 } })}
       </Box>
 
       {renderHandWithStatus(south, '南', { marginTop: { xs: 1, md: 2 } })}

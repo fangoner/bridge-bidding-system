@@ -1,0 +1,27 @@
+{
+  "id": "case-032",
+  "date": "2026-04-05",
+  "timestamp": "2026-04-05T16:30:00",
+  "hand": {
+    "spades": "AK7",
+    "hearts": "K2",
+    "diamonds": "AQJT53",
+    "clubs": "Q9",
+    "hcp": 19
+  },
+  "position": {
+    "dealer": "South",
+    "vulnerability": "Unknown",
+    "seat": "West"
+  },
+  "bidding_sequence": ["pass", "1D", "pass", "1S", "pass", "2H", "pass", "3D", "pass", "4H"],
+  "llm_bid": "4H",
+  "correct_bid": "3H or 3S",
+  "discussion_summary": "在发现D配合后，西家不应直接跳叫4H扣叫，而应先在3阶表示止张（3H或3S），让东家有机会表达C止张情况，从而决定目标是NT还是低花进局或满贯。",
+  "discussion_content": "叫牌序列：(南)pass-(西)1D-(北)pass-(东)1S-(南)pass-(西)2H-(北)pass-(东)3D-(南)pass-(西)4H\n\n西家手牌：♠AK7 ♥K2 ♦AQJT53 ♣Q9，19点\n\n问题分析：\n1. 西家2H表示D单套逼局（16+点，6+D）\n2. 东家3D表示D配合\n3. 西家在3D后直接跳叫4H扣叫是错误的\n\n正确策略：\n- 西家应先叫3H或3S表示止张\n- 如果东家有C止张，可以叫3NT\n- 如果东家无C止张，继续D进局或满贯探查\n\n止张分析：\n- S止张：东家1S应叫，通常有S止张\n- H止张：西家有HK，可以表示\n- D止张：将牌，已确认配合\n- C止张：存在问题，需要东家确认\n\nAI的错误：\n- 直接跳到4阶扣叫\n- 没有给东家表达C止张的机会\n- 可能错过更好的3NT定约\n\n这是一个止张探查策略问题，AI需要理解在低阶先表示止张，让同伴参与决策。",
+  "tags": ["sequence-error", "1D-opening", "slam-bidding", "cue-bid", "stopper-showing", "D-single-suiter", "game"],
+  "convention": "JF",
+  "source": "user discussion",
+  "error_type": "sequence-error",
+  "lesson": "在发现配合后，如果有止张探查空间，应先在低阶表示止张，让同伴参与决策是否NT或继续低花进局/满贯。"
+}

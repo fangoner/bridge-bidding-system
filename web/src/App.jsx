@@ -25,17 +25,22 @@ import {
   ListItemText,
   ListItemSecondaryAction,
   Divider,
-  Badge
+  Badge,
+  ToggleButtonGroup,
+  ToggleButton
 } from '@mui/material'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import HistoryIcon from '@mui/icons-material/History'
-import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, doubleDummyAnalysis, getFallbackModel, setFallbackModel } from './services/api'
+import LightbulbIcon from '@mui/icons-material/Lightbulb'
+import FitnessCenterIcon from '@mui/icons-material/FitnessCenter'
+import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, doubleDummyAnalysis, getFallbackModel, setFallbackModel, getAIProvider, setAIProvider } from './services/api'
 import HandDisplay from './components/HandDisplay'
 import CardTable from './components/CardTable'
 import BiddingControls from './components/BiddingControls'
 import BiddingTable from './components/BiddingTable'
 import AIOutputPanel from './components/AIOutputPanel'
+import BiddingSuggestion from './components/BiddingSuggestion'
 import MobileDraggableContainer, { SortableItem } from './components/MobileDraggableContainer'
 import { colorSchemes, defaultScheme } from './theme/colorSchemes'
 import './App.css'
@@ -48,7 +53,13 @@ const DEFAULT_PANEL_ORDER = ['cardTable', 'biddingDetails', 'biddingControls', '
 
 function App() {
   const isLoadingRecordRef = useRef(false) // 用于标记是否正在加载历史记录（不触发保存）
-  const [hands, setHands] = useState(null)
+  const [appMode, setAppMode] = useState('practice') // 'practice' 或 'suggestion'
+  const [hands, setHands] = useState({
+    '南': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
+    '北': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
+    '东': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
+    '西': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 }
+  })
   const [loading, setLoading] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
   const [suggestionLoading, setSuggestionLoading] = useState(false)
@@ -93,7 +104,13 @@ function App() {
   // 游戏设置
   const [gameMode, setGameMode] = useState('four') // 'four' 或 'pair'
   const [dealer, setDealer] = useState('南') // 发牌人位置
-  const [humanPosition, setHumanPosition] = useState(null) // 人类玩家位置
+  const [humanPosition, setHumanPosition] = useState(null) // 人类玩家位置（兼容旧逻辑）
+  const [positionRoles, setPositionRoles] = useState({
+    '南': 'ai',
+    '北': 'ai',
+    '东': 'ai',
+    '西': 'ai'
+  }) // 每个位置的角色：'human' 或 'ai'
   const [showPartnerHand, setShowPartnerHand] = useState(false) // 显示队友手牌
   const [showAIHands, setShowAIHands] = useState(false) // 显示AI手牌
   const [showOpponentHands, setShowOpponentHands] = useState(false) // 显示对方手牌
@@ -101,7 +118,9 @@ function App() {
   const [showAIBiddingOutput, setShowAIBiddingOutput] = useState(true) // 显示AI叫牌完整输出
   const [isNewDeal, setIsNewDeal] = useState(true) // 是否是新发牌
   const [stopBidding, setStopBidding] = useState(false) // 是否停止叫牌
-  const [passedPartnership, setPassedPartnership] = useState(null) // 已连续pass的搭档（'南北' 或 '东西'）
+  const [passedAIPositions, setPassedAIPositions] = useState(new Set()) // 因搭档相继pass而需要自动pass的AI位置
+  const [biddingStartTime, setBiddingStartTime] = useState(null) // 叫牌开始时间
+  const [biddingTotalTime, setBiddingTotalTime] = useState(null) // 叫牌总时间（秒）
   const [customBidMeaning, setCustomBidMeaning] = useState('') // 用户自定义叫牌含义
   const [useFallback, setUseFallback] = useState(false) // 是否使用备用提示词
   const [dealMode, setDealMode] = useState('free') // 发牌模式：free/game/slam
@@ -113,6 +132,14 @@ function App() {
       return saved || 'deepseek-chat'
     } catch {
       return 'deepseek-chat'
+    }
+  })
+  const [aiProvider, setAIProviderState] = useState(() => {
+    try {
+      const saved = localStorage.getItem('ai_provider')
+      return saved || 'deepseek'
+    } catch {
+      return 'deepseek'
     }
   })
   
@@ -146,6 +173,7 @@ function App() {
     checkApiStatus()
     loadBiddingRecords()
     syncFallbackModel()
+    syncAIProvider()
   }, [])
 
   // 同步备用模型到后端
@@ -154,6 +182,15 @@ function App() {
       await setFallbackModel(fallbackModel)
     } catch (err) {
       console.error('同步备用模型失败:', err)
+    }
+  }
+
+  // 同步AI提供商到后端
+  const syncAIProvider = async () => {
+    try {
+      await setAIProvider(aiProvider)
+    } catch (err) {
+      console.error('同步AI提供商失败:', err)
     }
   }
 
@@ -166,6 +203,18 @@ function App() {
       await setFallbackModel(newModel)
     } catch (err) {
       console.error('设置备用模型失败:', err)
+    }
+  }
+
+  // 处理AI提供商变更
+  const handleAIProviderChange = async (event) => {
+    const newProvider = event.target.value
+    setAIProviderState(newProvider)
+    localStorage.setItem('ai_provider', newProvider)
+    try {
+      await setAIProvider(newProvider)
+    } catch (err) {
+      console.error('设置AI提供商失败:', err)
     }
   }
 
@@ -228,6 +277,19 @@ function App() {
       localStorage.setItem(BIDDING_RECORDS_KEY, JSON.stringify(newRecords))
     } catch (err) {
       console.error('删除记录失败:', err)
+    }
+  }
+
+  // 批量删除叫牌记录
+  const deleteBiddingRecords = (ids) => {
+    try {
+      const idsSet = new Set(ids)
+      const newRecords = biddingRecords.filter(r => !idsSet.has(r.id))
+      setBiddingRecords(newRecords)
+      localStorage.setItem(BIDDING_RECORDS_KEY, JSON.stringify(newRecords))
+      setSelectedRecordIds(new Set())
+    } catch (err) {
+      console.error('批量删除记录失败:', err)
     }
   }
 
@@ -393,7 +455,7 @@ function App() {
       setBiddingStarted(false) // 重置叫牌开始状态
       setIsNewDeal(true) // 标记为新发牌
       setStopBidding(false) // 重置停止叫牌状态
-      setPassedPartnership(null) // 重置已pass的搭档
+      setPassedAIPositions(new Set()) // 重置已pass的AI位置
       setUseFallback(false) // 重置备用提示词状态
       setShowDoubleDummy(false) // 重置双明手显示状态
       setDoubleDummyResult(null) // 重置双明手结果
@@ -419,7 +481,7 @@ function App() {
         setBiddingStarted(false)
         setIsNewDeal(true)
         setStopBidding(false)
-        setPassedPartnership(null)
+        setPassedAIPositions(new Set())
         setUseFallback(false)
         setShowDoubleDummy(false)
         setDoubleDummyResult(null)
@@ -448,7 +510,7 @@ function App() {
         setBiddingStarted(false)
         setIsNewDeal(true)
         setStopBidding(false)
-        setPassedPartnership(null)
+        setPassedAIPositions(new Set())
         setUseFallback(false)
         setShowDoubleDummy(false)
         setDoubleDummyResult(null)
@@ -490,7 +552,7 @@ function App() {
         setBiddingStarted(false)
         setIsNewDeal(true)
         setStopBidding(false)
-        setPassedPartnership(null)
+        setPassedAIPositions(new Set())
         setUseFallback(false)
         setShowDoubleDummy(false)
         setDoubleDummyResult(null)
@@ -508,6 +570,19 @@ function App() {
   // 开始叫牌
   const startBidding = () => {
     if (hands) {
+      // 检查AI位置是否都有手牌
+      const aiPositions = Object.entries(positionRoles)
+        .filter(([, role]) => role === 'ai')
+        .map(([pos]) => pos)
+      
+      for (const pos of aiPositions) {
+        const hand = hands[pos]
+        if (!hand || (!hand.spades && !hand.hearts && !hand.diamonds && !hand.clubs)) {
+          setError(`${pos}家(AI)没有手牌，请先输入手牌`)
+          return
+        }
+      }
+      
       // 重置叫牌序列
       setBiddingSequence([])
       setCurrentBidder(dealer) // 从发牌人开始叫牌
@@ -515,7 +590,10 @@ function App() {
       setIsNewDeal(false) // 标记为非新发牌
       setAiBiddingHistory([]) // 清理上次叫牌输出
       setStopBidding(false) // 重置停止叫牌状态
-      setPassedPartnership(null) // 重置已pass的搭档
+      setPassedAIPositions(new Set()) // 重置已pass的AI位置
+      setBiddingStartTime(Date.now()) // 记录开始时间
+      setBiddingTotalTime(null) // 重置总时间
+      setError(null) // 清除错误
     }
   }
 
@@ -526,8 +604,31 @@ function App() {
     setBiddingStarted(false)
     setAiBiddingHistory([])
     setStopBidding(false)
-    setPassedPartnership(null)
+    setPassedAIPositions(new Set())
     setIsNewDeal(false)
+    setBiddingStartTime(null)
+    setBiddingTotalTime(null)
+  }
+
+  // 清除所有手牌（重新开始一局）
+  const clearAllHands = () => {
+    setHands({
+      '南': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
+      '北': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
+      '东': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
+      '西': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 }
+    })
+    setBiddingSequence([])
+    setBidSuggestion(null)
+    setAiBiddingHistory([])
+    setCurrentBidder(dealer)
+    setBiddingStarted(false)
+    setIsNewDeal(true)
+    setStopBidding(false)
+    setPassedAIPositions(new Set())
+    setOutputFormats(null)
+    setShowDoubleDummy(false)
+    setDoubleDummyResult(null)
   }
 
   // 切换停止/继续叫牌
@@ -537,14 +638,16 @@ function App() {
 
   // 添加叫牌
   const addBid = async (bid) => {
+    const isCurrentHuman = positionRoles && positionRoles[currentBidder] === 'human'
     // 人类叫牌后，立即标记叫牌已开始（在currentBidder更新之前）
-    if (humanPosition === currentBidder && !biddingStarted) {
+    if (isCurrentHuman && !biddingStarted) {
       setBiddingStarted(true)
     }
     
     // 人类叫牌时，保存叫牌记录
-    if (humanPosition === currentBidder) {
-      const biddingStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
+    if (isCurrentHuman) {
+      // 用于显示的字符串
+      const biddingStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-') + (biddingSequence.length > 0 ? '-' : '')
       
       // 如果用户输入了自定义叫牌含义，直接使用，不调用API
       if (customBidMeaning.trim()) {
@@ -557,16 +660,20 @@ function App() {
         }])
         setCustomBidMeaning('') // 清空输入框
       } else {
-        // 没有自定义含义，调用API获取
+        // 没有自定义含义，调用API获取（传递数组，后端处理格式）
         setCurrentBiddingPosition(currentBidder)
         try {
-          const result = await humanBid(biddingStr, currentBidder, bid)
+          const result = await humanBid(biddingSequence, currentBidder, bid)
           
           setAiBiddingHistory(prev => [...prev, {
             position: currentBidder,
             hand: hands[currentBidder],
             biddingSequence: biddingStr,
-            result: { bid: result.bid, meaning: result.meaning },
+            result: { 
+              bid: result.bid, 
+              meaning: result.meaning,
+              full_output: result.full_output
+            },
             timestamp: new Date().toLocaleTimeString()
           }])
         } catch (err) {
@@ -575,7 +682,11 @@ function App() {
             position: currentBidder,
             hand: hands[currentBidder],
             biddingSequence: biddingStr,
-            result: { bid: bid, meaning: '获取叫品含义失败' },
+            result: { 
+              bid: bid, 
+              meaning: '获取叫品含义失败',
+              full_output: {}
+            },
             timestamp: new Date().toLocaleTimeString()
           }])
         } finally {
@@ -627,7 +738,7 @@ function App() {
     
     // 四人模式：检查搭档两人是否相继pass（中间只有对方的一次叫牌或pass）
     // 前提：必须已有实质性叫牌（第一个实质性叫牌之前的pass不算）
-    if (gameMode === 'four' && bid === 'pass' && !passedPartnership) {
+    if (gameMode === 'four' && bid === 'pass') {
       // 检查是否已有实质性叫牌
       const hasRealBid = biddingSequence.some(b => b.bid !== 'pass')
       if (!hasRealBid) {
@@ -636,7 +747,6 @@ function App() {
       
       // 搭档关系
       const partnerships = { '南': '北', '北': '南', '东': '西', '西': '东' }
-      const partnershipNames = { '南': '南北', '北': '南北', '东': '东西', '西': '东西' }
       
       // 找到当前叫牌者的搭档
       const partner = partnerships[currentBidder]
@@ -658,24 +768,35 @@ function App() {
           const middleBid = bidsBetween[0]
           // 检查中间的叫牌是否来自对方
           if (partnerships[middleBid.position] !== partner) {
-            console.log(`搭档${currentBidder}和${partner}相继pass，后续不再调用AI`)
-            setPassedPartnership(partnershipNames[currentBidder])
+            // 相继pass成立，标记需要自动pass的AI位置
+            const currentIsAI = positionRoles[currentBidder] === 'ai'
+            const partnerIsAI = positionRoles[partner] === 'ai'
+            
+            const positionsToMark = []
+            if (currentIsAI) {
+              positionsToMark.push(currentBidder)
+            }
+            if (partnerIsAI) {
+              positionsToMark.push(partner)
+            }
+            
+            if (positionsToMark.length > 0) {
+              console.log(`搭档${currentBidder}和${partner}相继pass，AI位置${positionsToMark.join('、')}后续自动pass`)
+              setPassedAIPositions(prev => {
+                const newSet = new Set(prev)
+                positionsToMark.forEach(pos => newSet.add(pos))
+                return newSet
+              })
+            }
           }
         }
       }
     }
   }
 
-  // 检查位置是否属于已pass的搭档
-  const isInPassedPartnership = (position) => {
-    if (!passedPartnership) return false
-    
-    const partnershipPositions = {
-      '南北': ['南', '北'],
-      '东西': ['东', '西']
-    }
-    
-    return partnershipPositions[passedPartnership]?.includes(position) || false
+  // 检查AI位置是否需要自动pass
+  const shouldAIAutoPass = (position) => {
+    return passedAIPositions.has(position)
   }
 
   // 调用AI叫牌
@@ -686,12 +807,12 @@ function App() {
     if (stopBidding) return
     
     // 检查是否是人类玩家的回合
-    if (humanPosition === currentBidder) return
+    const isHumanTurn = positionRoles && positionRoles[currentBidder] === 'human'
+    if (isHumanTurn) return
     
-    // 检查当前位置是否属于已pass的搭档，如果是则直接pass
-    if (gameMode === 'four' && isInPassedPartnership(currentBidder)) {
-      console.log(`${currentBidder}家和搭档都已pass，直接pass`)
-      // 仍然需要添加到叫牌历史
+    // 检查AI位置是否需要自动pass
+    if (gameMode === 'four' && shouldAIAutoPass(currentBidder)) {
+      console.log(`${currentBidder}家因搭档相继pass，自动pass`)
       setAiBiddingHistory(prev => [...prev, {
         position: currentBidder,
         hand: hands[currentBidder],
@@ -706,8 +827,8 @@ function App() {
     setCurrentBiddingPosition(currentBidder)
     setAiLoading(true)
     try {
-      // 构建叫牌序列字符串
-      const biddingStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
+      // 用于显示的字符串
+      const biddingStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-') + (biddingSequence.length > 0 ? '-' : '')
       
       // 构建累积的叫牌历史（与终端版格式一致）
       const bidHistory = aiBiddingHistory.map(record => 
@@ -719,8 +840,8 @@ function App() {
       
       console.log(`AI叫牌: ${currentBidder}家, 手牌:`, currentHand, '叫牌序列:', biddingStr, '叫牌历史:', bidHistory)
       
-      // 调用AI叫牌API，传递备用模型参数
-      const result = await aiBid(currentHand, biddingStr, currentBidder, '2D/2H/2S：自然阻击', bidHistory, useFallback, fallbackModel)
+      // 传递数组，后端处理格式
+      const result = await aiBid(currentHand, biddingSequence, currentBidder, '2D/2H/2S：自然阻击', bidHistory, useFallback, fallbackModel, aiProvider)
       
       // 更新useFallback状态
       if (result.use_fallback !== undefined) {
@@ -782,37 +903,25 @@ function App() {
     if (isBiddingComplete()) return
     
     // 检查是否需要等待人类叫牌
-    const isHumanTurn = humanPosition === currentBidder
+    const isHumanTurn = positionRoles && positionRoles[currentBidder] === 'human'
     
-    // 四人模式下，如果当前叫牌者属于已pass的搭档，自动pass
-    if (gameMode === 'four' && isInPassedPartnership(currentBidder)) {
-      if (isHumanTurn) {
-        // 人类玩家属于已pass的搭档，自动添加pass
-        console.log(`人类玩家${currentBidder}和搭档都已pass，自动pass`)
-        setAiBiddingHistory(prev => [...prev, {
-          position: currentBidder,
-          hand: hands[currentBidder],
-          biddingSequence: biddingSequence.map(b => `(${b.position})${b.bid}`).join('-'),
-          result: { bid: 'pass', meaning: '搭档已相继pass，不再参与叫牌' },
-          timestamp: new Date().toLocaleTimeString()
-        }])
-        addBid('pass')
-      } else {
-        // AI属于已pass的搭档
-        callAIBid()
-      }
+    // 四人模式下，如果AI位置需要自动pass
+    if (gameMode === 'four' && shouldAIAutoPass(currentBidder) && !isHumanTurn) {
+      callAIBid()
       return
     }
     
-    // 人类玩家回合时，获取JF约定片段
+    // 人类玩家回合时，获取JF约定片段并自动切换到叫牌控制面板
     if (isHumanTurn) {
       getJFSuggestion()
+      setShowBiddingControls(true)
     }
     
     // AI叫牌逻辑
     if (!isHumanTurn && !stopBidding) {
       // AI回合
-      if (humanPosition === null) {
+      const hasHumanPosition = positionRoles && Object.values(positionRoles).some(r => r === 'human')
+      if (!hasHumanPosition) {
         // 观察模式：需要点击开始叫牌按钮
         if (biddingStarted) {
           callAIBid()
@@ -826,7 +935,7 @@ function App() {
         }
       }
     }
-  }, [currentBidder, humanPosition, hands, aiLoading, biddingSequence, biddingStarted, stopBidding, passedPartnership])
+  }, [currentBidder, positionRoles, hands, aiLoading, biddingSequence, biddingStarted, stopBidding, passedAIPositions])
 
   // 判断叫牌是否结束
   const isBiddingComplete = () => {
@@ -926,6 +1035,12 @@ function App() {
   // 叫牌结束时自动保存记录
   useEffect(() => {
     if (isBiddingComplete() && biddingSequence.length > 0 && hands && !isLoadingRecordRef.current) {
+      // 计算总时间
+      if (biddingStartTime) {
+        const totalTime = Math.round((Date.now() - biddingStartTime) / 1000)
+        setBiddingTotalTime(totalTime)
+      }
+      
       const finalContract = getFinalContract()
       const record = {
         id: Date.now().toString(),
@@ -954,7 +1069,7 @@ function App() {
     try {
       const biddingStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
       console.log('[DEBUG] 获取输出格式, biddingStr:', biddingStr, 'dealer:', dealer, 'gameMode:', gameMode)
-      const result = await getOutputFormats(hands, biddingStr, dealer, gameMode, humanPosition)
+      const result = await getOutputFormats(hands, biddingStr, dealer, gameMode, positionRoles)
       console.log('[DEBUG] 输出格式结果:', result)
       setOutputFormats(result)
     } catch (err) {
@@ -1021,6 +1136,26 @@ function App() {
       '西': '东'
     }
     return partners[pos]
+  }
+
+  // 处理位置角色变化
+  const handlePositionRoleChange = (position, role) => {
+    setPositionRoles(prev => {
+      const newRoles = { ...prev, [position]: role }
+      // 更新 humanPosition 以保持兼容性
+      const humanPositions = Object.entries(newRoles)
+        .filter(([, r]) => r === 'human')
+        .map(([pos]) => pos)
+      if (humanPositions.length === 0) {
+        setHumanPosition(null)
+      } else if (humanPositions.length === 1) {
+        setHumanPosition(humanPositions[0])
+      } else {
+        // 多个人类位置时，使用数组
+        setHumanPosition(humanPositions)
+      }
+      return newRoles
+    })
   }
 
   // 渲染叫牌表格
@@ -1105,7 +1240,8 @@ function App() {
 
       // 双人模式
       if (gameMode === 'pair') {
-        const partnerPosition = getPartnerPosition(humanPosition)
+        const humanPos = Array.isArray(humanPosition) ? humanPosition[0] : humanPosition
+        const partnerPosition = getPartnerPosition(humanPos)
         
         // 队友的牌根据showPartnerHand决定
         if (position === partnerPosition) {
@@ -1127,9 +1263,9 @@ function App() {
             hand={north}
             position="北"
             isActive={currentBidder === '北'}
-            isHuman={humanPosition === '北'}
+            isHuman={Array.isArray(humanPosition) ? humanPosition.includes('北') : humanPosition === '北'}
             isDealer={dealer === '北'}
-            isPartner={humanPosition && getPartnerPosition(humanPosition) === '北'}
+            isPartner={humanPosition && (Array.isArray(humanPosition) ? humanPosition.some(p => getPartnerPosition(p) === '北') : getPartnerPosition(humanPosition) === '北')}
             showContent={shouldShowHandContent('北')}
           />
         </Box>
@@ -1141,9 +1277,9 @@ function App() {
               hand={west}
               position="西"
               isActive={currentBidder === '西'}
-              isHuman={humanPosition === '西'}
+              isHuman={Array.isArray(humanPosition) ? humanPosition.includes('西') : humanPosition === '西'}
               isDealer={dealer === '西'}
-              isPartner={humanPosition && getPartnerPosition(humanPosition) === '西'}
+              isPartner={humanPosition && (Array.isArray(humanPosition) ? humanPosition.some(p => getPartnerPosition(p) === '西') : getPartnerPosition(humanPosition) === '西')}
               showContent={shouldShowHandContent('西')}
             />
           </Box>
@@ -1159,9 +1295,9 @@ function App() {
               hand={east}
               position="东"
               isActive={currentBidder === '东'}
-              isHuman={humanPosition === '东'}
+              isHuman={Array.isArray(humanPosition) ? humanPosition.includes('东') : humanPosition === '东'}
               isDealer={dealer === '东'}
-              isPartner={humanPosition && getPartnerPosition(humanPosition) === '东'}
+              isPartner={humanPosition && (Array.isArray(humanPosition) ? humanPosition.some(p => getPartnerPosition(p) === '东') : getPartnerPosition(humanPosition) === '东')}
               showContent={shouldShowHandContent('东')}
             />
           </Box>
@@ -1173,9 +1309,9 @@ function App() {
             hand={south}
             position="南"
             isActive={currentBidder === '南'}
-            isHuman={humanPosition === '南'}
+            isHuman={Array.isArray(humanPosition) ? humanPosition.includes('南') : humanPosition === '南'}
             isDealer={dealer === '南'}
-            isPartner={humanPosition && getPartnerPosition(humanPosition) === '南'}
+            isPartner={humanPosition && (Array.isArray(humanPosition) ? humanPosition.some(p => getPartnerPosition(p) === '南') : getPartnerPosition(humanPosition) === '南')}
             showContent={shouldShowHandContent('南')}
           />
         </Box>
@@ -1189,15 +1325,46 @@ function App() {
 
       {/* 标题 */}
       <Typography variant="h4" component="h1" align="center" sx={{ fontSize: { xs: '1.25rem', md: '1.75rem' }, mb: { xs: 2, md: 0 }, display: { xs: 'block', md: 'none' } }}>
-        桥牌叫牌练习系统
+        {appMode === 'practice' ? '桥牌叫牌练习系统' : '叫牌建议'}
       </Typography>
 
       {/* 标题和控制按钮 - 桌面版 */}
       <Box sx={{ mb: 2, display: { xs: 'none', md: 'flex' }, flexWrap: 'wrap', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
         <Typography variant="h4" component="h1" sx={{ fontSize: '1.75rem', mr: 3, whiteSpace: 'nowrap' }}>
-          桥牌叫牌练习系统
+          {appMode === 'practice' ? '桥牌叫牌练习系统' : '叫牌建议'}
         </Typography>
         
+        {/* 模式切换按钮 */}
+        <Button
+          variant={appMode === 'practice' ? 'contained' : 'outlined'}
+          color={appMode === 'practice' ? 'primary' : 'inherit'}
+          size="large"
+          onClick={() => setAppMode('practice')}
+          startIcon={<FitnessCenterIcon />}
+        >
+          练习
+        </Button>
+        <Button
+          variant={appMode === 'suggestion' ? 'contained' : 'outlined'}
+          color={appMode === 'suggestion' ? 'primary' : 'inherit'}
+          size="large"
+          onClick={() => setAppMode('suggestion')}
+          startIcon={<LightbulbIcon />}
+        >
+          建议
+        </Button>
+      </Box>
+
+      {/* 建议模式 */}
+      {appMode === 'suggestion' && (
+        <BiddingSuggestion />
+      )}
+
+      {/* 练习模式 */}
+      {appMode === 'practice' && (
+        <>
+      {/* 控制按钮 - 桌面版 */}
+      <Box sx={{ mb: 2, display: { xs: 'none', md: 'flex' }, flexWrap: 'wrap', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
         <Button
           variant="outlined"
           size="large"
@@ -1370,27 +1537,15 @@ function App() {
                 </Select>
               </FormControl>
 
-              <FormControl sx={{ minWidth: 90 }} size="small">
-                <InputLabel>发牌人</InputLabel>
-                <Select value={dealer} label="发牌人" onChange={(e) => { setDealer(e.target.value); setCurrentBidder(e.target.value); }}>
-                  <MenuItem value="南">南</MenuItem>
-                  <MenuItem value="西">西</MenuItem>
-                  <MenuItem value="北">北</MenuItem>
-                  <MenuItem value="东">东</MenuItem>
+              <FormControl sx={{ minWidth: 120 }} size="small">
+                <InputLabel>AI提供商</InputLabel>
+                <Select value={aiProvider} label="AI提供商" onChange={handleAIProviderChange}>
+                  <MenuItem value="deepseek">DeepSeek</MenuItem>
+                  <MenuItem value="doubao">Doubao(豆包)</MenuItem>
                 </Select>
               </FormControl>
 
-              <FormControl sx={{ minWidth: 110 }} size="small">
-                <InputLabel>人类位置</InputLabel>
-                <Select value={humanPosition === null ? 'observer' : humanPosition} label="人类位置" onChange={(e) => setHumanPosition(e.target.value === 'observer' ? null : e.target.value)}>
-                  <MenuItem value="observer">观察</MenuItem>
-                  <MenuItem value="南">南</MenuItem>
-                  <MenuItem value="西">西</MenuItem>
-                  <MenuItem value="北">北</MenuItem>
-                  <MenuItem value="东">东</MenuItem>
-                </Select>
-              </FormControl>
-
+              {aiProvider === 'deepseek' && (
               <FormControl sx={{ minWidth: 140 }} size="small">
                 <InputLabel>备用模型</InputLabel>
                 <Select value={fallbackModel} label="备用模型" onChange={handleFallbackModelChange}>
@@ -1398,6 +1553,7 @@ function App() {
                   <MenuItem value="deepseek-reasoner">Reasoner(准)</MenuItem>
                 </Select>
               </FormControl>
+              )}
             </Box>
           </Box>
 
@@ -1454,19 +1610,25 @@ function App() {
                   <Typography variant="h6">
                     当前牌局
                   </Typography>
-                  <FormControlLabel
-                    control={
-                      <Switch 
-                        checked={showDoubleDummy}
-                        onChange={(e) => toggleDoubleDummy(e.target.checked)}
-                        disabled={!isBiddingComplete()}
-                        size="small"
-                        sx={{ transform: 'scale(0.8)', transformOrigin: 'center' }}
-                      />
-                    }
-                    label={showDoubleDummy ? "显示叫牌结果" : "显示小房子"}
-                    sx={{ ml: 1, mr: 0, '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
-                  />
+                  <ToggleButtonGroup
+                    value={showDoubleDummy ? 'result' : 'table'}
+                    exclusive
+                    onChange={(e, newValue) => {
+                      if (newValue !== null) {
+                        toggleDoubleDummy(newValue === 'result')
+                      }
+                    }}
+                    size="small"
+                    sx={{ height: 26, ml: 1 }}
+                    disabled={!isBiddingComplete()}
+                  >
+                    <ToggleButton value="table" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 50 }}>
+                      叫牌过程
+                    </ToggleButton>
+                    <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 50 }}>
+                      小房子
+                    </ToggleButton>
+                  </ToggleButtonGroup>
                   
                   {/* 显示控制选项 */}
                   {gameMode === 'pair' && humanPosition && (
@@ -1482,27 +1644,28 @@ function App() {
                       sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
                     />
                   )}
-
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
                   {gameMode === 'four' && humanPosition && (
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={showAIHands}
-                        onChange={(e) => setShowAIHands(e.target.checked)}
-                        size="small"
-                      />
-                    }
-                    label="AI手牌"
-                    sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
-                  />
-                )}
-              </Box>
-                <FormControl size="small" sx={{ minWidth: 150, visibility: 'hidden' }}>
-                  <InputLabel>占位</InputLabel>
-                  <Select value="" label="占位">
-                    <MenuItem value="">占位</MenuItem>
-                  </Select>
-                </FormControl>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={showAIHands}
+                          onChange={(e) => setShowAIHands(e.target.checked)}
+                          size="small"
+                        />
+                      }
+                      label="AI手牌"
+                      sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
+                    />
+                  )}
+                  <FormControl size="small" sx={{ minWidth: 150, visibility: 'hidden' }}>
+                    <InputLabel>占位</InputLabel>
+                    <Select value="" label="占位">
+                      <MenuItem value="">占位</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Box>
               </Box>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
                 <CardTable
@@ -1526,14 +1689,26 @@ function App() {
                   showDoubleDummy={showDoubleDummy}
                   doubleDummyResult={doubleDummyResult}
                   doubleDummyLoading={doubleDummyLoading}
+                  biddingTotalTime={biddingTotalTime}
+                  positionRoles={positionRoles}
+                  onPositionRoleChange={handlePositionRoleChange}
+                  onDealerChange={(pos) => { setDealer(pos); setCurrentBidder(pos); }}
+                  onClearAllHands={clearAllHands}
+                  setHands={setHands}
+                  biddingStarted={biddingStarted}
+                  startBidding={startBidding}
                 />
               </Box>
             </Paper>
             
             {/* 右侧面板：统一面板，通过switch切换内容 */}
             {(humanPosition !== null || showAIBiddingOutput) && (() => {
-              const isHumanTurn = humanPosition !== null && humanPosition === currentBidder;
-              const canShowControls = isHumanTurn && !isBiddingComplete();
+              const isHumanTurn = humanPosition !== null && (
+                Array.isArray(humanPosition) 
+                  ? humanPosition.includes(currentBidder) 
+                  : humanPosition === currentBidder
+              );
+              const canShowControls = humanPosition !== null && !isBiddingComplete();
               // 默认显示叫牌控制（如果是人类回合），否则显示叫牌细节
               const effectiveShowControls = canShowControls ? showBiddingControls : false;
               return (
@@ -1550,49 +1725,53 @@ function App() {
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexShrink: 0 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <Typography variant="h6">
-                      {effectiveShowControls ? '叫牌控制' : '叫牌细节'}
+                      叫牌细节
                     </Typography>
-                    {canShowControls && (
-                      <FormControlLabel
-                        control={
-                          <Switch
-                            checked={showBiddingControls}
-                            onChange={(e) => setShowBiddingControls(e.target.checked)}
-                            size="small"
-                          />
+                    <ToggleButtonGroup
+                      value={effectiveShowControls ? 'controls' : 'details'}
+                      exclusive
+                      onChange={(e, newValue) => {
+                        if (newValue !== null) {
+                          setShowBiddingControls(newValue === 'controls')
                         }
-                        label={showBiddingControls ? "JF片段" : "细节"}
-                        sx={{ ml: 1 }}
-                      />
+                      }}
+                      size="small"
+                      sx={{ height: 26, ml: 1 }}
+                      disabled={!canShowControls}
+                    >
+                      <ToggleButton value="controls" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 40 }}>
+                        控制
+                      </ToggleButton>
+                      <ToggleButton value="details" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 40 }}>
+                        细节
+                      </ToggleButton>
+                    </ToggleButtonGroup>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <FormControlLabel
+                      control={<Checkbox checked={simpleDisplayMode} onChange={(e) => setSimpleDisplayMode(e.target.checked)} size="small" />}
+                      label="简单"
+                      sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
+                    />
+                    {aiBiddingHistory.length > 0 && !simpleDisplayMode && (
+                      <FormControl size="small" sx={{ minWidth: 120, '& .MuiInputBase-input': { fontSize: '0.875rem' }, '& .MuiInputLabel-root': { fontSize: '0.875rem' } }}>
+                        <InputLabel>记录</InputLabel>
+                        <Select
+                          value={selectedBiddingIndex}
+                          label="记录"
+                          onChange={(e) => setSelectedBiddingIndex(e.target.value)}
+                          sx={{ fontSize: '0.875rem' }}
+                        >
+                          <MenuItem value={-1}>最新 ({aiBiddingHistory[aiBiddingHistory.length - 1]?.position}家 {aiBiddingHistory[aiBiddingHistory.length - 1]?.result.bid})</MenuItem>
+                          {aiBiddingHistory.slice().reverse().slice(1).map((record, idx) => (
+                            <MenuItem key={idx} value={aiBiddingHistory.length - 2 - idx}>
+                              {record.position}家 {record.result.bid}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
                     )}
                   </Box>
-                  {!effectiveShowControls && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <FormControlLabel
-                        control={<Checkbox checked={simpleDisplayMode} onChange={(e) => setSimpleDisplayMode(e.target.checked)} size="small" />}
-                        label="简单"
-                        sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
-                      />
-                      {aiBiddingHistory.length > 0 && !simpleDisplayMode && (
-                        <FormControl size="small" sx={{ minWidth: 120, '& .MuiInputBase-input': { fontSize: '0.875rem' }, '& .MuiInputLabel-root': { fontSize: '0.875rem' } }}>
-                          <InputLabel>记录</InputLabel>
-                          <Select
-                            value={selectedBiddingIndex}
-                            label="记录"
-                            onChange={(e) => setSelectedBiddingIndex(e.target.value)}
-                            sx={{ fontSize: '0.875rem' }}
-                          >
-                            <MenuItem value={-1}>最新 ({aiBiddingHistory[aiBiddingHistory.length - 1]?.position}家 {aiBiddingHistory[aiBiddingHistory.length - 1]?.result.bid})</MenuItem>
-                            {aiBiddingHistory.slice().reverse().slice(1).map((record, idx) => (
-                              <MenuItem key={idx} value={aiBiddingHistory.length - 2 - idx}>
-                                {record.position}家 {record.result.bid}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      )}
-                    </Box>
-                  )}
                 </Box>
 
                 {effectiveShowControls ? (
@@ -1612,7 +1791,7 @@ function App() {
                         bidSuggestion={bidSuggestion}
                         suggestionLoading={suggestionLoading}
                         stopBidding={stopBidding}
-                        isInPassedPartnership={isInPassedPartnership}
+                        shouldAIAutoPass={shouldAIAutoPass}
                         customBidMeaning={customBidMeaning}
                         setCustomBidMeaning={setCustomBidMeaning}
                         isVerticalLayout={true}
@@ -1942,19 +2121,25 @@ function App() {
                           当前牌局
                         </Typography>
                         <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.5 }}>
-                          <FormControlLabel
-                            control={
-                              <Switch 
-                                checked={showDoubleDummy}
-                                onChange={(e) => toggleDoubleDummy(e.target.checked)}
-                                disabled={!isBiddingComplete()}
-                                size="small"
-                                sx={{ transform: 'scale(0.8)', transformOrigin: 'center' }}
-                              />
-                            }
-                            label={<span style={{ fontSize: '0.75rem' }}>{showDoubleDummy ? "显示叫牌结果" : "显示小房子"}</span>}
-                            sx={{ mr: 0 }}
-                          />
+                          <ToggleButtonGroup
+                            value={showDoubleDummy ? 'result' : 'table'}
+                            exclusive
+                            onChange={(e, newValue) => {
+                              if (newValue !== null) {
+                                toggleDoubleDummy(newValue === 'result')
+                              }
+                            }}
+                            size="small"
+                            sx={{ height: 26 }}
+                            disabled={!isBiddingComplete()}
+                          >
+                            <ToggleButton value="table" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 50 }}>
+                              叫牌过程
+                            </ToggleButton>
+                            <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 50 }}>
+                              小房子
+                            </ToggleButton>
+                          </ToggleButtonGroup>
                           
                           {/* 显示控制选项 */}
                           {gameMode === 'pair' && humanPosition && (
@@ -1966,12 +2151,14 @@ function App() {
                                   size="small"
                                 />
                               }
-                              label={<span style={{ fontSize: '0.75rem' }}>队友</span>}
-                              sx={{ mr: 0 }}
+                              label="队友手牌"
+                              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' }, mr: 0 }}
                             />
                           )}
-
-                          {gameMode === 'four' && humanPosition && (
+                        </Box>
+                      </Box>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', width: '100%', mt: 0.5 }}>
+                        {gameMode === 'four' && humanPosition && (
                           <FormControlLabel
                             control={
                               <Checkbox
@@ -1980,11 +2167,10 @@ function App() {
                                 size="small"
                               />
                             }
-                            label={<span style={{ fontSize: '0.75rem' }}>AI手牌</span>}
-                            sx={{ mr: 0 }}
+                            label="AI手牌"
+                            sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' }, mr: 0 }}
                           />
                         )}
-                        </Box>
                       </Box>
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
                         <CardTable
@@ -2008,6 +2194,14 @@ function App() {
                           showDoubleDummy={showDoubleDummy}
                           doubleDummyResult={doubleDummyResult}
                           doubleDummyLoading={doubleDummyLoading}
+                          biddingTotalTime={biddingTotalTime}
+                          positionRoles={positionRoles}
+                          onPositionRoleChange={handlePositionRoleChange}
+                          onDealerChange={(pos) => { setDealer(pos); setCurrentBidder(pos); }}
+                          onClearAllHands={clearAllHands}
+                          setHands={setHands}
+                          biddingStarted={biddingStarted}
+                          startBidding={startBidding}
                         />
                       </Box>
                     </Paper>
@@ -2015,8 +2209,13 @@ function App() {
                 )
               }
               if (panelId === 'biddingDetails' && (humanPosition !== null || showAIBiddingOutput)) {
-                const isHumanTurnMobile = humanPosition !== null && humanPosition === currentBidder;
+                const isHumanTurnMobile = humanPosition !== null && (
+                  Array.isArray(humanPosition) 
+                    ? humanPosition.includes(currentBidder) 
+                    : humanPosition === currentBidder
+                );
                 const showControlsMobile = isHumanTurnMobile && !isBiddingComplete();
+                const canShowControlsMobile = humanPosition !== null && !isBiddingComplete();
                 return (
                   <SortableItem key={panelId} id={panelId}>
                     <Paper elevation={3} sx={{ 
@@ -2043,7 +2242,7 @@ function App() {
                             bidSuggestion={bidSuggestion}
                             suggestionLoading={suggestionLoading}
                             stopBidding={stopBidding}
-                            isInPassedPartnership={isInPassedPartnership}
+                            shouldAIAutoPass={shouldAIAutoPass}
                             customBidMeaning={customBidMeaning}
                             setCustomBidMeaning={setCustomBidMeaning}
                             hideJFPanel={true}
@@ -2090,13 +2289,34 @@ function App() {
                         /* AI回合 / 叫牌结束 / 观察者模式：叫牌细节 */
                         <>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1, flexShrink: 0 }}>
-                        <Typography variant="h6">
-                          叫牌细节
-                        </Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Typography variant="h6">
+                            叫牌细节
+                          </Typography>
+                          <ToggleButtonGroup
+                            value={showControlsMobile ? 'controls' : 'details'}
+                            exclusive
+                            onChange={(e, newValue) => {
+                              if (newValue !== null) {
+                                setShowBiddingControls(newValue === 'controls')
+                              }
+                            }}
+                            size="small"
+                            sx={{ height: 26, ml: 1 }}
+                            disabled={!canShowControlsMobile}
+                          >
+                            <ToggleButton value="controls" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 40 }}>
+                              控制
+                            </ToggleButton>
+                            <ToggleButton value="details" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 40 }}>
+                              细节
+                            </ToggleButton>
+                          </ToggleButtonGroup>
+                        </Box>
                         <FormControlLabel
                           control={<Checkbox checked={simpleDisplayMode} onChange={(e) => setSimpleDisplayMode(e.target.checked)} />}
-                          label="简单显示"
-                          sx={{ ml: 1 }}
+                          label="简单"
+                          sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' }, ml: 1 }}
                         />
                       </Box>
                       
@@ -2448,8 +2668,15 @@ function App() {
             color="error"
             disabled={selectedRecordIds.size === 0}
             onClick={() => {
-              selectedRecordIds.forEach(id => deleteBiddingRecord(id))
-              setSelectedRecordIds(new Set())
+              const selectedRecords = biddingRecords.filter(r => selectedRecordIds.has(r.id))
+              const hasNotes = selectedRecords.some(r => r.note && r.note.trim() !== '')
+              if (hasNotes) {
+                const noteCount = selectedRecords.filter(r => r.note && r.note.trim() !== '').length
+                if (!window.confirm(`选中的记录中有 ${noteCount} 条包含注释，确定要删除吗？`)) {
+                  return
+                }
+              }
+              deleteBiddingRecords(Array.from(selectedRecordIds))
             }}
           >
             删除{selectedRecordIds.size > 0 && ` (${selectedRecordIds.size})`}
@@ -2585,6 +2812,8 @@ function App() {
           </Button>
         </DialogActions>
       </Dialog>
+        </>
+      )}
     </Box>
   )
 }

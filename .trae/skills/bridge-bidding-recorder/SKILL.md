@@ -171,15 +171,33 @@ D:\Bridge Card\Bidding System\
 
 ## Tagging Guidelines
 
-Use consistent tags for future retrieval:
+Use consistent tags for future retrieval. See `references/tag_taxonomy.md` for complete taxonomy.
 
-**Opening Tags**: `1♣ opening`, `1♦ opening`, `1♥ opening`, `1♠ opening`, `1NT opening`, `2♣ strong`, `2♦/♥/♠ weak`
+### Primary Error Type Tags (Required for Error Cases)
 
-**Convention Tags**: `Stayman`, `Jacoby transfer`, `Gerber`, `Blackwood`, `Splinter`, `Cue bid`
+Every error case must have **exactly one** primary error type:
 
-**Situation Tags**: `game invitation`, `slam bidding`, `competitive auction`, `preempt`, `balancing`, `card showing`
+| Tag | Chinese | Description |
+|-----|---------|-------------|
+| `overbid` | 叫过头 | Bid too aggressively |
+| `underbid` | 叫得保守 | Bid too conservatively |
+| `convention-error` | 约定理解错误 | Misunderstood convention |
+| `rule-violation` | 规则违反 | Violated bidding rules |
+| `calculation-error` | 计算错误 | Counting/arithmetic error |
+| `sequence-error` | 流程顺序错误 | Wrong order of operations |
+| `option-missing` | 叫品遗漏 | Failed to consider valid option |
 
-**Error Type Tags**: `underbid`, `overbid`, `missed game`, `missed slam`, `wrong convention`, `misread partner`
+### Context Tags (Optional)
+
+**Opening Type**: `1C-opening`, `1D-opening`, `1H-opening`, `1S-opening`, `1NT-opening`
+
+**Contract Level**: `partscore`, `game`, `slam`, `grand-slam`
+
+**Bidding Phase**: `opening`, `response`, `rebid`, `competitive`, `balancing`
+
+**Conventions**: `Stayman`, `Jacoby-transfer`, `RKCB`, `Blackwood`, `cue-bid`, `splinter`
+
+**Hand Pattern**: `balanced`, `single-suiter`, `two-suiter`, `void`, `singleton`
 
 ## Future Integration Notes
 

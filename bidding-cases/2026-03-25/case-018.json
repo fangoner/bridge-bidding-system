@@ -24,9 +24,10 @@
   "discussion_summary": "问题在于AI没有正确理解：",
   "discussion_content": "问题在于AI没有正确理解：\n这是备用提示词的逻辑问题。需要我修改提示词吗？\n",
   "tags": [
-    "slam bidding",
-    "wrong principle",
-    "game contract"
+    "convention-error",
+    "slam",
+    "2NT-opening",
+    "rebid"
   ],
   "convention": "JF",
   "source": "historical discussion"

@@ -33,9 +33,9 @@ from bridge.bidding_service import BiddingService
 from knowledge.loader import JFLoader, JFRetriever
 from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT
 from llm.deepseek_client import DeepSeekClient
-from llm.doubao_client import DoubaoVisionClient
+from llm.doubao_client import DoubaoVisionClient, DoubaoSeedClient
 from utils.screenshot import BridgeScreenshotCapture, trigger_screenshot_shortcut, read_clipboard_image
-from config import JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM, DEFAULT_FALLBACK_MODEL, DEFAULT_MAIN_PROMPT_MODEL
+from config import JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM, DEFAULT_FALLBACK_MODEL, DEFAULT_MAIN_PROMPT_MODEL, AI_PROVIDER_DEEPSEEK, AI_PROVIDER_DOUBAO, DEFAULT_AI_PROVIDER
 
 try:
     from endplay_integration import analyze_all_contracts_endplay
@@ -60,8 +60,18 @@ jf_loader = JFLoader(JF_CONVENTION_FILE)
 jf_segments = jf_loader.load()
 jf_retriever = JFRetriever(jf_segments)
 llm_client = DeepSeekClient(fallback_model=DEFAULT_FALLBACK_MODEL, main_prompt_model=DEFAULT_MAIN_PROMPT_MODEL)
+doubao_client = DoubaoSeedClient()
 vision_client = DoubaoVisionClient()
 screenshot_capture = BridgeScreenshotCapture()
+
+current_ai_provider = DEFAULT_AI_PROVIDER
+
+def get_llm_client(ai_provider: str = None):
+    global current_ai_provider
+    provider = ai_provider or current_ai_provider
+    if provider == AI_PROVIDER_DOUBAO:
+        return doubao_client
+    return llm_client
 
 
 class GameMode(str, Enum):
@@ -80,12 +90,13 @@ class DealResponse(BaseModel):
 
 class BidRequest(BaseModel):
     hand: dict
-    bidding_sequence: str
+    bidding_sequence: List[Dict[str, str]]
     position: str
     deal_system: str = DEFAULT_DEAL_SYSTEM
     bid_history: str = ""
     use_fallback: bool = False
-    fallback_model: Optional[str] = None  # 备用模型选择：deepseek-chat 或 deepseek-reasoner
+    fallback_model: Optional[str] = None
+    ai_provider: Optional[str] = None
 
 
 class FallbackModelRequest(BaseModel):
@@ -117,7 +128,7 @@ class AnalyzeResponse(BaseModel):
 
 
 class HumanBidRequest(BaseModel):
-    bidding_sequence: str
+    bidding_sequence: List[Dict[str, str]]
     position: str
     user_input: str
     deal_system: str = DEFAULT_DEAL_SYSTEM
@@ -134,7 +145,7 @@ class OutputFormatsRequest(BaseModel):
     bidding_sequence: str
     dealer: str
     game_mode: str = "四人叫牌"
-    human_position: Optional[str] = None
+    position_roles: Optional[Dict[str, str]] = None
 
 
 class OutputFormatsResponse(BaseModel):
@@ -211,13 +222,18 @@ async def analyze(request: AnalyzeRequest):
 async def human_bid(request: HumanBidRequest):
     """人类叫牌接口 - 获取叫品含义"""
     try:
-        print(f"[DEBUG] 收到人类叫牌请求: position={request.position}, user_input={request.user_input}, bidding_sequence={request.bidding_sequence}")
+        # 将数组转换为正确格式的字符串
+        bidding_str = ""
+        if request.bidding_sequence and len(request.bidding_sequence) > 0:
+            bidding_str = "-".join([f"({b['position']}){b['bid']}" for b in request.bidding_sequence]) + "-"
+        
+        print(f"[DEBUG] 收到人类叫牌请求: position={request.position}, user_input={request.user_input}, bidding_sequence={bidding_str}")
         
         bidding_service = BiddingService(llm_client, jf_retriever)
         result = bidding_service.human_bid(
             user_input=request.user_input,
             position=request.position,
-            bidding_sequence=request.bidding_sequence,
+            bidding_sequence=bidding_str,
             deal_system=request.deal_system,
             verbose=True
         )
@@ -228,6 +244,9 @@ async def human_bid(request: HumanBidRequest):
         if bid.upper() == "P":
             bid = "pass"
         meaning = result.get("叫品含义", "")
+        
+        print(f"[DEBUG] human_bid result keys: {result.keys()}")
+        print(f"[DEBUG] JF约定: {result.get('JF约定', 'NOT FOUND')}")
         
         return HumanBidResponse(
             bid=bid,
@@ -264,7 +283,6 @@ async def set_fallback_model(request: FallbackModelRequest):
             detail=f"无效的模型名称。有效选项: {', '.join(valid_models)}"
         )
     
-    # 更新全局 llm_client 的备用模型
     llm_client.fallback_model = request.fallback_model
     
     return FallbackModelResponse(
@@ -273,16 +291,90 @@ async def set_fallback_model(request: FallbackModelRequest):
     )
 
 
+class AIProviderRequest(BaseModel):
+    ai_provider: str
+
+
+class AIProviderResponse(BaseModel):
+    ai_provider: str
+    message: str
+
+
+@app.get("/api/ai-provider")
+async def get_ai_provider():
+    """获取当前AI提供商配置"""
+    return {
+        "ai_provider": current_ai_provider,
+        "available_providers": [
+            {"id": AI_PROVIDER_DEEPSEEK, "name": "DeepSeek", "models": ["deepseek-chat", "deepseek-reasoner"]},
+            {"id": AI_PROVIDER_DOUBAO, "name": "Doubao (豆包)", "models": ["Doubao-Seed-2.0-lite"]}
+        ]
+    }
+
+
+@app.post("/api/ai-provider", response_model=AIProviderResponse)
+async def set_ai_provider(request: AIProviderRequest):
+    """设置AI提供商"""
+    global current_ai_provider
+    valid_providers = [AI_PROVIDER_DEEPSEEK, AI_PROVIDER_DOUBAO]
+    if request.ai_provider not in valid_providers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"无效的AI提供商。有效选项: {', '.join(valid_providers)}"
+        )
+    
+    current_ai_provider = request.ai_provider
+    provider_name = "DeepSeek" if request.ai_provider == AI_PROVIDER_DEEPSEEK else "Doubao (豆包)"
+    
+    return AIProviderResponse(
+        ai_provider=request.ai_provider,
+        message=f"AI提供商已设置为: {provider_name}"
+    )
+
+
 @app.post("/api/bid", response_model=BidResponse)
 async def bid(request: BidRequest):
     """AI叫牌接口"""
     try:
-        print(f"[DEBUG] 收到叫牌请求: position={request.position}, hand={request.hand}, bidding_sequence={request.bidding_sequence}")
+        # 将数组转换为正确格式的字符串
+        bidding_str = ""
+        if request.bidding_sequence and len(request.bidding_sequence) > 0:
+            bidding_str = "-".join([f"({b['position']}){b['bid']}" for b in request.bidding_sequence]) + "-"
+        
+        print(f"[DEBUG] 收到叫牌请求: position={request.position}, hand={request.hand}, bidding_sequence={bidding_str}, ai_provider={request.ai_provider}")
         
         hand_info = request.hand
+        
+        # 支持两种手牌格式：
+        # 1. 旧格式：display, hcp, distribution
+        # 2. 新格式：spades, hearts, diamonds, clubs, hcp
         hand_display = hand_info.get('display', '')
         hcp = hand_info.get('hcp', 0)
         distribution = hand_info.get('distribution', '')
+        
+        # 如果没有display字段，从spades/hearts/diamonds/clubs构建
+        if not hand_display:
+            spades = hand_info.get('spades', '')
+            hearts = hand_info.get('hearts', '')
+            diamonds = hand_info.get('diamonds', '')
+            clubs = hand_info.get('clubs', '')
+            
+            # 构建display字符串
+            suit_parts = []
+            if spades:
+                suit_parts.append(f"♠{spades}")
+            if hearts:
+                suit_parts.append(f"♥{hearts}")
+            if diamonds:
+                suit_parts.append(f"♦{diamonds}")
+            if clubs:
+                suit_parts.append(f"♣{clubs}")
+            hand_display = ' '.join(suit_parts) if suit_parts else ''
+            
+            # 构建distribution字符串
+            distribution = f"S{len(spades)}-H{len(hearts)}-D{len(diamonds)}-C{len(clubs)}"
+            
+            print(f"[DEBUG] 从花色构建手牌: display={hand_display}, distribution={distribution}")
         
         class SimpleHand:
             def __init__(self, display, hcp, dist):
@@ -295,19 +387,21 @@ async def bid(request: BidRequest):
         
         hand = SimpleHand(hand_display, hcp, distribution)
         
-        # 如果请求中指定了备用模型，临时更新 llm_client
-        original_fallback = llm_client.fallback_model
-        if request.fallback_model:
-            llm_client.fallback_model = request.fallback_model
+        current_llm_client = get_llm_client(request.ai_provider)
         
-        bidding_service = BiddingService(llm_client, jf_retriever)
+        original_fallback = None
+        if request.fallback_model and request.ai_provider != AI_PROVIDER_DOUBAO:
+            original_fallback = current_llm_client.fallback_model
+            current_llm_client.fallback_model = request.fallback_model
+        
+        bidding_service = BiddingService(current_llm_client, jf_retriever)
         bidding_service.use_fallback = request.use_fallback
         bidding_service.set_bid_meanings(request.bid_history if request.bid_history else "")
         
         result = bidding_service.ai_bid(
             hand=hand,
             position=request.position,
-            bidding_sequence=request.bidding_sequence,
+            bidding_sequence=bidding_str,
             deal_system=request.deal_system,
             verbose=True
         )
@@ -318,9 +412,8 @@ async def bid(request: BidRequest):
         
         print(f"[DEBUG] 最终叫品: {bid}, 含义: {meaning}")
         
-        # 恢复原始备用模型设置
-        if request.fallback_model:
-            llm_client.fallback_model = original_fallback
+        if original_fallback:
+            current_llm_client.fallback_model = original_fallback
         
         return BidResponse(
             bid=bid,
@@ -331,9 +424,8 @@ async def bid(request: BidRequest):
         )
     except Exception as e:
         print(f"[ERROR] 叫牌失败: {str(e)}")
-        # 恢复原始备用模型设置
-        if request.fallback_model:
-            llm_client.fallback_model = original_fallback
+        if original_fallback:
+            current_llm_client.fallback_model = original_fallback
         return BidResponse(
             bid="pass",
             meaning=f"叫牌失败: {str(e)}",
@@ -387,10 +479,13 @@ async def get_output_formats(request: OutputFormatsRequest):
         # 获取庄家位置
         dealer_pos = position_map.get(request.dealer, Position.SOUTH)
         
-        # 获取人类位置
+        # 获取人类位置（从position_roles中提取）
         human_pos = None
-        if request.human_position:
-            human_pos = position_map.get(request.human_position)
+        if request.position_roles:
+            for pos_name, role in request.position_roles.items():
+                if role == 'human':
+                    human_pos = position_map.get(pos_name)
+                    break  # 取第一个人类位置
         
         # 叫牌序列格式已经是 (南)1S-(西)pass 格式，无需转换
         bidding_str = request.bidding_sequence
@@ -907,6 +1002,87 @@ class DoubleDummyResponse(BaseModel):
     success: bool
     table_data: Optional[Dict] = None
     error: Optional[str] = None
+
+
+class BiddingSuggestionRequest(BaseModel):
+    hand: str
+    bidding_sequence: str
+    current_bidder: str
+    dealer: str = "南"
+
+
+@app.post("/api/bidding-suggestion", response_model=BidResponse)
+async def bidding_suggestion(request: BiddingSuggestionRequest):
+    """叫牌建议接口 - 返回与练习叫牌相同的结构"""
+    try:
+        hand_str = request.hand
+        hand_str = hand_str.replace('10', 'T').replace('♠', ' ').replace('♥', ' ').replace('♦', ' ').replace('♣', ' ')
+        
+        hand = parse_hand_string(hand_str)
+        hcp = hand.hcp
+        distribution = f"{len(hand.spades)}-{len(hand.hearts)}-{len(hand.diamonds)}-{len(hand.clubs)}"
+        hand_display = f"♠{hand.spades} ♥{hand.hearts} ♦{hand.diamonds} ♣{hand.clubs}"
+        
+        class SimpleHand:
+            def __init__(self, display, hcp_val, dist):
+                self._display = display
+                self.hcp = hcp_val
+                self.distribution = dist
+            
+            def to_display_string(self):
+                return self._display
+        
+        simple_hand = SimpleHand(hand_display, hcp, distribution)
+        
+        current_llm_client = get_llm_client()
+        
+        bidding_service = BiddingService(current_llm_client, jf_retriever)
+        
+        bid_history = bidding_service.build_bid_history(
+            bidding_sequence=request.bidding_sequence,
+            dealer=request.dealer,
+            deal_system="2D/2H/2S：自然阻击",
+            verbose=True
+        )
+        
+        if bid_history:
+            bidding_service.set_bid_meanings(bid_history)
+            print(f"[INFO] 叫牌历史:\n{bid_history}")
+        
+        result = bidding_service.ai_bid(
+            hand=simple_hand,
+            position=request.current_bidder,
+            bidding_sequence=request.bidding_sequence,
+            deal_system="2D/2H/2S：自然阻击",
+            verbose=True
+        )
+        
+        bid = result.get("选定叫品") or "pass"
+        meaning = result.get("叫品含义") or result.get("叫品含义及后续建议") or ""
+        selection_process = result.get("叫品筛选过程") or ""
+        
+        if bid_history:
+            result["叫牌历史"] = bid_history
+        
+        return BidResponse(
+            bid=bid,
+            meaning=meaning,
+            selection_process=selection_process,
+            use_fallback=bidding_service.use_fallback,
+            full_output=result
+        )
+        
+    except Exception as e:
+        print(f"[ERROR] 叫牌建议失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return BidResponse(
+            bid="pass",
+            meaning=f"叫牌建议失败: {str(e)}",
+            selection_process="",
+            use_fallback=False,
+            full_output={"error": str(e)}
+        )
 
 
 @app.post("/api/double-dummy", response_model=DoubleDummyResponse)

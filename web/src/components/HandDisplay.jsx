@@ -7,9 +7,9 @@ const HandCard = styled(Box, {
 })(({ theme, isActive, isHuman, isPartner }) => ({
   background: 'white',
   borderRadius: theme.shape.borderRadius,
-  padding: theme.spacing(1.5, 2),
-  boxShadow: theme.shadows[1],
-  minWidth: 140,
+  padding: theme.spacing(0.5),
+  boxShadow: 'none',
+  width: '100%',
   fontFamily: '"Courier New", Courier, monospace',
   transition: 'all 0.3s ease',
   ...(isActive && {
@@ -33,8 +33,8 @@ const HandTitle = styled(Typography)(({ theme }) => ({
 }));
 
 const SuitLine = styled(Box)(({ theme }) => ({
-  fontSize: '1rem',
-  lineHeight: 1.5,
+  fontSize: '0.95rem',
+  lineHeight: 1.4,
   whiteSpace: 'nowrap',
 }));
 
@@ -47,7 +47,7 @@ const SuitSymbol = styled('span', {
 }));
 
 const HiddenHand = styled(Box)(({ theme }) => ({
-  minHeight: 80,
+  height: '100%',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -65,6 +65,8 @@ const HiddenHand = styled(Box)(({ theme }) => ({
  * @param {boolean} props.isDealer - Whether this position is the dealer
  * @param {boolean} props.isPartner - Whether this position is the human's partner
  * @param {boolean} props.showContent - Whether to show hand content or hide it
+ * @param {React.ReactNode} props.titleExtra - Extra content to display next to the title
+ * @param {boolean} props.hideTitle - Whether to hide the title
  */
 function HandDisplay({
   hand,
@@ -73,16 +75,18 @@ function HandDisplay({
   isHuman = false,
   isDealer = false,
   isPartner = false,
-  showContent = true
+  showContent = true,
+  titleExtra = null,
+  hideTitle = false,
 }) {
-  if (!hand) return null;
-
   const suitColors = {
     spades: '#000000',
     hearts: '#d32f2f',
     diamonds: '#d32f2f', // Using red for diamonds as well (could use orange)
     clubs: '#000000',
   };
+
+  const hasCards = hand && (hand.spades || hand.hearts || hand.diamonds || hand.clubs);
 
   return (
     <HandCard
@@ -91,11 +95,16 @@ function HandDisplay({
       isPartner={isPartner}
       className={`hand-card ${isActive ? 'active' : ''} ${isHuman ? 'human' : ''} ${isPartner ? 'partner' : ''}`}
     >
-      <HandTitle variant="subtitle2" className="hand-title">
-        {position}{isDealer ? '*' : ''} {showContent ? `(${hand.hcp})` : ''} {isHuman ? '[你]' : isPartner ? '[队友]' : ''}
-      </HandTitle>
+      {!hideTitle && (
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <HandTitle variant="subtitle2" className="hand-title" sx={{ mb: 0, borderBottom: 'none', pb: 0 }}>
+            {position}{isDealer ? '*' : ''} {showContent && hasCards ? `(${hand.hcp})` : ''}
+          </HandTitle>
+          {titleExtra}
+        </Box>
+      )}
 
-      {showContent ? (
+      {showContent && hasCards ? (
         <>
           <SuitLine className="suit-line">
             <SuitSymbol color={suitColors.spades} className="suit-black">♠</SuitSymbol>
@@ -117,7 +126,7 @@ function HandDisplay({
       ) : (
         <HiddenHand className="hidden-hand">
           <Typography variant="body2" color="text.secondary" align="center">
-            [隐藏]
+            {hasCards ? '[隐藏]' : '[待输入]'}
           </Typography>
         </HiddenHand>
       )}

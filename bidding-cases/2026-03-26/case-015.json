@@ -24,7 +24,7 @@
   "correct_bid": null,
   "discussion_summary": "**北家手牌关键张计算：**\n- 关键张定义：4个A + 将牌K（♥K）= 5个关键张\n- 北家：无A，无♥K → **0个关键张**\n- 北家有将牌Q（♥Q）",
   "discussion_content": "",
-  "tags": [],
+  "tags": ["convention-error", "slam", "RKCB", "1H-opening"],
   "convention": "JF",
   "source": "historical discussion"
 }

@@ -21,7 +21,7 @@
   "correct_bid": null,
   "discussion_summary": "叫牌序列：(南)1D-(西)1H-(北)1S-(东)2H",
   "discussion_content": "",
-  "tags": [],
+  "tags": ["unclear"],
   "convention": "JF",
   "source": "historical discussion"
 }

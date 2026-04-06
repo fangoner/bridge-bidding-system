@@ -24,7 +24,7 @@
   "correct_bid": null,
   "discussion_summary": "**手牌实际情况**:\n- ♠J65: 3张\n- ♥QJT76: 5张\n- ♦8732: 4张\n- ♣Q: **1张** ← 明显是单张",
   "discussion_content": "",
-  "tags": [],
+  "tags": ["calculation-error", "response", "1S-opening"],
   "convention": "JF",
   "source": "historical discussion"
 }

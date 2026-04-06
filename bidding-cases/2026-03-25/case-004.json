@@ -20,11 +20,10 @@
   "discussion_summary": "这是一个严重的规则错误！",
   "discussion_content": "这是一个严重的规则错误！\n## 问题分析\n### 错误1：叫品递增规则违反\nLLM的错误理解：\n**错误！** 扣叫敌方花色时，必须叫**高于**敌方叫品的阶次。东家叫2H，南家要扣叫H，必须叫**3H**。\n### 错误2：合规性检查逻辑错误\nLLM说\"扣叫vs自然叫，通常允许\"，这是完全错误的。桥牌规则中，叫品是否合规只看阶次和花色等级，不看\"含义\"。\n## 正确的叫品选择\n南家选择了不合规的2H，这是严重的规则错误。\n",
   "tags": [
-    "1D opening",
-    "1H opening",
-    "1S opening",
-    "game invitation",
-    "rule violation"
+    "rule-violation",
+    "competitive",
+    "1D-opening",
+    "cue-bid"
   ],
   "convention": "JF",
   "source": "historical discussion"

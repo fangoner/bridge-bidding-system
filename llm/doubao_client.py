@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import DOUBAO_API_KEY, DOUBAO_BASE_URL, DOUBAO_VISION_ENDPOINT
+from config import DOUBAO_API_KEY, DOUBAO_BASE_URL, DOUBAO_VISION_ENDPOINT, DOUBAO_SEED_ENDPOINT
 
 
 VISION_PROMPT = """你的任务是从桥牌游戏图片中提取信息：
@@ -138,3 +138,86 @@ class DoubaoVisionClient:
                 hands[en_key] = vision_result[cn_key]
         
         return hands
+
+
+class DoubaoSeedClient:
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, endpoint: Optional[str] = None):
+        self.api_key = api_key or DOUBAO_API_KEY
+        self.base_url = base_url or DOUBAO_BASE_URL
+        self.endpoint = endpoint or DOUBAO_SEED_ENDPOINT
+        self.client = None
+        
+        if self.api_key:
+            self.client = OpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url
+            )
+    
+    def is_configured(self) -> bool:
+        return self.client is not None and self.endpoint and self.endpoint != ""
+    
+    def chat(self, system_prompt: str, user_prompt: str = "", temperature: float = 0.7) -> str:
+        if not self.client:
+            raise ValueError("Doubao API Key未配置，请设置环境变量 DOUBAO_API_KEY")
+        
+        if not self.endpoint:
+            raise ValueError("Doubao Seed Endpoint未配置，请设置环境变量 DOUBAO_SEED_ENDPOINT")
+        
+        messages = [{"role": "system", "content": system_prompt}]
+        if user_prompt:
+            messages.append({"role": "user", "content": user_prompt})
+        
+        response = self.client.chat.completions.create(
+            model=self.endpoint,
+            messages=messages,
+            temperature=temperature
+        )
+        
+        return response.choices[0].message.content
+    
+    def chat_json(self, system_prompt: str, user_prompt: str = "", temperature: float = 0.7) -> Dict[str, Any]:
+        if not self.client:
+            raise ValueError("Doubao API Key未配置，请设置环境变量 DOUBAO_API_KEY")
+        
+        if not self.endpoint:
+            raise ValueError("Doubao Seed Endpoint未配置，请设置环境变量 DOUBAO_SEED_ENDPOINT")
+        
+        messages = [{"role": "system", "content": system_prompt}]
+        if user_prompt:
+            messages.append({"role": "user", "content": user_prompt})
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.endpoint,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=8192
+            )
+            content = response.choices[0].message.content
+            return json.loads(content)
+        except json.JSONDecodeError:
+            pass
+        except Exception as e:
+            pass
+        
+        response_text = self.chat(system_prompt, user_prompt, temperature)
+        
+        try:
+            json_match = response_text
+            if "```json" in response_text:
+                json_match = response_text.split("```json")[1].split("```")[0]
+            elif "```" in response_text:
+                json_match = response_text.split("```")[1].split("```")[0]
+            
+            return json.loads(json_match.strip())
+        except json.JSONDecodeError:
+            return {"raw_response": response_text, "error": "JSON解析失败"}
+    
+    def chat_bidding(self, system_prompt: str, temperature: float = 0.7) -> Dict[str, Any]:
+        return self.chat_json(system_prompt, "", temperature)
+    
+    def chat_bidding_fallback(self, system_prompt: str, temperature: float = 0.7) -> Dict[str, Any]:
+        return self.chat_json(system_prompt, "", temperature)
+    
+    def chat_human_bid(self, system_prompt: str, temperature: float = 0) -> Dict[str, Any]:
+        return self.chat_json(system_prompt, "", temperature)

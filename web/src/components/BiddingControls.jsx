@@ -22,7 +22,7 @@ function BiddingControls({
   bidSuggestion,
   suggestionLoading,
   stopBidding,
-  isInPassedPartnership,
+  shouldAIAutoPass,
   customBidMeaning,
   setCustomBidMeaning,
   isVerticalLayout = false,
@@ -48,7 +48,9 @@ function BiddingControls({
     ['7C', '7D', '7H', '7S', '7NT', null, 'X', 'XX', 'pass', null, null],
   ];
 
-  const isHumanTurn = humanPosition === currentBidder;
+  const isHumanTurn = Array.isArray(humanPosition) 
+    ? humanPosition.includes(currentBidder) 
+    : humanPosition === currentBidder;
   const finalContract = getFinalContract();
 
   return (
@@ -109,7 +111,7 @@ function BiddingControls({
                       variant="outlined"
                       size="small"
                       onClick={() => addBid(bid)}
-                      disabled={(!isHumanTurn && humanPosition !== null) || (gameMode === 'four' && isInPassedPartnership(currentBidder))}
+                      disabled={!isHumanTurn && humanPosition !== null}
                     >
                       {bid}
                     </Button>
@@ -125,7 +127,7 @@ function BiddingControls({
                           variant="outlined"
                           size="small"
                           onClick={() => addBid(bid)}
-                          disabled={(!isHumanTurn && humanPosition !== null) || (gameMode === 'four' && isInPassedPartnership(currentBidder))}
+                          disabled={!isHumanTurn && humanPosition !== null}
                         >
                           {bid}
                         </Button>
@@ -139,7 +141,7 @@ function BiddingControls({
                         variant="outlined"
                         size="small"
                         onClick={() => addBid(bid)}
-                        disabled={(!isHumanTurn && humanPosition !== null) || (gameMode === 'four' && isInPassedPartnership(currentBidder))}
+                        disabled={!isHumanTurn && humanPosition !== null}
                       >
                         {bid}
                       </Button>
@@ -149,7 +151,7 @@ function BiddingControls({
               )}
             </Box>
 
-            {humanPosition !== null && isHumanTurn && !isInPassedPartnership(currentBidder) && (
+            {humanPosition !== null && isHumanTurn && (
               <Box sx={{ mt: isVerticalLayout ? 1 : 2 }}>
                 <TextField
                   size="small"
@@ -162,12 +164,6 @@ function BiddingControls({
                   maxRows={2}
                 />
               </Box>
-            )}
-
-            {gameMode === 'four' && isInPassedPartnership(currentBidder) && isHumanTurn && (
-              <Alert severity="info" sx={{ mt: isVerticalLayout ? 1 : 2, py: isVerticalLayout ? 0.5 : undefined }}>
-                您的搭档已相继pass，您将自动pass
-              </Alert>
             )}
 
             {humanPosition !== null && !isHumanTurn && stopBidding && (

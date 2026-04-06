@@ -2,104 +2,110 @@
 
 Standardized tags for categorizing bidding cases.
 
-## Opening Tags
+## Primary Tags: Error Types (Required for Error Cases)
 
-Indicate the opening bid that started the auction:
+Every error case must have exactly one primary error type tag:
 
-- `1♣ opening` - One club opening
-- `1♦ opening` - One diamond opening
-- `1♥ opening` - One heart opening
-- `1♠ opening` - One spade opening
-- `1NT opening` - One no-trump opening
-- `2♣ strong` - Strong two clubs (artificial)
-- `2♦/♥/♠ weak` - Weak two-bid preempt
-- `2NT opening` - Two no-trump opening (20-21)
-- `3-level preempt` - Three-level preemptive opening
-- `4-level preempt` - Four-level preemptive opening
+| Tag | Chinese | Description | Example |
+|-----|---------|-------------|---------|
+| `overbid` | 叫过头 | Bid too aggressively for the hand strength | 13 points but bid game; jumped without sufficient strength |
+| `underbid` | 叫得保守 | Bid too conservatively, missed opportunity | 6-5 shape but passed; missed game/slam |
+| `convention-error` | 约定理解错误 | Misunderstood or misapplied a convention | RKCB response logic wrong; Stayman misuse |
+| `rule-violation` | 规则违反 | Violated bidding rules | Bid lower than previous bid; illegal pass |
+| `calculation-error` | 计算错误 | Arithmetic or counting error | Key cards miscounted; HCP miscounted |
+| `sequence-error` | 流程顺序错误 | Wrong order of operations | Cue bid before confirming trump fit |
+| `option-missing` | 叫品遗漏 | Failed to consider a valid bid option | Didn't consider double; missed transfer |
 
-## Convention Tags
+## Secondary Tags: Bidding Context (Optional)
 
-Indicate conventions used in the auction:
+### Opening Type
 
-- `Stayman` - Stayman convention (2♣ response to 1NT)
-- `Jacoby transfer` - Jacoby transfer responses to 1NT
-- `Texas transfer` - Texas transfer (4-level)
-- `Gerber` - Gerber ace-asking (4♣)
-- `Blackwood` - Blackwood ace-asking (4NT)
-- `RKCB` - Roman Key Card Blackwood
-- `Splinter` - Splinter bid (singleton/void showing)
-- `Jacoby 2NT` - Jacoby 2NT (game force with trump support)
-- `Drury` - Drury convention (passed hand response)
-- `Negative double` - Negative (Sputnik) double
-- `Takeout double` - Takeout double
-- `Responsive double` - Responsive double
-- `Support double` - Support double
-- `Cue bid` - Cue bid (Michaels, unusual NT, etc.)
-- `Michaels` - Michaels cue bid
-- `Unusual NT` - Unusual 2NT (two lowest unbid suits)
+- `1C-opening` - One club opening
+- `1D-opening` - One diamond opening
+- `1H-opening` - One heart opening
+- `1S-opening` - One spade opening
+- `1NT-opening` - One no-trump opening
+- `2C-opening` - Strong two clubs
+- `2D/H/S-opening` - Weak two opening
+- `2NT-opening` - Two no-trump opening (20-21)
+- `preempt` - Preemptive opening (3+ level)
 
-## Situation Tags
+### Bidding Phase
 
-Describe the type of bidding situation:
+- `opening` - Opening bid decision
+- `response` - Response to opening
+- `rebid` - Opener's or responder's rebid
+- `competitive` - Competitive auction (both sides bidding)
+- `balancing` - Balancing/protective position
 
-- `game invitation` - Inviting to game contract
-- `slam bidding` - Investigating slam possibilities
-- `grand slam` - Seven-level contract investigation
-- `competitive auction` - Both sides bidding
-- `preempt` - Preemptive bidding situation
-- `balancing` - Balancing (protective) position
-- `passed hand` - Responder is a passed hand
-- `card showing` - Showing specific card holdings
-- `control showing` - Showing controls (aces/kings)
-- `signoff` - Sign-off bid (to play)
-- `forcing bid` - Forcing bid (one round/game)
-- `non-forcing` - Non-forcing bid
-
-## Error Type Tags
-
-Classify the type of error (if applicable):
-
-- `underbid` - Bid too conservatively
-- `overbid` - Bid too aggressively
-- `missed game` - Failed to reach makable game
-- `missed slam` - Failed to reach makable slam
-- `wrong contract` - Reached wrong strain/level
-- `wrong convention` - Applied convention incorrectly
-- `misread partner` - Misinterpreted partner's bid
-- `misread opponent` - Misinterpreted opponent's bid
-- "forgot convention` - Failed to apply known convention
-- `counting error` - Miscounted points/distribution
-
-## Strain Tags
-
-Indicate the final or intended strain:
-
-- `no trump` - No-trump contract
-- `spade contract` - Spade as trump
-- `heart contract` - Heart as trump
-- `diamond contract` - Diamond as trump
-- `club contract` - Club as trump
-
-## Level Tags
-
-Indicate the contract level:
+### Contract Level
 
 - `partscore` - Partscore contract (1-2 level)
-- `game level` - Game contract (3NT, 4♥/♠, 5♣/♦)
-- `small slam` - Six-level contract
-- `grand slam` - Seven-level contract
+- `game` - Game contract decision (3NT, 4M, 5m)
+- `slam` - Slam investigation
+- `grand-slam` - Grand slam investigation
 
-## Vulnerability Tags
+### Conventions Used
 
-- `vulnerable` - Side is vulnerable
-- `non-vulnerable` - Side is not vulnerable
-- `favorable` - Favorable vulnerability
-- `unfavorable` - Unfavorable vulnerability
+- `Stayman` - Stayman convention
+- `Jacoby-transfer` - Jacoby transfer
+- `RKCB` - Roman Key Card Blackwood
+- `Blackwood` - Standard Blackwood
+- `cue-bid` - Cue bid (control showing)
+- `splinter` - Splinter bid
+- `negative-double` - Negative double
+- `takeout-double` - Takeout double
 
-## Usage Guidelines
+### Hand Pattern
 
-1. Use 3-5 tags per case for optimal categorization
-2. Always include at least one "Opening Tag" when applicable
-3. Include "Error Type Tags" when discussing corrections
-4. Be consistent with tag names (use this taxonomy)
-5. Add new tags only when a case truly doesn't fit existing categories
+- `balanced` - Balanced hand (4333, 4432, 5332)
+- `single-suiter` - Single long suit (6+ cards)
+- `two-suiter` - Two long suits (5-5, 6-5, etc.)
+- `three-suiter` - Three suits (4441, 5440)
+- `void` - Hand contains a void
+- `singleton` - Hand contains a singleton
+
+## Tag Selection Guidelines
+
+### Required Tags for Error Cases
+
+1. **Exactly one** primary error type tag (from Error Types)
+2. **At least one** context tag (opening type, phase, or level)
+
+### Recommended Tag Combinations
+
+```
+Example 1: Overbid in slam bidding
+Tags: ["overbid", "slam", "RKCB", "calculation-error"]
+
+Example 2: Underbid with two-suiter
+Tags: ["underbid", "two-suiter", "competitive", "1S-opening"]
+
+Example 3: Convention error in response
+Tags: ["convention-error", "response", "Stayman", "1NT-opening"]
+```
+
+### Tag Priority
+
+When multiple errors exist, prioritize by impact:
+1. `rule-violation` - Always tag if present (most severe)
+2. `calculation-error` - If it directly caused the wrong bid
+3. `convention-error` - If convention was misunderstood
+4. `sequence-error` - If order of operations was wrong
+5. `overbid` / `underbid` - The outcome of the error
+
+## Statistics Categories
+
+For tag_statistics in cases-index.json, count:
+- Primary error types (overbid, underbid, convention-error, etc.)
+- Contract levels (game, slam, partscore)
+- Opening types (1H-opening, 1NT-opening, etc.)
+
+## Migration Notes
+
+Old tags mapped to new system:
+- `wrong principle` → `convention-error` or `sequence-error`
+- `pass too conservative` → `underbid`
+- `wrong convention` → `convention-error`
+- `point counting error` → `calculation-error`
+- `historical`, `error` → Remove, use specific error type instead

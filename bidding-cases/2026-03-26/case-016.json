@@ -24,7 +24,7 @@
   "correct_bid": null,
   "discussion_summary": "叫牌存在问题，需要分析",
   "discussion_content": "",
-  "tags": [],
+  "tags": ["unclear"],
   "convention": "JF",
   "source": "historical discussion"
 }

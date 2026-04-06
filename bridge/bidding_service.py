@@ -1,6 +1,6 @@
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List, Tuple
 from bridge.bidding import extract_retrieval_keyword, get_partner_position, get_position_name
-from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT
+from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT, EXPLAIN_BID_PROMPT
 from config import MAIN_PROMPT_TEMPERATURE, FALLBACK_PROMPT_TEMPERATURE
 
 
@@ -273,11 +273,15 @@ class BiddingService:
         deal_system: str,
         verbose: bool = False
     ) -> Dict:
-        if not self.llm_client.is_configured():
-            bid = user_input.strip().upper()
-            if bid == "P":
-                bid = "pass"
-            return {"选定叫品": bid, "叫品含义": "API Key未配置，无法获取叫品含义"}
+        bid = user_input.strip().upper()
+        if bid == "P":
+            bid = "pass"
+        
+        if bid.lower() == "pass":
+            player_name = position
+            bidding_prefix = bidding_sequence if bidding_sequence else ""
+            full_sequence = f"{bidding_prefix}({player_name})pass-"
+            return {"选定叫品": "pass", "叫品含义": "pass：不叫", "JF约定": "", "完整叫牌序列": full_sequence}
         
         player_name = position
         partner_name = get_partner_position(position)
@@ -285,10 +289,24 @@ class BiddingService:
         jf_keyword = extract_retrieval_keyword(bidding_sequence, deal_system, player_name)
         jf_result = self.jf_retriever.retrieve_with_preprocess(jf_keyword, bidding_sequence, partner_name)
         
+        subsequent_bids = jf_result.get("subsequent_bids", [])
+        for item in subsequent_bids:
+            if item.get("bid", "").upper() == bid.upper():
+                meaning = item.get("line", "")
+                if meaning:
+                    if verbose:
+                        print(f"[human_bid] 从JF约定匹配到 {bid} 含义: {meaning}")
+                    full_sequence = f"{bidding_sequence}({player_name}){bid}-"
+                    return {"选定叫品": bid, "叫品含义": meaning, "JF约定": jf_keyword, "完整叫牌序列": full_sequence}
+        
+        if not self.llm_client.is_configured():
+            full_sequence = f"{bidding_sequence}({player_name}){bid}-"
+            return {"选定叫品": bid, "叫品含义": "API Key未配置，无法获取叫品含义", "JF约定": jf_keyword, "完整叫牌序列": full_sequence}
+        
         is_opener = self._check_is_opener(bidding_sequence)
         
         is_structural = jf_result.get("is_structural_convention", False)
-        has_subsequent = len(jf_result.get("subsequent_bids", [])) > 0
+        has_subsequent = len(subsequent_bids) > 0
         
         if is_structural and has_subsequent:
             jf_content = ""
@@ -296,6 +314,9 @@ class BiddingService:
         else:
             jf_content = jf_result.get("original_content", "")
             subsequent_bids_str = ""
+        
+        if verbose:
+            print(f"[human_bid] JF约定未匹配到 {bid}，调用AI推断")
         
         prompt = HUMAN_BID_PROMPT.format(
             bidding=bidding_sequence if bidding_sequence else "空",
@@ -307,6 +328,116 @@ class BiddingService:
         
         try:
             result = self.llm_client.chat_human_bid(prompt, temperature=0)
+            result["JF约定"] = jf_keyword
+            if "完整叫牌序列" not in result:
+                result["完整叫牌序列"] = f"{bidding_sequence}({player_name}){bid}-"
             return result
         except Exception as e:
-            return {"选定叫品": user_input.strip().upper(), "叫品含义": f"获取叫品含义失败: {e}"}
+            full_sequence = f"{bidding_sequence}({player_name}){bid}-"
+            return {"选定叫品": bid, "叫品含义": f"获取叫品含义失败: {e}", "JF约定": jf_keyword, "完整叫牌序列": full_sequence}
+    
+    def explain_bid(
+        self,
+        bid: str,
+        bidding_sequence: str,
+        position: str,
+        deal_system: str = "2D/2H/2S：自然阻击",
+        verbose: bool = False
+    ) -> str:
+        """解释某个叫品在当前序列下的含义（不知道手牌）"""
+        
+        if bid.lower() == "pass":
+            return "pass：不叫"
+        
+        partner_name = get_partner_position(position)
+        jf_keyword = extract_retrieval_keyword(bidding_sequence, deal_system, position)
+        jf_result = self.jf_retriever.retrieve_with_preprocess(jf_keyword, bidding_sequence, partner_name)
+        
+        subsequent_bids = jf_result.get("subsequent_bids", [])
+        for item in subsequent_bids:
+            if item.get("bid", "").upper() == bid.upper():
+                meaning = item.get("line", "")
+                if meaning:
+                    if verbose:
+                        print(f"[explain_bid] 从JF约定匹配到 {bid} 含义: {meaning}")
+                    return meaning
+        
+        jf_content = jf_result.get("original_content", "")
+        if not jf_content:
+            jf_content = "无相关JF约定"
+        
+        prompt = EXPLAIN_BID_PROMPT.format(
+            bidding=bidding_sequence if bidding_sequence else "空（开叫位置）",
+            position=position,
+            bid=bid,
+            jf_content=jf_content
+        )
+        
+        try:
+            if verbose:
+                print(f"[explain_bid] 调用AI解释 {bid}")
+            result = self.llm_client.chat(prompt, temperature=0)
+            meaning = result.strip() if result else f"{bid}：含义未知"
+            if verbose:
+                print(f"[explain_bid] AI解释结果: {meaning}")
+            return meaning
+        except Exception as e:
+            if verbose:
+                print(f"[explain_bid] AI解释失败: {e}")
+            return f"{bid}：含义未知"
+    
+    def build_bid_history(
+        self,
+        bidding_sequence: str,
+        dealer: str = "南",
+        deal_system: str = "2D/2H/2S：自然阻击",
+        verbose: bool = False
+    ) -> str:
+        """从叫牌序列构建叫牌历史
+        
+        支持两种格式：
+        - 带位置前缀: (南)pass-(西)2C-(北)pass-...
+        - 不带位置前缀: pass-2C-pass-...
+        """
+        
+        if not bidding_sequence:
+            return ""
+        
+        import re
+        position_pattern = re.compile(r'^\((南|西|北|东)\)(.+)$')
+        
+        bids = [b.strip() for b in bidding_sequence.split("-") if b.strip()]
+        
+        if not bids:
+            return ""
+        
+        bid_history = []
+        
+        for i, bid_item in enumerate(bids):
+            match = position_pattern.match(bid_item)
+            if match:
+                position = match.group(1)
+                bid = match.group(2).strip()
+            else:
+                positions = ["南", "西", "北", "东"]
+                dealer_idx = positions.index(dealer)
+                position = positions[(dealer_idx + i) % 4]
+                bid = bid_item
+            
+            if bid.lower() == "pass":
+                bid_history.append(f"{position}家pass")
+                continue
+            
+            partial_sequence = "-".join(bids[:i]) if i > 0 else ""
+            
+            meaning = self.explain_bid(
+                bid=bid,
+                bidding_sequence=partial_sequence,
+                position=position,
+                deal_system=deal_system,
+                verbose=verbose
+            )
+            
+            bid_history.append(f"{position}家{bid}：{meaning}")
+        
+        return "\n".join(bid_history)

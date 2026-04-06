@@ -81,8 +81,32 @@ export const setFallbackModel = async (fallbackModel) => {
   }
 };
 
+// 获取AI提供商配置
+export const getAIProvider = async () => {
+  try {
+    const response = await api.get('/api/ai-provider');
+    return response.data;
+  } catch (error) {
+    console.error('获取AI提供商配置失败:', error);
+    throw error;
+  }
+};
+
+// 设置AI提供商
+export const setAIProvider = async (aiProvider) => {
+  try {
+    const response = await api.post('/api/ai-provider', {
+      ai_provider: aiProvider
+    });
+    return response.data;
+  } catch (error) {
+    console.error('设置AI提供商失败:', error);
+    throw error;
+  }
+};
+
 // AI叫牌
-export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H/2S：自然阻击', bidHistory = '', useFallback = false, fallbackModel = null) => {
+export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H/2S：自然阻击', bidHistory = '', useFallback = false, fallbackModel = null, aiProvider = null) => {
   try {
     const requestData = {
       hand,
@@ -93,9 +117,12 @@ export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H
       use_fallback: useFallback
     };
     
-    // 如果指定了备用模型，添加到请求中
     if (fallbackModel) {
       requestData.fallback_model = fallbackModel;
+    }
+    
+    if (aiProvider) {
+      requestData.ai_provider = aiProvider;
     }
     
     const response = await api.post('/api/bid', requestData);
@@ -123,14 +150,14 @@ export const humanBid = async (biddingSequence, position, userInput, dealSystem 
 };
 
 // 获取输出格式（紧凑格式和Deep Finesse格式）
-export const getOutputFormats = async (hands, biddingSequence, dealer, gameMode = '四人叫牌', humanPosition = null) => {
+export const getOutputFormats = async (hands, biddingSequence, dealer, gameMode = '四人叫牌', positionRoles = null) => {
   try {
     const response = await api.post('/api/output-formats', {
       hands,
       bidding_sequence: biddingSequence,
       dealer,
       game_mode: gameMode,
-      human_position: humanPosition
+      position_roles: positionRoles
     });
     return response.data;
   } catch (error) {
@@ -207,6 +234,22 @@ export const readClipboardDeal = async () => {
     return response.data;
   } catch (error) {
     console.error('读取剪贴板失败:', error);
+    throw error;
+  }
+};
+
+// 叫牌建议
+export const getBiddingSuggestion = async (hand, biddingSequence, currentBidder, dealer = '南') => {
+  try {
+    const response = await api.post('/api/bidding-suggestion', {
+      hand,
+      bidding_sequence: biddingSequence,
+      current_bidder: currentBidder,
+      dealer
+    });
+    return response.data;
+  } catch (error) {
+    console.error('获取叫牌建议失败:', error);
     throw error;
   }
 };

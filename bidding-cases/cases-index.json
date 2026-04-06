@@ -1,323 +1,221 @@
 {
-  "version": "1.0",
-  "total_cases": 30,
-  "last_updated": "2026-04-03T22:54:11",
+  "version": "2.0",
+  "total_cases": 32,
+  "last_updated": "2026-04-05T16:30:00",
+  "tag_system": "error-focused",
   "cases": [
-    {
-      "id": "case-030",
-      "date": "2026-04-03",
-      "tags": ["1H opening", "competitive auction", "overbid", "jump bid", "6-5 double suit"],
-      "brief": "南家6张♥持13点，同伴2S逼叫一轮，LLM选择3H过于激进（暗示16+点），实际13点。正确选择是pass。"
-    },
-    {
-      "id": "case-029",
-      "date": "2026-04-02",
-      "tags": ["competitive auction", "6-5 double suit", "underbid", "balance position", "pass too conservative"],
-      "brief": "南家6-5双高套（♠6张+♥5张）持9点，LLM选择Pass过于保守。应积极竞争2S或2H，6-5双套牌型价值被低估。"
-    },
-    {
-      "id": "case-028",
-      "date": "2026-03-26",
-      "tags": ["1S opening", "cue bid", "slam bidding", "wrong convention", "trump confirmation"],
-      "brief": "逼局进程中急于扣叫，未先确认将牌配合。3C后应先叫3S支持S，而非直接扣叫4C。"
-    },
     {
       "id": "case-001",
       "date": "2026-03-25",
-      "tags": [
-        "1D opening",
-        "Jacoby transfer",
-        "game invitation",
-        "overbid"
-      ],
-      "brief": "南家持13点中限牌力，面对北家2S邀请叫(10-12点，5+张S)。LLM选择直接3NT进局过于激进，忽略了联手点力下限仅23点未达成局门槛。正确叫品应为2NT接受邀请，让北家持上限时决定是否继续进局。"
+      "tags": ["overbid", "game", "1D-opening", "Jacoby-transfer", "response"],
+      "brief": "南家13点面对2S邀请叫，LLM选择3NT进局过于激进。联手下限23点未达成局门槛，应2NT接受邀请。"
     },
     {
       "id": "case-002",
       "date": "2026-03-25",
-      "tags": [
-        "1D opening",
-        "1H opening",
-        "1S opening",
-        "game invitation",
-        "wrong principle"
-      ],
-      "brief": "速达原则误用：应先XX示强（10点以上），然后探索满贯可能性。"
+      "tags": ["sequence-error", "slam", "1D-opening", "cue-bid"],
+      "brief": "速达原则误用：应先XX示强（10点以上），然后探索满贯可能性，而非直接跳叫4D。"
     },
     {
       "id": "case-003",
       "date": "2026-03-25",
-      "tags": [
-        "1D opening",
-        "1H opening",
-        "1S opening"
-      ],
+      "tags": ["calculation-error", "opening", "1S-opening"],
       "brief": "点力范围判断错误：9点不在12-21范围内，LLM错误地判断为可以开叫。"
     },
     {
       "id": "case-004",
       "date": "2026-03-25",
-      "tags": [
-        "1D opening",
-        "1H opening",
-        "1S opening",
-        "game invitation",
-        "rule violation"
-      ],
+      "tags": ["rule-violation", "competitive", "1D-opening", "cue-bid"],
       "brief": "叫品递增规则违反：扣叫敌方花色时必须叫高于敌方叫品的阶次。东家叫2H，南家要扣叫H必须叫3H。"
     },
     {
       "id": "case-005",
       "date": "2026-03-25",
-      "tags": [
-        "1S opening",
-        "game invitation",
-        "slam bidding",
-        "game contract"
-      ],
-      "brief": "配合判断和邀请问题：联手23-32点，邀请是正确的选择，但配合判断可能过于保守。"
+      "tags": ["underbid", "game", "1S-opening", "response"],
+      "brief": "配合判断过于保守：联手23-32点，邀请是正确选择，但配合判断可能过于保守。"
     },
     {
       "id": "case-006",
       "date": "2026-03-25",
-      "tags": [
-        "1D opening",
-        "game invitation",
-        "slam bidding",
-        "game contract",
-        "rule violation"
-      ],
-      "brief": "RKCB问叫后的处理：南家在RKCB问叫后选择pass，但应该叫5D停在成局定约。在RKCB约定中，问叫人可以叫回将牌花色停在成局，不受普通叫品递增规则限制。"
+      "tags": ["convention-error", "slam", "1D-opening", "RKCB"],
+      "brief": "RKCB问叫后处理错误：南家在RKCB问叫后选择pass，但应该叫5D停在成局定约。问叫人可以叫回将牌花色停在成局。"
     },
     {
       "id": "case-007",
       "date": "2026-03-25",
-      "tags": [
-        "1S opening",
-        "game invitation",
-        "slam bidding",
-        "game contract"
-      ],
-      "brief": "加倍理解错误：在敌方阻击叫后，加倍是强牌的标准处理方式之一，不应该被排除。"
+      "tags": ["option-missing", "game", "1S-opening", "competitive", "response"],
+      "brief": "加倍选项被排除：在敌方阻击叫后，加倍是强牌的标准处理方式之一，AI未考虑此选项。"
     },
     {
       "id": "case-008",
       "date": "2026-03-25",
-      "tags": [
-        "1H opening",
-        "slam bidding",
-        "game contract"
-      ],
+      "tags": ["convention-error", "slam", "RKCB", "1H-opening"],
       "brief": "RKCB答叫逻辑错误：答叫的首要约束是关键张数量必须匹配，而不是优先考虑显示将牌Q。"
+    },
+    {
+      "id": "case-012",
+      "date": "2026-03-26",
+      "tags": ["unclear"],
+      "brief": "南家手牌：9点，♠6张。需要进一步分析。"
+    },
+    {
+      "id": "case-013",
+      "date": "2026-03-26",
+      "tags": ["unclear"],
+      "brief": "叫牌序列：(南)1D-(西)1H-(北)1S-(东)2H。需要进一步分析。"
+    },
+    {
+      "id": "case-014",
+      "date": "2026-03-26",
+      "tags": ["underbid", "slam", "1D-opening", "rebid"],
+      "brief": "满贯进程中停在5阶，应该继续探查或停在成局。"
+    },
+    {
+      "id": "case-015",
+      "date": "2026-03-26",
+      "tags": ["convention-error", "slam", "RKCB", "1H-opening"],
+      "brief": "关键张计算：北家无A无♥K，应为0个关键张，有将牌Q（♥Q）。"
+    },
+    {
+      "id": "case-016",
+      "date": "2026-03-26",
+      "tags": ["unclear"],
+      "brief": "叫牌存在问题，需要分析。"
     },
     {
       "id": "case-017",
       "date": "2026-03-25",
-      "tags": [
-        "1S opening",
-        "game invitation",
-        "slam bidding"
-      ],
-      "brief": "单张识别错误：手牌中♣只有1张（Q），但LLM分析说无单张，这是LLM的错误判断。"
+      "tags": ["calculation-error", "response", "1S-opening"],
+      "brief": "单张识别错误：手牌中♣只有1张（Q），但LLM分析说无单张，这是事实判断错误。"
     },
     {
       "id": "case-018",
       "date": "2026-03-25",
-      "tags": [
-        "slam bidding",
-        "wrong principle",
-        "game contract"
-      ],
+      "tags": ["convention-error", "slam", "2NT-opening", "rebid"],
       "brief": "满贯探查问题：备用提示词的逻辑问题导致错误的满贯决策。"
     },
     {
       "id": "case-019",
       "date": "2026-03-25",
-      "tags": [
-        "slam bidding",
-        "game contract"
-      ],
+      "tags": ["calculation-error", "slam", "2NT-opening", "RKCB"],
       "brief": "关键张计算错误：AI只检查了♦A，漏掉了♥A，需要强调必须逐门花色检查。"
-    },
-    {
-      "id": "case-012",
-      "date": "2026-03-26",
-      "tags": [],
-      "brief": "南家手牌：9点，♠6张"
-    },
-    {
-      "id": "case-013",
-      "date": "2026-03-26",
-      "tags": [],
-      "brief": "叫牌序列：(南)1D-(西)1H-(北)1S-(东)2H"
-    },
-    {
-      "id": "case-014",
-      "date": "2026-03-26",
-      "tags": [],
-      "brief": "**叫牌序列**：`(南)1D-(西)2C-(北)3C-(东)pass-(南)4D-(西)pass-(北)4H-(东)pass-(南)4NT-(西)pass-(北)5H-(东)pass-(南)pass"
-    },
-    {
-      "id": "case-015",
-      "date": "2026-03-26",
-      "tags": [],
-      "brief": "**北家手牌关键张计算：**\n- 关键张定义：4个A + 将牌K（♥K）= 5个关键张\n- 北家：无A，无♥K → **0个关键张**\n- 北家有将牌Q（♥Q）"
-    },
-    {
-      "id": "case-016",
-      "date": "2026-03-26",
-      "tags": [],
-      "brief": "叫牌存在问题，需要分析"
-    },
-    {
-      "id": "case-017",
-      "date": "2026-03-26",
-      "tags": [],
-      "brief": "叫牌存在问题，需要分析"
-    },
-    {
-      "id": "case-018",
-      "date": "2026-03-26",
-      "tags": [],
-      "brief": "叫牌存在问题，需要分析"
-    },
-    {
-      "id": "case-019",
-      "date": "2026-03-26",
-      "tags": [],
-      "brief": "**手牌实际情况**:\n- ♠J65: 3张\n- ♥QJT76: 5张\n- ♦8732: 4张\n- ♣Q: **1张** ← 明显是单张"
     },
     {
       "id": "case-020",
       "date": "2026-03-26",
-      "tags": [],
-      "brief": "叫牌存在问题，需要分析"
+      "tags": ["unclear"],
+      "brief": "叫牌存在问题，需要分析。"
     },
     {
       "id": "case-021",
       "date": "2026-03-26",
-      "tags": [],
-      "brief": "叫牌存在问题，需要分析"
+      "tags": ["unclear"],
+      "brief": "叫牌存在问题，需要分析。"
     },
     {
       "id": "case-022",
       "date": "2026-03-26",
-      "hand": "♠832 ♥3 ♦AKJ987 ♣Q43",
-      "hcp": 10,
-      "position": "应叫",
-      "bidding_sequence": [
-        "1D",
-        "X"
-      ],
-      "llm_bid": "4D",
-      "tags": [
-        "historical",
-        "error"
-      ]
+      "tags": ["overbid", "response", "1D-opening"],
+      "brief": "1D-X后跳叫4D过于激进，应先示强再探索。"
     },
     {
       "id": "case-023",
       "date": "2026-03-26",
-      "hand": "♠KQ7543 ♥96 ♦A92 ♣92",
-      "hcp": 9,
-      "position": "开叫",
-      "bidding_sequence": [],
-      "llm_bid": "1S",
-      "tags": [
-        "historical",
-        "error"
-      ]
+      "tags": ["unclear"],
+      "brief": "需要进一步分析。"
     },
     {
       "id": "case-024",
       "date": "2026-03-26",
-      "hand": "♠93 ♥JT865 ♦AK ♣A632",
-      "hcp": 12,
-      "position": "开叫",
-      "bidding_sequence": [
-        "1H",
-        "PASS",
-        "1S",
-        "PASS",
-        "2C",
-        "PASS",
-        "3H",
-        "PASS"
-      ],
-      "llm_bid": "PASS",
-      "tags": [
-        "historical",
-        "error"
-      ]
+      "tags": ["unclear"],
+      "brief": "用户质疑叫牌选择，需要进一步分析。"
     },
     {
       "id": "case-025",
       "date": "2026-03-26",
-      "hand": "♠AT5 ♥97 ♦AKT75 ♣9543253",
-      "hcp": 11,
-      "position": "Unknown",
-      "bidding_sequence": [],
-      "llm_bid": "PASS",
-      "tags": [
-        "historical",
-        "error"
-      ]
+      "tags": ["unclear"],
+      "brief": "手牌数据异常，需要核实。"
     },
     {
       "id": "case-026",
       "date": "2026-03-26",
-      "hand": "♠J65 ♥QJT76 ♦8732 ♣Q",
-      "hcp": 6,
-      "position": "应叫",
-      "bidding_sequence": [
-        "1S",
-        "PASS",
-        "1N",
-        "PASS",
-        "2N",
-        "PASS"
-      ],
-      "llm_bid": "3S",
-      "tags": [
-        "historical",
-        "error"
-      ]
+      "tags": ["calculation-error", "response", "1S-opening"],
+      "brief": "单张识别错误：♣Q是单张但系统误判为无单张。"
     },
     {
       "id": "case-027",
       "date": "2026-03-26",
-      "hand": "♠Q74 ♥K ♦KQ42 ♣KQJ92",
-      "hcp": 16,
-      "position": "应叫",
-      "bidding_sequence": [
-        "PASS",
-        "PASS",
-        "1S",
-        "PASS"
-      ],
-      "llm_bid": null,
-      "tags": [
-        "historical",
-        "error"
-      ]
+      "tags": ["unclear"],
+      "brief": "应叫问题，需要进一步分析。"
+    },
+    {
+      "id": "case-028",
+      "date": "2026-03-26",
+      "tags": ["sequence-error", "slam", "1S-opening", "cue-bid", "response"],
+      "brief": "逼局进程中急于扣叫，未先确认将牌配合。3C后应先叫3S支持S，而非直接扣叫4C。"
+    },
+    {
+      "id": "case-029",
+      "date": "2026-04-02",
+      "tags": ["underbid", "competitive", "two-suiter", "balancing"],
+      "brief": "南家6-5双高套持9点，LLM选择Pass过于保守。应积极竞争2S或2H，6-5双套牌型价值被低估。"
+    },
+    {
+      "id": "case-030",
+      "date": "2026-04-03",
+      "tags": ["overbid", "competitive", "1H-opening", "two-suiter"],
+      "brief": "南家6张♥持13点，同伴2S逼叫一轮，LLM选择3H过于激进（暗示16+点），实际13点。正确选择是pass。"
+    },
+    {
+      "id": "case-031",
+      "date": "2026-04-05",
+      "tags": ["convention-error", "competitive", "1S-opening", "Michaels", "two-suiter"],
+      "brief": "Michaels扣叫理解错误：对1S扣叫2S应表示5张H+5张低花，而非5张S+低花。手牌H缺门，应选择2C自然争叫。"
+    },
+    {
+      "id": "case-032",
+      "date": "2026-04-05",
+      "tags": ["sequence-error", "slam", "1D-opening", "cue-bid", "stopper-showing"],
+      "brief": "止张探查策略错误：3D后不应直接跳叫4H扣叫，应先叫3H/3S表示止张，让同伴决定NT或低花进局/满贯。"
     }
   ],
   "tag_statistics": {
-    "competitive auction": 2,
-    "6-5 double suit": 2,
-    "underbid": 2,
-    "overbid": 2,
-    "balance position": 1,
-    "pass too conservative": 1,
-    "1D opening": 4,
-    "1H opening": 3,
-    "1S opening": 4,
-    "Jacoby transfer": 1,
-    "game invitation": 7,
-    "wrong principle": 2,
-    "rule violation": 2,
-    "slam bidding": 7,
-    "game contract": 6,
-    "jump bid": 1
+    "error_types": {
+      "overbid": 3,
+      "underbid": 3,
+      "convention-error": 5,
+      "rule-violation": 1,
+      "calculation-error": 4,
+      "sequence-error": 3,
+      "option-missing": 1,
+      "unclear": 9
+    },
+    "contract_levels": {
+      "game": 3,
+      "slam": 8,
+      "partscore": 0
+    },
+    "opening_types": {
+      "1D-opening": 6,
+      "1H-opening": 2,
+      "1S-opening": 6,
+      "1NT-opening": 0,
+      "2NT-opening": 2
+    },
+    "bidding_phases": {
+      "opening": 1,
+      "response": 6,
+      "rebid": 3,
+      "competitive": 4,
+      "balancing": 1
+    },
+    "conventions": {
+      "RKCB": 4,
+      "cue-bid": 3,
+      "Jacoby-transfer": 1,
+      "two-suiter": 3,
+      "Michaels": 1,
+      "stopper-showing": 1
+    }
   }
 }

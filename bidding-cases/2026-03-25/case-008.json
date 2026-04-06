@@ -22,9 +22,10 @@
   "discussion_summary": "这个叫牌有一个严重的逻辑错误：",
   "discussion_content": "这个叫牌有一个严重的逻辑错误：\n## 问题分析\n**错误：**\n**正确答叫应该是：**\n## 根本原因\nAI的逻辑错误在于：优先考虑\"显示将牌Q\"，而忽略了答叫的首要约束是**关键张数量必须匹配**。\n需要我修改叫牌逻辑代码来修复这个问题吗？\n",
   "tags": [
-    "1H opening",
-    "slam bidding",
-    "game contract"
+    "convention-error",
+    "slam",
+    "RKCB",
+    "1H-opening"
   ],
   "convention": "JF",
   "source": "historical discussion"

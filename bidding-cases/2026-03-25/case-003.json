@@ -17,9 +17,9 @@
   "discussion_summary": "这是一个严重的逻辑错误！",
   "discussion_content": "这是一个严重的逻辑错误！\n## 问题分析\n**9不在12-21范围内！** 这是基础的数学比较错误。\n## 根本原因\n这样LLM在判断点力范围时必须写出比较过程，而不是直接给出结论。这应该能避免\"9在12-21范围内\"这种低级错误。\n",
   "tags": [
-    "1D opening",
-    "1H opening",
-    "1S opening"
+    "calculation-error",
+    "opening",
+    "1S-opening"
   ],
   "convention": "JF",
   "source": "historical discussion"
