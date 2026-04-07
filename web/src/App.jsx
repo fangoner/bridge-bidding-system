@@ -1527,6 +1527,14 @@ function App() {
                 </Select>
               </FormControl>
               )}
+
+              <FormControl sx={{ minWidth: 180 }} size="small">
+                <InputLabel>敌方叫牌体系</InputLabel>
+                <Select value={dealSystem} label="敌方叫牌体系" onChange={(e) => setDealSystem(e.target.value)}>
+                  <MenuItem value="2D/2H/2S：自然阻击">2D/2H/2S：自然阻击</MenuItem>
+                  <MenuItem value="2D：多功能，2H/S：麦德伯格，2NT：双低花">多功能/麦德伯格</MenuItem>
+                </Select>
+              </FormControl>
             </Box>
           </Box>
 
@@ -1716,18 +1724,6 @@ function App() {
                     </ToggleButtonGroup>
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <FormControl size="small" sx={{ minWidth: 180, '& .MuiInputBase-input': { fontSize: '0.75rem' }, '& .MuiInputLabel-root': { fontSize: '0.75rem' } }}>
-                      <InputLabel>敌方叫牌体系</InputLabel>
-                      <Select
-                        value={dealSystem}
-                        label="敌方叫牌体系"
-                        onChange={(e) => setDealSystem(e.target.value)}
-                        sx={{ fontSize: '0.75rem' }}
-                      >
-                        <MenuItem value="2D/2H/2S：自然阻击">2D/2H/2S：自然阻击</MenuItem>
-                        <MenuItem value="2D：多功能，2H/S：麦德伯格，2NT：双低花">2D：多功能，2H/S：麦德伯格</MenuItem>
-                      </Select>
-                    </FormControl>
                     <FormControlLabel
                       control={<Checkbox checked={simpleDisplayMode} onChange={(e) => setSimpleDisplayMode(e.target.checked)} size="small" />}
                       label="简单"
