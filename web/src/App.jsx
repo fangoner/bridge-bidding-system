@@ -32,15 +32,12 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import HistoryIcon from '@mui/icons-material/History'
-import LightbulbIcon from '@mui/icons-material/Lightbulb'
-import FitnessCenterIcon from '@mui/icons-material/FitnessCenter'
 import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, doubleDummyAnalysis, getFallbackModel, setFallbackModel, getAIProvider, setAIProvider } from './services/api'
 import HandDisplay from './components/HandDisplay'
 import CardTable from './components/CardTable'
 import BiddingControls from './components/BiddingControls'
 import BiddingTable from './components/BiddingTable'
 import AIOutputPanel from './components/AIOutputPanel'
-import BiddingSuggestion from './components/BiddingSuggestion'
 import MobileDraggableContainer, { SortableItem } from './components/MobileDraggableContainer'
 import { colorSchemes, defaultScheme } from './theme/colorSchemes'
 import './App.css'
@@ -53,7 +50,6 @@ const DEFAULT_PANEL_ORDER = ['cardTable', 'biddingDetails', 'biddingControls', '
 
 function App() {
   const isLoadingRecordRef = useRef(false) // 用于标记是否正在加载历史记录（不触发保存）
-  const [appMode, setAppMode] = useState('practice') // 'practice' 或 'suggestion'
   const [hands, setHands] = useState({
     '南': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
     '北': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
@@ -1325,44 +1321,16 @@ function App() {
 
       {/* 标题 */}
       <Typography variant="h4" component="h1" align="center" sx={{ fontSize: { xs: '1.25rem', md: '1.75rem' }, mb: { xs: 2, md: 0 }, display: { xs: 'block', md: 'none' } }}>
-        {appMode === 'practice' ? '桥牌叫牌练习系统' : '叫牌建议'}
+        桥牌叫牌练习系统
       </Typography>
 
-      {/* 标题和控制按钮 - 桌面版 */}
+      {/* 标题 - 桌面版 */}
       <Box sx={{ mb: 2, display: { xs: 'none', md: 'flex' }, flexWrap: 'wrap', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
         <Typography variant="h4" component="h1" sx={{ fontSize: '1.75rem', mr: 3, whiteSpace: 'nowrap' }}>
-          {appMode === 'practice' ? '桥牌叫牌练习系统' : '叫牌建议'}
+          桥牌叫牌练习系统
         </Typography>
-        
-        {/* 模式切换按钮 */}
-        <Button
-          variant={appMode === 'practice' ? 'contained' : 'outlined'}
-          color={appMode === 'practice' ? 'primary' : 'inherit'}
-          size="large"
-          onClick={() => setAppMode('practice')}
-          startIcon={<FitnessCenterIcon />}
-        >
-          练习
-        </Button>
-        <Button
-          variant={appMode === 'suggestion' ? 'contained' : 'outlined'}
-          color={appMode === 'suggestion' ? 'primary' : 'inherit'}
-          size="large"
-          onClick={() => setAppMode('suggestion')}
-          startIcon={<LightbulbIcon />}
-        >
-          建议
-        </Button>
       </Box>
 
-      {/* 建议模式 */}
-      {appMode === 'suggestion' && (
-        <BiddingSuggestion />
-      )}
-
-      {/* 练习模式 */}
-      {appMode === 'practice' && (
-        <>
       {/* 控制按钮 - 桌面版 */}
       <Box sx={{ mb: 2, display: { xs: 'none', md: 'flex' }, flexWrap: 'wrap', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
         <Button
@@ -1595,15 +1563,15 @@ function App() {
       {hands && (
         <Box sx={{ display: { xs: 'none', md: 'block' } }}>
           {/* 牌桌和右侧面板并排 */}
-          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+          <Box sx={{ display: 'flex', gap: 2, mb: 2, justifyContent: 'center' }}>
             <Paper elevation={3} sx={{ 
               p: 1, 
               bgcolor: '#f5f5f5', 
               display: 'flex', 
               flexDirection: 'column', 
               flex: '0 0 auto',
-              width: '700px',
-              height: '750px'
+              width: '620px',
+              height: '660px'
             }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5, flexShrink: 0 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
@@ -1667,7 +1635,7 @@ function App() {
                   </FormControl>
                 </Box>
               </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}>
                 <CardTable
                   hands={hands}
                   currentBidder={currentBidder}
@@ -1717,9 +1685,9 @@ function App() {
                 bgcolor: '#f5f5f5', 
                 display: 'flex', 
                 flexDirection: 'column', 
-                flex: '1 1 auto',
-                minWidth: 0,
-                height: '750px'
+                flex: '0 0 auto',
+                width: '620px',
+                height: '660px'
               }}>
                 {/* 顶部切换栏 */}
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexShrink: 0 }}>
@@ -2812,8 +2780,6 @@ function App() {
           </Button>
         </DialogActions>
       </Dialog>
-        </>
-      )}
     </Box>
   )
 }

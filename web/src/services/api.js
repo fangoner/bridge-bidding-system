@@ -238,22 +238,6 @@ export const readClipboardDeal = async () => {
   }
 };
 
-// 叫牌建议
-export const getBiddingSuggestion = async (hand, biddingSequence, currentBidder, dealer = '南') => {
-  try {
-    const response = await api.post('/api/bidding-suggestion', {
-      hand,
-      bidding_sequence: biddingSequence,
-      current_bidder: currentBidder,
-      dealer
-    });
-    return response.data;
-  } catch (error) {
-    console.error('获取叫牌建议失败:', error);
-    throw error;
-  }
-};
-
 // 双明手分析
 export const doubleDummyAnalysis = async (hands) => {
   try {

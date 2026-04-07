@@ -416,7 +416,29 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 
 ## 版本历史
 
-### v1.27 (当前版本)
+### v1.28 (当前版本)
+- **移除叫牌建议功能**
+  - 移除"练习/建议"模式切换按钮
+  - 删除 `BiddingSuggestion.jsx` 组件
+  - 移除 `getBiddingSuggestion` API函数
+  - 移除后端 `/api/bidding-suggestion` 端点
+  - 保留练习模式和JF约定片段功能
+- **发牌人设定功能重构**
+  - 去掉顶部下拉框，改为点击方位标签设定
+  - 使用"*"代替"(发)"作为发牌人标记
+  - 叫牌过程中禁止修改发牌人
+- **UI优化**
+  - 叫牌细节标签的控制/细节切换位置固定
+  - 当前牌局框切换改为"叫牌过程/小房子"
+  - 字体加大，AI手牌checkbox移动到最右端
+- **Bug修复**
+  - **人类叫牌含义确定问题**（关键修复）：
+    - 问题：用户叫3S，但显示pass的含义
+    - 原因：`addBid` 使用旧的 `humanPosition` 状态，但系统已改用 `positionRoles`
+    - 修复：判断逻辑改为 `positionRoles[currentBidder] === 'human'`
+    - 同时修复 `human_bid` 方法返回值和 `fetchOutputFormats` 参数
+
+### v1.27
 - **叫牌建议功能**
   - 新增"建议"模式，与"练习"模式切换
   - 支持截屏识别手牌和叫牌序列

@@ -9,6 +9,89 @@ import {
   Divider,
   CircularProgress,
 } from '@mui/material';
+import { styled } from '@mui/material/styles';
+
+const getBidColor = (bid) => {
+  if (!bid) return {};
+  const suit = bid.slice(-1);
+  const level = bid.slice(0, -1);
+  
+  if (suit === 'H' || suit === 'D') {
+    return { color: '#dc2626', bgColor: '#fef2f2', borderColor: '#fca5a5' };
+  }
+  if (suit === 'S' || suit === 'C') {
+    return { color: '#1e293b', bgColor: '#f1f5f9', borderColor: '#94a3b8' };
+  }
+  if (suit === 'T') {
+    return { color: '#7c3aed', bgColor: '#f5f3ff', borderColor: '#a78bfa' };
+  }
+  if (bid === 'X') {
+    return { color: '#dc2626', bgColor: '#fef2f2', borderColor: '#fca5a5' };
+  }
+  if (bid === 'XX') {
+    return { color: '#dc2626', bgColor: '#fee2e2', borderColor: '#f87171' };
+  }
+  if (bid === 'pass') {
+    return { color: '#059669', bgColor: '#ecfdf5', borderColor: '#6ee7b7' };
+  }
+  return { color: '#475569', bgColor: '#f8fafc', borderColor: '#cbd5e1' };
+};
+
+const BidButton = styled(Button, {
+  shouldForwardProp: (prop) => !['bidColor', 'isActive'].includes(prop),
+})(({ theme, bidColor, isActive }) => ({
+  minWidth: '44px',
+  width: '44px',
+  height: '32px',
+  padding: '4px 8px',
+  fontSize: '0.8rem',
+  fontWeight: 600,
+  borderRadius: '8px',
+  transition: 'all 0.2s ease',
+  color: bidColor?.color || '#475569',
+  backgroundColor: bidColor?.bgColor || '#f8fafc',
+  border: `1.5px solid ${bidColor?.borderColor || '#cbd5e1'}`,
+  boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+  '&:hover': {
+    backgroundColor: bidColor?.bgColor || '#f8fafc',
+    transform: 'translateY(-1px)',
+    boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
+    border: `1.5px solid ${bidColor?.color || '#475569'}`,
+  },
+  '&:disabled': {
+    opacity: 0.5,
+    transform: 'none',
+    boxShadow: 'none',
+  },
+  ...(isActive && {
+    transform: 'scale(1.05)',
+    boxShadow: `0 0 0 2px ${bidColor?.color || '#475569'}`,
+  }),
+}));
+
+const CompactBidButton = styled(Button, {
+  shouldForwardProp: (prop) => !['bidColor'].includes(prop),
+})(({ theme, bidColor }) => ({
+  minWidth: '40px',
+  width: '40px',
+  height: '24px',
+  padding: '2px 5px',
+  fontSize: '0.75rem',
+  fontWeight: 600,
+  borderRadius: '6px',
+  transition: 'all 0.15s ease',
+  color: bidColor?.color || '#475569',
+  backgroundColor: bidColor?.bgColor || '#f8fafc',
+  border: `1px solid ${bidColor?.borderColor || '#cbd5e1'}`,
+  '&:hover': {
+    backgroundColor: bidColor?.bgColor || '#f8fafc',
+    transform: 'scale(1.05)',
+  },
+  '&:disabled': {
+    opacity: 0.4,
+    transform: 'none',
+  },
+}));
 
 function BiddingControls({
   hands,
@@ -57,18 +140,17 @@ function BiddingControls({
     <Box sx={{
       display: 'flex',
       flexDirection: isVerticalLayout ? 'column' : { xs: 'column', md: 'row' },
-      gap: isVerticalLayout ? 2 : 1,
+      gap: isVerticalLayout ? 2 : 1.5,
       mt: isVerticalLayout ? 0 : 3,
       alignItems: isVerticalLayout ? 'stretch' : { xs: 'stretch', md: 'flex-start' },
       width: '100%',
       justifyContent: 'flex-start',
       height: isVerticalLayout ? '100%' : 'auto',
     }}>
-      {/* Left: Bidding control panel - only show when humanPosition is set */}
       {humanPosition !== null && (
-      <Paper elevation={2} sx={{
-        p: 1.5,
-        width: isVerticalLayout ? '100%' : { xs: '100%', md: '260px' },
+      <Paper elevation={0} sx={{
+        p: 2,
+        width: isVerticalLayout ? '100%' : { xs: '100%', md: '280px' },
         height: isVerticalLayout ? 'auto' : '420px',
         flex: isVerticalLayout ? '1 1 auto' : 'none',
         flexShrink: 0,
@@ -76,76 +158,95 @@ function BiddingControls({
         flexDirection: 'column',
         overflow: 'auto',
         minHeight: isVerticalLayout ? 0 : 'auto',
+        border: '1px solid',
+        borderColor: 'divider',
+        borderRadius: 3,
+        background: 'linear-gradient(180deg, #ffffff 0%, #fafafa 100%)',
       }}>
         {!checkBiddingComplete() ? (
           <>
-            <Typography variant="h6" gutterBottom sx={{ fontSize: isVerticalLayout ? '1rem' : undefined }}>
-              叫牌控制 - 当前: {currentBidder}家 {isHumanTurn ? '(你的回合)' : '(AI)'}
+            <Typography variant="h6" gutterBottom sx={{ 
+              fontSize: isVerticalLayout ? '1rem' : '1rem',
+              fontWeight: 600,
+              color: 'text.primary',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+            }}>
+              <Box component="span" sx={{ 
+                width: 8, 
+                height: 8, 
+                borderRadius: '50%', 
+                bgcolor: isHumanTurn ? 'success.main' : 'grey.400',
+                animation: isHumanTurn ? 'pulse 1.5s infinite' : 'none',
+                '@keyframes pulse': {
+                  '0%': { opacity: 1 },
+                  '50%': { opacity: 0.5 },
+                  '100%': { opacity: 1 },
+                },
+              }} />
+              叫牌控制 - {currentBidder}家 {isHumanTurn ? '(你的回合)' : '(AI)'}
             </Typography>
 
             <Box sx={{ 
               display: isVerticalLayout ? 'grid' : 'flex',
               flexDirection: isVerticalLayout ? undefined : 'column',
               gridTemplateColumns: isVerticalLayout ? 'repeat(5, 40px) 8px repeat(5, 40px)' : undefined,
-              gap: isVerticalLayout ? '2.4px' : 0.5,
+              gap: isVerticalLayout ? '4px' : 0.8,
               width: '100%',
               alignItems: isVerticalLayout ? undefined : 'center',
               justifyContent: isVerticalLayout ? 'center' : undefined,
-              '& .MuiButton-root': {
-                minWidth: isVerticalLayout ? '40px' : { xs: '46px', md: '44px' },
-                width: isVerticalLayout ? '40px' : { xs: '46px', md: '44px' },
-                height: isVerticalLayout ? '24px' : { xs: '40px', md: '30px' },
-                padding: isVerticalLayout ? '2px 5px' : { xs: '4px 8px', md: '4px 7px' },
-                fontSize: isVerticalLayout ? '0.75rem' : { xs: '0.85rem', md: '0.8rem' },
-                fontWeight: 500,
-                flexShrink: 0,
-              }
             }}>
               {isVerticalLayout ? (
                 allBidsCompact.flat().map((bid, index) => {
+                  const bidColor = getBidColor(bid);
                   return bid === null ? (
                     <Box key={index} sx={{ width: '40px', height: '24px' }} />
                   ) : (
-                    <Button
+                    <CompactBidButton
                       key={bid + index}
-                      variant="outlined"
-                      size="small"
+                      bidColor={bidColor}
                       onClick={() => addBid(bid)}
                       disabled={!isHumanTurn && humanPosition !== null}
                     >
                       {bid}
-                    </Button>
+                    </CompactBidButton>
                   )
                 })
               ) : (
                 <>
                   {bidLevels.map((level, levelIndex) => (
-                    <Box key={levelIndex} sx={{ display: 'flex', gap: 0.5 }}>
-                      {level.map((bid) => (
-                        <Button
-                          key={bid}
-                          variant="outlined"
-                          size="small"
-                          onClick={() => addBid(bid)}
-                          disabled={!isHumanTurn && humanPosition !== null}
-                        >
-                          {bid}
-                        </Button>
-                      ))}
+                    <Box key={levelIndex} sx={{ display: 'flex', gap: 0.8 }}>
+                      {level.map((bid) => {
+                        const bidColor = getBidColor(bid);
+                        return (
+                          <BidButton
+                            key={bid}
+                            bidColor={bidColor}
+                            onClick={() => addBid(bid)}
+                            disabled={!isHumanTurn && humanPosition !== null}
+                          >
+                            {bid}
+                          </BidButton>
+                        );
+                      })}
                     </Box>
                   ))}
-                  <Box sx={{ display: 'flex', gap: 0.5, mt: 1 }}>
-                    {specialBids.map((bid) => (
-                      <Button
-                        key={bid}
-                        variant="outlined"
-                        size="small"
-                        onClick={() => addBid(bid)}
-                        disabled={!isHumanTurn && humanPosition !== null}
-                      >
-                        {bid}
-                      </Button>
-                    ))}
+                  <Box sx={{ display: 'flex', gap: 0.8, mt: 1.5 }}>
+                    {specialBids.map((bid) => {
+                      const bidColor = getBidColor(bid);
+                      return (
+                        <BidButton
+                          key={bid}
+                          bidColor={bidColor}
+                          onClick={() => addBid(bid)}
+                          disabled={!isHumanTurn && humanPosition !== null}
+                          sx={{ width: bid === 'pass' ? '60px' : '44px' }}
+                        >
+                          {bid}
+                        </BidButton>
+                      );
+                    })}
                   </Box>
                 </>
               )}
@@ -162,43 +263,62 @@ function BiddingControls({
                   fullWidth
                   multiline
                   maxRows={2}
+                  sx={{
+                    '& .MuiOutlinedInput-root': {
+                      borderRadius: 2,
+                      fontSize: '0.875rem',
+                    },
+                  }}
                 />
               </Box>
             )}
 
             {humanPosition !== null && !isHumanTurn && stopBidding && (
-              <Alert severity="info" sx={{ mt: isVerticalLayout ? 1 : 2, py: isVerticalLayout ? 0.5 : undefined }}>
+              <Alert severity="info" sx={{ mt: isVerticalLayout ? 1 : 2, py: isVerticalLayout ? 0.5 : undefined, borderRadius: 2 }}>
                 叫牌已暂停
               </Alert>
             )}
           </>
         ) : (
           <>
-            <Typography variant="h6" gutterBottom>
+            <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
               叫牌结束
             </Typography>
             {finalContract ? (
-              <Alert severity="success" sx={{ mt: 2 }}>
-                <Typography variant="body1" gutterBottom>
+              <Box sx={{ 
+                mt: 2, 
+                p: 2, 
+                borderRadius: 2, 
+                background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+                border: '1px solid #6ee7b7',
+              }}>
+                <Typography variant="h6" sx={{ color: '#059669', fontWeight: 600, mb: 1 }}>
                   最终定约: {finalContract.level}{finalContract.suit}{finalContract.isRedouble ? 'XX' : finalContract.isDouble ? 'X' : ''}
                 </Typography>
-                <Typography variant="body2">
+                <Typography variant="body2" sx={{ color: '#047857' }}>
                   定约方: {finalContract.partnership} | 庄家: {finalContract.declarer}家
                 </Typography>
-              </Alert>
+              </Box>
             ) : (
-              <Alert severity="info" sx={{ mt: 2 }}>
-                叫牌结束，无最终定约（全部pass）
-              </Alert>
+              <Box sx={{ 
+                mt: 2, 
+                p: 2, 
+                borderRadius: 2, 
+                background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
+                border: '1px solid #7dd3fc',
+              }}>
+                <Typography variant="body1" sx={{ color: '#0369a1' }}>
+                  叫牌结束，无最终定约（全部pass）
+                </Typography>
+              </Box>
             )}
           </>
         )}
       </Paper>
       )}
 
-      {/* Middle: JF suggestion panel - show when human is playing and bidding not complete, and hideJFPanel is false */}
       {!hideJFPanel && humanPosition !== null && !checkBiddingComplete() && (
-        <Paper elevation={2} sx={{
+        <Paper elevation={0} sx={{
           p: 2,
           flex: isVerticalLayout ? '1 1 auto' : '1 1 auto',
           height: isVerticalLayout ? 'auto' : '420px',
@@ -207,8 +327,12 @@ function BiddingControls({
           flexDirection: 'column',
           overflow: 'hidden',
           minHeight: isVerticalLayout ? 0 : 'auto',
+          border: '1px solid',
+          borderColor: 'divider',
+          borderRadius: 3,
+          background: 'linear-gradient(180deg, #ffffff 0%, #fafafa 100%)',
         }}>
-          <Typography variant="h6" gutterBottom sx={{ flexShrink: 0 }}>
+          <Typography variant="h6" gutterBottom sx={{ flexShrink: 0, fontWeight: 600 }}>
             JF约定片段
           </Typography>
           <Box sx={{ flex: 1, overflow: 'auto', maxWidth: '100%', minWidth: 0, minHeight: 0 }}>
@@ -219,30 +343,39 @@ function BiddingControls({
               </Box>
             ) : bidSuggestion ? (
               <Box>
-                <Typography variant="subtitle2" gutterBottom sx={{ color: '#666' }}>
-                  检索关键字: <strong style={{ color: '#1976d2' }}>{bidSuggestion.keyword}</strong>
+                <Typography variant="subtitle2" gutterBottom sx={{ color: '#64748b', fontWeight: 500 }}>
+                  检索关键字: <strong style={{ color: '#6366f1' }}>{bidSuggestion.keyword}</strong>
                 </Typography>
                 {bidSuggestion.content ? (
-                  <Box sx={{ mt: 1, p: 1.5, background: '#fafafa', borderRadius: 1, border: '1px solid #e0e0e0', overflow: 'auto', maxWidth: '100%' }}>
+                  <Box sx={{ 
+                    mt: 1, 
+                    p: 1.5, 
+                    background: 'linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%)', 
+                    borderRadius: 2, 
+                    border: '1px solid #e2e8f0', 
+                    overflow: 'auto', 
+                    maxWidth: '100%' 
+                  }}>
                     <Typography variant="body2" component="pre" sx={{
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
                       margin: 0,
                       fontFamily: 'inherit',
-                      fontSize: '0.9rem',
+                      fontSize: '0.875rem',
                       maxWidth: '100%',
+                      lineHeight: 1.6,
                     }}>
                       {bidSuggestion.content}
                     </Typography>
                   </Box>
                 ) : (
-                  <Alert severity="info" sx={{ mt: 1 }}>
+                  <Alert severity="info" sx={{ mt: 1, borderRadius: 2 }}>
                     JF尚未提供建议
                   </Alert>
                 )}
               </Box>
             ) : (
-              <Alert severity="info" sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Alert severity="info" sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 2 }}>
                 JF尚未提供建议
               </Alert>
             )}

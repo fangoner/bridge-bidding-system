@@ -1,5 +1,84 @@
 # 开发日志
 
+## 2026-04-07
+
+### 移除叫牌建议功能
+
+**背景**:
+叫牌建议功能与练习模式功能重叠，且用户反馈练习模式已能满足需求。为简化代码和用户体验，决定移除叫牌建议功能。
+
+**改进**:
+- 移除"练习/建议"模式切换按钮
+- 删除 `BiddingSuggestion.jsx` 组件
+- 移除 `getBiddingSuggestion` API函数
+- 移除后端 `/api/bidding-suggestion` 端点
+- 保留练习模式和JF约定片段功能
+
+**修改文件**:
+- `web/src/App.jsx`
+- `web/src/services/api.js`
+- `web/src/components/BiddingSuggestion.jsx`（删除）
+- `api/main.py`
+
+---
+
+### UI优化：发牌人设定、叫牌控制切换、输出格式修复
+
+**背景**:
+1. 发牌人设定方式不够直观，需要改进交互方式
+2. 叫牌细节标签的控制/细节切换位置不固定，影响用户体验
+3. 人类叫牌时叫品含义显示不正确（显示pass含义而非实际叫品含义）
+4. 叫牌结束后检验定约按钮无法点击
+
+**改进**:
+
+1. **发牌人设定功能重构** (`web/src/App.jsx`, `web/src/components/CardTable.jsx`):
+   - 去掉顶部下拉框，改为点击方位标签设定发牌人
+   - 使用"*"代替"(发)"作为发牌人标记
+   - 叫牌过程中禁止修改发牌人（点击无响应，光标不变）
+
+2. **叫牌细节标签切换优化** (`web/src/App.jsx`):
+   - 标题始终显示"叫牌细节"
+   - 切换按钮始终显示，叫牌结束时禁用
+   - "简单"复选框和记录选择器始终在右侧显示
+
+3. **当前牌局框切换优化** (`web/src/App.jsx`):
+   - 切换按钮改为"叫牌过程/小房子"
+   - 字体加大到0.875rem
+   - AI手牌checkbox移动到最右端
+
+4. **叫牌含义不匹配问题修复**（关键修复）:
+   
+   **问题描述**：用户点击叫牌按钮叫了3S，但叫牌含义显示的是pass的含义。
+   
+   **问题分析**：
+   - 后端日志显示 `human_bid` 收到的 `user_input=pass` 而不是 `3S`
+   - 根本原因：`addBid` 函数使用旧的 `humanPosition` 状态判断当前叫牌者是否是人类
+   - 但系统已经改用 `positionRoles` 来管理每个位置的角色（`{南: 'human', 北: 'ai', ...}`）
+   - 导致 `isCurrentHuman` 判断为 false，人类叫牌时没有调用 `humanBid` API
+   - 结果：叫牌序列正确更新为3S，但没有获取叫牌含义，显示的是之前pass的含义
+   
+   **修复方案**：
+   - `addBid` 函数：将判断逻辑从 `humanPosition === currentBidder` 改为 `positionRoles[currentBidder] === 'human'`
+   - `human_bid` 方法：在所有返回路径添加"完整叫牌序列"字段
+   - `fetchOutputFormats` 函数：将 `humanPosition` 参数改为 `positionRoles`
+   
+   **修改文件**:
+   - `web/src/App.jsx`（`addBid` 函数判断逻辑）
+   - `bridge/bidding_service.py`（`human_bid` 方法返回值）
+   - `web/src/App.jsx`（`fetchOutputFormats` 参数）
+
+**修改文件**:
+- `web/src/App.jsx`
+- `web/src/components/CardTable.jsx`
+- `bridge/bidding_service.py`
+
+**Git提交**: `71b5033`
+
+**本地恢复点**: `backups/backup_20260407_004004/`
+
+---
+
 ## 2026-04-06
 
 ### 叫牌建议功能

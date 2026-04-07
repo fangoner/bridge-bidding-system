@@ -183,29 +183,32 @@ function CardTable({
         )}
         
         <Box sx={{
-          bgcolor: 'rgba(255, 255, 255, 0.95)',
-          borderRadius: 1,
+          bgcolor: 'rgba(255, 255, 255, 0.98)',
+          borderRadius: 2,
           p: 1,
-          width: 155,
-          height: 165,
-          boxShadow: 2,
+          width: 160,
+          height: 160,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
           display: 'flex',
           flexDirection: 'column',
+          border: '1px solid rgba(255,255,255,0.5)',
+          backdropFilter: 'blur(10px)',
         }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
             <Typography 
               variant="subtitle2" 
               sx={{ 
-                fontWeight: 'bold', 
+                fontWeight: 600, 
                 fontSize: '0.85rem',
                 cursor: onDealerChange && !biddingStarted ? 'pointer' : 'default',
+                transition: 'color 0.2s',
                 '&:hover': onDealerChange && !biddingStarted ? { color: 'primary.main' } : {}
               }}
               onClick={() => onDealerChange && !biddingStarted && onDealerChange(position)}
             >
               {position}家
               {dealer === position && ' *'}
-              {hasHandData && hand && hand.hcp !== undefined && !showInput && ` (${hand.hcp}H)`}
+              {hasHandData && hand && hand.hcp !== undefined && !showInput && ` (${hand.hcp})`}
             </Typography>
             {onPositionRoleChange && (
               <ToggleButtonGroup
@@ -217,14 +220,19 @@ function CardTable({
                   }
                 }}
                 size="small"
-                sx={{ height: 22 }}
+                sx={{ 
+                  height: 24,
+                  '& .MuiToggleButton-root': {
+                    px: 0.8,
+                    py: 0.3,
+                    fontSize: '0.7rem',
+                    fontWeight: 500,
+                    borderRadius: 1,
+                  }
+                }}
               >
-                <ToggleButton value="ai" sx={{ px: 0.5, py: 0, fontSize: '0.7rem', minWidth: 30 }}>
-                  AI
-                </ToggleButton>
-                <ToggleButton value="human" sx={{ px: 0.5, py: 0, fontSize: '0.7rem', minWidth: 30 }}>
-                  人类
-                </ToggleButton>
+                <ToggleButton value="ai" sx={{ minWidth: 32 }}>AI</ToggleButton>
+                <ToggleButton value="human" sx={{ minWidth: 32 }}>人类</ToggleButton>
               </ToggleButtonGroup>
             )}
           </Box>
@@ -290,13 +298,14 @@ function CardTable({
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
-      padding: { xs: 1, md: 2 },
+      justifyContent: 'center',
+      padding: 1,
       background: scheme.table.background,
       borderRadius: 2,
       boxShadow: 8,
-      minHeight: { xs: 350, md: 600 },
       width: '100%',
       position: 'relative',
+      overflow: 'hidden',
     }}>
       {onClearAllHands && (!biddingStarted || (checkBiddingComplete && checkBiddingComplete())) && (
         <Box sx={{
@@ -367,7 +376,7 @@ function CardTable({
         </Box>
       )}
 
-      {renderHandWithStatus(north, '北', { marginBottom: { xs: 1, md: 2 } })}
+      {renderHandWithStatus(north, '北', { mb: '8px' })}
 
       <Box className="middle-row" sx={{
         display: 'flex',
@@ -375,25 +384,22 @@ function CardTable({
         alignItems: 'center',
         width: '100%',
         maxWidth: 800,
-        margin: { xs: 1, md: 2 },
-        gap: { xs: 1, md: 3 },
-        flex: 1,
+        gap: '8px',
       }}>
-        {renderHandWithStatus(west, '西', { marginLeft: { xs: -1, md: -3 } })}
+        {renderHandWithStatus(west, '西')}
 
         <Box className="table-center">
           <Box className="table-border" sx={{
-            width: { xs: 200, md: 280 },
-            minHeight: { xs: 150, md: 280 },
+            width: 240,
+            height: 240,
             border: scheme.table.border,
             borderRadius: 2,
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
             background: scheme.table.centerBg,
-            padding: { xs: 1, md: 2 },
+            padding: 1,
             overflowY: 'auto',
-            maxHeight: { xs: 200, md: 400 },
           }}>
             {showDoubleDummy ? (
               doubleDummyLoading ? (
@@ -415,10 +421,10 @@ function CardTable({
           </Box>
         </Box>
 
-        {renderHandWithStatus(east, '东', { marginRight: { xs: -1, md: -3 } })}
+        {renderHandWithStatus(east, '东')}
       </Box>
 
-      {renderHandWithStatus(south, '南', { marginTop: { xs: 1, md: 2 } })}
+      {renderHandWithStatus(south, '南', { mt: '8px' })}
     </Box>
   );
 }
