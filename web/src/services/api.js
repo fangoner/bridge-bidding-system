@@ -22,11 +22,12 @@ export const dealCards = async (mode = 'free') => {
 };
 
 // 分析叫牌序列
-export const analyzeBidding = async (biddingSequence, position = null) => {
+export const analyzeBidding = async (biddingSequence, position = null, dealSystem = '2D/2H/2S：自然阻击') => {
   try {
     const response = await api.post('/api/analyze', {
       bidding_sequence: biddingSequence,
       position,
+      deal_system: dealSystem,
     });
     return response.data;
   } catch (error) {

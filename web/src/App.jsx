@@ -881,7 +881,7 @@ function App() {
       const biddingStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
       
       // 调用分析API获取JF约定片段
-      const result = await analyzeBidding(biddingStr, currentBidder)
+      const result = await analyzeBidding(biddingStr, currentBidder, dealSystem)
       
       setBidSuggestion({
         keyword: result.keyword,
