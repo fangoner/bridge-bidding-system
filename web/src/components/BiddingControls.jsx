@@ -145,18 +145,18 @@ function BiddingControls({
       alignItems: isVerticalLayout ? 'stretch' : { xs: 'stretch', md: 'flex-start' },
       width: '100%',
       justifyContent: 'flex-start',
-      height: isVerticalLayout ? '100%' : 'auto',
+      height: isVerticalLayout ? 'auto' : 'auto',
     }}>
       {humanPosition !== null && (
       <Paper elevation={0} sx={{
-        p: 2,
+        p: isVerticalLayout ? 1.5 : 2,
         width: isVerticalLayout ? '100%' : { xs: '100%', md: '280px' },
-        height: isVerticalLayout ? 'auto' : '420px',
+        height: 'auto',
         flex: isVerticalLayout ? '1 1 auto' : 'none',
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
-        overflow: 'auto',
+        overflow: 'hidden',
         minHeight: isVerticalLayout ? 0 : 'auto',
         border: '1px solid',
         borderColor: 'divider',

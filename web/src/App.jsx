@@ -1566,16 +1566,17 @@ function App() {
           <Box sx={{ display: 'flex', gap: 2, mb: 2, justifyContent: 'center' }}>
             <Paper elevation={3} sx={{ 
               p: 1, 
-              bgcolor: '#f5f5f5', 
+              bgcolor: '#e8e8e8', 
               display: 'flex', 
               flexDirection: 'column', 
               flex: '0 0 auto',
-              width: '620px',
-              height: '660px'
+              width: '600px',
+              height: '640px',
+              overflow: 'hidden'
             }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5, flexShrink: 0 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
-                  <Typography variant="h6">
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5, flexShrink: 0, minHeight: 32 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, fontSize: '1rem' }}>
                     当前牌局
                   </Typography>
                   <ToggleButtonGroup
@@ -1587,18 +1588,17 @@ function App() {
                       }
                     }}
                     size="small"
-                    sx={{ height: 26, ml: 1 }}
+                    sx={{ height: 24 }}
                     disabled={!isBiddingComplete()}
                   >
-                    <ToggleButton value="table" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 50 }}>
+                    <ToggleButton value="table" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 50 }}>
                       叫牌过程
                     </ToggleButton>
-                    <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 50 }}>
+                    <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 50 }}>
                       小房子
                     </ToggleButton>
                   </ToggleButtonGroup>
                   
-                  {/* 显示控制选项 */}
                   {gameMode === 'pair' && humanPosition && (
                     <FormControlLabel
                       control={
@@ -1609,7 +1609,7 @@ function App() {
                         />
                       }
                       label="队友手牌"
-                      sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
+                      sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, ml: 0.5 }}
                     />
                   )}
                 </Box>
@@ -1624,18 +1624,12 @@ function App() {
                         />
                       }
                       label="AI手牌"
-                      sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
+                      sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' } }}
                     />
                   )}
-                  <FormControl size="small" sx={{ minWidth: 150, visibility: 'hidden' }}>
-                    <InputLabel>占位</InputLabel>
-                    <Select value="" label="占位">
-                      <MenuItem value="">占位</MenuItem>
-                    </Select>
-                  </FormControl>
                 </Box>
               </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '1 1 auto', minHeight: 0, overflow: 'hidden' }}>
                 <CardTable
                   hands={hands}
                   currentBidder={currentBidder}
@@ -1682,17 +1676,18 @@ function App() {
               return (
               <Paper elevation={3} sx={{ 
                 p: 1, 
-                bgcolor: '#f5f5f5', 
+                bgcolor: '#e8e8e8', 
                 display: 'flex', 
                 flexDirection: 'column', 
                 flex: '0 0 auto',
-                width: '620px',
-                height: '660px'
+                width: '600px',
+                height: '640px',
+                overflow: 'hidden'
               }}>
                 {/* 顶部切换栏 */}
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexShrink: 0 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <Typography variant="h6">
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5, flexShrink: 0, minHeight: 32 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600, fontSize: '1rem' }}>
                       叫牌细节
                     </Typography>
                     <ToggleButtonGroup
@@ -1704,13 +1699,13 @@ function App() {
                         }
                       }}
                       size="small"
-                      sx={{ height: 26, ml: 1 }}
+                      sx={{ height: 24 }}
                       disabled={!canShowControls}
                     >
-                      <ToggleButton value="controls" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 40 }}>
+                      <ToggleButton value="controls" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 40 }}>
                         控制
                       </ToggleButton>
-                      <ToggleButton value="details" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 40 }}>
+                      <ToggleButton value="details" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 40 }}>
                         细节
                       </ToggleButton>
                     </ToggleButtonGroup>
@@ -1719,7 +1714,7 @@ function App() {
                     <FormControlLabel
                       control={<Checkbox checked={simpleDisplayMode} onChange={(e) => setSimpleDisplayMode(e.target.checked)} size="small" />}
                       label="简单"
-                      sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
+                      sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' } }}
                     />
                     {aiBiddingHistory.length > 0 && !simpleDisplayMode && (
                       <FormControl size="small" sx={{ minWidth: 120, '& .MuiInputBase-input': { fontSize: '0.875rem' }, '& .MuiInputLabel-root': { fontSize: '0.875rem' } }}>
@@ -1744,9 +1739,9 @@ function App() {
 
                 {effectiveShowControls ? (
                   /* 叫牌控制 + JF片段 */
-                  <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 1 }}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 1, overflow: 'hidden' }}>
                     {/* 叫牌控制区域 */}
-                    <Box sx={{ flexShrink: 0 }}>
+                    <Box sx={{ flex: '0 0 auto', minHeight: 0 }}>
                       <BiddingControls
                         hands={hands}
                         currentBidder={currentBidder}
@@ -1768,7 +1763,7 @@ function App() {
                     </Box>
                     {/* JF约定区域 */}
                     <Paper elevation={2} sx={{
-                      p: 2,
+                      p: 1.5,
                       flex: '1 1 auto',
                       minHeight: 0,
                       display: 'flex',

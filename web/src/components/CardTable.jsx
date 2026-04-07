@@ -303,7 +303,8 @@ function CardTable({
       background: scheme.table.background,
       borderRadius: 2,
       boxShadow: 8,
-      width: '100%',
+      maxWidth: '100%',
+      maxHeight: '100%',
       position: 'relative',
       overflow: 'hidden',
     }}>
@@ -376,7 +377,7 @@ function CardTable({
         </Box>
       )}
 
-      {renderHandWithStatus(north, '北', { mb: '8px' })}
+      {renderHandWithStatus(north, '北', { mb: '4px' })}
 
       <Box className="middle-row" sx={{
         display: 'flex',
@@ -384,14 +385,14 @@ function CardTable({
         alignItems: 'center',
         width: '100%',
         maxWidth: 800,
-        gap: '8px',
+        gap: '4px',
       }}>
         {renderHandWithStatus(west, '西')}
 
         <Box className="table-center">
           <Box className="table-border" sx={{
-            width: 240,
-            height: 240,
+            width: 220,
+            height: 220,
             border: scheme.table.border,
             borderRadius: 2,
             display: 'flex',
@@ -424,7 +425,7 @@ function CardTable({
         {renderHandWithStatus(east, '东')}
       </Box>
 
-      {renderHandWithStatus(south, '南', { mt: '8px' })}
+      {renderHandWithStatus(south, '南', { mt: '4px' })}
     </Box>
   );
 }
