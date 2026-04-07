@@ -826,7 +826,7 @@ function App() {
         }
       }
     }
-  }, [currentBidder, humanPosition, hands, aiLoading, biddingSequence, biddingStarted, stopBidding, passedPartnership])
+  }, [currentBidder, humanPosition, hands, aiLoading, biddingSequence, biddingStarted, stopBidding, passedPartnership, callAIBid, addBid, isInPassedPartnership, getJFSuggestion])
 
   // 判断叫牌是否结束
   const isBiddingComplete = () => {
