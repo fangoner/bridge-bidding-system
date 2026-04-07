@@ -69,6 +69,7 @@ function App() {
   const [selectedBiddingIndex, setSelectedBiddingIndex] = useState(-1) // 选择的叫牌记录索引，-1表示最新
   const [simpleDisplayMode, setSimpleDisplayMode] = useState(false) // 简单显示模式
   const [showBiddingControls, setShowBiddingControls] = useState(false) // 右侧面板显示叫牌控制+JF片段
+  const [dealSystem, setDealSystem] = useState('2D/2H/2S：自然阻击') // 敌方叫牌体系
   
   // 配色方案
   const [colorSchemeKey, setColorSchemeKey] = useState(() => {
@@ -400,6 +401,9 @@ function App() {
       setHumanPosition(record.humanPosition)
     }
     setAiBiddingHistory(record.aiBiddingHistory || [])
+    if (record.dealSystem) {
+      setDealSystem(record.dealSystem)
+    }
     setBiddingStarted(true)
     setHistoryDialogOpen(false)
     setOutputFormats(null) // 重置输出格式
@@ -659,7 +663,7 @@ function App() {
         // 没有自定义含义，调用API获取（传递数组，后端处理格式）
         setCurrentBiddingPosition(currentBidder)
         try {
-          const result = await humanBid(biddingSequence, currentBidder, bid)
+          const result = await humanBid(biddingSequence, currentBidder, bid, dealSystem)
           
           setAiBiddingHistory(prev => [...prev, {
             position: currentBidder,
@@ -837,7 +841,7 @@ function App() {
       console.log(`AI叫牌: ${currentBidder}家, 手牌:`, currentHand, '叫牌序列:', biddingStr, '叫牌历史:', bidHistory)
       
       // 传递数组，后端处理格式
-      const result = await aiBid(currentHand, biddingSequence, currentBidder, '2D/2H/2S：自然阻击', bidHistory, useFallback, fallbackModel, aiProvider)
+      const result = await aiBid(currentHand, biddingSequence, currentBidder, dealSystem, bidHistory, useFallback, fallbackModel, aiProvider)
       
       // 更新useFallback状态
       if (result.use_fallback !== undefined) {
@@ -1048,6 +1052,7 @@ function App() {
         gameMode: gameMode,
         humanPosition: humanPosition,
         finalContract: finalContract,
+        dealSystem: dealSystem,
         note: ''
       }
       saveBiddingRecord(record)
@@ -1711,6 +1716,18 @@ function App() {
                     </ToggleButtonGroup>
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <FormControl size="small" sx={{ minWidth: 180, '& .MuiInputBase-input': { fontSize: '0.75rem' }, '& .MuiInputLabel-root': { fontSize: '0.75rem' } }}>
+                      <InputLabel>敌方叫牌体系</InputLabel>
+                      <Select
+                        value={dealSystem}
+                        label="敌方叫牌体系"
+                        onChange={(e) => setDealSystem(e.target.value)}
+                        sx={{ fontSize: '0.75rem' }}
+                      >
+                        <MenuItem value="2D/2H/2S：自然阻击">2D/2H/2S：自然阻击</MenuItem>
+                        <MenuItem value="2D：多功能，2H/S：麦德伯格，2NT：双低花">2D：多功能，2H/S：麦德伯格</MenuItem>
+                      </Select>
+                    </FormControl>
                     <FormControlLabel
                       control={<Checkbox checked={simpleDisplayMode} onChange={(e) => setSimpleDisplayMode(e.target.checked)} size="small" />}
                       label="简单"
