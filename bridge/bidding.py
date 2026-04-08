@@ -143,17 +143,17 @@ def extract_retrieval_keyword(bidding_str: str, deal_system: str = "2D/2H/2S：�
     
     is_natural_overcall = "自然阻击" in deal_system
     
-    if "2D：多功能，2H/S：麦德伯格，2NT：双低花" in deal_system and first_bid in ['2H', '2S', '2D', '2NT']:
-        if first_bid == '2D':
-            result = "2D多功能开叫"
-        elif first_bid in ['2H', '2S']:
-            result = "2M麦德伯格"
-        elif first_bid == '2NT':
-            result = "2NT双低花阻击"
-    elif len(bids) == 1:
+    if len(bids) == 1:
         result = "第二家争叫"
     elif len(bids) == 2:
-        if second_bid == "pass":
+        if "2D：多功能，2H/S：麦德伯格，2NT：双低花" in deal_system and first_bid in ['2H', '2S', '2D', '2NT']:
+            if first_bid == '2D':
+                result = "2D多功能开叫"
+            elif first_bid in ['2H', '2S']:
+                result = "2M麦德伯格"
+            elif first_bid == '2NT':
+                result = "2NT双低花阻击"
+        elif second_bid == "pass":
             if pass_time in [2, 3] and first_bid == "1H":
                 result = "第三四家开叫1H"
             elif pass_time in [2, 3] and first_bid == "1S":
@@ -262,7 +262,14 @@ def extract_retrieval_keyword(bidding_str: str, deal_system: str = "2D/2H/2S：�
             elif first_bid == "2C":
                 result = "对精确1C和自然2C开叫"
     elif len(bids) == 4:
-        if second_bid == "pass" and fourth_bid == "pass":
+        if "2D：多功能，2H/S：麦德伯格，2NT：双低花" in deal_system and first_bid in ['2H', '2S', '2D', '2NT']:
+            if first_bid == '2D':
+                result = "2D多功能开叫"
+            elif first_bid in ['2H', '2S']:
+                result = "2M麦德伯格"
+            elif first_bid == '2NT':
+                result = "2NT双低花阻击"
+        elif second_bid == "pass" and fourth_bid == "pass":
             if pass_time in [2, 3] and first_bid == "1H":
                 result = "第三四家开叫1H"
             elif pass_time in [2, 3] and first_bid == "1S":
@@ -302,7 +309,14 @@ def extract_retrieval_keyword(bidding_str: str, deal_system: str = "2D/2H/2S：�
         else:
             result = "自然叫牌"
     elif len(bids) == 6:
-        if second_bid == "pass" and fourth_bid == "pass" and sixth_bid == "pass":
+        if "2D：多功能，2H/S：麦德伯格，2NT：双低花" in deal_system and first_bid in ['2H', '2S', '2D', '2NT']:
+            if first_bid == '2D':
+                result = "2D多功能开叫"
+            elif first_bid in ['2H', '2S']:
+                result = "2M麦德伯格"
+            elif first_bid == '2NT':
+                result = "2NT双低花阻击"
+        elif second_bid == "pass" and fourth_bid == "pass" and sixth_bid == "pass":
             if pass_time in [2, 3] and first_bid == "1H":
                 result = "第三四家开叫1H"
             elif pass_time in [2, 3] and first_bid == "1S":
@@ -319,7 +333,14 @@ def extract_retrieval_keyword(bidding_str: str, deal_system: str = "2D/2H/2S：�
         else:
             result = "自然叫牌"
     elif len(bids) == 8:
-        if second_bid == "pass" and fourth_bid == "pass" and sixth_bid == "pass" and eighth_bid == "pass":
+        if "2D：多功能，2H/S：麦德伯格，2NT：双低花" in deal_system and first_bid in ['2H', '2S', '2D', '2NT']:
+            if first_bid == '2D':
+                result = "2D多功能开叫"
+            elif first_bid in ['2H', '2S']:
+                result = "2M麦德伯格"
+            elif first_bid == '2NT':
+                result = "2NT双低花阻击"
+        elif second_bid == "pass" and fourth_bid == "pass" and sixth_bid == "pass" and eighth_bid == "pass":
             if pass_time in [2, 3] and first_bid == "1H":
                 result = "第三四家开叫1H"
             elif pass_time in [2, 3] and first_bid == "1S":
@@ -335,7 +356,14 @@ def extract_retrieval_keyword(bidding_str: str, deal_system: str = "2D/2H/2S：�
                 all_even_pass = False
                 break
         if all_even_pass:
-            if pass_time in [2, 3] and first_bid == "1H":
+            if "2D：多功能，2H/S：麦德伯格，2NT：双低花" in deal_system and first_bid in ['2H', '2S', '2D', '2NT']:
+                if first_bid == '2D':
+                    result = "2D多功能开叫"
+                elif first_bid in ['2H', '2S']:
+                    result = "2M麦德伯格"
+                elif first_bid == '2NT':
+                    result = "2NT双低花阻击"
+            elif pass_time in [2, 3] and first_bid == "1H":
                 result = "第三四家开叫1H"
             elif pass_time in [2, 3] and first_bid == "1S":
                 result = "第三四家开叫1S"
