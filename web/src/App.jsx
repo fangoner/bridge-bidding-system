@@ -69,7 +69,7 @@ function App() {
   const [selectedBiddingIndex, setSelectedBiddingIndex] = useState(-1) // 选择的叫牌记录索引，-1表示最新
   const [simpleDisplayMode, setSimpleDisplayMode] = useState(false) // 简单显示模式
   const [showBiddingControls, setShowBiddingControls] = useState(false) // 右侧面板显示叫牌控制+JF片段
-  const [dealSystem, setDealSystem] = useState('2D/2H/2S：自然阻击') // 敌方叫牌体系
+  const [dealSystem, setDealSystem] = useState('2D/2H/2S：自然阻击') // 阻击叫牌体系
   
   // 配色方案
   const [colorSchemeKey, setColorSchemeKey] = useState(() => {
@@ -1529,8 +1529,8 @@ function App() {
               )}
 
               <FormControl sx={{ minWidth: 180 }} size="small">
-                <InputLabel>敌方叫牌体系</InputLabel>
-                <Select value={dealSystem} label="敌方叫牌体系" onChange={(e) => setDealSystem(e.target.value)}>
+                <InputLabel>阻击叫牌体系</InputLabel>
+                <Select value={dealSystem} label="阻击叫牌体系" onChange={(e) => setDealSystem(e.target.value)}>
                   <MenuItem value="2D/2H/2S：自然阻击">2D/2H/2S：自然阻击</MenuItem>
                   <MenuItem value="2D：多功能，2H/S：麦德伯格，2NT：双低花">多功能/麦德伯格</MenuItem>
                 </Select>
