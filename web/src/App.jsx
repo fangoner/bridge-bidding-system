@@ -41,6 +41,7 @@ import BiddingControls from './components/BiddingControls'
 import BiddingTable from './components/BiddingTable'
 import AIOutputPanel from './components/AIOutputPanel'
 import MobileDraggableContainer, { SortableItem } from './components/MobileDraggableContainer'
+import ControlButtons from './components/ControlButtons'
 import { colorSchemes, defaultScheme } from './theme/colorSchemes'
 import './App.css'
 
@@ -1343,156 +1344,50 @@ function App() {
 
       {/* 控制按钮 - 桌面版 */}
       <Box sx={{ mb: 2, display: { xs: 'none', md: 'flex' }, flexWrap: 'wrap', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
-        <Button
-          variant="outlined"
+        <ControlButtons
           size="large"
-          onClick={() => setShowSettings(!showSettings)}
-        >
-          {showSettings ? '隐藏设置' : '显示设置'}
-        </Button>
-
-        <Button
-          variant="contained"
-          size="large"
-          onClick={() => handleDeal(dealMode)}
-          disabled={loading}
-          startIcon={loading && <CircularProgress size={20} />}
-        >
-          {loading ? '发牌中...' : '发牌'}
-        </Button>
-
-        <Button
-          variant="outlined"
-          size="large"
-          onClick={startBidding}
-          disabled={!hands || (biddingStarted && !isBiddingComplete() && !stopBidding)}
-        >
-          {isNewDeal ? '开始叫牌' : '重新叫牌'}
-        </Button>
-        {biddingStarted && !isBiddingComplete() && (
-          <Button
-            variant={stopBidding ? "contained" : "outlined"}
-            color={stopBidding ? "success" : "warning"}
-            size="large"
-            onClick={toggleStopBidding}
-          >
-            {stopBidding ? '继续叫牌' : '停止叫牌'}
-          </Button>
-        )}
-        <Badge 
-          badgeContent={biddingRecords.length} 
-          color="primary"
-          max={999}
-          sx={{ '& .MuiBadge-badge': { fontSize: '0.7rem', height: '18px', minWidth: '18px' } }}
-        >
-          <Button
-            variant="outlined"
-            size="large"
-            onClick={() => setHistoryDialogOpen(true)}
-            startIcon={<HistoryIcon />}
-          >
-            历史记录
-          </Button>
-        </Badge>
-        <Button
-          variant="outlined"
-          size="large"
-          onClick={checkApiStatus}
-          sx={apiStatus?.error ? { borderColor: 'error.main', color: 'error.main', '&:hover': { borderColor: 'error.dark' } } : {}}
-        >
-          检查API状态
-        </Button>
-        <Badge 
-          badgeContent={apiStatus?.jf_segments_loaded || 0} 
-          color="primary"
-          max={999}
-          sx={{ '& .MuiBadge-badge': { fontSize: '0.7rem', height: '18px', minWidth: '18px' } }}
-        >
-          <Button
-            variant="outlined"
-            size="large"
-            onClick={handleReloadJF}
-          >
-            重新加载约定
-          </Button>
-        </Badge>
+          showSettings={showSettings}
+          setShowSettings={setShowSettings}
+          loading={loading}
+          handleDeal={handleDeal}
+          dealMode={dealMode}
+          hands={hands}
+          biddingStarted={biddingStarted}
+          isBiddingComplete={isBiddingComplete}
+          stopBidding={stopBidding}
+          toggleStopBidding={toggleStopBidding}
+          isNewDeal={isNewDeal}
+          startBidding={startBidding}
+          biddingRecords={biddingRecords}
+          setHistoryDialogOpen={setHistoryDialogOpen}
+          checkApiStatus={checkApiStatus}
+          apiStatus={apiStatus}
+          handleReloadJF={handleReloadJF}
+        />
       </Box>
 
       {/* 控制按钮 - 手机版 */}
       <Box sx={{ mb: 2, display: { xs: 'flex', md: 'none' }, flexWrap: 'wrap', justifyContent: 'center', gap: 1, alignItems: 'center' }}>
-        <Button
-          variant="outlined"
+        <ControlButtons
           size="small"
-          onClick={() => setShowSettings(!showSettings)}
-        >
-          {showSettings ? '隐藏设置' : '显示设置'}
-        </Button>
-
-        <Button
-          variant="contained"
-          size="small"
-          onClick={() => handleDeal(dealMode)}
-          disabled={loading}
-          startIcon={loading && <CircularProgress size={16} />}
-        >
-          {loading ? '发牌中...' : '发牌'}
-        </Button>
-
-        <Button
-          variant="outlined"
-          size="small"
-          onClick={startBidding}
-          disabled={!hands || (biddingStarted && !isBiddingComplete() && !stopBidding)}
-        >
-          {isNewDeal ? '开始叫牌' : '重新叫牌'}
-        </Button>
-        {biddingStarted && !isBiddingComplete() && (
-          <Button
-            variant={stopBidding ? "contained" : "outlined"}
-            color={stopBidding ? "success" : "warning"}
-            size="small"
-            onClick={toggleStopBidding}
-          >
-            {stopBidding ? '继续' : '暂停'}
-          </Button>
-        )}
-        <Badge 
-          badgeContent={biddingRecords.length} 
-          color="primary"
-          max={999}
-          sx={{ '& .MuiBadge-badge': { fontSize: '0.7rem', height: '18px', minWidth: '18px' } }}
-        >
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={() => setHistoryDialogOpen(true)}
-            startIcon={<HistoryIcon />}
-          >
-            历史
-          </Button>
-        </Badge>
-        <Button
-          variant="outlined"
-          size="small"
-          onClick={checkApiStatus}
-          sx={apiStatus?.error ? { borderColor: 'error.main', color: 'error.main', '&:hover': { borderColor: 'error.dark' } } : {}}
-        >
-          API
-        </Button>
-        <Badge 
-          badgeContent={apiStatus?.jf_segments_loaded || 0} 
-          color="primary"
-          max={999}
-          sx={{ '& .MuiBadge-badge': { fontSize: '0.7rem', height: '18px', minWidth: '18px' } }}
-        >
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={handleReloadJF}
-          >
-            约定
-          </Button>
-        </Badge>
+          showSettings={showSettings}
+          setShowSettings={setShowSettings}
+          loading={loading}
+          handleDeal={handleDeal}
+          dealMode={dealMode}
+          hands={hands}
+          biddingStarted={biddingStarted}
+          isBiddingComplete={isBiddingComplete}
+          stopBidding={stopBidding}
+          toggleStopBidding={toggleStopBidding}
+          isNewDeal={isNewDeal}
+          startBidding={startBidding}
+          biddingRecords={biddingRecords}
+          setHistoryDialogOpen={setHistoryDialogOpen}
+          checkApiStatus={checkApiStatus}
+          apiStatus={apiStatus}
+          handleReloadJF={handleReloadJF}
+        />
       </Box>
 
       <Divider sx={{ my: 3, borderColor: 'rgba(0, 0, 0, 0.3)', borderBottomWidth: 2 }} />
