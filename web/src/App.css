@@ -13,7 +13,6 @@ body {
   background-color: #fafafa;
 }
 
-/* 牌桌容器 */
 .card-table-container {
   display: flex;
   flex-direction: column;
@@ -25,12 +24,10 @@ body {
   min-height: 500px;
 }
 
-/* 北家 */
 .north-hand {
   margin-bottom: 10px;
 }
 
-/* 中间行：西家 + 牌桌 + 东家 */
 .middle-row {
   display: flex;
   justify-content: center;
@@ -41,12 +38,10 @@ body {
   gap: 20px;
 }
 
-/* 西家 */
 .west-hand {
   flex: 0 0 auto;
 }
 
-/* 牌桌中心 */
 .table-center {
   flex: 0 0 auto;
   display: flex;
@@ -68,7 +63,6 @@ body {
   max-height: 300px;
 }
 
-/* 叫牌表格 */
 .bidding-table {
   width: 100%;
   font-family: 'Courier New', monospace;
@@ -126,89 +120,26 @@ body {
   border-radius: 4px;
 }
 
-/* 东家 */
 .east-hand {
   flex: 0 0 auto;
 }
 
-/* 南家 */
 .south-hand {
   margin-top: 10px;
 }
 
-/* 手牌卡片 */
-.hand-card {
-  background: white;
-  border-radius: 8px;
-  padding: 12px 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  min-width: 140px;
-  font-family: 'Courier New', monospace;
-  transition: all 0.3s ease;
-}
-
-.hand-card.active {
-  box-shadow: 0 0 0 3px #ffd700, 0 4px 12px rgba(0, 0, 0, 0.3);
-  transform: scale(1.02);
-}
-
-.hand-card.human {
-  background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
-}
-
-.hand-card.partner {
-  background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%);
-}
-
-.hand-title {
-  font-weight: bold;
-  margin-bottom: 8px;
-  color: #333;
-  border-bottom: 1px solid #eee;
-  padding-bottom: 4px;
-}
-
-.suit-line {
-  font-size: 1rem;
-  line-height: 1.5;
-  white-space: nowrap;
-}
-
-.suit-black {
-  color: #000;
-  font-weight: bold;
-}
-
-.suit-red {
-  color: #d32f2f;
-  font-weight: bold;
-}
-
-.hidden-hand {
-  min-height: 80px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #999;
-  font-style: italic;
-}
-
-/* 响应式调整 - 手机竖屏保持四方位布局 */
-/* 计算基准: 最小宽度320px (iPhone SE) */
 @media (max-width: 768px) {
   .card-table-container {
     padding: 8px;
     min-height: auto;
   }
   
-  /* 保持四方位布局 */
   .middle-row {
     flex-direction: row !important;
     gap: 6px;
     flex-wrap: nowrap;
   }
   
-  /* 叫牌框 */
   .table-border {
     width: auto !important;
     min-width: 120px;
@@ -218,7 +149,6 @@ body {
     overflow: visible !important;
   }
   
-  /* 叫品字体: 0.25rem ≈ 4px */
   .bidding-table {
     font-size: 0.25rem;
   }
@@ -254,26 +184,8 @@ body {
     text-align: center;
     padding: 0;
   }
-  
-  /* 手牌框 - 限定在牌桌容器内 */
-  .card-table-container .hand-card {
-    min-width: 88px !important;
-    padding: 4px 6px !important;
-  }
-  
-  .card-table-container .hand-title {
-    font-size: 0.7rem !important;
-    margin-bottom: 2px !important;
-    padding-bottom: 2px !important;
-  }
-  
-  .card-table-container .suit-line {
-    font-size: 0.7rem !important;
-    line-height: 1.3 !important;
-  }
 }
 
-/* 更小屏幕 (320px) */
 @media (max-width: 360px) {
   .card-table-container {
     padding: 6px;
@@ -283,7 +195,6 @@ body {
     gap: 4px;
   }
   
-  /* 叫牌框 */
   .table-border {
     width: auto !important;
     min-width: 100px;
@@ -327,67 +238,4 @@ body {
     text-align: center;
     padding: 0;
   }
-  
-  .card-table-container .hand-card {
-    min-width: 75px !important;
-    padding: 3px 4px !important;
-  }
-  
-  .card-table-container .hand-title {
-    font-size: 0.6rem !important;
-    margin-bottom: 2px !important;
-    padding-bottom: 2px !important;
-  }
-  
-  .card-table-container .suit-line {
-    font-size: 0.6rem !important;
-    line-height: 1.2 !important;
-  }
-}
-
-/* LLM输出面板 */
-.llm-output-panel {
-  margin-top: 20px;
-  padding: 15px;
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  max-width: 400px;
-  align-self: center;
-}
-
-.llm-output-content {
-  max-height: 400px;
-  overflow-y: auto;
-  padding: 10px;
-  background: #f5f5f5;
-  border-radius: 8px;
-  border: 1px solid #ddd;
-}
-
-.llm-output-entry {
-  padding: 12px;
-  margin-bottom: 12px;
-  background: white;
-  border-radius: 8px;
-  border-left: 4px solid #2196f3;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.llm-output-entry:last-child {
-  margin-bottom: 0;
-}
-
-.llm-process-text {
-  background: #f8f9fa;
-  padding: 10px;
-  border-radius: 4px;
-  font-size: 0.85rem;
-  line-height: 1.4;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 200px;
-  overflow-y: auto;
-  margin-top: 8px;
-  border: 1px solid #e9ecef;
 }
