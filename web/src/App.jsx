@@ -40,16 +40,13 @@ import CardTable from './components/CardTable'
 import BiddingControls from './components/BiddingControls'
 import BiddingTable from './components/BiddingTable'
 import AIOutputPanel from './components/AIOutputPanel'
-import MobileDraggableContainer, { SortableItem } from './components/MobileDraggableContainer'
 import ControlButtons from './components/ControlButtons'
 import { colorSchemes, defaultScheme } from './theme/colorSchemes'
 import './App.css'
 
 const BIDDING_RECORDS_KEY = 'bridge_bidding_records'
-const PANEL_ORDER_KEY = 'bridge_panel_order'
 const COLOR_SCHEME_KEY = 'bridge_color_scheme'
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
-const DEFAULT_PANEL_ORDER = ['cardTable', 'biddingDetails', 'biddingControls', 'jfSuggestion']
 
 function App() {
   const theme = useTheme()
@@ -94,16 +91,6 @@ function App() {
     localStorage.setItem(COLOR_SCHEME_KEY, newScheme)
   }
   
-  // 面板顺序（手机端拖拽排序）
-  const [panelOrder, setPanelOrder] = useState(() => {
-    try {
-      const saved = localStorage.getItem(PANEL_ORDER_KEY)
-      return saved ? JSON.parse(saved) : DEFAULT_PANEL_ORDER
-    } catch {
-      return DEFAULT_PANEL_ORDER
-    }
-  })
-
   // 游戏设置
   const [gameMode, setGameMode] = useState('four') // 'four' 或 'pair'
   const [dealer, setDealer] = useState('南') // 发牌人位置
@@ -220,11 +207,6 @@ function App() {
       console.error('设置AI提供商失败:', err)
     }
   }
-
-  // 保存面板顺序到localStorage
-  useEffect(() => {
-    localStorage.setItem(PANEL_ORDER_KEY, JSON.stringify(panelOrder))
-  }, [panelOrder])
 
   const checkApiStatus = async () => {
     try {
@@ -1988,25 +1970,19 @@ function App() {
         </Box>
       )}
 
-      {/* 手机端可拖拽面板容器 */}
+      {/* 手机端布局 */}
       {hands && (
         <Box sx={{ display: { xs: 'block', md: 'none' } }}>
-          <MobileDraggableContainer 
-            panelOrder={panelOrder} 
-            onReorder={setPanelOrder}
-          >
-            {panelOrder.map((panelId) => {
-              if (panelId === 'cardTable') {
-                return (
-                  <SortableItem key={panelId} id={panelId}>
-                    <Paper elevation={3} sx={{ 
-                      p: 1, 
-                      bgcolor: '#f5f5f5', 
-                      display: 'flex', 
-                      flexDirection: 'column', 
-                      width: '100%',
-                      minHeight: '400px'
-                    }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {/* 当前牌局面板 */}
+            <Paper elevation={3} sx={{ 
+              p: 1, 
+              bgcolor: '#f5f5f5', 
+              display: 'flex', 
+              flexDirection: 'column', 
+              width: '100%',
+              minHeight: '400px'
+            }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5, flexWrap: 'wrap', gap: 0.5 }}>
                         <Typography variant="h6">
                           当前牌局
@@ -2106,10 +2082,9 @@ function App() {
                         />
                       </Box>
                     </Paper>
-                  </SortableItem>
-                )
-              }
-              if (panelId === 'biddingDetails' && (humanPosition !== null || showAIBiddingOutput)) {
+            
+            {/* 叫牌细节面板 */}
+            {(humanPosition !== null || showAIBiddingOutput) && (() => {
                 const isHumanTurnMobile = humanPosition !== null && (
                   Array.isArray(humanPosition) 
                     ? humanPosition.includes(currentBidder) 
@@ -2118,7 +2093,6 @@ function App() {
                 const showControlsMobile = isHumanTurnMobile && !isBiddingComplete();
                 const canShowControlsMobile = humanPosition !== null && !isBiddingComplete();
                 return (
-                  <SortableItem key={panelId} id={panelId}>
                     <Paper elevation={3} sx={{ 
                       p: 1, 
                       bgcolor: '#f5f5f5', 
@@ -2474,16 +2448,9 @@ function App() {
                         </>
                       )}
                     </Paper>
-                  </SortableItem>
-                )
-              }
-              if (panelId === 'biddingControls') {
-                // 叫牌控制已合并到 biddingDetails 面板，此面板不再单独显示
-                return null
-              }
-              return null
-            })}
-          </MobileDraggableContainer>
+                );
+              })()}
+          </Box>
         </Box>
       )}
 
