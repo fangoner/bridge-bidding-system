@@ -408,6 +408,10 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
   - 提取 `ControlButtons` 公共组件，合并桌面版和手机版控制按钮
   - 清理 `App.css` 中未使用的样式
   - 共减少约250行冗余代码
+- **删除手机版面板拖拽排序功能**
+  - 删除 `MobileDraggableContainer` 组件
+  - 删除 @dnd-kit 依赖
+  - 简化手机版布局代码
 
 ### v1.29
 - **阻击叫牌体系参数传递优化**

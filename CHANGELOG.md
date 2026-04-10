@@ -27,6 +27,35 @@
 
 ---
 
+### 删除手机版面板拖拽排序功能
+
+**背景**:
+手机版面板拖拽排序功能使用频率低，增加了代码复杂度。用户反馈该功能用处不大，决定删除以简化代码。
+
+**改进**:
+1. **删除组件** (`web/src/components/MobileDraggableContainer.jsx`):
+   - 删除整个拖拽排序组件
+   - 删除 SortableItem 子组件
+
+2. **简化手机版布局** (`web/src/App.jsx`):
+   - 移除 MobileDraggableContainer 和 SortableItem 包装
+   - 移除 panelOrder 状态和 localStorage 存储
+   - 直接渲染当前牌局和叫牌细节面板
+
+3. **删除依赖** (`web/package.json`):
+   - 删除 @dnd-kit/core
+   - 删除 @dnd-kit/sortable
+   - 删除 @dnd-kit/utilities
+
+**修改文件**:
+- `web/src/components/MobileDraggableContainer.jsx` (删除)
+- `web/src/App.jsx`
+- `web/package.json`
+
+**测试验证**: 手机版界面正常显示，面板顺序固定为当前牌局在上、叫牌细节在下。
+
+---
+
 ## 2026-04-09
 
 ### 阻击叫牌体系参数传递优化
