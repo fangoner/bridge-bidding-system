@@ -214,25 +214,6 @@ def capture_edge_window() -> Optional[str]:
     return None
 
 
-def capture_window_region(left: int, top: int, width: int, height: int):
-    try:
-        import mss
-        with mss.mss() as sct:
-            monitor = {"left": left, "top": top, "width": width, "height": height}
-            screenshot = sct.grab(monitor)
-            from PIL import Image
-            return Image.frombytes('RGB', screenshot.size, screenshot.rgb)
-    except ImportError:
-        pass
-    
-    try:
-        import pyautogui
-        return pyautogui.screenshot(region=(left, top, width, height))
-    except Exception as e:
-        print(f"区域截屏失败: {e}")
-        return None
-
-
 def capture_all_screens():
     try:
         import mss
@@ -317,43 +298,6 @@ def capture_active_window() -> Optional[str]:
     except Exception as e:
         print(f"截屏异常: {e}")
         return capture_fullscreen_powershell(screenshot_path)
-
-
-def capture_region(x: int, y: int, width: int, height: int) -> Optional[str]:
-    ensure_screenshot_dir()
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    screenshot_path = SCREENSHOT_DIR / f"region_{timestamp}.png"
-    
-    ps_script = f'''
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-
-$rect = New-Object System.Drawing.Rectangle({x}, {y}, {width}, {height})
-$bitmap = New-Object System.Drawing.Bitmap($rect.Width, $rect.Height)
-$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-$graphics.CopyFromScreen($rect.Location, [System.Drawing.Point]::Empty, $rect.Size)
-$bitmap.Save("{screenshot_path}", [System.Drawing.Imaging.ImageFormat]::Png)
-$graphics.Dispose()
-$bitmap.Dispose()
-Write-Output "SUCCESS"
-'''
-    
-    try:
-        result = subprocess.run(
-            ["powershell", "-Command", ps_script],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        
-        if "SUCCESS" in result.stdout and screenshot_path.exists():
-            return str(screenshot_path)
-        
-        return None
-        
-    except Exception as e:
-        print(f"区域截屏异常: {e}")
-        return None
 
 
 BRIDGE_EXTRACTION_PROMPT = """你的任务是从桥牌游戏图片中提取信息：

@@ -83,26 +83,6 @@ def is_partner(pos1: str, pos2: str) -> bool:
     return partners.get(pos1) == pos2
 
 
-def is_right_hand_opponent(current_pos: str, last_bid_pos: str) -> bool:
-    """判断current_pos是否是last_bid_pos的右手敌方"""
-    order = ["南", "西", "北", "东"]
-    current_idx = get_position_order(current_pos)
-    last_idx = get_position_order(last_bid_pos)
-    if current_idx < 0 or last_idx < 0:
-        return False
-    return current_idx == (last_idx + 1) % 4
-
-
-def is_left_hand_opponent(current_pos: str, last_bid_pos: str) -> bool:
-    """判断current_pos是否是last_bid_pos的左手敌方"""
-    order = ["南", "西", "北", "东"]
-    current_idx = get_position_order(current_pos)
-    last_idx = get_position_order(last_bid_pos)
-    if current_idx < 0 or last_idx < 0:
-        return False
-    return current_idx == (last_idx + 3) % 4
-
-
 def extract_retrieval_keyword(bidding_str: str, deal_system: str = "2D/2H/2S：自然阻击", current_position: str = None) -> str:
     first_bid, second_bid, third_bid, fourth_bid, result = None, None, None, None, None
     
