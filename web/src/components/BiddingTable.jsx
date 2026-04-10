@@ -9,6 +9,8 @@ import { Box, Typography } from '@mui/material';
  * @param {string} props.dealer - Dealer position
  */
 function BiddingTable({ biddingSequence, dealer }) {
+  const isMobile = window.innerWidth < 600;
+  
   if (biddingSequence.length === 0) {
     return (
       <Box className="bidding-empty" sx={{
@@ -47,14 +49,14 @@ function BiddingTable({ biddingSequence, dealer }) {
     <Box className="bidding-table" sx={{
       width: '100%',
       fontFamily: '"Courier New", monospace',
-      fontSize: { xs: '0.75rem', md: '0.9rem' },
+      fontSize: isMobile ? '0.9rem' : '0.9rem',
     }}>
       <Box className="bidding-header" sx={{
         display: 'flex',
         justifyContent: 'space-around',
         borderBottom: '2px solid #333',
-        paddingBottom: { xs: 0.5, md: 1 },
-        marginBottom: { xs: 0.5, md: 1 },
+        paddingBottom: isMobile ? 0.5 : 1,
+        marginBottom: isMobile ? 0.5 : 1,
         fontWeight: 'bold',
         color: '#333',
       }}>
@@ -65,7 +67,7 @@ function BiddingTable({ biddingSequence, dealer }) {
             sx={{
               flex: 1,
               textAlign: 'center',
-              minWidth: { xs: 35, md: 50 },
+              minWidth: isMobile ? 60 : 50,
               color: pos === dealer ? '#d32f2f' : 'inherit',
             }}
             className={pos === dealer ? 'dealer' : ''}
@@ -97,7 +99,7 @@ function BiddingTable({ biddingSequence, dealer }) {
               sx={{
                 flex: 1,
                 textAlign: 'center',
-                minWidth: 50,
+                minWidth: isMobile ? 60 : 50,
                 fontWeight: 500,
                 color: '#333',
                 backgroundColor: row[colIndex] ? '#e3f2fd' : 'transparent',

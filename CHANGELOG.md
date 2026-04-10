@@ -1,5 +1,73 @@
 # 开发日志
 
+## 2026-04-09
+
+### 阻击叫牌体系参数传递优化
+
+**背景**:
+用户可以选择不同的阻击叫牌体系（自然阻击 vs 多功能/麦德伯格），但该参数之前只传递给叫牌序列分析功能，没有传递给AI叫牌提示词，导致AI无法根据所选体系做出正确的叫牌决策。
+
+**改进**:
+1. **提示词参数扩展** (`llm/prompts.py`):
+   - 在 `BIDDING_SYSTEM_PROMPT`、`BIDDING_FALLBACK_PROMPT`、`HUMAN_BID_PROMPT` 三个提示词中添加 `{deal_system}` 占位符
+   - 明确说明"我方使用的是xxx阻击叫牌体系"，指导AI根据所选体系选择叫品
+
+2. **参数传递完善** (`bridge/bidding_service.py`):
+   - `ai_bid` 方法：传递 `deal_system` 到 `BIDDING_SYSTEM_PROMPT.format()`
+   - `_fallback_bid` 方法：添加 `deal_system` 参数并传递到 `BIDDING_FALLBACK_PROMPT.format()`
+   - `human_bid` 方法：传递 `deal_system` 到 `HUMAN_BID_PROMPT.format()`
+   - 所有调用 `_fallback_bid` 的地方都传递 `deal_system` 参数
+
+3. **叫牌序列分析优化** (`bridge/bidding.py`):
+   - 开叫位置关键字选择：根据阻击叫牌体系选择"花色开叫"或"花色开叫1"
+   - 支持新增的"花色开叫1"JF约定片段，专门用于多功能/麦德伯格体系
+
+4. **输出显示增强**:
+   - 后端返回结果添加"阻击叫体系"字段
+   - 前端叫牌细节面板显示"阻击叫体系"信息
+
+5. **代码清理**:
+   - 删除 `explain_bid` 方法（v1.27添加，叫牌建议功能的一部分）
+   - 删除 `build_bid_history` 方法（v1.27添加，叫牌建议功能的一部分）
+   - 删除 `EXPLAIN_BID_PROMPT` 提示词（v1.27添加）
+
+**修改文件**:
+- `llm/prompts.py`
+- `bridge/bidding_service.py`
+- `bridge/bidding.py`
+- `web/src/App.jsx`
+- `web/src/components/AIOutputPanel.jsx`
+
+**测试验证**: 选择"多功能/麦德伯格"体系后，开叫位置正确使用"花色开叫1"片段，叫牌细节显示所选体系。
+
+---
+
+### 发牌人调整逻辑优化
+
+**背景**:
+用户反馈在叫牌过程中点击"停止叫牌"后，应该能够调整发牌人。同时，调整发牌人后应该重置叫牌状态，回到发牌后的初始状态。
+
+**改进**:
+1. **停止叫牌后可调整发牌人** (`web/src/components/CardTable.jsx`):
+   - 修改判断条件：`!biddingStarted || stopBidding` 时允许调整
+   - 添加 `stopBidding` prop 到组件
+
+2. **调整发牌人时重置叫牌状态** (`web/src/App.jsx`):
+   - `biddingStarted` → false
+   - `stopBidding` → false
+   - `isNewDeal` → true
+   - 叫牌序列清空
+   - AI叫牌历史清空
+   - 已pass的AI位置清空
+
+**修改文件**:
+- `web/src/App.jsx`
+- `web/src/components/CardTable.jsx`
+
+**测试验证**: 停止叫牌后可以点击方位标签调整发牌人，调整后界面回到初始状态（按钮显示"开始叫牌"，停止/继续叫牌按钮消失）。
+
+---
+
 ## 2026-04-07
 
 ### 移除叫牌建议功能

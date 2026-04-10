@@ -27,7 +27,9 @@ import {
   Divider,
   Badge,
   ToggleButtonGroup,
-  ToggleButton
+  ToggleButton,
+  useTheme,
+  useMediaQuery
 } from '@mui/material'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
@@ -49,6 +51,9 @@ const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
 const DEFAULT_PANEL_ORDER = ['cardTable', 'biddingDetails', 'biddingControls', 'jfSuggestion']
 
 function App() {
+  const theme = useTheme()
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
+  
   const isLoadingRecordRef = useRef(false) // 用于标记是否正在加载历史记录（不触发保存）
   const [hands, setHands] = useState({
     '南': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
@@ -1578,13 +1583,13 @@ function App() {
           {/* 牌桌和右侧面板并排 */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2, justifyContent: 'center' }}>
             <Paper elevation={3} sx={{ 
-              p: 1, 
+              p: isMobile ? 0.5 : 1, 
               bgcolor: '#e8e8e8', 
               display: 'flex', 
               flexDirection: 'column', 
               flex: '0 0 auto',
-              width: '600px',
-              height: '640px',
+              width: isMobile ? '100%' : '600px',
+              height: isMobile ? 'auto' : '640px',
               overflow: 'hidden'
             }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5, flexShrink: 0, minHeight: 32 }}>
@@ -1667,10 +1672,20 @@ function App() {
                   biddingTotalTime={biddingTotalTime}
                   positionRoles={positionRoles}
                   onPositionRoleChange={handlePositionRoleChange}
-                  onDealerChange={(pos) => { setDealer(pos); setCurrentBidder(pos); }}
+                  onDealerChange={(pos) => { 
+                    setDealer(pos); 
+                    setCurrentBidder(pos);
+                    setBiddingStarted(false);
+                    setStopBidding(false);
+                    setIsNewDeal(true);
+                    setBiddingSequence([]);
+                    setAiBiddingHistory([]);
+                    setPassedAIPositions(new Set());
+                  }}
                   onClearAllHands={clearAllHands}
                   setHands={setHands}
                   biddingStarted={biddingStarted}
+                  stopBidding={stopBidding}
                   startBidding={startBidding}
                 />
               </Box>
@@ -1687,16 +1702,16 @@ function App() {
               // 默认显示叫牌控制（如果是人类回合），否则显示叫牌细节
               const effectiveShowControls = canShowControls ? showBiddingControls : false;
               return (
-              <Paper elevation={3} sx={{ 
-                p: 1, 
-                bgcolor: '#e8e8e8', 
-                display: 'flex', 
-                flexDirection: 'column', 
-                flex: '0 0 auto',
-                width: '600px',
-                height: '640px',
-                overflow: 'hidden'
-              }}>
+                <Paper elevation={3} sx={{ 
+                  p: isMobile ? 0.5 : 1, 
+                  bgcolor: '#e8e8e8', 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  flex: '0 0 auto',
+                  width: isMobile ? '100%' : '600px',
+                  height: isMobile ? 'auto' : '640px',
+                  overflow: 'hidden'
+                }}>
                 {/* 顶部切换栏 */}
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5, flexShrink: 0, minHeight: 32 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -1863,6 +1878,11 @@ function App() {
                         {fullOutput["自己pass次数"] && (
                           <Typography variant="body2" sx={{ mt: 1 }}>
                             <strong>自己pass次数:</strong> {fullOutput["自己pass次数"]}
+                          </Typography>
+                        )}
+                        {fullOutput["阻击叫体系"] && (
+                          <Typography variant="body2" sx={{ mt: 1 }}>
+                            <strong>阻击叫体系:</strong> {fullOutput["阻击叫体系"]}
                           </Typography>
                         )}
                         {fullOutput["JF约定"] && (
@@ -2173,10 +2193,20 @@ function App() {
                           biddingTotalTime={biddingTotalTime}
                           positionRoles={positionRoles}
                           onPositionRoleChange={handlePositionRoleChange}
-                          onDealerChange={(pos) => { setDealer(pos); setCurrentBidder(pos); }}
+                          onDealerChange={(pos) => { 
+                            setDealer(pos); 
+                            setCurrentBidder(pos);
+                            setBiddingStarted(false);
+                            setStopBidding(false);
+                            setIsNewDeal(true);
+                            setBiddingSequence([]);
+                            setAiBiddingHistory([]);
+                            setPassedAIPositions(new Set());
+                          }}
                           onClearAllHands={clearAllHands}
                           setHands={setHands}
                           biddingStarted={biddingStarted}
+                          stopBidding={stopBidding}
                           startBidding={startBidding}
                         />
                       </Box>
@@ -2203,7 +2233,36 @@ function App() {
                       height: showControlsMobile ? 'auto' : '400px',
                       minHeight: showControlsMobile ? '500px' : undefined,
                     }}>
-                      {showControlsMobile ? (
+                      {/* 控制切换栏 - 在人类回合时显示 */}
+                      {canShowControlsMobile && (
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexWrap: 'wrap', gap: 1, flexShrink: 0 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <Typography variant="h6">
+                              叫牌细节
+                            </Typography>
+                            <ToggleButtonGroup
+                              value={showBiddingControls ? 'controls' : 'details'}
+                              exclusive
+                              onChange={(e, newValue) => {
+                                if (newValue !== null) {
+                                  setShowBiddingControls(newValue === 'controls')
+                                }
+                              }}
+                              size="small"
+                              sx={{ height: 26, ml: 1 }}
+                            >
+                              <ToggleButton value="controls" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 40 }}>
+                                控制
+                              </ToggleButton>
+                              <ToggleButton value="details" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 40 }}>
+                                细节
+                              </ToggleButton>
+                            </ToggleButtonGroup>
+                          </Box>
+                        </Box>
+                      )}
+                      
+                      {showControlsMobile && showBiddingControls ? (
                         /* 人类回合：叫牌控制 + JF约定 */
                         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                           <BiddingControls
@@ -2262,9 +2321,10 @@ function App() {
                           </Paper>
                         </Box>
                       ) : (
-                        /* AI回合 / 叫牌结束 / 观察者模式：叫牌细节 */
+                        /* AI回合 / 叫牌结束 / 观察者模式 / 人类回合选择细节：叫牌细节 */
                         <>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1, flexShrink: 0 }}>
+                        {!canShowControlsMobile && (
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
                           <Typography variant="h6">
                             叫牌细节
@@ -2289,6 +2349,7 @@ function App() {
                             </ToggleButton>
                           </ToggleButtonGroup>
                         </Box>
+                        )}
                         <FormControlLabel
                           control={<Checkbox checked={simpleDisplayMode} onChange={(e) => setSimpleDisplayMode(e.target.checked)} />}
                           label="简单"
@@ -2350,6 +2411,11 @@ function App() {
                               {fullOutput["自己pass次数"] && (
                                 <Typography variant="body2" sx={{ mt: 1 }}>
                                   <strong>自己pass次数:</strong> {fullOutput["自己pass次数"]}
+                                </Typography>
+                              )}
+                              {fullOutput["阻击叫体系"] && (
+                                <Typography variant="body2" sx={{ mt: 1 }}>
+                                  <strong>阻击叫体系:</strong> {fullOutput["阻击叫体系"]}
                                 </Typography>
                               )}
                               {fullOutput["JF约定"] && (

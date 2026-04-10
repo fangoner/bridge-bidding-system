@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Button, CircularProgress, TextField, ToggleButton, ToggleButtonGroup, Typography, IconButton, Tooltip } from '@mui/material';
+import { Box, Button, CircularProgress, TextField, ToggleButton, ToggleButtonGroup, Typography, IconButton, Tooltip, useTheme, useMediaQuery } from '@mui/material';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import HandDisplay from './HandDisplay';
 import DoubleDummyTable from './DoubleDummyTable';
@@ -32,6 +32,7 @@ function CardTable({
   onClearAllHands,
   setHands,
   biddingStarted,
+  stopBidding,
   startBidding,
 }) {
   const [handInputs, setHandInputs] = useState({
@@ -46,6 +47,12 @@ function CardTable({
     '东': '',
     '西': ''
   })
+
+  const theme = useTheme()
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
+  
+  const handBoxSize = isMobile ? 'calc((100vw - 12px) * 0.42)' : 160
+  const centerBoxSize = isMobile ? 120 : 220
 
   if (!hands) return null;
 
@@ -185,9 +192,10 @@ function CardTable({
         <Box sx={{
           bgcolor: 'rgba(255, 255, 255, 0.98)',
           borderRadius: 2,
-          p: 1,
-          width: 160,
-          height: 160,
+          p: isMobile ? 0.5 : 1,
+          width: handBoxSize,
+          height: handBoxSize,
+          flexShrink: 0,
           boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
           display: 'flex',
           flexDirection: 'column',
@@ -200,11 +208,11 @@ function CardTable({
               sx={{ 
                 fontWeight: 600, 
                 fontSize: '0.85rem',
-                cursor: onDealerChange && !biddingStarted ? 'pointer' : 'default',
+                cursor: onDealerChange && (!biddingStarted || stopBidding) ? 'pointer' : 'default',
                 transition: 'color 0.2s',
-                '&:hover': onDealerChange && !biddingStarted ? { color: 'primary.main' } : {}
+                '&:hover': onDealerChange && (!biddingStarted || stopBidding) ? { color: 'primary.main' } : {}
               }}
-              onClick={() => onDealerChange && !biddingStarted && onDealerChange(position)}
+              onClick={() => onDealerChange && (!biddingStarted || stopBidding) && onDealerChange(position)}
             >
               {position}家
               {dealer === position && ' *'}
@@ -238,14 +246,28 @@ function CardTable({
           </Box>
           
           {showInput ? (
-            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+              {!handInputs[position] && (
+                <Box sx={{
+                  position: 'absolute',
+                  top: '8px',
+                  left: '8px',
+                  pointerEvents: 'none',
+                  fontSize: '0.75rem',
+                  zIndex: 1,
+                }}>
+                  <span style={{ color: '#000' }}>♠</span>{' '}
+                  <span style={{ color: '#d32f2f' }}>♥</span>{' '}
+                  <span style={{ color: '#f57c00' }}>♦</span>{' '}
+                  <span style={{ color: '#000' }}>♣</span>
+                </Box>
+              )}
               <TextField
                 size="small"
-                placeholder="♠ ♥ ♦ ♣ 空格分隔"
                 value={handInputs[position]}
                 onChange={(e) => handleHandInputChange(position, e.target.value)}
                 error={!!inputErrors[position]}
-                helperText={inputErrors[position] || '如: AKQJ - 987 654'}
+                helperText={inputErrors[position] || '如: AKQJ - T87 654'}
                 fullWidth
                 multiline
                 maxRows={2}
@@ -297,16 +319,17 @@ function CardTable({
     <Box className="card-table-container" sx={{
       display: 'flex',
       flexDirection: 'column',
-      alignItems: 'center',
+      alignItems: isMobile ? 'stretch' : 'center',
       justifyContent: 'center',
-      padding: 1,
+      padding: isMobile ? 0.5 : 1,
       background: scheme.table.background,
       borderRadius: 2,
       boxShadow: 8,
+      width: isMobile ? 'calc(100vw - 16px)' : 'auto',
       maxWidth: '100%',
       maxHeight: '100%',
       position: 'relative',
-      overflow: 'hidden',
+      overflow: isMobile ? 'visible' : 'hidden',
     }}>
       {onClearAllHands && (!biddingStarted || (checkBiddingComplete && checkBiddingComplete())) && (
         <Box sx={{
@@ -377,55 +400,109 @@ function CardTable({
         </Box>
       )}
 
-      {renderHandWithStatus(north, '北', { mb: '4px' })}
+      {isMobile ? (
+        <>
+          <Box sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
+            {renderHandWithStatus(north, '北', { mb: '12px' })}
+          </Box>
+          
+          <Box sx={{ display: 'flex', gap: '4px', width: '100%', mb: '12px', justifyContent: 'center' }}>
+            {renderHandWithStatus(west, '西')}
+            {renderHandWithStatus(east, '东')}
+          </Box>
+          
+          <Box sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
+            {renderHandWithStatus(south, '南', { mb: '12px' })}
+          </Box>
+          
+          <Box className="table-center" sx={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+            <Box className="table-border" sx={{
+              width: handBoxSize,
+              minWidth: handBoxSize,
+              flexShrink: 0,
+              minHeight: 80,
+              border: scheme.table.border,
+              borderRadius: 2,
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'flex-start',
+              background: scheme.table.centerBg,
+              padding: 1,
+              overflowY: 'auto',
+            }}>
+              {showDoubleDummy ? (
+                doubleDummyLoading ? (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
+                    <CircularProgress size={24} />
+                  </Box>
+                ) : doubleDummyResult ? (
+                  <DoubleDummyTable tableData={doubleDummyResult} />
+                ) : (
+                  <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
+                    无分析结果
+                  </div>
+                )
+              ) : renderBiddingTable ? renderBiddingTable() : (
+                <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
+                  等待叫牌...
+                </div>
+              )}
+            </Box>
+          </Box>
+        </>
+      ) : (
+        <>
+          {renderHandWithStatus(north, '北', { mb: '8px' })}
 
-      <Box className="middle-row" sx={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        width: '100%',
-        maxWidth: 800,
-        gap: '4px',
-      }}>
-        {renderHandWithStatus(west, '西')}
-
-        <Box className="table-center">
-          <Box className="table-border" sx={{
-            width: 220,
-            height: 220,
-            border: scheme.table.border,
-            borderRadius: 2,
+          <Box className="middle-row" sx={{
             display: 'flex',
             justifyContent: 'center',
-            alignItems: 'flex-start',
-            background: scheme.table.centerBg,
-            padding: 1,
-            overflowY: 'auto',
+            alignItems: 'center',
+            width: '100%',
+            maxWidth: 800,
+            gap: '8px',
           }}>
-            {showDoubleDummy ? (
-              doubleDummyLoading ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
-                  <CircularProgress size={24} />
-                </Box>
-              ) : doubleDummyResult ? (
-                <DoubleDummyTable tableData={doubleDummyResult} />
-              ) : (
-                <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
-                  无分析结果
-                </div>
-              )
-            ) : renderBiddingTable ? renderBiddingTable() : (
-              <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
-                等待叫牌...
-              </div>
-            )}
+            {renderHandWithStatus(west, '西')}
+
+            <Box className="table-center">
+              <Box className="table-border" sx={{
+                width: centerBoxSize,
+                height: centerBoxSize,
+                border: scheme.table.border,
+                borderRadius: 2,
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'flex-start',
+                background: scheme.table.centerBg,
+                padding: 1,
+                overflowY: 'auto',
+              }}>
+                {showDoubleDummy ? (
+                  doubleDummyLoading ? (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
+                      <CircularProgress size={24} />
+                    </Box>
+                  ) : doubleDummyResult ? (
+                    <DoubleDummyTable tableData={doubleDummyResult} />
+                  ) : (
+                    <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
+                      无分析结果
+                    </div>
+                  )
+                ) : renderBiddingTable ? renderBiddingTable() : (
+                  <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
+                    等待叫牌...
+                  </div>
+                )}
+              </Box>
+            </Box>
+
+            {renderHandWithStatus(east, '东')}
           </Box>
-        </Box>
 
-        {renderHandWithStatus(east, '东')}
-      </Box>
-
-      {renderHandWithStatus(south, '南', { mt: '4px' })}
+          {renderHandWithStatus(south, '南', { mt: '8px' })}
+        </>
+      )}
     </Box>
   );
 }

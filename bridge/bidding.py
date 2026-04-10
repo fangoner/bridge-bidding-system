@@ -106,8 +106,10 @@ def is_left_hand_opponent(current_pos: str, last_bid_pos: str) -> bool:
 def extract_retrieval_keyword(bidding_str: str, deal_system: str = "2D/2H/2S：自然阻击", current_position: str = None) -> str:
     first_bid, second_bid, third_bid, fourth_bid, result = None, None, None, None, None
     
+    is_multi_madberg = "多功能" in deal_system or "麦德伯格" in deal_system
+    
     if bidding_str is None or bidding_str == "":
-        return "花色开叫"
+        return "花色开叫1" if is_multi_madberg else "花色开叫"
     
     import re
     bidding_str = bidding_str.replace('（', '(').replace('）', ')')
@@ -130,7 +132,7 @@ def extract_retrieval_keyword(bidding_str: str, deal_system: str = "2D/2H/2S：�
         pass_time += 1
     
     if len(bids) == 0:
-        return "花色开叫"
+        return "花色开叫1" if is_multi_madberg else "花色开叫"
     
     first_bid = bids[0] if len(bids) > 0 else None
     second_bid = bids[1] if len(bids) > 1 else None

@@ -1,6 +1,6 @@
 from typing import Dict, Optional, Any, List, Tuple
 from bridge.bidding import extract_retrieval_keyword, get_partner_position, get_position_name
-from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT, EXPLAIN_BID_PROMPT
+from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT
 from config import MAIN_PROMPT_TEMPERATURE, FALLBACK_PROMPT_TEMPERATURE
 
 
@@ -103,6 +103,7 @@ class BiddingService:
                 bidding_sequence,
                 is_structural,
                 jf_keyword="成局与满贯",
+                deal_system=deal_system,
                 verbose=verbose
             )
         
@@ -118,6 +119,7 @@ class BiddingService:
                 bidding_sequence,
                 is_structural,
                 jf_keyword=jf_keyword,
+                deal_system=deal_system,
                 verbose=verbose
             )
         
@@ -134,6 +136,7 @@ class BiddingService:
                 bidding_sequence,
                 is_structural,
                 jf_keyword="成局与满贯",
+                deal_system=deal_system,
                 verbose=verbose
             )
         
@@ -149,6 +152,7 @@ class BiddingService:
                 bidding_sequence,
                 is_structural,
                 from_main_prompt=True,
+                deal_system=deal_system,
                 verbose=verbose
             )
         
@@ -162,12 +166,14 @@ class BiddingService:
             dist=dist,
             bidding=bidding_sequence if bidding_sequence else "空（开叫位置）",
             jf_keyword=jf_keyword,
-            bid_meaning=self.bid_meanings if self.bid_meanings else "无"
+            bid_meaning=self.bid_meanings if self.bid_meanings else "无",
+            deal_system=deal_system
         )
         
         try:
             result = self.llm_client.chat_bidding(prompt, temperature=MAIN_PROMPT_TEMPERATURE)
             result["JF约定"] = jf_keyword
+            result["阻击叫体系"] = deal_system
             
             if self._is_no_valid_bid(result):
                 if not is_opener:
@@ -187,6 +193,7 @@ class BiddingService:
                         bidding_sequence,
                         is_structural,
                         from_main_prompt=True,
+                        deal_system=deal_system,
                         verbose=verbose
                     )
                     fallback_result["主提示词输出"] = main_prompt_output
@@ -202,6 +209,7 @@ class BiddingService:
                     bidding_sequence,
                     is_structural,
                     from_main_prompt=True,
+                    deal_system=deal_system,
                     verbose=verbose
                 )
             
@@ -225,6 +233,7 @@ class BiddingService:
         is_structural: bool,
         from_main_prompt: bool = False,
         jf_keyword: str = None,
+        deal_system: str = "2D/2H/2S：自然阻击",
         verbose: bool = False
     ) -> Dict:
         actual_jf_content = jf_content
@@ -248,13 +257,15 @@ class BiddingService:
             bidding=bidding_sequence if bidding_sequence else "空（开叫位置）",
             jf_keyword=actual_jf_keyword,
             bid_meaning=self.bid_meanings if self.bid_meanings else "无",
-            is_structural="是" if is_structural else "否"
+            is_structural="是" if is_structural else "否",
+            deal_system=deal_system
         )
         
         try:
             result = self.llm_client.chat_bidding_fallback(prompt, temperature=FALLBACK_PROMPT_TEMPERATURE)
             result["叫品筛选过程"] = "[备用提示词] " + result.get("叫品筛选过程", "")
             result["JF约定"] = actual_jf_keyword
+            result["阻击叫体系"] = deal_system
             
             bid = result.get("选定叫品", "").strip().lower()
             if not bid or bid in ["jf无合格叫品", "无合格叫品", "没有合格叫品"]:
@@ -263,7 +274,7 @@ class BiddingService:
             
             return result
         except Exception as e:
-            return {"选定叫品": "pass", "叫品含义": f"[备用提示词异常] {e}，强制选择pass", "叫品筛选过程": f"[备用提示词异常] {e}", "JF约定": actual_jf_keyword}
+            return {"选定叫品": "pass", "叫品含义": f"[备用提示词异常] {e}，强制选择pass", "叫品筛选过程": f"[备用提示词异常] {e}", "JF约定": actual_jf_keyword, "阻击叫体系": deal_system}
     
     def human_bid(
         self,
@@ -323,7 +334,8 @@ class BiddingService:
             player=player_name,
             user_input=user_input,
             jf_content=jf_content,
-            subsequent_bids=subsequent_bids_str
+            subsequent_bids=subsequent_bids_str,
+            deal_system=deal_system
         )
         
         try:
@@ -335,109 +347,3 @@ class BiddingService:
         except Exception as e:
             full_sequence = f"{bidding_sequence}({player_name}){bid}-"
             return {"选定叫品": bid, "叫品含义": f"获取叫品含义失败: {e}", "JF约定": jf_keyword, "完整叫牌序列": full_sequence}
-    
-    def explain_bid(
-        self,
-        bid: str,
-        bidding_sequence: str,
-        position: str,
-        deal_system: str = "2D/2H/2S：自然阻击",
-        verbose: bool = False
-    ) -> str:
-        """解释某个叫品在当前序列下的含义（不知道手牌）"""
-        
-        if bid.lower() == "pass":
-            return "pass：不叫"
-        
-        partner_name = get_partner_position(position)
-        jf_keyword = extract_retrieval_keyword(bidding_sequence, deal_system, position)
-        jf_result = self.jf_retriever.retrieve_with_preprocess(jf_keyword, bidding_sequence, partner_name)
-        
-        subsequent_bids = jf_result.get("subsequent_bids", [])
-        for item in subsequent_bids:
-            if item.get("bid", "").upper() == bid.upper():
-                meaning = item.get("line", "")
-                if meaning:
-                    if verbose:
-                        print(f"[explain_bid] 从JF约定匹配到 {bid} 含义: {meaning}")
-                    return meaning
-        
-        jf_content = jf_result.get("original_content", "")
-        if not jf_content:
-            jf_content = "无相关JF约定"
-        
-        prompt = EXPLAIN_BID_PROMPT.format(
-            bidding=bidding_sequence if bidding_sequence else "空（开叫位置）",
-            position=position,
-            bid=bid,
-            jf_content=jf_content
-        )
-        
-        try:
-            if verbose:
-                print(f"[explain_bid] 调用AI解释 {bid}")
-            result = self.llm_client.chat(prompt, temperature=0)
-            meaning = result.strip() if result else f"{bid}：含义未知"
-            if verbose:
-                print(f"[explain_bid] AI解释结果: {meaning}")
-            return meaning
-        except Exception as e:
-            if verbose:
-                print(f"[explain_bid] AI解释失败: {e}")
-            return f"{bid}：含义未知"
-    
-    def build_bid_history(
-        self,
-        bidding_sequence: str,
-        dealer: str = "南",
-        deal_system: str = "2D/2H/2S：自然阻击",
-        verbose: bool = False
-    ) -> str:
-        """从叫牌序列构建叫牌历史
-        
-        支持两种格式：
-        - 带位置前缀: (南)pass-(西)2C-(北)pass-...
-        - 不带位置前缀: pass-2C-pass-...
-        """
-        
-        if not bidding_sequence:
-            return ""
-        
-        import re
-        position_pattern = re.compile(r'^\((南|西|北|东)\)(.+)$')
-        
-        bids = [b.strip() for b in bidding_sequence.split("-") if b.strip()]
-        
-        if not bids:
-            return ""
-        
-        bid_history = []
-        
-        for i, bid_item in enumerate(bids):
-            match = position_pattern.match(bid_item)
-            if match:
-                position = match.group(1)
-                bid = match.group(2).strip()
-            else:
-                positions = ["南", "西", "北", "东"]
-                dealer_idx = positions.index(dealer)
-                position = positions[(dealer_idx + i) % 4]
-                bid = bid_item
-            
-            if bid.lower() == "pass":
-                bid_history.append(f"{position}家pass")
-                continue
-            
-            partial_sequence = "-".join(bids[:i]) if i > 0 else ""
-            
-            meaning = self.explain_bid(
-                bid=bid,
-                bidding_sequence=partial_sequence,
-                position=position,
-                deal_system=deal_system,
-                verbose=verbose
-            )
-            
-            bid_history.append(f"{position}家{bid}：{meaning}")
-        
-        return "\n".join(bid_history)

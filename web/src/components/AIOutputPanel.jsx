@@ -180,6 +180,11 @@ function AIOutputPanel({
                     <strong>自己pass次数:</strong> {fullOutput["自己pass次数"]}
                   </Typography>
                 )}
+                {fullOutput["阻击叫体系"] && (
+                  <Typography variant="body2" sx={{ mt: 1 }}>
+                    <strong>阻击叫体系:</strong> {fullOutput["阻击叫体系"]}
+                  </Typography>
+                )}
                 {fullOutput["JF约定"] && (
                   <Typography variant="body2" sx={{ mt: 1 }}>
                     <strong>JF约定:</strong> {fullOutput["JF约定"]}
