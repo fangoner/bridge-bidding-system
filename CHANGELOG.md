@@ -1,5 +1,32 @@
 # 开发日志
 
+## 2026-04-11
+
+### 前端组件结构优化
+
+**背景**:
+前端代码经过多次迭代，积累了一些重复代码和未使用的样式。桌面版和手机版的控制按钮代码几乎相同，App.css中也有很多未使用的样式。
+
+**改进**:
+1. **提取公共组件** (`web/src/components/ControlButtons.jsx`):
+   - 创建 `ControlButtons` 组件，合并桌面版和手机版的控制按钮
+   - 通过 `size` prop 控制按钮大小和显示文本
+   - 减少约100行重复代码
+
+2. **清理CSS样式** (`web/src/App.css`):
+   - 删除未使用的样式：`hand-card`、`llm-output-panel` 等
+   - 保留正在使用的样式：`card-table-container`、`bidding-table` 等
+   - 减少约150行冗余CSS
+
+**修改文件**:
+- `web/src/components/ControlButtons.jsx` (新增)
+- `web/src/App.jsx`
+- `web/src/App.css`
+
+**测试验证**: 桌面版和手机版控制按钮功能正常，界面显示无变化。
+
+---
+
 ## 2026-04-09
 
 ### 阻击叫牌体系参数传递优化

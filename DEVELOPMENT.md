@@ -403,7 +403,13 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 
 ## 版本历史
 
-### v1.29 (当前版本)
+### v1.30 (当前版本)
+- **前端组件结构优化**
+  - 提取 `ControlButtons` 公共组件，合并桌面版和手机版控制按钮
+  - 清理 `App.css` 中未使用的样式
+  - 共减少约250行冗余代码
+
+### v1.29
 - **阻击叫牌体系参数传递优化**
   - 三个提示词添加 `{deal_system}` 占位符，指导AI根据所选体系选择叫品
   - `bidding_service.py` 完善参数传递链路
