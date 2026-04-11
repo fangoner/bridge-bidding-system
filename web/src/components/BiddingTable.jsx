@@ -67,12 +67,12 @@ function BiddingTable({ biddingSequence, dealer }) {
             sx={{
               flex: 1,
               textAlign: 'center',
-              minWidth: isMobile ? 60 : 50,
+              minWidth: isMobile ? 70 : 50,
               color: pos === dealer ? '#d32f2f' : 'inherit',
             }}
             className={pos === dealer ? 'dealer' : ''}
           >
-            {pos}{pos === dealer ? '*' : ''}
+            {pos}
           </Box>
         ))}
       </Box>
@@ -99,7 +99,7 @@ function BiddingTable({ biddingSequence, dealer }) {
               sx={{
                 flex: 1,
                 textAlign: 'center',
-                minWidth: isMobile ? 60 : 50,
+                minWidth: isMobile ? 70 : 50,
                 fontWeight: 500,
                 color: '#333',
                 backgroundColor: row[colIndex] ? '#e3f2fd' : 'transparent',

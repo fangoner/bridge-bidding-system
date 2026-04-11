@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Container,
   Typography,
@@ -36,11 +36,10 @@ import EditIcon from '@mui/icons-material/Edit'
 import HistoryIcon from '@mui/icons-material/History'
 import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, doubleDummyAnalysis, getFallbackModel, setFallbackModel, getAIProvider, setAIProvider } from './services/api'
 import HandDisplay from './components/HandDisplay'
-import CardTable from './components/CardTable'
-import BiddingControls from './components/BiddingControls'
-import BiddingTable from './components/BiddingTable'
-import AIOutputPanel from './components/AIOutputPanel'
 import ControlButtons from './components/ControlButtons'
+import BiddingDetailPanel from './components/BiddingDetailPanel'
+import CardTablePanel from './components/CardTablePanel'
+import SettingsPanel from './components/SettingsPanel'
 import { colorSchemes, defaultScheme } from './theme/colorSchemes'
 import './App.css'
 
@@ -73,6 +72,10 @@ function App() {
   const [simpleDisplayMode, setSimpleDisplayMode] = useState(false) // 简单显示模式
   const [showBiddingControls, setShowBiddingControls] = useState(false) // 右侧面板显示叫牌控制+JF片段
   const [dealSystem, setDealSystem] = useState('2D/2H/2S：自然阻击') // 阻击叫牌体系
+  
+  // 叫牌回退历史
+  const [biddingHistory, setBiddingHistory] = useState([]) // 历史快照列表
+  const [historyIndex, setHistoryIndex] = useState(-1) // 当前历史位置
   
   // 配色方案
   const [colorSchemeKey, setColorSchemeKey] = useState(() => {
@@ -429,6 +432,35 @@ function App() {
     }
   }
 
+  // 叫牌回退功能
+  const saveBiddingSnapshot = useCallback(() => {
+    const snapshot = {
+      biddingSequence: [...biddingSequence],
+      currentBidder,
+      aiBiddingHistory: [...aiBiddingHistory],
+    }
+    const newHistory = historyIndex >= 0 
+      ? biddingHistory.slice(0, historyIndex + 1) 
+      : biddingHistory
+    setBiddingHistory([...newHistory, snapshot])
+    setHistoryIndex(newHistory.length)
+  }, [biddingSequence, currentBidder, aiBiddingHistory, biddingHistory, historyIndex])
+
+  const undoBidding = useCallback(() => {
+    if (historyIndex > 0) {
+      const snapshot = biddingHistory[historyIndex - 1]
+      setBiddingSequence(snapshot.biddingSequence)
+      setCurrentBidder(snapshot.currentBidder)
+      setAiBiddingHistory(snapshot.aiBiddingHistory)
+      setHistoryIndex(historyIndex - 1)
+      setBidSuggestion(null)
+    }
+  }, [biddingHistory, historyIndex])
+
+  // 只有停止叫牌后才能撤销，且AI不在加载中（包括AI叫牌和获取叫品含义）
+  const showUndo = stopBidding && historyIndex > 0
+  const canUndo = !aiLoading && !currentBiddingPosition
+
   // 发牌
   const handleDeal = async (mode = 'free') => {
     setLoading(true)
@@ -447,6 +479,9 @@ function App() {
       setUseFallback(false) // 重置备用提示词状态
       setShowDoubleDummy(false) // 重置双明手显示状态
       setDoubleDummyResult(null) // 重置双明手结果
+      // 重置回退历史
+      setBiddingHistory([])
+      setHistoryIndex(-1)
     } catch (err) {
       setError('发牌失败，请检查API服务是否正常运行')
     } finally {
@@ -473,6 +508,8 @@ function App() {
         setUseFallback(false)
         setShowDoubleDummy(false)
         setDoubleDummyResult(null)
+        setBiddingHistory([])
+        setHistoryIndex(-1)
       } else {
         setError(data.message || '牌局解析失败')
       }
@@ -502,6 +539,8 @@ function App() {
         setUseFallback(false)
         setShowDoubleDummy(false)
         setDoubleDummyResult(null)
+        setBiddingHistory([])
+        setHistoryIndex(-1)
       } else {
         setError(data.message || '图片识别失败')
       }
@@ -544,6 +583,8 @@ function App() {
         setUseFallback(false)
         setShowDoubleDummy(false)
         setDoubleDummyResult(null)
+        setBiddingHistory([])
+        setHistoryIndex(-1)
         setError(null)
       } else {
         setError(data.message || '识别失败，请确保已截取图片')
@@ -582,6 +623,14 @@ function App() {
       setBiddingStartTime(Date.now()) // 记录开始时间
       setBiddingTotalTime(null) // 重置总时间
       setError(null) // 清除错误
+      // 重置回退历史并保存初始快照
+      const initialSnapshot = {
+        biddingSequence: [],
+        currentBidder: dealer,
+        aiBiddingHistory: [],
+      }
+      setBiddingHistory([initialSnapshot])
+      setHistoryIndex(0)
     }
   }
 
@@ -596,6 +645,8 @@ function App() {
     setIsNewDeal(false)
     setBiddingStartTime(null)
     setBiddingTotalTime(null)
+    setBiddingHistory([])
+    setHistoryIndex(-1)
   }
 
   // 清除所有手牌（重新开始一局）
@@ -617,6 +668,8 @@ function App() {
     setOutputFormats(null)
     setShowDoubleDummy(false)
     setDoubleDummyResult(null)
+    setBiddingHistory([])
+    setHistoryIndex(-1)
   }
 
   // 切换停止/继续叫牌
@@ -717,12 +770,37 @@ function App() {
         
         setBiddingSequence(newSequence)
         setCurrentBidder(nextNextBidder)
+        
+        // 保存叫牌快照（双人模式自动pass）
+        const snapshotPair = {
+          biddingSequence: newSequence,
+          currentBidder: nextNextBidder,
+          aiBiddingHistory: [...aiBiddingHistory],
+        }
+        const newHistoryPair = historyIndex >= 0 
+          ? biddingHistory.slice(0, historyIndex + 1) 
+          : biddingHistory
+        setBiddingHistory([...newHistoryPair, snapshotPair])
+        setHistoryIndex(newHistoryPair.length)
+        
         return
       }
     }
 
     setBiddingSequence(newSequence)
     setCurrentBidder(nextBidder)
+    
+    // 保存叫牌快照
+    const snapshot = {
+      biddingSequence: newSequence,
+      currentBidder: nextBidder,
+      aiBiddingHistory: [...aiBiddingHistory],
+    }
+    const newHistory = historyIndex >= 0 
+      ? biddingHistory.slice(0, historyIndex + 1) 
+      : biddingHistory
+    setBiddingHistory([...newHistory, snapshot])
+    setHistoryIndex(newHistory.length)
     
     // 四人模式：检查搭档两人是否相继pass（中间只有对方的一次叫牌或pass）
     // 前提：必须已有实质性叫牌（第一个实质性叫牌之前的pass不算）
@@ -1345,6 +1423,9 @@ function App() {
           checkApiStatus={checkApiStatus}
           apiStatus={apiStatus}
           handleReloadJF={handleReloadJF}
+          showUndo={showUndo}
+          canUndo={canUndo}
+          onUndo={undoBidding}
         />
       </Box>
 
@@ -1369,83 +1450,32 @@ function App() {
           checkApiStatus={checkApiStatus}
           apiStatus={apiStatus}
           handleReloadJF={handleReloadJF}
+          showUndo={showUndo}
+          canUndo={canUndo}
+          onUndo={undoBidding}
         />
       </Box>
 
       <Divider sx={{ my: 3, borderColor: 'rgba(0, 0, 0, 0.3)', borderBottomWidth: 2 }} />
 
       {/* 游戏设置 */}
-      {showSettings && (
-      <Paper elevation={2} sx={{ p: { xs: 2, md: 3 }, mb: 3, width: '100%' }}>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, alignItems: 'flex-start' }}>
-          {/* 叫牌设置组 */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <Typography variant="h6">
-              叫牌设置
-            </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
-              <FormControl sx={{ minWidth: 100 }} size="small">
-                <InputLabel>模式</InputLabel>
-                <Select value={gameMode} label="模式" onChange={(e) => setGameMode(e.target.value)}>
-                  <MenuItem value="four">四人</MenuItem>
-                  <MenuItem value="pair">双人</MenuItem>
-                </Select>
-              </FormControl>
-
-              <FormControl sx={{ minWidth: 120 }} size="small">
-                <InputLabel>AI提供商</InputLabel>
-                <Select value={aiProvider} label="AI提供商" onChange={handleAIProviderChange}>
-                  <MenuItem value="deepseek">DeepSeek</MenuItem>
-                  <MenuItem value="doubao">Doubao(豆包)</MenuItem>
-                </Select>
-              </FormControl>
-
-              {aiProvider === 'deepseek' && (
-              <FormControl sx={{ minWidth: 140 }} size="small">
-                <InputLabel>备用模型</InputLabel>
-                <Select value={fallbackModel} label="备用模型" onChange={handleFallbackModelChange}>
-                  <MenuItem value="deepseek-chat">Chat(快)</MenuItem>
-                  <MenuItem value="deepseek-reasoner">Reasoner(准)</MenuItem>
-                </Select>
-              </FormControl>
-              )}
-
-              <FormControl sx={{ minWidth: 180 }} size="small">
-                <InputLabel>阻击叫牌体系</InputLabel>
-                <Select value={dealSystem} label="阻击叫牌体系" onChange={(e) => setDealSystem(e.target.value)}>
-                  <MenuItem value="2D/2H/2S：自然阻击">2D/2H/2S：自然阻击</MenuItem>
-                  <MenuItem value="2D：多功能，2H/S：麦德伯格，2NT：双低花">多功能/麦德伯格</MenuItem>
-                </Select>
-              </FormControl>
-            </Box>
-          </Box>
-
-          {/* 竖线分隔 */}
-          <Divider orientation="vertical" flexItem sx={{ borderColor: 'rgba(0, 0, 0, 0.2)' }} />
-
-          {/* 发牌设置组 */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <Typography variant="h6">
-              发牌设置
-            </Typography>
-            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
-              <FormControl sx={{ minWidth: 100 }} size="small">
-                <InputLabel>发牌</InputLabel>
-                <Select value={dealMode} label="发牌" onChange={(e) => setDealMode(e.target.value)}>
-                  <MenuItem value="free">自由</MenuItem>
-                  <MenuItem value="game">进局</MenuItem>
-                  <MenuItem value="slam">满贯</MenuItem>
-                </Select>
-              </FormControl>
-
-              <Button variant="outlined" size="small" onClick={() => setCustomDealOpen(true)} disabled={loading} sx={{ fontSize: '0.875rem', textTransform: 'none', borderColor: 'rgba(0, 0, 0, 0.23)', height: '40px', px: 1.5 }}>自定义</Button>
-              <Button variant="outlined" size="small" onClick={() => setImageDealOpen(true)} disabled={loading} sx={{ fontSize: '0.875rem', textTransform: 'none', borderColor: 'rgba(0, 0, 0, 0.23)', height: '40px', px: 1.5 }}>图片</Button>
-              <Button variant="outlined" size="small" onClick={handleScreenshotDeal} disabled={loading} sx={{ fontSize: '0.875rem', textTransform: 'none', borderColor: 'rgba(0, 0, 0, 0.23)', height: '40px', px: 1.5 }}>截屏</Button>
-            </Box>
-          </Box>
-        </Box>
-      </Paper>
-      )}
+      <SettingsPanel
+        showSettings={showSettings}
+        gameMode={gameMode}
+        setGameMode={setGameMode}
+        aiProvider={aiProvider}
+        handleAIProviderChange={handleAIProviderChange}
+        fallbackModel={fallbackModel}
+        handleFallbackModelChange={handleFallbackModelChange}
+        dealSystem={dealSystem}
+        setDealSystem={setDealSystem}
+        dealMode={dealMode}
+        setDealMode={setDealMode}
+        loading={loading}
+        setCustomDealOpen={setCustomDealOpen}
+        setImageDealOpen={setImageDealOpen}
+        handleScreenshotDeal={handleScreenshotDeal}
+      />
 
       {/* 错误提示 */}
       {error && (
@@ -1459,513 +1489,80 @@ function App() {
         <Box sx={{ display: { xs: 'none', md: 'block' } }}>
           {/* 牌桌和右侧面板并排 */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2, justifyContent: 'center' }}>
-            <Paper elevation={3} sx={{ 
-              p: isMobile ? 0.5 : 1, 
-              bgcolor: '#e8e8e8', 
-              display: 'flex', 
-              flexDirection: 'column', 
-              flex: '0 0 auto',
-              width: isMobile ? '100%' : '600px',
-              height: isMobile ? 'auto' : '640px',
-              overflow: 'hidden'
-            }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5, flexShrink: 0, minHeight: 32 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Typography variant="subtitle1" sx={{ fontWeight: 600, fontSize: '1rem' }}>
-                    当前牌局
-                  </Typography>
-                  <ToggleButtonGroup
-                    value={showDoubleDummy ? 'result' : 'table'}
-                    exclusive
-                    onChange={(e, newValue) => {
-                      if (newValue !== null) {
-                        toggleDoubleDummy(newValue === 'result')
-                      }
-                    }}
-                    size="small"
-                    sx={{ height: 24 }}
-                    disabled={!isBiddingComplete()}
-                  >
-                    <ToggleButton value="table" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 50 }}>
-                      叫牌过程
-                    </ToggleButton>
-                    <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 50 }}>
-                      小房子
-                    </ToggleButton>
-                  </ToggleButtonGroup>
-                  
-                  {gameMode === 'pair' && humanPosition && (
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          checked={showPartnerHand}
-                          onChange={(e) => setShowPartnerHand(e.target.checked)}
-                          size="small"
-                        />
-                      }
-                      label="队友手牌"
-                      sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, ml: 0.5 }}
-                    />
-                  )}
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  {gameMode === 'four' && humanPosition && (
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          checked={showAIHands}
-                          onChange={(e) => setShowAIHands(e.target.checked)}
-                          size="small"
-                        />
-                      }
-                      label="AI手牌"
-                      sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' } }}
-                    />
-                  )}
-                </Box>
-              </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '1 1 auto', minHeight: 0, overflow: 'hidden' }}>
-                <CardTable
-                  hands={hands}
-                  currentBidder={currentBidder}
-                  humanPosition={humanPosition}
-                  dealer={dealer}
-                  gameMode={gameMode}
-                  showPartnerHand={showPartnerHand}
-                  showAIHands={showAIHands}
-                  showOpponentHands={showOpponentHands}
-                  getPartnerPosition={getPartnerPosition}
-                  renderBiddingTable={() => <BiddingTable biddingSequence={biddingSequence} dealer={dealer} />}
-                  checkBiddingComplete={isBiddingComplete}
-                  outputFormats={outputFormats}
-                  outputFormatsLoading={outputFormatsLoading}
-                  handleAnalyzeContract={handleAnalyzeContract}
-                  analyzeLoading={analyzeLoading}
-                  colorScheme={currentColorScheme}
-                  currentBiddingPosition={currentBiddingPosition}
-                  showDoubleDummy={showDoubleDummy}
-                  doubleDummyResult={doubleDummyResult}
-                  doubleDummyLoading={doubleDummyLoading}
-                  biddingTotalTime={biddingTotalTime}
-                  positionRoles={positionRoles}
-                  onPositionRoleChange={handlePositionRoleChange}
-                  onDealerChange={(pos) => { 
-                    setDealer(pos); 
-                    setCurrentBidder(pos);
-                    setBiddingStarted(false);
-                    setStopBidding(false);
-                    setIsNewDeal(true);
-                    setBiddingSequence([]);
-                    setAiBiddingHistory([]);
-                    setPassedAIPositions(new Set());
-                  }}
-                  onClearAllHands={clearAllHands}
-                  setHands={setHands}
-                  biddingStarted={biddingStarted}
-                  stopBidding={stopBidding}
-                  startBidding={startBidding}
-                />
-              </Box>
-            </Paper>
+            <CardTablePanel
+              isMobile={false}
+              hands={hands}
+              currentBidder={currentBidder}
+              humanPosition={humanPosition}
+              dealer={dealer}
+              gameMode={gameMode}
+              showPartnerHand={showPartnerHand}
+              setShowPartnerHand={setShowPartnerHand}
+              showAIHands={showAIHands}
+              setShowAIHands={setShowAIHands}
+              showOpponentHands={showOpponentHands}
+              getPartnerPosition={getPartnerPosition}
+              biddingSequence={biddingSequence}
+              isBiddingComplete={isBiddingComplete}
+              outputFormats={outputFormats}
+              outputFormatsLoading={outputFormatsLoading}
+              handleAnalyzeContract={handleAnalyzeContract}
+              analyzeLoading={analyzeLoading}
+              colorScheme={currentColorScheme}
+              currentBiddingPosition={currentBiddingPosition}
+              showDoubleDummy={showDoubleDummy}
+              toggleDoubleDummy={toggleDoubleDummy}
+              doubleDummyResult={doubleDummyResult}
+              doubleDummyLoading={doubleDummyLoading}
+              biddingTotalTime={biddingTotalTime}
+              positionRoles={positionRoles}
+              handlePositionRoleChange={handlePositionRoleChange}
+              onDealerChange={(pos) => { 
+                setDealer(pos); 
+                setCurrentBidder(pos);
+                setBiddingStarted(false);
+                setStopBidding(false);
+                setIsNewDeal(true);
+                setBiddingSequence([]);
+                setAiBiddingHistory([]);
+                setPassedAIPositions(new Set());
+              }}
+              onClearAllHands={clearAllHands}
+              setHands={setHands}
+              biddingStarted={biddingStarted}
+              stopBidding={stopBidding}
+              startBidding={startBidding}
+            />
             
-            {/* 右侧面板：统一面板，通过switch切换内容 */}
-            {(humanPosition !== null || showAIBiddingOutput) && (() => {
-              const isHumanTurn = humanPosition !== null && (
-                Array.isArray(humanPosition) 
-                  ? humanPosition.includes(currentBidder) 
-                  : humanPosition === currentBidder
-              );
-              const canShowControls = humanPosition !== null && !isBiddingComplete();
-              // 默认显示叫牌控制（如果是人类回合），否则显示叫牌细节
-              const effectiveShowControls = canShowControls ? showBiddingControls : false;
-              return (
-                <Paper elevation={3} sx={{ 
-                  p: isMobile ? 0.5 : 1, 
-                  bgcolor: '#e8e8e8', 
-                  display: 'flex', 
-                  flexDirection: 'column', 
-                  flex: '0 0 auto',
-                  width: isMobile ? '100%' : '600px',
-                  height: isMobile ? 'auto' : '640px',
-                  overflow: 'hidden'
-                }}>
-                {/* 顶部切换栏 */}
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5, flexShrink: 0, minHeight: 32 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 600, fontSize: '1rem' }}>
-                      叫牌细节
-                    </Typography>
-                    <ToggleButtonGroup
-                      value={effectiveShowControls ? 'controls' : 'details'}
-                      exclusive
-                      onChange={(e, newValue) => {
-                        if (newValue !== null) {
-                          setShowBiddingControls(newValue === 'controls')
-                        }
-                      }}
-                      size="small"
-                      sx={{ height: 24 }}
-                      disabled={!canShowControls}
-                    >
-                      <ToggleButton value="controls" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 40 }}>
-                        控制
-                      </ToggleButton>
-                      <ToggleButton value="details" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 40 }}>
-                        细节
-                      </ToggleButton>
-                    </ToggleButtonGroup>
-                  </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <FormControlLabel
-                      control={<Checkbox checked={simpleDisplayMode} onChange={(e) => setSimpleDisplayMode(e.target.checked)} size="small" />}
-                      label="简单"
-                      sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' } }}
-                    />
-                    {aiBiddingHistory.length > 0 && !simpleDisplayMode && (
-                      <FormControl size="small" sx={{ minWidth: 120, '& .MuiInputBase-input': { fontSize: '0.875rem' }, '& .MuiInputLabel-root': { fontSize: '0.875rem' } }}>
-                        <InputLabel>记录</InputLabel>
-                        <Select
-                          value={selectedBiddingIndex}
-                          label="记录"
-                          onChange={(e) => setSelectedBiddingIndex(e.target.value)}
-                          sx={{ fontSize: '0.875rem' }}
-                        >
-                          <MenuItem value={-1}>最新 ({aiBiddingHistory[aiBiddingHistory.length - 1]?.position}家 {aiBiddingHistory[aiBiddingHistory.length - 1]?.result.bid})</MenuItem>
-                          {aiBiddingHistory.slice().reverse().slice(1).map((record, idx) => (
-                            <MenuItem key={idx} value={aiBiddingHistory.length - 2 - idx}>
-                              {record.position}家 {record.result.bid}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                    )}
-                  </Box>
-                </Box>
-
-                {effectiveShowControls ? (
-                  /* 叫牌控制 + JF片段 */
-                  <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 1, overflow: 'hidden' }}>
-                    {/* 叫牌控制区域 */}
-                    <Box sx={{ flex: '0 0 auto', minHeight: 0 }}>
-                      <BiddingControls
-                        hands={hands}
-                        currentBidder={currentBidder}
-                        humanPosition={humanPosition}
-                        gameMode={gameMode}
-                        checkBiddingComplete={isBiddingComplete}
-                        addBid={addBid}
-                        getJFSuggestion={getJFSuggestion}
-                        getFinalContract={getFinalContract}
-                        bidSuggestion={bidSuggestion}
-                        suggestionLoading={suggestionLoading}
-                        stopBidding={stopBidding}
-                        shouldAIAutoPass={shouldAIAutoPass}
-                        customBidMeaning={customBidMeaning}
-                        setCustomBidMeaning={setCustomBidMeaning}
-                        isVerticalLayout={true}
-                        hideJFPanel={true}
-                      />
-                    </Box>
-                    {/* JF约定区域 */}
-                    <Paper elevation={2} sx={{
-                      p: 1.5,
-                      flex: '1 1 auto',
-                      minHeight: 0,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      overflow: 'hidden',
-                    }}>
-                      <Typography variant="h6" gutterBottom sx={{ flexShrink: 0 }}>
-                        JF约定片段
-                      </Typography>
-                      <Box sx={{ flex: 1, overflow: 'auto', maxWidth: '100%', minWidth: 0, minHeight: 0 }}>
-                        {suggestionLoading ? (
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, justifyContent: 'center', height: '100%' }}>
-                            <CircularProgress size={20} />
-                            <Typography variant="body2">获取JF约定片段中...</Typography>
-                          </Box>
-                        ) : bidSuggestion ? (
-                          <Box>
-                            <Typography variant="subtitle2" gutterBottom sx={{ color: '#666' }}>
-                              检索关键字: <strong style={{ color: '#1976d2' }}>{bidSuggestion.keyword}</strong>
-                            </Typography>
-                            {bidSuggestion.content ? (
-                              <Box sx={{ mt: 1, p: 1.5, background: '#fafafa', borderRadius: 1, border: '1px solid #e0e0e0', overflow: 'auto', maxWidth: '100%' }}>
-                                <Typography variant="body2" component="pre" sx={{
-                                  whiteSpace: 'pre-wrap',
-                                  wordBreak: 'break-word',
-                                  margin: 0,
-                                  fontFamily: 'inherit',
-                                  fontSize: '0.9rem',
-                                  maxWidth: '100%',
-                                }}>
-                                  {bidSuggestion.content}
-                                </Typography>
-                              </Box>
-                            ) : (
-                              <Alert severity="info" sx={{ mt: 1 }}>
-                                JF尚未提供建议
-                              </Alert>
-                            )}
-                          </Box>
-                        ) : (
-                          <Alert severity="info" sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            JF尚未提供建议
-                          </Alert>
-                        )}
-                      </Box>
-                    </Paper>
-                  </Box>
-                ) : (
-                  /* 叫牌细节 */
-                
-                <Box sx={{ flex: 1, overflow: 'auto', p: 1, background: '#fafafa', borderRadius: 1, border: '1px solid #ddd', minHeight: 0 }}>
-                {aiBiddingHistory.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 4 }}>
-                    等待AI叫牌...
-                  </Typography>
-                ) : simpleDisplayMode ? (
-                  aiBiddingHistory.map((record, index) => (
-                    <Box key={index} sx={{ mb: 1, p: 1.5, background: 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>
-                      <Typography variant="body2">
-                        <strong>{record.position}家</strong> → <span style={{ color: '#d32f2f', fontWeight: 'bold' }}>{record.result.bid}</span>
-                        {record.result.meaning && <span style={{ color: '#666' }}> ({record.result.meaning})</span>}
-                      </Typography>
-                    </Box>
-                  ))
-                ) : (
-                  (() => {
-                    const record = selectedBiddingIndex === -1 
-                      ? aiBiddingHistory[aiBiddingHistory.length - 1] 
-                      : aiBiddingHistory[selectedBiddingIndex]
-                    if (!record) return null
-                    const fullOutput = record.result.full_output || {}
-                    return (
-                      <Box sx={{ p: 2, background: 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                        <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 'bold', color: '#1976d2' }}>
-                          {record.timestamp} - {record.position}家
-                        </Typography>
-                        <Typography variant="body2" sx={{ mt: 1 }}>
-                          <strong>手牌:</strong> {record.hand.display}
-                        </Typography>
-                        <Typography variant="body2" sx={{ mt: 1 }}>
-                          <strong>叫牌序列:</strong> {record.biddingSequence || '空（开叫位置）'}
-                        </Typography>
-                        
-                        {fullOutput["自己pass次数"] && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>自己pass次数:</strong> {fullOutput["自己pass次数"]}
-                          </Typography>
-                        )}
-                        {fullOutput["阻击叫体系"] && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>阻击叫体系:</strong> {fullOutput["阻击叫体系"]}
-                          </Typography>
-                        )}
-                        {fullOutput["JF约定"] && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>JF约定:</strong> {fullOutput["JF约定"]}
-                          </Typography>
-                        )}
-                        {fullOutput["叫牌位置"] && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>叫牌位置:</strong> {fullOutput["叫牌位置"]}
-                          </Typography>
-                        )}
-                        {fullOutput["手牌分析"] && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>手牌分析:</strong>
-                            <Box component="pre" sx={{ 
-                              mt: 0.5, 
-                              p: 1, 
-                              background: '#f8f9fa', 
-                              borderRadius: 1,
-                              fontSize: '0.85rem',
-                              lineHeight: 1.4,
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word',
-                              border: '1px solid #e9ecef',
-                              maxHeight: '150px',
-                              overflow: 'auto'
-                            }}>
-                              {fullOutput["手牌分析"]}
-                            </Box>
-                          </Typography>
-                        )}
-                        {fullOutput["叫牌历史"] && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>叫牌历史:</strong>
-                            <Box component="pre" sx={{ 
-                              mt: 0.5, 
-                              p: 1, 
-                              background: '#f8f9fa', 
-                              borderRadius: 1,
-                              fontSize: '0.85rem',
-                              lineHeight: 1.4,
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word',
-                              border: '1px solid #e9ecef',
-                              maxHeight: '150px',
-                              overflow: 'auto'
-                            }}>
-                              {fullOutput["叫牌历史"]}
-                            </Box>
-                          </Typography>
-                        )}
-                        {fullOutput["自己和队友配合花色张数合计"] && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>配合花色:</strong> {fullOutput["自己和队友配合花色张数合计"]}
-                          </Typography>
-                        )}
-                        {fullOutput["牌型点"] && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>牌型点:</strong> {fullOutput["牌型点"]}
-                          </Typography>
-                        )}
-                        {fullOutput["自己和队友点力合计"] && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>点力合计:</strong> {fullOutput["自己和队友点力合计"]}
-                          </Typography>
-                        )}
-                        {fullOutput["是否进局或试探满贯"] && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>定约目标:</strong> {fullOutput["是否进局或试探满贯"]}
-                          </Typography>
-                        )}
-                        {fullOutput["止张分析"] && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>止张分析:</strong> {fullOutput["止张分析"]}
-                          </Typography>
-                        )}
-                        {fullOutput["扣叫控制"] && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>扣叫控制:</strong>
-                            <Box component="pre" sx={{ 
-                              mt: 0.5, 
-                              p: 1, 
-                              background: '#f8f9fa', 
-                              borderRadius: 1,
-                              fontSize: '0.85rem',
-                              lineHeight: 1.4,
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word',
-                              border: '1px solid #e9ecef',
-                              maxHeight: '150px',
-                              overflow: 'auto'
-                            }}>
-                              {fullOutput["扣叫控制"]}
-                            </Box>
-                          </Typography>
-                        )}
-                        {fullOutput["自己和队友关键张合计"] && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>关键张合计:</strong> {fullOutput["自己和队友关键张合计"]}
-                          </Typography>
-                        )}
-                        {fullOutput["主提示词输出"] && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>主提示词输出:</strong>
-                            <Box component="pre" sx={{ 
-                              mt: 0.5, 
-                              p: 1, 
-                              background: '#fff3e0', 
-                              borderRadius: 1,
-                              fontSize: '0.85rem',
-                              lineHeight: 1.4,
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word',
-                              border: '1px solid #ffcc80'
-                            }}>
-                              选定叫品: {fullOutput["主提示词输出"]["选定叫品"]}
-                              {'\n'}叫品筛选过程: {fullOutput["主提示词输出"]["叫品筛选过程"]}
-                            </Box>
-                          </Typography>
-                        )}
-                        
-                        <Typography variant="body2" sx={{ mt: 1 }}>
-                          <strong>选定叫品:</strong> <span style={{ fontWeight: 'bold', color: '#d32f2f' }}>{record.result.bid}</span>
-                        </Typography>
-                        {record.result.meaning && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>叫品含义:</strong> {record.result.meaning}
-                          </Typography>
-                        )}
-                        {record.result.selection_process && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>叫品筛选过程:</strong>
-                            <Box component="pre" sx={{ 
-                              mt: 1, 
-                              p: 1, 
-                              background: '#f8f9fa', 
-                              borderRadius: 1,
-                              fontSize: '0.85rem',
-                              lineHeight: 1.4,
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word',
-                              border: '1px solid #e9ecef',
-                              maxHeight: '200px',
-                              overflow: 'auto'
-                            }}>
-                              {record.result.selection_process}
-                            </Box>
-                          </Typography>
-                        )}
-                        {fullOutput["完整叫牌序列"] && (
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            <strong>完整叫牌序列:</strong> {fullOutput["完整叫牌序列"]}
-                          </Typography>
-                        )}
-                      </Box>
-                    )
-                  })()
-                )}
-                
-                {(() => {
-                  const isLastRecord = selectedBiddingIndex === -1
-                  const lastRecord = aiBiddingHistory[aiBiddingHistory.length - 1]
-                  const isLastPass = lastRecord && lastRecord.result && lastRecord.result.bid === 'pass'
-                  return isBiddingComplete() && outputFormats && isLastRecord && isLastPass
-                })() && (
-                  <Box sx={{ mt: 2, p: 2, background: 'white', borderRadius: 1, border: '1px solid #e0e0e0' }}>
-                    <Typography variant="subtitle2" sx={{ mb: 1, color: '#1976d2', fontWeight: 'bold' }}>
-                      牌局格式
-                    </Typography>
-                    <Typography variant="body2" component="pre" sx={{
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      margin: 0,
-                      fontFamily: 'monospace',
-                      fontSize: '0.75rem',
-                      p: 1,
-                      background: '#fafafa',
-                      borderRadius: 1,
-                      border: '1px solid #e0e0e0',
-                    }}>
-                      {outputFormats.compact}
-                    </Typography>
-                    <Typography variant="subtitle2" sx={{ mt: 2, mb: 1, color: '#1976d2', fontWeight: 'bold' }}>
-                      Deep Finesse格式
-                    </Typography>
-                    <Typography variant="body2" component="pre" sx={{
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      margin: 0,
-                      fontFamily: 'monospace',
-                      fontSize: '0.75rem',
-                      p: 1,
-                      background: '#fafafa',
-                      borderRadius: 1,
-                      border: '1px solid #e0e0e0',
-                    }}>
-                      {outputFormats.deep_finesse}
-                    </Typography>
-                  </Box>
-                )}
-                </Box>
-              )}
-              </Paper>
-              );
-            })()}
+            {/* 右侧面板：叫牌细节 */}
+            {(humanPosition !== null || showAIBiddingOutput) && (
+              <BiddingDetailPanel
+                isMobile={false}
+                humanPosition={humanPosition}
+                currentBidder={currentBidder}
+                isBiddingComplete={isBiddingComplete()}
+                showBiddingControls={showBiddingControls}
+                setShowBiddingControls={setShowBiddingControls}
+                simpleDisplayMode={simpleDisplayMode}
+                setSimpleDisplayMode={setSimpleDisplayMode}
+                aiBiddingHistory={aiBiddingHistory}
+                selectedBiddingIndex={selectedBiddingIndex}
+                setSelectedBiddingIndex={setSelectedBiddingIndex}
+                hands={hands}
+                gameMode={gameMode}
+                addBid={addBid}
+                getJFSuggestion={getJFSuggestion}
+                getFinalContract={getFinalContract}
+                bidSuggestion={bidSuggestion}
+                suggestionLoading={suggestionLoading}
+                stopBidding={stopBidding}
+                shouldAIAutoPass={shouldAIAutoPass}
+                customBidMeaning={customBidMeaning}
+                setCustomBidMeaning={setCustomBidMeaning}
+                outputFormats={outputFormats}
+                isBiddingCompleteFn={isBiddingComplete}
+              />
+            )}
           </Box>
         </Box>
       )}
@@ -1975,481 +1572,80 @@ function App() {
         <Box sx={{ display: { xs: 'block', md: 'none' } }}>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {/* 当前牌局面板 */}
-            <Paper elevation={3} sx={{ 
-              p: 1, 
-              bgcolor: '#f5f5f5', 
-              display: 'flex', 
-              flexDirection: 'column', 
-              width: '100%',
-              minHeight: '400px'
-            }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5, flexWrap: 'wrap', gap: 0.5 }}>
-                        <Typography variant="h6">
-                          当前牌局
-                        </Typography>
-                        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.5 }}>
-                          <ToggleButtonGroup
-                            value={showDoubleDummy ? 'result' : 'table'}
-                            exclusive
-                            onChange={(e, newValue) => {
-                              if (newValue !== null) {
-                                toggleDoubleDummy(newValue === 'result')
-                              }
-                            }}
-                            size="small"
-                            sx={{ height: 26 }}
-                            disabled={!isBiddingComplete()}
-                          >
-                            <ToggleButton value="table" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 50 }}>
-                              叫牌过程
-                            </ToggleButton>
-                            <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 50 }}>
-                              小房子
-                            </ToggleButton>
-                          </ToggleButtonGroup>
-                          
-                          {/* 显示控制选项 */}
-                          {gameMode === 'pair' && humanPosition && (
-                            <FormControlLabel
-                              control={
-                                <Checkbox
-                                  checked={showPartnerHand}
-                                  onChange={(e) => setShowPartnerHand(e.target.checked)}
-                                  size="small"
-                                />
-                              }
-                              label="队友手牌"
-                              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' }, mr: 0 }}
-                            />
-                          )}
-                        </Box>
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', width: '100%', mt: 0.5 }}>
-                        {gameMode === 'four' && humanPosition && (
-                          <FormControlLabel
-                            control={
-                              <Checkbox
-                                checked={showAIHands}
-                                onChange={(e) => setShowAIHands(e.target.checked)}
-                                size="small"
-                              />
-                            }
-                            label="AI手牌"
-                            sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' }, mr: 0 }}
-                          />
-                        )}
-                      </Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
-                        <CardTable
-                          hands={hands}
-                          currentBidder={currentBidder}
-                          humanPosition={humanPosition}
-                          dealer={dealer}
-                          gameMode={gameMode}
-                          showPartnerHand={showPartnerHand}
-                          showAIHands={showAIHands}
-                          showOpponentHands={showOpponentHands}
-                          getPartnerPosition={getPartnerPosition}
-                          renderBiddingTable={() => <BiddingTable biddingSequence={biddingSequence} dealer={dealer} />}
-                          checkBiddingComplete={isBiddingComplete}
-                          outputFormats={outputFormats}
-                          outputFormatsLoading={outputFormatsLoading}
-                          handleAnalyzeContract={handleAnalyzeContract}
-                          analyzeLoading={analyzeLoading}
-                          colorScheme={currentColorScheme}
-                          currentBiddingPosition={currentBiddingPosition}
-                          showDoubleDummy={showDoubleDummy}
-                          doubleDummyResult={doubleDummyResult}
-                          doubleDummyLoading={doubleDummyLoading}
-                          biddingTotalTime={biddingTotalTime}
-                          positionRoles={positionRoles}
-                          onPositionRoleChange={handlePositionRoleChange}
-                          onDealerChange={(pos) => { 
-                            setDealer(pos); 
-                            setCurrentBidder(pos);
-                            setBiddingStarted(false);
-                            setStopBidding(false);
-                            setIsNewDeal(true);
-                            setBiddingSequence([]);
-                            setAiBiddingHistory([]);
-                            setPassedAIPositions(new Set());
-                          }}
-                          onClearAllHands={clearAllHands}
-                          setHands={setHands}
-                          biddingStarted={biddingStarted}
-                          stopBidding={stopBidding}
-                          startBidding={startBidding}
-                        />
-                      </Box>
-                    </Paper>
+            <CardTablePanel
+              isMobile={true}
+              hands={hands}
+              currentBidder={currentBidder}
+              humanPosition={humanPosition}
+              dealer={dealer}
+              gameMode={gameMode}
+              showPartnerHand={showPartnerHand}
+              setShowPartnerHand={setShowPartnerHand}
+              showAIHands={showAIHands}
+              setShowAIHands={setShowAIHands}
+              showOpponentHands={showOpponentHands}
+              getPartnerPosition={getPartnerPosition}
+              biddingSequence={biddingSequence}
+              isBiddingComplete={isBiddingComplete}
+              outputFormats={outputFormats}
+              outputFormatsLoading={outputFormatsLoading}
+              handleAnalyzeContract={handleAnalyzeContract}
+              analyzeLoading={analyzeLoading}
+              colorScheme={currentColorScheme}
+              currentBiddingPosition={currentBiddingPosition}
+              showDoubleDummy={showDoubleDummy}
+              toggleDoubleDummy={toggleDoubleDummy}
+              doubleDummyResult={doubleDummyResult}
+              doubleDummyLoading={doubleDummyLoading}
+              biddingTotalTime={biddingTotalTime}
+              positionRoles={positionRoles}
+              handlePositionRoleChange={handlePositionRoleChange}
+              onDealerChange={(pos) => { 
+                setDealer(pos); 
+                setCurrentBidder(pos);
+                setBiddingStarted(false);
+                setStopBidding(false);
+                setIsNewDeal(true);
+                setBiddingSequence([]);
+                setAiBiddingHistory([]);
+                setPassedAIPositions(new Set());
+              }}
+              onClearAllHands={clearAllHands}
+              setHands={setHands}
+              biddingStarted={biddingStarted}
+              stopBidding={stopBidding}
+              startBidding={startBidding}
+            />
             
             {/* 叫牌细节面板 */}
-            {(humanPosition !== null || showAIBiddingOutput) && (() => {
-                const isHumanTurnMobile = humanPosition !== null && (
-                  Array.isArray(humanPosition) 
-                    ? humanPosition.includes(currentBidder) 
-                    : humanPosition === currentBidder
-                );
-                const showControlsMobile = isHumanTurnMobile && !isBiddingComplete();
-                const canShowControlsMobile = humanPosition !== null && !isBiddingComplete();
-                return (
-                    <Paper elevation={3} sx={{ 
-                      p: 1, 
-                      bgcolor: '#f5f5f5', 
-                      display: 'flex', 
-                      flexDirection: 'column', 
-                      width: '100%',
-                      height: showControlsMobile ? 'auto' : '400px',
-                      minHeight: showControlsMobile ? '500px' : undefined,
-                    }}>
-                      {/* 控制切换栏 - 在人类回合时显示 */}
-                      {canShowControlsMobile && (
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexWrap: 'wrap', gap: 1, flexShrink: 0 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                            <Typography variant="h6">
-                              叫牌细节
-                            </Typography>
-                            <ToggleButtonGroup
-                              value={showBiddingControls ? 'controls' : 'details'}
-                              exclusive
-                              onChange={(e, newValue) => {
-                                if (newValue !== null) {
-                                  setShowBiddingControls(newValue === 'controls')
-                                }
-                              }}
-                              size="small"
-                              sx={{ height: 26, ml: 1 }}
-                            >
-                              <ToggleButton value="controls" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 40 }}>
-                                控制
-                              </ToggleButton>
-                              <ToggleButton value="details" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 40 }}>
-                                细节
-                              </ToggleButton>
-                            </ToggleButtonGroup>
-                          </Box>
-                        </Box>
-                      )}
-                      
-                      {showControlsMobile && showBiddingControls ? (
-                        /* 人类回合：叫牌控制 + JF约定 */
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                          <BiddingControls
-                            hands={hands}
-                            currentBidder={currentBidder}
-                            humanPosition={humanPosition}
-                            gameMode={gameMode}
-                            checkBiddingComplete={isBiddingComplete}
-                            addBid={addBid}
-                            getJFSuggestion={getJFSuggestion}
-                            getFinalContract={getFinalContract}
-                            bidSuggestion={bidSuggestion}
-                            suggestionLoading={suggestionLoading}
-                            stopBidding={stopBidding}
-                            shouldAIAutoPass={shouldAIAutoPass}
-                            customBidMeaning={customBidMeaning}
-                            setCustomBidMeaning={setCustomBidMeaning}
-                            hideJFPanel={true}
-                          />
-                          {/* JF约定区域 */}
-                          <Paper elevation={2} sx={{ p: 2, minHeight: '200px', display: 'flex', flexDirection: 'column' }}>
-                            <Typography variant="h6" gutterBottom sx={{ flexShrink: 0 }}>
-                              JF约定片段
-                            </Typography>
-                            <Box sx={{ flex: 1, overflow: 'auto' }}>
-                              {suggestionLoading ? (
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, justifyContent: 'center', py: 2 }}>
-                                  <CircularProgress size={20} />
-                                  <Typography variant="body2">获取JF约定片段中...</Typography>
-                                </Box>
-                              ) : bidSuggestion ? (
-                                <Box>
-                                  <Typography variant="subtitle2" gutterBottom sx={{ color: '#666' }}>
-                                    检索关键字: <strong style={{ color: '#1976d2' }}>{bidSuggestion.keyword}</strong>
-                                  </Typography>
-                                  {bidSuggestion.content ? (
-                                    <Box sx={{ mt: 1, p: 1.5, background: '#fafafa', borderRadius: 1, border: '1px solid #e0e0e0' }}>
-                                      <Typography variant="body2" component="pre" sx={{
-                                        whiteSpace: 'pre-wrap',
-                                        wordBreak: 'break-word',
-                                        margin: 0,
-                                        fontFamily: 'inherit',
-                                        fontSize: '0.9rem',
-                                      }}>
-                                        {bidSuggestion.content}
-                                      </Typography>
-                                    </Box>
-                                  ) : (
-                                    <Alert severity="info" sx={{ mt: 1 }}>JF尚未提供建议</Alert>
-                                  )}
-                                </Box>
-                              ) : (
-                                <Alert severity="info">JF尚未提供建议</Alert>
-                              )}
-                            </Box>
-                          </Paper>
-                        </Box>
-                      ) : (
-                        /* AI回合 / 叫牌结束 / 观察者模式 / 人类回合选择细节：叫牌细节 */
-                        <>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1, flexShrink: 0 }}>
-                        {!canShowControlsMobile && (
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <Typography variant="h6">
-                            叫牌细节
-                          </Typography>
-                          <ToggleButtonGroup
-                            value={showControlsMobile ? 'controls' : 'details'}
-                            exclusive
-                            onChange={(e, newValue) => {
-                              if (newValue !== null) {
-                                setShowBiddingControls(newValue === 'controls')
-                              }
-                            }}
-                            size="small"
-                            sx={{ height: 26, ml: 1 }}
-                            disabled={!canShowControlsMobile}
-                          >
-                            <ToggleButton value="controls" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 40 }}>
-                              控制
-                            </ToggleButton>
-                            <ToggleButton value="details" sx={{ px: 1, py: 0, fontSize: '0.875rem', minWidth: 40 }}>
-                              细节
-                            </ToggleButton>
-                          </ToggleButtonGroup>
-                        </Box>
-                        )}
-                        <FormControlLabel
-                          control={<Checkbox checked={simpleDisplayMode} onChange={(e) => setSimpleDisplayMode(e.target.checked)} />}
-                          label="简单"
-                          sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' }, ml: 1 }}
-                        />
-                      </Box>
-                      
-                      {aiBiddingHistory.length > 0 && !simpleDisplayMode && (
-                        <FormControl size="small" sx={{ mb: 2, minWidth: 200, flexShrink: 0 }}>
-                          <InputLabel>选择叫牌记录</InputLabel>
-                          <Select
-                            value={selectedBiddingIndex}
-                            label="选择叫牌记录"
-                            onChange={(e) => setSelectedBiddingIndex(e.target.value)}
-                          >
-                            <MenuItem value={-1}>最新 ({aiBiddingHistory[aiBiddingHistory.length - 1]?.position}家 - {aiBiddingHistory[aiBiddingHistory.length - 1]?.result.bid})</MenuItem>
-                            {aiBiddingHistory.slice().reverse().slice(1).map((record, idx) => (
-                              <MenuItem key={idx} value={aiBiddingHistory.length - 2 - idx}>
-                                {record.position}家 - {record.result.bid}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      )}
-                      
-                      <Box sx={{ flex: 1, overflow: 'auto', p: 1, background: '#fafafa', borderRadius: 1, border: '1px solid #ddd', minHeight: 0 }}>
-                      {aiBiddingHistory.length === 0 ? (
-                        <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 4 }}>
-                          等待AI叫牌...
-                        </Typography>
-                      ) : simpleDisplayMode ? (
-                        aiBiddingHistory.map((record, index) => (
-                          <Box key={index} sx={{ mb: 1, p: 1.5, background: 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>
-                            <Typography variant="body2">
-                              <strong>{record.position}家</strong> → <span style={{ color: '#d32f2f', fontWeight: 'bold' }}>{record.result.bid}</span>
-                              {record.result.meaning && <span style={{ color: '#666' }}> ({record.result.meaning})</span>}
-                            </Typography>
-                          </Box>
-                        ))
-                      ) : (
-                        (() => {
-                          const record = selectedBiddingIndex === -1 
-                            ? aiBiddingHistory[aiBiddingHistory.length - 1] 
-                            : aiBiddingHistory[selectedBiddingIndex]
-                          if (!record) return null
-                          const fullOutput = record.result.full_output || {}
-                          return (
-                            <Box sx={{ p: 2, background: 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-                              <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 'bold', color: '#1976d2' }}>
-                                {record.timestamp} - {record.position}家
-                              </Typography>
-                              <Typography variant="body2" sx={{ mt: 1 }}>
-                                <strong>手牌:</strong> {record.hand.display}
-                              </Typography>
-                              <Typography variant="body2" sx={{ mt: 1 }}>
-                                <strong>叫牌序列:</strong> {record.biddingSequence || '空（开叫位置）'}
-                              </Typography>
-                              
-                              {fullOutput["自己pass次数"] && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>自己pass次数:</strong> {fullOutput["自己pass次数"]}
-                                </Typography>
-                              )}
-                              {fullOutput["阻击叫体系"] && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>阻击叫体系:</strong> {fullOutput["阻击叫体系"]}
-                                </Typography>
-                              )}
-                              {fullOutput["JF约定"] && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>JF约定:</strong> {fullOutput["JF约定"]}
-                                </Typography>
-                              )}
-                              {fullOutput["叫牌位置"] && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>叫牌位置:</strong> {fullOutput["叫牌位置"]}
-                                </Typography>
-                              )}
-                              {fullOutput["手牌分析"] && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>手牌分析:</strong>
-                                  <Box component="pre" sx={{ 
-                                    mt: 0.5, 
-                                    p: 1, 
-                                    background: '#f8f9fa', 
-                                    borderRadius: 1,
-                                    fontSize: '0.85rem',
-                                    lineHeight: 1.4,
-                                    whiteSpace: 'pre-wrap',
-                                    wordBreak: 'break-word',
-                                    border: '1px solid #e9ecef',
-                                    maxHeight: '150px',
-                                    overflow: 'auto'
-                                  }}>
-                                    {fullOutput["手牌分析"]}
-                                  </Box>
-                                </Typography>
-                              )}
-                              {fullOutput["叫牌历史"] && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>叫牌历史:</strong>
-                                  <Box component="pre" sx={{ 
-                                    mt: 0.5, 
-                                    p: 1, 
-                                    background: '#f8f9fa', 
-                                    borderRadius: 1,
-                                    fontSize: '0.85rem',
-                                    lineHeight: 1.4,
-                                    whiteSpace: 'pre-wrap',
-                                    wordBreak: 'break-word',
-                                    border: '1px solid #e9ecef',
-                                    maxHeight: '150px',
-                                    overflow: 'auto'
-                                  }}>
-                                    {fullOutput["叫牌历史"]}
-                                  </Box>
-                                </Typography>
-                              )}
-                              {fullOutput["自己和队友配合花色张数合计"] && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>配合花色:</strong> {fullOutput["自己和队友配合花色张数合计"]}
-                                </Typography>
-                              )}
-                              {fullOutput["牌型点"] && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>牌型点:</strong> {fullOutput["牌型点"]}
-                                </Typography>
-                              )}
-                              {fullOutput["自己和队友点力合计"] && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>点力合计:</strong> {fullOutput["自己和队友点力合计"]}
-                                </Typography>
-                              )}
-                              {fullOutput["是否进局或试探满贯"] && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>定约目标:</strong> {fullOutput["是否进局或试探满贯"]}
-                                </Typography>
-                              )}
-                              {fullOutput["止张分析"] && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>止张分析:</strong> {fullOutput["止张分析"]}
-                                </Typography>
-                              )}
-                              {fullOutput["扣叫控制"] && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>扣叫控制:</strong>
-                                  <Box component="pre" sx={{ 
-                                    mt: 0.5, 
-                                    p: 1, 
-                                    background: '#f8f9fa', 
-                                    borderRadius: 1,
-                                    fontSize: '0.85rem',
-                                    lineHeight: 1.4,
-                                    whiteSpace: 'pre-wrap',
-                                    wordBreak: 'break-word',
-                                    border: '1px solid #e9ecef',
-                                    maxHeight: '150px',
-                                    overflow: 'auto'
-                                  }}>
-                                    {fullOutput["扣叫控制"]}
-                                  </Box>
-                                </Typography>
-                              )}
-                              {fullOutput["自己和队友关键张合计"] && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>关键张合计:</strong> {fullOutput["自己和队友关键张合计"]}
-                                </Typography>
-                              )}
-                              {fullOutput["主提示词输出"] && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>主提示词输出:</strong>
-                                  <Box component="pre" sx={{ 
-                                    mt: 0.5, 
-                                    p: 1, 
-                                    background: '#fff3e0', 
-                                    borderRadius: 1,
-                                    fontSize: '0.85rem',
-                                    lineHeight: 1.4,
-                                    whiteSpace: 'pre-wrap',
-                                    wordBreak: 'break-word',
-                                    border: '1px solid #ffcc80'
-                                  }}>
-                                    选定叫品: {fullOutput["主提示词输出"]["选定叫品"]}
-                                    {'\n'}叫品筛选过程: {fullOutput["主提示词输出"]["叫品筛选过程"]}
-                                  </Box>
-                                </Typography>
-                              )}
-                              
-                              <Typography variant="body2" sx={{ mt: 1 }}>
-                                <strong>选定叫品:</strong> <span style={{ fontWeight: 'bold', color: '#d32f2f' }}>{record.result.bid}</span>
-                              </Typography>
-                              {record.result.meaning && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>叫品含义:</strong> {record.result.meaning}
-                                </Typography>
-                              )}
-                              {record.result.selection_process && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>叫品筛选过程:</strong>
-                                  <Box component="pre" sx={{ 
-                                    mt: 1, 
-                                    p: 1, 
-                                    background: '#f8f9fa', 
-                                    borderRadius: 1,
-                                    fontSize: '0.85rem',
-                                    lineHeight: 1.4,
-                                    whiteSpace: 'pre-wrap',
-                                    wordBreak: 'break-word',
-                                    border: '1px solid #e9ecef',
-                                    maxHeight: '200px',
-                                    overflow: 'auto'
-                                  }}>
-                                    {record.result.selection_process}
-                                  </Box>
-                                </Typography>
-                              )}
-                              {fullOutput["完整叫牌序列"] && (
-                                <Typography variant="body2" sx={{ mt: 1 }}>
-                                  <strong>完整叫牌序列:</strong> {fullOutput["完整叫牌序列"]}
-                                </Typography>
-                              )}
-                            </Box>
-                          )
-                        })()
-                      )}
-                      </Box>
-                        </>
-                      )}
-                    </Paper>
-                );
-              })()}
+            {(humanPosition !== null || showAIBiddingOutput) && (
+              <BiddingDetailPanel
+                isMobile={true}
+                humanPosition={humanPosition}
+                currentBidder={currentBidder}
+                isBiddingComplete={isBiddingComplete()}
+                showBiddingControls={showBiddingControls}
+                setShowBiddingControls={setShowBiddingControls}
+                simpleDisplayMode={simpleDisplayMode}
+                setSimpleDisplayMode={setSimpleDisplayMode}
+                aiBiddingHistory={aiBiddingHistory}
+                selectedBiddingIndex={selectedBiddingIndex}
+                setSelectedBiddingIndex={setSelectedBiddingIndex}
+                hands={hands}
+                gameMode={gameMode}
+                addBid={addBid}
+                getJFSuggestion={getJFSuggestion}
+                getFinalContract={getFinalContract}
+                bidSuggestion={bidSuggestion}
+                suggestionLoading={suggestionLoading}
+                stopBidding={stopBidding}
+                shouldAIAutoPass={shouldAIAutoPass}
+                customBidMeaning={customBidMeaning}
+                setCustomBidMeaning={setCustomBidMeaning}
+                outputFormats={outputFormats}
+                isBiddingCompleteFn={isBiddingComplete}
+              />
+            )}
           </Box>
         </Box>
       )}

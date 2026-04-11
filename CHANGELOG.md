@@ -2,6 +2,71 @@
 
 ## 2026-04-11
 
+### 前端代码结构优化 - 自定义Hooks与组件提取
+
+**背景**:
+App.jsx 文件过大（约1900行），包含大量状态管理和重复代码。需要提取自定义 hooks 和组件来简化代码结构，提高可维护性。
+
+**改进**:
+
+1. **提取自定义 Hooks** (`web/src/hooks/`):
+   - `useBiddingRecords.js`: 管理叫牌记录相关状态和函数
+   - `useGameSettings.js`: 管理游戏设置相关状态和函数
+   - `useBiddingState.js`: 管理叫牌状态相关状态和函数
+   - `useDoubleDummy.js`: 管理双明手分析相关状态和函数
+   - `useOutputFormats.js`: 管理输出格式相关状态和函数
+
+2. **提取设置面板组件** (`web/src/components/SettingsPanel.jsx`):
+   - 将设置面板从 App.jsx 中提取为独立组件
+   - 包含叫牌设置和发牌设置两组
+   - 减少约57行代码
+
+3. **统一样式常量** (`web/src/styles/constants.js`):
+   - 创建样式常量文件，包含面板样式、按钮样式、排版样式等
+   - 便于后续统一管理和复用
+
+4. **清理未使用导入**:
+   - 移除 `CardTable`、`BiddingControls`、`BiddingTable`、`AIOutputPanel` 等未使用的组件导入
+
+5. **手机版 JF 约定面板优化**:
+   - JF 约定面板固定高度：手机版 500px，网页版 400px
+   - 内容超出时显示滚动条
+   - 叫牌控制按钮使用自适应 grid 布局，修复溢出问题
+
+**修改文件**:
+- `web/src/hooks/useBiddingRecords.js` (新增)
+- `web/src/hooks/useGameSettings.js` (新增)
+- `web/src/hooks/useBiddingState.js` (新增)
+- `web/src/hooks/useDoubleDummy.js` (新增)
+- `web/src/hooks/useOutputFormats.js` (新增)
+- `web/src/components/SettingsPanel.jsx` (新增)
+- `web/src/styles/constants.js` (新增)
+- `web/src/App.jsx`
+- `web/src/components/BiddingDetailPanel.jsx`
+- `web/src/components/BiddingControls.jsx`
+
+**测试验证**: 桌面版和手机版功能正常，JF 约定面板显示滚动条，叫牌控制按钮无溢出。
+
+---
+
+### 手机版叫牌过程框优化
+
+**背景**:
+手机版叫牌过程框宽度不足，NT 等叫品显示不全。发牌人用红色显示后，"*" 号显得多余。
+
+**改进**:
+1. **叫牌过程框宽度增加**: 从 42% 增加到 50%，NT 等叫品可完整显示
+2. **移除发牌人"*"号**: 叫牌过程框中发牌人已用红色显示，不再需要"*"号标识
+3. **手牌框宽度保持不变**: 手牌框保持 42% 宽度，避免溢出
+
+**修改文件**:
+- `web/src/components/BiddingTable.jsx`
+- `web/src/components/CardTable.jsx`
+
+**测试验证**: 手机版叫牌过程框显示完整，手牌框无溢出。
+
+---
+
 ### 前端组件结构优化
 
 **背景**:

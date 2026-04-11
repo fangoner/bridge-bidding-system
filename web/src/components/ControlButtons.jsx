@@ -1,5 +1,6 @@
-import { Button, Badge, CircularProgress } from '@mui/material'
+import { Button, Badge, CircularProgress, Tooltip } from '@mui/material'
 import HistoryIcon from '@mui/icons-material/History'
+import UndoIcon from '@mui/icons-material/Undo'
 
 function ControlButtons({
   size = 'large',
@@ -20,6 +21,9 @@ function ControlButtons({
   checkApiStatus,
   apiStatus,
   handleReloadJF,
+  showUndo,
+  canUndo,
+  onUndo,
 }) {
   const isLarge = size === 'large'
   const gap = isLarge ? 2 : 1
@@ -64,6 +68,23 @@ function ControlButtons({
         >
           {stopBidding ? (isLarge ? '继续叫牌' : '继续') : (isLarge ? '停止叫牌' : '暂停')}
         </Button>
+      )}
+      
+      {showUndo && (
+        <Tooltip title={canUndo ? "撤销上一步叫牌" : "AI正在思考..."}>
+          <span>
+            <Button
+              variant="outlined"
+              color="secondary"
+              size={buttonSize}
+              onClick={onUndo}
+              disabled={!canUndo}
+              startIcon={<UndoIcon />}
+            >
+              {isLarge ? '撤销' : ''}
+            </Button>
+          </span>
+        </Tooltip>
       )}
       
       <Badge 

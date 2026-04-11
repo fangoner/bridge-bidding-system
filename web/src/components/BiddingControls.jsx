@@ -72,11 +72,11 @@ const BidButton = styled(Button, {
 const CompactBidButton = styled(Button, {
   shouldForwardProp: (prop) => !['bidColor'].includes(prop),
 })(({ theme, bidColor }) => ({
-  minWidth: '40px',
-  width: '40px',
-  height: '24px',
-  padding: '2px 5px',
-  fontSize: '0.75rem',
+  minWidth: '28px',
+  width: '100%',
+  height: '28px',
+  padding: '2px 2px',
+  fontSize: '0.7rem',
   fontWeight: 600,
   borderRadius: '6px',
   transition: 'all 0.15s ease',
@@ -152,7 +152,7 @@ function BiddingControls({
         p: isVerticalLayout ? 1.5 : 2,
         width: isVerticalLayout ? '100%' : { xs: '100%', md: '280px' },
         height: 'auto',
-        flex: isVerticalLayout ? '1 1 auto' : 'none',
+        flex: 'none',
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
@@ -162,6 +162,7 @@ function BiddingControls({
         borderColor: 'divider',
         borderRadius: 3,
         background: 'linear-gradient(180deg, #ffffff 0%, #fafafa 100%)',
+        boxSizing: 'border-box'
       }}>
         {!checkBiddingComplete() ? (
           <>
@@ -191,17 +192,19 @@ function BiddingControls({
             <Box sx={{ 
               display: isVerticalLayout ? 'grid' : 'flex',
               flexDirection: isVerticalLayout ? undefined : 'column',
-              gridTemplateColumns: isVerticalLayout ? 'repeat(5, 40px) 8px repeat(5, 40px)' : undefined,
+              gridTemplateColumns: isVerticalLayout ? 'repeat(11, 1fr)' : undefined,
               gap: isVerticalLayout ? '4px' : 0.8,
               width: '100%',
+              maxWidth: '100%',
               alignItems: isVerticalLayout ? undefined : 'center',
-              justifyContent: isVerticalLayout ? 'center' : undefined,
+              justifyContent: isVerticalLayout ? undefined : 'center',
+              boxSizing: 'border-box'
             }}>
               {isVerticalLayout ? (
                 allBidsCompact.flat().map((bid, index) => {
                   const bidColor = getBidColor(bid);
                   return bid === null ? (
-                    <Box key={index} sx={{ width: '40px', height: '24px' }} />
+                    <Box key={index} />
                   ) : (
                     <CompactBidButton
                       key={bid + index}

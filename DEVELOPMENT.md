@@ -403,7 +403,18 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 
 ## 版本历史
 
-### v1.30 (当前版本)
+### v1.31 (当前版本)
+- **前端代码结构优化**
+  - 提取5个自定义 Hooks：`useBiddingRecords`、`useGameSettings`、`useBiddingState`、`useDoubleDummy`、`useOutputFormats`
+  - 提取 `SettingsPanel` 组件，减少约57行代码
+  - 创建统一样式常量文件 `constants.js`
+  - 清理未使用的组件导入
+- **手机版 JF 约定面板优化**
+  - 固定高度显示（手机版 500px，网页版 400px）
+  - 内容超出时显示滚动条
+  - 叫牌控制按钮使用自适应 grid 布局，修复溢出问题
+
+### v1.30
 - **前端组件结构优化**
   - 提取 `ControlButtons` 公共组件，合并桌面版和手机版控制按钮
   - 清理 `App.css` 中未使用的样式

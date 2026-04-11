@@ -52,6 +52,7 @@ function CardTable({
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   
   const handBoxSize = isMobile ? 'calc((100vw - 12px) * 0.42)' : 160
+  const biddingTableWidth = isMobile ? 'calc((100vw - 12px) * 0.5)' : 160
   const centerBoxSize = isMobile ? 120 : 220
 
   if (!hands) return null;
@@ -417,8 +418,8 @@ function CardTable({
           
           <Box className="table-center" sx={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
             <Box className="table-border" sx={{
-              width: handBoxSize,
-              minWidth: handBoxSize,
+              width: biddingTableWidth,
+              minWidth: biddingTableWidth,
               flexShrink: 0,
               minHeight: 80,
               border: scheme.table.border,
