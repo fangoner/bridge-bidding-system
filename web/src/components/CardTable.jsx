@@ -34,6 +34,7 @@ function CardTable({
   biddingStarted,
   stopBidding,
   startBidding,
+  declarer,
 }) {
   const [handInputs, setHandInputs] = useState({
     '南': '',
@@ -207,8 +208,9 @@ function CardTable({
             <Typography 
               variant="subtitle2" 
               sx={{ 
-                fontWeight: 600, 
+                fontWeight: declarer === position ? 700 : 600, 
                 fontSize: '0.85rem',
+                color: declarer === position ? '#d32f2f' : 'inherit',
                 cursor: onDealerChange && (!biddingStarted || stopBidding) ? 'pointer' : 'default',
                 transition: 'color 0.2s',
                 '&:hover': onDealerChange && (!biddingStarted || stopBidding) ? { color: 'primary.main' } : {}

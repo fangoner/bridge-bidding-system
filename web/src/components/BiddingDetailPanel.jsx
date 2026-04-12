@@ -1,4 +1,4 @@
-import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, FormControl, InputLabel, Select, MenuItem, CircularProgress, Alert } from '@mui/material'
+import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, FormControl, InputLabel, Select, MenuItem, CircularProgress, Alert, Button, Divider } from '@mui/material'
 import BiddingControls from './BiddingControls'
 
 function BiddingDetailPanel({
@@ -26,7 +26,9 @@ function BiddingDetailPanel({
   setCustomBidMeaning,
   outputFormats,
   isBiddingCompleteFn,
-  height = '640px',
+  height = '680px',
+  onStartPlay,
+  playLoading,
 }) {
   const isHumanTurn = humanPosition !== null && (
     Array.isArray(humanPosition) 
@@ -210,13 +212,7 @@ function BiddingDetailPanel({
   }
 
   const renderOutputFormats = () => {
-    if (!isBiddingComplete || !outputFormats) return null
-    
-    const isLastRecord = selectedBiddingIndex === -1
-    const lastRecord = aiBiddingHistory[aiBiddingHistory.length - 1]
-    const isLastPass = lastRecord && lastRecord.result && lastRecord.result.bid === 'pass'
-    
-    if (!(isLastRecord && isLastPass)) return null
+    if (!isBiddingCompleteFn || !isBiddingCompleteFn() || !outputFormats) return null
 
     return (
       <Box sx={{ mt: 2, p: 2, background: 'white', borderRadius: 1, border: '1px solid #e0e0e0' }}>
@@ -240,6 +236,22 @@ function BiddingDetailPanel({
         }}>
           {outputFormats.deep_finesse}
         </Typography>
+        
+        {onStartPlay && (
+          <>
+            <Divider sx={{ my: 2 }} />
+            <Button
+              variant="contained"
+              color="primary"
+              fullWidth
+              onClick={onStartPlay}
+              disabled={playLoading}
+              sx={{ mt: 1 }}
+            >
+              {playLoading ? <CircularProgress size={24} /> : '开始打牌'}
+            </Button>
+          </>
+        )}
       </Box>
     )
   }

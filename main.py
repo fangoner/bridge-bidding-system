@@ -28,7 +28,7 @@ from knowledge.loader import JFLoader, JFRetriever
 from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT
 from llm.deepseek_client import DeepSeekClient
 from llm.doubao_client import DoubaoVisionClient
-from config import JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM, SHOW_FULL_LLM_OUTPUT, OUTPUT_MODE_GRAPHIC, OUTPUT_MODE_COMPACT, OUTPUT_MODE_DEEP_FINESSE, OUTPUT_MODE_ALL, DEFAULT_OUTPUT_MODE, FALLBACK_MODEL_CHAT, FALLBACK_MODEL_REASONER, DEFAULT_FALLBACK_MODEL, MAIN_PROMPT_MODEL_CHAT, MAIN_PROMPT_MODEL_REASONER, DEFAULT_MAIN_PROMPT_MODEL, MAIN_PROMPT_TEMPERATURE, FALLBACK_PROMPT_TEMPERATURE
+from config import JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM, SHOW_FULL_LLM_OUTPUT, OUTPUT_MODE_GRAPHIC, OUTPUT_MODE_COMPACT, OUTPUT_MODE_DEEP_FINESSE, OUTPUT_MODE_ALL, DEFAULT_OUTPUT_MODE, MAIN_PROMPT_TEMPERATURE, FALLBACK_PROMPT_TEMPERATURE
 from utils.history import HistoryManager
 from utils.screenshot import BridgeScreenshotCapture
 
@@ -57,14 +57,13 @@ class BiddingGame:
         self.deal_system: str = DEFAULT_DEAL_SYSTEM
         self.output_mode: str = DEFAULT_OUTPUT_MODE
         self.df_format_output: str = ""
-        self.fallback_model: str = DEFAULT_FALLBACK_MODEL
-        self.main_prompt_model: str = DEFAULT_MAIN_PROMPT_MODEL
+        self.model: str = "deepseek-chat"
         
         self.jf_loader = JFLoader(JF_CONVENTION_FILE)
         self.jf_segments = self.jf_loader.load()
         self.jf_retriever = JFRetriever(self.jf_segments)
         
-        self.llm_client = DeepSeekClient(fallback_model=self.fallback_model, main_prompt_model=self.main_prompt_model)
+        self.llm_client = DeepSeekClient(model=self.model)
         self.vision_client = DoubaoVisionClient()
         self.history_manager = HistoryManager()
         self.screenshot_capture = BridgeScreenshotCapture()
@@ -1382,53 +1381,35 @@ def select_output_mode(game: BiddingGame):
         print(f"输出格式已设置为: {mode_names[mode_map[choice]]}")
 
 
-def select_fallback_model(game: BiddingGame):
-    print("\n选择备用提示词AI模型:")
+def select_model(game: BiddingGame):
+    print("\n选择AI模型:")
     print("1. DeepSeek Chat (快速)")
     print("2. DeepSeek Reasoner (推理)")
     choice = input("请选择 (1/2): ").strip()
     if choice == "1":
-        game.fallback_model = FALLBACK_MODEL_CHAT
-        game.llm_client.fallback_model = FALLBACK_MODEL_CHAT
-        print("备用提示词AI模型已设置为: DeepSeek Chat")
+        game.model = "deepseek-chat"
+        game.llm_client.model = "deepseek-chat"
+        print("AI模型已设置为: DeepSeek Chat")
     elif choice == "2":
-        game.fallback_model = FALLBACK_MODEL_REASONER
-        game.llm_client.fallback_model = FALLBACK_MODEL_REASONER
-        print("备用提示词AI模型已设置为: DeepSeek Reasoner")
-
-
-def select_main_prompt_model(game: BiddingGame):
-    print("\n选择主提示词AI模型:")
-    print("1. DeepSeek Chat (快速)")
-    print("2. DeepSeek Reasoner (推理)")
-    choice = input("请选择 (1/2): ").strip()
-    if choice == "1":
-        game.main_prompt_model = MAIN_PROMPT_MODEL_CHAT
-        game.llm_client.main_prompt_model = MAIN_PROMPT_MODEL_CHAT
-        print("主提示词AI模型已设置为: DeepSeek Chat")
-    elif choice == "2":
-        game.main_prompt_model = MAIN_PROMPT_MODEL_REASONER
-        game.llm_client.main_prompt_model = MAIN_PROMPT_MODEL_REASONER
-        print("主提示词AI模型已设置为: DeepSeek Reasoner")
+        game.model = "deepseek-reasoner"
+        game.llm_client.model = "deepseek-reasoner"
+        print("AI模型已设置为: DeepSeek Reasoner")
 
 
 def select_ai_settings(game: BiddingGame):
     while True:
         print("\nAI设置:")
-        print("1. 主提示词AI模型")
-        print("2. 备用提示词AI模型")
-        print("3. 主提示词AI温度")
-        print("4. 备用提示词AI温度")
+        print("1. AI模型")
+        print("2. 主提示词AI温度")
+        print("3. 备用提示词AI温度")
         print("0. 返回")
         choice = input("请选择: ").strip()
         
         if choice == "1":
-            select_main_prompt_model(game)
+            select_model(game)
         elif choice == "2":
-            select_fallback_model(game)
-        elif choice == "3":
             select_main_prompt_temperature(game)
-        elif choice == "4":
+        elif choice == "3":
             select_fallback_prompt_temperature(game)
         elif choice == "0":
             return

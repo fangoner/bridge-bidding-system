@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEFAULT_FALLBACK_MODEL
+from config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL
 from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT
 
 
@@ -98,13 +98,24 @@ HUMAN_BID_SCHEMA = {
     ]
 }
 
+PLAY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "局面分析": {"type": "string"},
+        "可选牌张": {"type": "string"},
+        "推荐出牌": {"type": "string"},
+        "理由": {"type": "string"},
+        "风险提示": {"type": "string"}
+    },
+    "required": ["局面分析", "可选牌张", "推荐出牌", "理由"]
+}
+
 
 class DeepSeekClient:
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, fallback_model: Optional[str] = None, main_prompt_model: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, model: Optional[str] = None):
         self.api_key = api_key or DEEPSEEK_API_KEY
         self.base_url = base_url or DEEPSEEK_BASE_URL
-        self.fallback_model = fallback_model or DEFAULT_FALLBACK_MODEL
-        self.main_prompt_model = main_prompt_model or "deepseek-chat"
+        self.model = model or "deepseek-chat"
         self.client = None
         
         if self.api_key:
@@ -116,7 +127,7 @@ class DeepSeekClient:
     def is_configured(self) -> bool:
         return self.client is not None
     
-    def chat(self, system_prompt: str, user_prompt: str = "", temperature: float = 0.7) -> str:
+    def chat(self, system_prompt: str, user_prompt: str = "", temperature: float = 0.7, model: str = None) -> str:
         if not self.client:
             raise ValueError("DeepSeek API Key未配置，请设置环境变量 DEEPSEEK_API_KEY")
         
@@ -125,7 +136,7 @@ class DeepSeekClient:
             messages.append({"role": "user", "content": user_prompt})
         
         response = self.client.chat.completions.create(
-            model="deepseek-chat",
+            model=model or self.model,
             messages=messages,
             temperature=temperature
         )
@@ -142,7 +153,7 @@ class DeepSeekClient:
         
         try:
             response = self.client.chat.completions.create(
-                model=model or self.main_prompt_model,
+                model=model or self.model,
                 messages=messages,
                 temperature=temperature,
                 response_format={"type": "json_object"},
@@ -152,7 +163,7 @@ class DeepSeekClient:
         except Exception as e:
             pass
         
-        response_text = self.chat(system_prompt, user_prompt, temperature)
+        response_text = self.chat(system_prompt, user_prompt, temperature, model)
         
         try:
             json_match = response_text
@@ -165,39 +176,14 @@ class DeepSeekClient:
         except json.JSONDecodeError:
             return {"raw_response": response_text, "error": "JSON解析失败"}
     
-    def chat_bidding(self, system_prompt: str, temperature: float = 0.7) -> Dict[str, Any]:
-        return self.chat_json(system_prompt, "", temperature, BIDDING_SCHEMA)
+    def chat_bidding(self, system_prompt: str, temperature: float = 0.7, model: str = None) -> Dict[str, Any]:
+        return self.chat_json(system_prompt, "", temperature, BIDDING_SCHEMA, model)
     
-    def chat_bidding_fallback(self, system_prompt: str, temperature: float = 0.7) -> Dict[str, Any]:
-        if not self.client:
-            raise ValueError("DeepSeek API Key未配置，请设置环境变量 DEEPSEEK_API_KEY")
-        
-        messages = [{"role": "system", "content": system_prompt}]
-        
-        try:
-            response = self.client.chat.completions.create(
-                model=self.fallback_model,
-                messages=messages,
-                temperature=temperature,
-                response_format={"type": "json_object"},
-                max_tokens=8192
-            )
-            return json.loads(response.choices[0].message.content)
-        except Exception as e:
-            pass
-        
-        response_text = self.chat(system_prompt, "", temperature)
-        
-        try:
-            json_match = response_text
-            if "```json" in response_text:
-                json_match = response_text.split("```json")[1].split("```")[0]
-            elif "```" in response_text:
-                json_match = response_text.split("```")[1].split("```")[0]
-            
-            return json.loads(json_match.strip())
-        except json.JSONDecodeError:
-            return {"raw_response": response_text, "error": "JSON解析失败"}
+    def chat_bidding_fallback(self, system_prompt: str, temperature: float = 0.7, model: str = None) -> Dict[str, Any]:
+        return self.chat_json(system_prompt, "", temperature, BIDDING_FALLBACK_SCHEMA, model)
     
-    def chat_human_bid(self, system_prompt: str, temperature: float = 0) -> Dict[str, Any]:
-        return self.chat_json(system_prompt, "", temperature, HUMAN_BID_SCHEMA)
+    def chat_human_bid(self, system_prompt: str, temperature: float = 0, model: str = None) -> Dict[str, Any]:
+        return self.chat_json(system_prompt, "", temperature, HUMAN_BID_SCHEMA, model)
+    
+    def chat_play(self, system_prompt: str, temperature: float = 0.7, model: str = None) -> Dict[str, Any]:
+        return self.chat_json(system_prompt, "", temperature, PLAY_SCHEMA, model)

@@ -36,7 +36,10 @@ function CardTablePanel({
   biddingStarted,
   stopBidding,
   startBidding,
-  height = '640px',
+  height = '680px',
+  playState,
+  showPlayPanel,
+  declarer,
 }) {
   return (
     <Paper elevation={3} sx={{ 
@@ -62,27 +65,34 @@ function CardTablePanel({
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
           <Typography variant={isMobile ? "h6" : "subtitle1"} sx={{ fontWeight: 600, fontSize: isMobile ? undefined : '1rem' }}>
-            当前牌局
+            {showPlayPanel ? '打牌阶段' : '当前牌局'}
           </Typography>
-          <ToggleButtonGroup
-            value={showDoubleDummy ? 'result' : 'table'}
-            exclusive
-            onChange={(e, newValue) => {
-              if (newValue !== null) {
-                toggleDoubleDummy(newValue === 'result')
-              }
-            }}
-            size="small"
-            sx={{ height: isMobile ? 26 : 24 }}
-            disabled={!isBiddingComplete()}
-          >
-            <ToggleButton value="table" sx={{ px: 1, py: 0, fontSize: isMobile ? '0.875rem' : '0.75rem', minWidth: 50 }}>
-              叫牌过程
-            </ToggleButton>
-            <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: isMobile ? '0.875rem' : '0.75rem', minWidth: 50 }}>
-              小房子
-            </ToggleButton>
-          </ToggleButtonGroup>
+          {!showPlayPanel && (
+            <ToggleButtonGroup
+              value={showDoubleDummy ? 'result' : 'table'}
+              exclusive
+              onChange={(e, newValue) => {
+                if (newValue !== null) {
+                  toggleDoubleDummy(newValue === 'result')
+                }
+              }}
+              size="small"
+              sx={{ height: isMobile ? 26 : 24 }}
+              disabled={!isBiddingComplete()}
+            >
+              <ToggleButton value="table" sx={{ px: 1, py: 0, fontSize: isMobile ? '0.875rem' : '0.75rem', minWidth: 50 }}>
+                叫牌过程
+              </ToggleButton>
+              <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: isMobile ? '0.875rem' : '0.75rem', minWidth: 50 }}>
+                小房子
+              </ToggleButton>
+            </ToggleButtonGroup>
+          )}
+          {showPlayPanel && playState && (
+            <Typography variant="body2" color="text.secondary">
+              {playState.current_player}出牌
+            </Typography>
+          )}
           
           {gameMode === 'pair' && humanPosition && (
             <FormControlLabel
@@ -152,6 +162,7 @@ function CardTablePanel({
           biddingStarted={biddingStarted}
           stopBidding={stopBidding}
           startBidding={startBidding}
+          declarer={declarer}
         />
       </Box>
     </Paper>

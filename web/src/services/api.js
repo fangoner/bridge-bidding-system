@@ -250,4 +250,75 @@ export const doubleDummyAnalysis = async (hands) => {
   }
 };
 
+// ==================== 打牌相关API ====================
+
+// 初始化打牌
+export const playInit = async (hands, contract, declarer, playerRoles = null, doubled = false, redoubled = false) => {
+  try {
+    const response = await api.post('/api/play/init', {
+      hands,
+      contract,
+      declarer,
+      player_roles: playerRoles,
+      doubled,
+      redoubled,
+    });
+    return response.data;
+  } catch (error) {
+    console.error('初始化打牌失败:', error);
+    throw error;
+  }
+};
+
+// 出牌
+export const playCard = async (position, card) => {
+  try {
+    const response = await api.post('/api/play/card', {
+      position,
+      card,
+    });
+    return response.data;
+  } catch (error) {
+    console.error('出牌失败:', error);
+    throw error;
+  }
+};
+
+// AI出牌
+export const aiPlay = async (useReasoning = true) => {
+  try {
+    const response = await api.post('/api/play/ai-play', {
+      use_reasoning: useReasoning,
+    });
+    return response.data;
+  } catch (error) {
+    console.error('AI出牌失败:', error);
+    throw error;
+  }
+};
+
+// 更新打牌阶段的玩家角色
+export const updatePlayPlayerRoles = async (playerRoles) => {
+  try {
+    const response = await api.post('/api/play/update-roles', {
+      player_roles: playerRoles,
+    });
+    return response.data;
+  } catch (error) {
+    console.error('更新玩家角色失败:', error);
+    throw error;
+  }
+};
+
+// 获取打牌状态
+export const getPlayState = async () => {
+  try {
+    const response = await api.get('/api/play/state');
+    return response.data;
+  } catch (error) {
+    console.error('获取打牌状态失败:', error);
+    throw error;
+  }
+};
+
 export default api;

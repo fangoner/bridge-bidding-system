@@ -35,7 +35,7 @@ from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BI
 from llm.deepseek_client import DeepSeekClient
 from llm.doubao_client import DoubaoVisionClient, DoubaoSeedClient
 from utils.screenshot import BridgeScreenshotCapture, trigger_screenshot_shortcut, read_clipboard_image
-from config import JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM, DEFAULT_FALLBACK_MODEL, DEFAULT_MAIN_PROMPT_MODEL, AI_PROVIDER_DEEPSEEK, AI_PROVIDER_DOUBAO, DEFAULT_AI_PROVIDER
+from config import JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM, AI_PROVIDER_DEEPSEEK, AI_PROVIDER_DOUBAO, DEFAULT_AI_PROVIDER
 
 try:
     from endplay_integration import analyze_all_contracts_endplay
@@ -59,7 +59,7 @@ app.add_middleware(
 jf_loader = JFLoader(JF_CONVENTION_FILE)
 jf_segments = jf_loader.load()
 jf_retriever = JFRetriever(jf_segments)
-llm_client = DeepSeekClient(fallback_model=DEFAULT_FALLBACK_MODEL, main_prompt_model=DEFAULT_MAIN_PROMPT_MODEL)
+llm_client = DeepSeekClient()
 doubao_client = DoubaoSeedClient()
 vision_client = DoubaoVisionClient()
 screenshot_capture = BridgeScreenshotCapture()
@@ -266,16 +266,16 @@ async def human_bid(request: HumanBidRequest):
 
 @app.get("/api/fallback-model")
 async def get_fallback_model():
-    """获取当前备用模型配置"""
+    """获取当前模型配置"""
     return {
-        "fallback_model": llm_client.fallback_model,
+        "fallback_model": llm_client.model,
         "available_models": ["deepseek-chat", "deepseek-reasoner"]
     }
 
 
 @app.post("/api/fallback-model", response_model=FallbackModelResponse)
 async def set_fallback_model(request: FallbackModelRequest):
-    """设置备用模型"""
+    """设置模型"""
     valid_models = ["deepseek-chat", "deepseek-reasoner"]
     if request.fallback_model not in valid_models:
         raise HTTPException(
@@ -283,11 +283,11 @@ async def set_fallback_model(request: FallbackModelRequest):
             detail=f"无效的模型名称。有效选项: {', '.join(valid_models)}"
         )
     
-    llm_client.fallback_model = request.fallback_model
+    llm_client.model = request.fallback_model
     
     return FallbackModelResponse(
         fallback_model=request.fallback_model,
-        message=f"备用模型已设置为: {request.fallback_model}"
+        message=f"模型已设置为: {request.fallback_model}"
     )
 
 
@@ -389,10 +389,10 @@ async def bid(request: BidRequest):
         
         current_llm_client = get_llm_client(request.ai_provider)
         
-        original_fallback = None
+        original_model = None
         if request.fallback_model and request.ai_provider != AI_PROVIDER_DOUBAO:
-            original_fallback = current_llm_client.fallback_model
-            current_llm_client.fallback_model = request.fallback_model
+            original_model = current_llm_client.model
+            current_llm_client.model = request.fallback_model
         
         bidding_service = BiddingService(current_llm_client, jf_retriever)
         bidding_service.use_fallback = request.use_fallback
@@ -412,8 +412,8 @@ async def bid(request: BidRequest):
         
         print(f"[DEBUG] 最终叫品: {bid}, 含义: {meaning}")
         
-        if original_fallback:
-            current_llm_client.fallback_model = original_fallback
+        if original_model:
+            current_llm_client.model = original_model
         
         return BidResponse(
             bid=bid,
@@ -424,8 +424,8 @@ async def bid(request: BidRequest):
         )
     except Exception as e:
         print(f"[ERROR] 叫牌失败: {str(e)}")
-        if original_fallback:
-            current_llm_client.fallback_model = original_fallback
+        if original_model:
+            current_llm_client.model = original_model
         return BidResponse(
             bid="pass",
             meaning=f"叫牌失败: {str(e)}",
@@ -1051,6 +1051,273 @@ async def double_dummy_analysis(request: DoubleDummyRequest):
         return DoubleDummyResponse(
             success=False,
             error=f"分析失败: {str(e)}"
+        )
+
+
+# ==================== 打牌相关API ====================
+
+from bridge.play_types import Card, Contract, PlayPhase
+from bridge.play_service import PlayService
+
+# 全局打牌服务实例
+play_service = None
+
+
+def get_play_service():
+    global play_service
+    if play_service is None:
+        current_llm_client = get_llm_client()
+        play_service = PlayService(current_llm_client)
+    return play_service
+
+
+class PlayInitRequest(BaseModel):
+    hands: Dict[str, dict]
+    contract: str
+    declarer: str
+    player_roles: Optional[Dict[str, str]] = None
+    doubled: bool = False
+    redoubled: bool = False
+
+
+class PlayInitResponse(BaseModel):
+    success: bool
+    state: Optional[dict] = None
+    current_player: Optional[str] = None
+    dummy: Optional[str] = None
+    lead_player: Optional[str] = None
+    message: Optional[str] = None
+    error: Optional[str] = None
+
+
+@app.post("/api/play/init", response_model=PlayInitResponse)
+async def play_init(request: PlayInitRequest):
+    """初始化打牌"""
+    try:
+        service = get_play_service()
+        state = service.initialize(
+            hands=request.hands,
+            contract_str=request.contract,
+            declarer=request.declarer,
+            player_roles=request.player_roles,
+            doubled=request.doubled,
+            redoubled=request.redoubled
+        )
+        
+        return PlayInitResponse(
+            success=True,
+            state=state.to_dict(),
+            current_player=state.current_player,
+            dummy=state.dummy,
+            lead_player=state.lead_player,
+            message=f"打牌初始化成功，{state.lead_player}首攻"
+        )
+    except Exception as e:
+        print(f"[ERROR] 初始化打牌失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return PlayInitResponse(
+            success=False,
+            error=f"初始化失败: {str(e)}"
+        )
+
+
+class PlayCardRequest(BaseModel):
+    position: str
+    card: dict  # {"suit": "♠", "rank": "A"}
+
+
+class PlayCardResponse(BaseModel):
+    success: bool
+    state: Optional[dict] = None
+    trick_winner: Optional[str] = None
+    trick_complete: bool = False
+    declarer_tricks: int = 0
+    defender_tricks: int = 0
+    is_complete: bool = False
+    result: Optional[dict] = None
+    message: Optional[str] = None
+    error: Optional[str] = None
+
+
+@app.post("/api/play/card", response_model=PlayCardResponse)
+async def play_card(request: PlayCardRequest):
+    """出牌"""
+    try:
+        service = get_play_service()
+        
+        card = Card(suit=request.card["suit"], rank=request.card["rank"])
+        success, message = service.play_card(request.position, card)
+        
+        state = service.get_state()
+        trick_winner = None
+        trick_complete = False
+        
+        if state and state.current_trick.is_complete():
+            trick_winner = state.current_trick.winner()
+            trick_complete = True
+        
+        result = None
+        is_complete = service.is_complete()
+        if is_complete:
+            result = service.get_result()
+        
+        return PlayCardResponse(
+            success=success,
+            state=service.get_state_dict(),
+            trick_winner=trick_winner,
+            trick_complete=trick_complete,
+            declarer_tricks=state.declarer_tricks if state else 0,
+            defender_tricks=state.defender_tricks if state else 0,
+            is_complete=is_complete,
+            result=result,
+            message=message
+        )
+    except Exception as e:
+        print(f"[ERROR] 出牌失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return PlayCardResponse(
+            success=False,
+            error=f"出牌失败: {str(e)}"
+        )
+
+
+class PlayAIRequest(BaseModel):
+    use_reasoning: bool = True
+
+
+class PlayAIResponse(BaseModel):
+    success: bool
+    card: Optional[dict] = None
+    reasoning: Optional[str] = None
+    analysis: Optional[str] = None
+    error: Optional[str] = None
+
+
+@app.post("/api/play/ai-play", response_model=PlayAIResponse)
+async def ai_play(request: PlayAIRequest):
+    """AI出牌"""
+    try:
+        service = get_play_service()
+        
+        if not service.is_human_turn():
+            result = await service.get_ai_play(use_reasoning=request.use_reasoning)
+            
+            if result.get("card"):
+                card = Card(suit=result["card"]["suit"], rank=result["card"]["rank"])
+                current_player = service.get_current_player()
+                reason = result.get("reasoning", "")
+                risk = result.get("risk", "")
+                success, message = service.play_card(current_player, card, is_ai=True, reason=reason, risk=risk)
+                
+                print(f"[DEBUG AI出牌] player={current_player}, card={card}, is_ai=True, success={success}, reason={reason[:30] if reason else 'None'}...")
+                
+                return PlayAIResponse(
+                    success=success,
+                    card=result["card"],
+                    reasoning=result.get("reasoning"),
+                    analysis=result.get("analysis")
+                )
+            else:
+                return PlayAIResponse(
+                    success=False,
+                    error=result.get("error", "AI无法选择出牌")
+                )
+        else:
+            return PlayAIResponse(
+                success=False,
+                error="当前是人类玩家回合"
+            )
+    except Exception as e:
+        print(f"[ERROR] AI出牌失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return PlayAIResponse(
+            success=False,
+            error=f"AI出牌失败: {str(e)}"
+        )
+
+
+class UpdatePlayerRolesRequest(BaseModel):
+    player_roles: Dict[str, str]
+
+
+class UpdatePlayerRolesResponse(BaseModel):
+    success: bool
+    state: Optional[dict] = None
+    is_human_turn: bool = False
+    error: Optional[str] = None
+
+
+@app.post("/api/play/update-roles", response_model=UpdatePlayerRolesResponse)
+async def update_player_roles(request: UpdatePlayerRolesRequest):
+    """更新打牌阶段的玩家角色"""
+    try:
+        service = get_play_service()
+        success = service.update_player_roles(request.player_roles)
+        
+        if not success:
+            return UpdatePlayerRolesResponse(
+                success=False,
+                error="打牌未初始化"
+            )
+        
+        return UpdatePlayerRolesResponse(
+            success=True,
+            state=service.get_state_dict(),
+            is_human_turn=service.is_human_turn()
+        )
+    except Exception as e:
+        print(f"[ERROR] 更新玩家角色失败: {str(e)}")
+        return UpdatePlayerRolesResponse(
+            success=False,
+            error=f"更新失败: {str(e)}"
+        )
+
+
+class PlayStateResponse(BaseModel):
+    success: bool
+    state: Optional[dict] = None
+    current_player: Optional[str] = None
+    is_human_turn: bool = False
+    playable_cards: Optional[List[dict]] = None
+    error: Optional[str] = None
+
+
+@app.get("/api/play/state", response_model=PlayStateResponse)
+async def get_play_state():
+    """获取当前打牌状态"""
+    try:
+        service = get_play_service()
+        state = service.get_state()
+        
+        if not state:
+            return PlayStateResponse(
+                success=False,
+                error="打牌未初始化"
+            )
+        
+        playable = service.get_playable_cards()
+        state_dict = service.get_state_dict()
+        
+        print(f"[DEBUG get_play_state] current_trick.is_ai_cards: {state_dict.get('current_trick', {}).get('is_ai_cards')}")
+        print(f"[DEBUG get_play_state] tricks count: {len(state_dict.get('tricks', []))}")
+        for i, t in enumerate(state_dict.get('tricks', [])):
+            print(f"[DEBUG get_play_state] tricks[{i}].is_ai_cards: {t.get('is_ai_cards')}")
+        
+        return PlayStateResponse(
+            success=True,
+            state=state_dict,
+            current_player=state.current_player,
+            is_human_turn=service.is_human_turn(),
+            playable_cards=[c.to_dict() for c in playable]
+        )
+    except Exception as e:
+        print(f"[ERROR] 获取打牌状态失败: {str(e)}")
+        return PlayStateResponse(
+            success=False,
+            error=f"获取状态失败: {str(e)}"
         )
 
 

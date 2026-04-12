@@ -34,12 +34,13 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import HistoryIcon from '@mui/icons-material/History'
-import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, doubleDummyAnalysis, getFallbackModel, setFallbackModel, getAIProvider, setAIProvider } from './services/api'
+import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, doubleDummyAnalysis, getFallbackModel, setFallbackModel, getAIProvider, setAIProvider, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles } from './services/api'
 import HandDisplay from './components/HandDisplay'
 import ControlButtons from './components/ControlButtons'
 import BiddingDetailPanel from './components/BiddingDetailPanel'
 import CardTablePanel from './components/CardTablePanel'
 import SettingsPanel from './components/SettingsPanel'
+import PlayPanel from './components/PlayPanel'
 import { colorSchemes, defaultScheme } from './theme/colorSchemes'
 import './App.css'
 
@@ -160,6 +161,14 @@ function App() {
   const [showDoubleDummy, setShowDoubleDummy] = useState(false) // 显示双明手结果
   const [doubleDummyResult, setDoubleDummyResult] = useState(null) // 双明手分析结果
   const [doubleDummyLoading, setDoubleDummyLoading] = useState(false) // 加载中
+
+  // 打牌相关状态
+  const [playState, setPlayState] = useState(null) // 打牌状态
+  const [playLoading, setPlayLoading] = useState(false) // 打牌加载中
+  const [playAiLoading, setPlayAiLoading] = useState(false) // AI出牌加载中
+  const [showPlayPanel, setShowPlayPanel] = useState(false) // 显示打牌面板
+  const [isPlayPaused, setIsPlayPaused] = useState(false) // 打牌暂停状态
+  const prevTricksCountRef = useRef(0) // 用于检测一墩完成
 
   // 检查API状态
   useEffect(() => {
@@ -1194,6 +1203,136 @@ function App() {
     }
   }
 
+  // ==================== 打牌相关函数 ====================
+
+  // 开始打牌
+  const handleStartPlay = async () => {
+    const contract = getFinalContract()
+    
+    if (!contract) {
+      setError('无法确定定约')
+      return
+    }
+    
+    setPlayLoading(true)
+    setError(null)
+    setIsPlayPaused(false) // 重置暂停状态
+    prevTricksCountRef.current = 0 // 重置墩数计数器
+    
+    try {
+      const result = await playInit(
+        hands,
+        `${contract.level}${contract.suit}`,
+        contract.declarer,
+        positionRoles,
+        contract.isDouble,
+        contract.isRedouble
+      )
+      
+      if (result.success) {
+        setPlayState(result.state)
+        setShowPlayPanel(true)
+      } else {
+        setError(result.error || '初始化打牌失败')
+      }
+    } catch (err) {
+      console.error('初始化打牌失败:', err)
+      setError('初始化打牌失败: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setPlayLoading(false)
+    }
+  }
+
+  // 出牌
+  const handlePlayCard = async (position, card) => {
+    setPlayLoading(true)
+    setError(null)
+    
+    try {
+      const result = await playCard(position, card)
+      
+      if (result.success) {
+        console.log('[DEBUG handlePlayCard] result.state.current_trick:', result.state.current_trick)
+        setPlayState(result.state)
+        
+        if (result.is_complete && result.result) {
+          console.log('打牌结束:', result.result)
+        }
+      } else {
+        setError(result.error || '出牌失败')
+      }
+    } catch (err) {
+      console.error('出牌失败:', err)
+      setError('出牌失败: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setPlayLoading(false)
+    }
+  }
+
+  // AI出牌
+  const handleAIPlay = async () => {
+    setPlayAiLoading(true)
+    setError(null)
+    
+    try {
+      const result = await aiPlay()
+      
+      if (result.success) {
+        // 获取最新状态
+        const stateResult = await getPlayState()
+        if (stateResult.success) {
+          console.log('[DEBUG handleAIPlay] FULL state:', JSON.stringify(stateResult.state, null, 2))
+          console.log('[DEBUG handleAIPlay] current_trick:', JSON.stringify(stateResult.state?.current_trick, null, 2))
+          setPlayState(stateResult.state)
+        }
+      } else {
+        setError(result.error || 'AI出牌失败')
+      }
+    } catch (err) {
+      console.error('AI出牌失败:', err)
+      setError('AI出牌失败: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setPlayAiLoading(false)
+    }
+  }
+
+  // 返回叫牌
+  const handleBackToBidding = () => {
+    setShowPlayPanel(false)
+    setPlayState(null)
+  }
+
+  // AI自动出牌
+  useEffect(() => {
+    if (!showPlayPanel || !playState || playAiLoading || playLoading || isPlayPaused) return
+    
+    const { is_human_turn, phase } = playState
+    
+    // 如果不是人类回合且游戏未结束，自动AI出牌
+    if (!is_human_turn && phase !== 'complete') {
+      const timer = setTimeout(() => {
+        handleAIPlay()
+      }, 500) // 延迟500ms让用户看到状态变化
+      
+      return () => clearTimeout(timer)
+    }
+  }, [playState?.is_human_turn, playState?.phase, showPlayPanel, playAiLoading, playLoading, isPlayPaused])
+
+  // 检测一墩完成，自动暂停
+  useEffect(() => {
+    if (!showPlayPanel || !playState) return
+    
+    const currentTricksCount = playState.tricks?.length || 0
+    const prevTricksCount = prevTricksCountRef.current
+    
+    // 如果墩数增加了，说明一墩完成，自动暂停
+    if (currentTricksCount > prevTricksCount) {
+      setIsPlayPaused(true)
+    }
+    
+    prevTricksCountRef.current = currentTricksCount
+  }, [playState?.tricks?.length, showPlayPanel])
+
   // 获取队友位置
   const getPartnerPosition = (pos) => {
     const partners = {
@@ -1206,11 +1345,13 @@ function App() {
   }
 
   // 处理位置角色变化
-  const handlePositionRoleChange = (position, role) => {
+  const handlePositionRoleChange = async (position, role) => {
+    const newRoles = { ...positionRoles, [position]: role }
+    
     setPositionRoles(prev => {
-      const newRoles = { ...prev, [position]: role }
+      const updatedRoles = { ...prev, [position]: role }
       // 更新 humanPosition 以保持兼容性
-      const humanPositions = Object.entries(newRoles)
+      const humanPositions = Object.entries(updatedRoles)
         .filter(([, r]) => r === 'human')
         .map(([pos]) => pos)
       if (humanPositions.length === 0) {
@@ -1221,8 +1362,23 @@ function App() {
         // 多个人类位置时，使用数组
         setHumanPosition(humanPositions)
       }
-      return newRoles
+      return updatedRoles
     })
+    
+    // 如果在打牌阶段，同步更新后端的 player_roles
+    if (showPlayPanel && playState) {
+      try {
+        const result = await updatePlayPlayerRoles(newRoles)
+        console.log('[DEBUG] updatePlayPlayerRoles result:', result)
+        if (result.success) {
+          console.log('[DEBUG] new state is_human_turn:', result.state?.is_human_turn)
+          console.log('[DEBUG] new state player_roles:', result.state?.player_roles)
+          setPlayState(result.state)
+        }
+      } catch (err) {
+        console.error('更新打牌角色失败:', err)
+      }
+    }
   }
 
   // 渲染叫牌表格
@@ -1532,36 +1688,54 @@ function App() {
               biddingStarted={biddingStarted}
               stopBidding={stopBidding}
               startBidding={startBidding}
+              playState={playState}
+              showPlayPanel={showPlayPanel}
+              declarer={isBiddingComplete() ? getFinalContract()?.declarer : null}
             />
             
-            {/* 右侧面板：叫牌细节 */}
-            {(humanPosition !== null || showAIBiddingOutput) && (
-              <BiddingDetailPanel
-                isMobile={false}
-                humanPosition={humanPosition}
-                currentBidder={currentBidder}
-                isBiddingComplete={isBiddingComplete()}
-                showBiddingControls={showBiddingControls}
-                setShowBiddingControls={setShowBiddingControls}
-                simpleDisplayMode={simpleDisplayMode}
-                setSimpleDisplayMode={setSimpleDisplayMode}
-                aiBiddingHistory={aiBiddingHistory}
-                selectedBiddingIndex={selectedBiddingIndex}
-                setSelectedBiddingIndex={setSelectedBiddingIndex}
-                hands={hands}
-                gameMode={gameMode}
-                addBid={addBid}
-                getJFSuggestion={getJFSuggestion}
-                getFinalContract={getFinalContract}
-                bidSuggestion={bidSuggestion}
-                suggestionLoading={suggestionLoading}
-                stopBidding={stopBidding}
-                shouldAIAutoPass={shouldAIAutoPass}
-                customBidMeaning={customBidMeaning}
-                setCustomBidMeaning={setCustomBidMeaning}
-                outputFormats={outputFormats}
-                isBiddingCompleteFn={isBiddingComplete}
+            {/* 右侧面板：叫牌细节或打牌面板 */}
+            {showPlayPanel ? (
+              <PlayPanel
+                playState={playState}
+                onPlayCard={handlePlayCard}
+                onAIPlay={handleAIPlay}
+                loading={playLoading}
+                aiLoading={playAiLoading}
+                onBack={handleBackToBidding}
+                isPaused={isPlayPaused}
+                onPauseToggle={() => setIsPlayPaused(!isPlayPaused)}
               />
+            ) : (
+              (humanPosition !== null || showAIBiddingOutput) && (
+                <BiddingDetailPanel
+                  isMobile={false}
+                  humanPosition={humanPosition}
+                  currentBidder={currentBidder}
+                  isBiddingComplete={isBiddingComplete()}
+                  showBiddingControls={showBiddingControls}
+                  setShowBiddingControls={setShowBiddingControls}
+                  simpleDisplayMode={simpleDisplayMode}
+                  setSimpleDisplayMode={setSimpleDisplayMode}
+                  aiBiddingHistory={aiBiddingHistory}
+                  selectedBiddingIndex={selectedBiddingIndex}
+                  setSelectedBiddingIndex={setSelectedBiddingIndex}
+                  hands={hands}
+                  gameMode={gameMode}
+                  addBid={addBid}
+                  getJFSuggestion={getJFSuggestion}
+                  getFinalContract={getFinalContract}
+                  bidSuggestion={bidSuggestion}
+                  suggestionLoading={suggestionLoading}
+                  stopBidding={stopBidding}
+                  shouldAIAutoPass={shouldAIAutoPass}
+                  customBidMeaning={customBidMeaning}
+                  setCustomBidMeaning={setCustomBidMeaning}
+                  outputFormats={outputFormats}
+                  isBiddingCompleteFn={isBiddingComplete}
+                  onStartPlay={handleStartPlay}
+                  playLoading={playLoading}
+                />
+              )
             )}
           </Box>
         </Box>
@@ -1615,36 +1789,54 @@ function App() {
               biddingStarted={biddingStarted}
               stopBidding={stopBidding}
               startBidding={startBidding}
+              playState={playState}
+              showPlayPanel={showPlayPanel}
+              declarer={isBiddingComplete() ? getFinalContract()?.declarer : null}
             />
             
-            {/* 叫牌细节面板 */}
-            {(humanPosition !== null || showAIBiddingOutput) && (
-              <BiddingDetailPanel
-                isMobile={true}
-                humanPosition={humanPosition}
-                currentBidder={currentBidder}
-                isBiddingComplete={isBiddingComplete()}
-                showBiddingControls={showBiddingControls}
-                setShowBiddingControls={setShowBiddingControls}
-                simpleDisplayMode={simpleDisplayMode}
-                setSimpleDisplayMode={setSimpleDisplayMode}
-                aiBiddingHistory={aiBiddingHistory}
-                selectedBiddingIndex={selectedBiddingIndex}
-                setSelectedBiddingIndex={setSelectedBiddingIndex}
-                hands={hands}
-                gameMode={gameMode}
-                addBid={addBid}
-                getJFSuggestion={getJFSuggestion}
-                getFinalContract={getFinalContract}
-                bidSuggestion={bidSuggestion}
-                suggestionLoading={suggestionLoading}
-                stopBidding={stopBidding}
-                shouldAIAutoPass={shouldAIAutoPass}
-                customBidMeaning={customBidMeaning}
-                setCustomBidMeaning={setCustomBidMeaning}
-                outputFormats={outputFormats}
-                isBiddingCompleteFn={isBiddingComplete}
+            {/* 叫牌细节面板或打牌面板 */}
+            {showPlayPanel ? (
+              <PlayPanel
+                playState={playState}
+                onPlayCard={handlePlayCard}
+                onAIPlay={handleAIPlay}
+                loading={playLoading}
+                aiLoading={playAiLoading}
+                onBack={handleBackToBidding}
+                isPaused={isPlayPaused}
+                onPauseToggle={() => setIsPlayPaused(!isPlayPaused)}
               />
+            ) : (
+              (humanPosition !== null || showAIBiddingOutput) && (
+                <BiddingDetailPanel
+                  isMobile={true}
+                  humanPosition={humanPosition}
+                  currentBidder={currentBidder}
+                  isBiddingComplete={isBiddingComplete()}
+                  showBiddingControls={showBiddingControls}
+                  setShowBiddingControls={setShowBiddingControls}
+                  simpleDisplayMode={simpleDisplayMode}
+                  setSimpleDisplayMode={setSimpleDisplayMode}
+                  aiBiddingHistory={aiBiddingHistory}
+                  selectedBiddingIndex={selectedBiddingIndex}
+                  setSelectedBiddingIndex={setSelectedBiddingIndex}
+                  hands={hands}
+                  gameMode={gameMode}
+                  addBid={addBid}
+                  getJFSuggestion={getJFSuggestion}
+                  getFinalContract={getFinalContract}
+                  bidSuggestion={bidSuggestion}
+                  suggestionLoading={suggestionLoading}
+                  stopBidding={stopBidding}
+                  shouldAIAutoPass={shouldAIAutoPass}
+                  customBidMeaning={customBidMeaning}
+                  setCustomBidMeaning={setCustomBidMeaning}
+                  outputFormats={outputFormats}
+                  isBiddingCompleteFn={isBiddingComplete}
+                  onStartPlay={handleStartPlay}
+                  playLoading={playLoading}
+                />
+              )
             )}
           </Box>
         </Box>
