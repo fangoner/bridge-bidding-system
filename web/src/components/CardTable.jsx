@@ -33,8 +33,12 @@ function CardTable({
   setHands,
   biddingStarted,
   stopBidding,
-  startBidding,
   declarer,
+  playState,
+  showPlayPanel,
+  lastCompletedTrick,
+  isPlayPaused,
+  aiLoading,
 }) {
   const [handInputs, setHandInputs] = useState({
     '南': '',
@@ -146,6 +150,22 @@ function CardTable({
   }
 
   const shouldShowHandContent = (position) => {
+    if (showPlayPanel && playState) {
+      const dummy = playState.dummy
+      const playerRoles = playState.player_roles || positionRoles
+      
+      if (position === dummy) {
+        return true
+      }
+      
+      const isHumanPosition = playerRoles && playerRoles[position] === 'human'
+      if (isHumanPosition) {
+        return true
+      }
+      
+      return showAIHands
+    }
+    
     if (!humanPosition) {
       return true;
     }
@@ -163,6 +183,109 @@ function CardTable({
       return showOpponentHands;
     }
     return true;
+  };
+
+  const SUIT_COLORS = {
+    '♠': '#000',
+    '♥': '#e53935',
+    '♦': '#e53935',
+    '♣': '#000',
+  };
+
+  const renderCurrentTrick = () => {
+    if (!playState) return null
+    
+    const { current_trick, current_player, phase } = playState
+    const isComplete = phase === 'complete'
+    
+    // 如果暂停且有已完成的墩，显示上一墩的牌
+    const displayTrick = (isPlayPaused && lastCompletedTrick) ? lastCompletedTrick : current_trick
+    
+    const getCardAtPosition = (position) => {
+      if (!displayTrick?.cards) return null
+      const cardEntry = displayTrick.cards.find(([pos]) => pos === position)
+      return cardEntry ? cardEntry[1] : null
+    }
+    
+    const getLastTrickWinner = () => {
+      if (isPlayPaused && lastCompletedTrick) {
+        return lastCompletedTrick?.winner
+      }
+      return null
+    }
+    
+    const renderCard = (position) => {
+      const card = getCardAtPosition(position)
+      
+      if (!card) {
+        return (
+          <Box sx={{
+            width: 44,
+            height: 60,
+            border: '1px dashed #ccc',
+            borderRadius: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            bgcolor: '#fafafa',
+          }} />
+        )
+      }
+      
+      const color = SUIT_COLORS[card.suit] || '#000'
+      
+      return (
+        <Box sx={{
+          width: 44,
+          height: 60,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          bgcolor: '#fff',
+          border: '1px solid #ddd',
+          borderRadius: 1,
+          boxShadow: 1,
+        }}>
+          <Typography sx={{ color, fontWeight: 'bold', fontSize: '1.1rem' }}>
+            {card.suit}{card.rank}
+          </Typography>
+        </Box>
+      )
+    }
+    
+    return (
+      <Box sx={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        alignItems: 'center', 
+        justifyContent: 'center',
+        height: '100%',
+        width: '100%',
+        gap: 0.5,
+      }}>
+        <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+          {renderCard('北')}
+        </Box>
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1 }}>
+          {renderCard('西')}
+          <Box sx={{ width: 60, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {getLastTrickWinner() ? (
+              <Typography variant="caption" color="primary" sx={{ fontSize: '0.65rem', fontWeight: 'bold' }}>
+                {getLastTrickWinner()}赢
+              </Typography>
+            ) : !isComplete && current_player ? (
+              <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem', display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                {current_player}出牌{aiLoading && <CircularProgress size={10} />}
+              </Typography>
+            ) : null}
+          </Box>
+          {renderCard('东')}
+        </Box>
+        <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+          {renderCard('南')}
+        </Box>
+      </Box>
+    )
   };
 
   const renderHandWithStatus = (hand, position, sxProps) => {
@@ -334,7 +457,7 @@ function CardTable({
       position: 'relative',
       overflow: isMobile ? 'visible' : 'hidden',
     }}>
-      {onClearAllHands && (!biddingStarted || (checkBiddingComplete && checkBiddingComplete())) && (
+      {onClearAllHands && !showPlayPanel && (!biddingStarted || (checkBiddingComplete && checkBiddingComplete())) && (
         <Box sx={{
           position: 'absolute',
           top: 8,
@@ -433,7 +556,21 @@ function CardTable({
               padding: 1,
               overflowY: 'auto',
             }}>
-              {showDoubleDummy ? (
+              {showPlayPanel && playState ? (
+                showDoubleDummy ? (
+                  doubleDummyLoading ? (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
+                      <CircularProgress size={24} />
+                    </Box>
+                  ) : doubleDummyResult ? (
+                    <DoubleDummyTable tableData={doubleDummyResult} />
+                  ) : (
+                    <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
+                      无分析结果
+                    </div>
+                  )
+                ) : renderCurrentTrick()
+              ) : showDoubleDummy ? (
                 doubleDummyLoading ? (
                   <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
                     <CircularProgress size={24} />
@@ -480,7 +617,21 @@ function CardTable({
                 padding: 1,
                 overflowY: 'auto',
               }}>
-                {showDoubleDummy ? (
+              {showPlayPanel && playState ? (
+                showDoubleDummy ? (
+                  doubleDummyLoading ? (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
+                      <CircularProgress size={24} />
+                    </Box>
+                  ) : doubleDummyResult ? (
+                    <DoubleDummyTable tableData={doubleDummyResult} />
+                  ) : (
+                    <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
+                      无分析结果
+                    </div>
+                  )
+                ) : renderCurrentTrick()
+              ) : showDoubleDummy ? (
                   doubleDummyLoading ? (
                     <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
                       <CircularProgress size={24} />

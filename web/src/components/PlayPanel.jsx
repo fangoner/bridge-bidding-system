@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Box,
   Paper,
@@ -33,7 +33,6 @@ const SUIT_COLORS = {
 function PlayPanel({
   playState,
   onPlayCard,
-  onAIPlay,
   loading,
   aiLoading,
   onBack,
@@ -41,9 +40,13 @@ function PlayPanel({
   onPauseToggle,
 }) {
   const [selectedCard, setSelectedCard] = useState(null)
+  const prevPlayerRef = useRef(playState?.current_player)
   
   useEffect(() => {
-    setSelectedCard(null)
+    if (playState?.current_player !== prevPlayerRef.current) {
+      prevPlayerRef.current = playState?.current_player
+      setSelectedCard(null)
+    }
   }, [playState?.current_player])
   
   if (!playState) {
@@ -114,10 +117,6 @@ function PlayPanel({
     if (selectedCard && current_player) {
       onPlayCard(current_player, selectedCard)
     }
-  }
-  
-  const handleAIPlay = () => {
-    onAIPlay()
   }
   
   const renderCurrentTrick = () => {

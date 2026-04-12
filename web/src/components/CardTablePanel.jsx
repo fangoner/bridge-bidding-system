@@ -35,11 +35,13 @@ function CardTablePanel({
   setHands,
   biddingStarted,
   stopBidding,
-  startBidding,
   height = '680px',
   playState,
   showPlayPanel,
   declarer,
+  lastCompletedTrick,
+  isPlayPaused,
+  aiLoading,
 }) {
   return (
     <Paper elevation={3} sx={{ 
@@ -88,10 +90,25 @@ function CardTablePanel({
               </ToggleButton>
             </ToggleButtonGroup>
           )}
-          {showPlayPanel && playState && (
-            <Typography variant="body2" color="text.secondary">
-              {playState.current_player}出牌
-            </Typography>
+          {showPlayPanel && (
+            <ToggleButtonGroup
+              value={showDoubleDummy ? 'result' : 'play'}
+              exclusive
+              onChange={(e, newValue) => {
+                if (newValue !== null) {
+                  toggleDoubleDummy(newValue === 'result')
+                }
+              }}
+              size="small"
+              sx={{ height: isMobile ? 26 : 24 }}
+            >
+              <ToggleButton value="play" sx={{ px: 1, py: 0, fontSize: isMobile ? '0.875rem' : '0.75rem', minWidth: 50 }}>
+                出牌状态
+              </ToggleButton>
+              <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: isMobile ? '0.875rem' : '0.75rem', minWidth: 50 }}>
+                双明手
+              </ToggleButton>
+            </ToggleButtonGroup>
           )}
           
           {gameMode === 'pair' && humanPosition && (
@@ -109,7 +126,7 @@ function CardTablePanel({
           )}
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          {gameMode === 'four' && humanPosition && (
+          {(gameMode === 'four' && humanPosition) || showPlayPanel ? (
             <FormControlLabel
               control={
                 <Checkbox
@@ -121,7 +138,7 @@ function CardTablePanel({
               label="AI手牌"
               sx={{ '& .MuiFormControlLabel-label': { fontSize: isMobile ? '0.875rem' : '0.75rem' }, mr: isMobile ? 0 : undefined }}
             />
-          )}
+          ) : null}
         </Box>
       </Box>
       <Box sx={{ 
@@ -161,8 +178,12 @@ function CardTablePanel({
           setHands={setHands}
           biddingStarted={biddingStarted}
           stopBidding={stopBidding}
-          startBidding={startBidding}
           declarer={declarer}
+          playState={playState}
+          showPlayPanel={showPlayPanel}
+          lastCompletedTrick={lastCompletedTrick}
+          isPlayPaused={isPlayPaused}
+          aiLoading={aiLoading}
         />
       </Box>
     </Paper>

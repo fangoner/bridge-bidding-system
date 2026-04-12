@@ -24,6 +24,7 @@ function ControlButtons({
   showUndo,
   canUndo,
   onUndo,
+  showPlayPanel,
 }) {
   const isLarge = size === 'large'
   const gap = isLarge ? 2 : 1
@@ -50,16 +51,18 @@ function ControlButtons({
         {loading ? '发牌中...' : '发牌'}
       </Button>
 
-      <Button
-        variant="outlined"
-        size={buttonSize}
-        onClick={startBidding}
-        disabled={!hands || (biddingStarted && !isBiddingComplete() && !stopBidding)}
-      >
-        {isNewDeal ? '开始叫牌' : '重新叫牌'}
-      </Button>
+      {!showPlayPanel && (
+        <Button
+          variant="outlined"
+          size={buttonSize}
+          onClick={startBidding}
+          disabled={!hands || (biddingStarted && !isBiddingComplete() && !stopBidding)}
+        >
+          {isNewDeal ? '开始叫牌' : '重新叫牌'}
+        </Button>
+      )}
       
-      {biddingStarted && !isBiddingComplete() && (
+      {biddingStarted && !isBiddingComplete() && !showPlayPanel && (
         <Button
           variant={stopBidding ? "contained" : "outlined"}
           color={stopBidding ? "success" : "warning"}
@@ -70,7 +73,7 @@ function ControlButtons({
         </Button>
       )}
       
-      {showUndo && (
+      {showUndo && !showPlayPanel && (
         <Tooltip title={canUndo ? "撤销上一步叫牌" : "AI正在思考..."}>
           <span>
             <Button

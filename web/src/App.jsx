@@ -28,6 +28,7 @@ import {
   Badge,
   ToggleButtonGroup,
   ToggleButton,
+  Tooltip,
   useTheme,
   useMediaQuery
 } from '@mui/material'
@@ -41,6 +42,7 @@ import BiddingDetailPanel from './components/BiddingDetailPanel'
 import CardTablePanel from './components/CardTablePanel'
 import SettingsPanel from './components/SettingsPanel'
 import PlayPanel from './components/PlayPanel'
+import PlayDetailPanel from './components/PlayDetailPanel'
 import { colorSchemes, defaultScheme } from './theme/colorSchemes'
 import './App.css'
 
@@ -168,6 +170,9 @@ function App() {
   const [playAiLoading, setPlayAiLoading] = useState(false) // AI出牌加载中
   const [showPlayPanel, setShowPlayPanel] = useState(false) // 显示打牌面板
   const [isPlayPaused, setIsPlayPaused] = useState(false) // 打牌暂停状态
+  const [lastCompletedTrick, setLastCompletedTrick] = useState(null) // 暂停时保存的上一墩
+  const [aiPlayHistory, setAiPlayHistory] = useState([]) // AI打牌历史记录
+  const [selectedPlayCard, setSelectedPlayCard] = useState(null) // 选中的出牌
   const prevTricksCountRef = useRef(0) // 用于检测一墩完成
 
   // 检查API状态
@@ -410,6 +415,12 @@ function App() {
     setIsNewDeal(false) // 标记为历史记录加载，显示"重新叫牌"
     setShowDoubleDummy(false) // 切换到显示叫牌过程
     setDoubleDummyResult(null) // 清除双明手结果
+    setShowPlayPanel(false) // 确保显示叫牌面板
+    // 重置打牌相关状态
+    setPlayState(null)
+    setAiPlayHistory([])
+    setSelectedPlayCard(null)
+    setIsPlayPaused(false)
     
     // 加载历史记录后获取更多输出格式
     if (record.hands && record.biddingSequence && record.biddingSequence.length > 0) {
@@ -491,6 +502,12 @@ function App() {
       // 重置回退历史
       setBiddingHistory([])
       setHistoryIndex(-1)
+      // 重置打牌相关状态
+      setShowPlayPanel(false)
+      setPlayState(null)
+      setAiPlayHistory([])
+      setSelectedPlayCard(null)
+      setIsPlayPaused(false)
     } catch (err) {
       setError('发牌失败，请检查API服务是否正常运行')
     } finally {
@@ -519,6 +536,12 @@ function App() {
         setDoubleDummyResult(null)
         setBiddingHistory([])
         setHistoryIndex(-1)
+        // 重置打牌相关状态
+        setShowPlayPanel(false)
+        setPlayState(null)
+        setAiPlayHistory([])
+        setSelectedPlayCard(null)
+        setIsPlayPaused(false)
       } else {
         setError(data.message || '牌局解析失败')
       }
@@ -550,6 +573,12 @@ function App() {
         setDoubleDummyResult(null)
         setBiddingHistory([])
         setHistoryIndex(-1)
+        // 重置打牌相关状态
+        setShowPlayPanel(false)
+        setPlayState(null)
+        setAiPlayHistory([])
+        setSelectedPlayCard(null)
+        setIsPlayPaused(false)
       } else {
         setError(data.message || '图片识别失败')
       }
@@ -595,6 +624,12 @@ function App() {
         setBiddingHistory([])
         setHistoryIndex(-1)
         setError(null)
+        // 重置打牌相关状态
+        setShowPlayPanel(false)
+        setPlayState(null)
+        setAiPlayHistory([])
+        setSelectedPlayCard(null)
+        setIsPlayPaused(false)
       } else {
         setError(data.message || '识别失败，请确保已截取图片')
       }
@@ -679,6 +714,12 @@ function App() {
     setDoubleDummyResult(null)
     setBiddingHistory([])
     setHistoryIndex(-1)
+    // 重置打牌相关状态
+    setShowPlayPanel(false)
+    setPlayState(null)
+    setAiPlayHistory([])
+    setSelectedPlayCard(null)
+    setIsPlayPaused(false)
   }
 
   // 切换停止/继续叫牌
@@ -1278,7 +1319,16 @@ function App() {
       const result = await aiPlay()
       
       if (result.success) {
-        // 获取最新状态
+        const aiRecord = {
+          position: playState?.current_player,
+          card: result.card,
+          reasoning: result.reasoning,
+          risk: result.risk,
+          full_output: result.full_output,
+          timestamp: new Date().toLocaleTimeString(),
+        }
+        setAiPlayHistory(prev => [...prev, aiRecord])
+        
         const stateResult = await getPlayState()
         if (stateResult.success) {
           console.log('[DEBUG handleAIPlay] FULL state:', JSON.stringify(stateResult.state, null, 2))
@@ -1296,10 +1346,10 @@ function App() {
     }
   }
 
-  // 返回叫牌
-  const handleBackToBidding = () => {
-    setShowPlayPanel(false)
-    setPlayState(null)
+  const handleResumePlay = () => {
+    setIsPlayPaused(false)
+    setLastCompletedTrick(null)
+    setShowDoubleDummy(false)
   }
 
   // AI自动出牌
@@ -1326,7 +1376,9 @@ function App() {
     const prevTricksCount = prevTricksCountRef.current
     
     // 如果墩数增加了，说明一墩完成，自动暂停
-    if (currentTricksCount > prevTricksCount) {
+    if (currentTricksCount > prevTricksCount && playState.tricks && playState.tricks.length > 0) {
+      const lastTrick = playState.tricks[playState.tricks.length - 1]
+      setLastCompletedTrick(lastTrick)
       setIsPlayPaused(true)
     }
     
@@ -1395,21 +1447,29 @@ function App() {
     const positions = ['南', '西', '北', '东']
     const rows = []
     let currentRow = Array(4).fill(null)
+    let currentRowInfo = Array(4).fill(null)
 
-    biddingSequence.forEach((bid) => {
+    biddingSequence.forEach((bid, bidIndex) => {
       const posIndex = positions.indexOf(bid.position)
       currentRow[posIndex] = bid.bid
+      
+      const isAI = positionRoles[bid.position] === 'ai'
+      const aiRecord = aiBiddingHistory[bidIndex]
+      
+      currentRowInfo[posIndex] = {
+        isAI,
+        reason: aiRecord?.result?.meaning || null
+      }
 
-      // 如果这一行满了（东家叫牌后），或者是最后一个叫品
       if (posIndex === 3) {
-        rows.push([...currentRow])
+        rows.push({ bids: [...currentRow], info: [...currentRowInfo] })
         currentRow = Array(4).fill(null)
+        currentRowInfo = Array(4).fill(null)
       }
     })
 
-    // 添加未完成的最后一行
     if (currentRow.some(cell => cell !== null)) {
-      rows.push([...currentRow])
+      rows.push({ bids: [...currentRow], info: [...currentRowInfo] })
     }
 
     return (
@@ -1423,122 +1483,45 @@ function App() {
         </div>
         {rows.map((row, rowIndex) => (
           <div key={rowIndex} className="bidding-row">
-            {positions.map((pos, colIndex) => (
-              <span key={colIndex} className={`bidding-cell ${row[colIndex] ? 'has-bid' : ''}`}>
-                {row[colIndex] === 'pass' ? 'P' : row[colIndex] || ''}
-              </span>
-            ))}
+            {positions.map((pos, colIndex) => {
+              const bid = row.bids[colIndex]
+              const info = row.info[colIndex]
+              if (!bid) {
+                return <span key={colIndex} className="bidding-cell"></span>
+              }
+              
+              const displayText = bid === 'pass' ? 'P' : bid
+              
+              if (info?.isAI) {
+                const cell = (
+                  <span 
+                    key={colIndex} 
+                    className="bidding-cell has-bid ai-bid" 
+                    style={{ backgroundColor: '#e0e0e0', cursor: info?.reason ? 'pointer' : 'default' }}
+                  >
+                    {displayText}
+                  </span>
+                )
+                
+                if (info?.reason) {
+                  return (
+                    <Tooltip key={colIndex} title={info.reason} arrow placement="top">
+                      {cell}
+                    </Tooltip>
+                  )
+                }
+                return cell
+              }
+              
+              return (
+                <span key={colIndex} className="bidding-cell has-bid" style={{ backgroundColor: '#fff' }}>
+                  {displayText}
+                </span>
+              )
+            })}
           </div>
         ))}
       </div>
-    )
-  }
-
-  // 渲染牌桌
-  const renderCardTable = () => {
-    if (!hands) return null
-
-    const north = hands['北']
-    const south = hands['南']
-    const east = hands['东']
-    const west = hands['西']
-
-    // 判断是否显示某个位置的手牌内容
-    const shouldShowHandContent = (position) => {
-      // 观察模式：显示所有手牌
-      if (!humanPosition) {
-        return true
-      }
-
-      // 人类玩家自己的牌总是显示
-      if (position === humanPosition) {
-        return true
-      }
-
-      // 四人模式
-      if (gameMode === 'four') {
-        // 其他玩家的牌根据showAIHands决定
-        return showAIHands
-      }
-
-      // 双人模式
-      if (gameMode === 'pair') {
-        const humanPos = Array.isArray(humanPosition) ? humanPosition[0] : humanPosition
-        const partnerPosition = getPartnerPosition(humanPos)
-        
-        // 队友的牌根据showPartnerHand决定
-        if (position === partnerPosition) {
-          return showPartnerHand
-        }
-        
-        // 对方阵营的牌根据showOpponentHands决定
-        return showOpponentHands
-      }
-
-      return true
-    }
-
-    return (
-      <Box className="card-table-container">
-        {/* 北家 */}
-        <Box className="north-hand">
-          <HandDisplay
-            hand={north}
-            position="北"
-            isActive={currentBidder === '北'}
-            isHuman={Array.isArray(humanPosition) ? humanPosition.includes('北') : humanPosition === '北'}
-            isDealer={dealer === '北'}
-            isPartner={humanPosition && (Array.isArray(humanPosition) ? humanPosition.some(p => getPartnerPosition(p) === '北') : getPartnerPosition(humanPosition) === '北')}
-            showContent={shouldShowHandContent('北')}
-          />
-        </Box>
-
-        {/* 中间区域：西家 + 牌桌 + 东家 */}
-        <Box className="middle-row">
-          <Box className="west-hand">
-            <HandDisplay
-              hand={west}
-              position="西"
-              isActive={currentBidder === '西'}
-              isHuman={Array.isArray(humanPosition) ? humanPosition.includes('西') : humanPosition === '西'}
-              isDealer={dealer === '西'}
-              isPartner={humanPosition && (Array.isArray(humanPosition) ? humanPosition.some(p => getPartnerPosition(p) === '西') : getPartnerPosition(humanPosition) === '西')}
-              showContent={shouldShowHandContent('西')}
-            />
-          </Box>
-
-          <Box className="table-center">
-            <div className="table-border">
-              {renderBiddingTable()}
-            </div>
-          </Box>
-
-          <Box className="east-hand">
-            <HandDisplay
-              hand={east}
-              position="东"
-              isActive={currentBidder === '东'}
-              isHuman={Array.isArray(humanPosition) ? humanPosition.includes('东') : humanPosition === '东'}
-              isDealer={dealer === '东'}
-              isPartner={humanPosition && (Array.isArray(humanPosition) ? humanPosition.some(p => getPartnerPosition(p) === '东') : getPartnerPosition(humanPosition) === '东')}
-              showContent={shouldShowHandContent('东')}
-            />
-          </Box>
-        </Box>
-
-        {/* 南家 */}
-        <Box className="south-hand">
-          <HandDisplay
-            hand={south}
-            position="南"
-            isActive={currentBidder === '南'}
-            isHuman={Array.isArray(humanPosition) ? humanPosition.includes('南') : humanPosition === '南'}
-            isDealer={dealer === '南'}
-            isPartner={humanPosition && (Array.isArray(humanPosition) ? humanPosition.some(p => getPartnerPosition(p) === '南') : getPartnerPosition(humanPosition) === '南')}
-            showContent={shouldShowHandContent('南')}
-          />
-        </Box>
-      </Box>
     )
   }
 
@@ -1582,6 +1565,7 @@ function App() {
           showUndo={showUndo}
           canUndo={canUndo}
           onUndo={undoBidding}
+          showPlayPanel={showPlayPanel}
         />
       </Box>
 
@@ -1609,6 +1593,7 @@ function App() {
           showUndo={showUndo}
           canUndo={canUndo}
           onUndo={undoBidding}
+          showPlayPanel={showPlayPanel}
         />
       </Box>
 
@@ -1682,6 +1667,12 @@ function App() {
                 setBiddingSequence([]);
                 setAiBiddingHistory([]);
                 setPassedAIPositions(new Set());
+                // 重置打牌相关状态
+                setShowPlayPanel(false);
+                setPlayState(null);
+                setAiPlayHistory([]);
+                setSelectedPlayCard(null);
+                setIsPlayPaused(false);
               }}
               onClearAllHands={clearAllHands}
               setHands={setHands}
@@ -1691,19 +1682,29 @@ function App() {
               playState={playState}
               showPlayPanel={showPlayPanel}
               declarer={isBiddingComplete() ? getFinalContract()?.declarer : null}
+              lastCompletedTrick={lastCompletedTrick}
+              isPlayPaused={isPlayPaused}
+              aiLoading={playAiLoading}
             />
             
             {/* 右侧面板：叫牌细节或打牌面板 */}
             {showPlayPanel ? (
-              <PlayPanel
+              <PlayDetailPanel
+                isMobile={false}
                 playState={playState}
-                onPlayCard={handlePlayCard}
-                onAIPlay={handleAIPlay}
+                aiPlayHistory={aiPlayHistory}
+                selectedCard={selectedPlayCard}
+                onCardSelect={setSelectedPlayCard}
+                onConfirmPlay={() => {
+                  if (selectedPlayCard && playState?.current_player) {
+                    handlePlayCard(playState.current_player, selectedPlayCard)
+                    setSelectedPlayCard(null)
+                  }
+                }}
                 loading={playLoading}
                 aiLoading={playAiLoading}
-                onBack={handleBackToBidding}
                 isPaused={isPlayPaused}
-                onPauseToggle={() => setIsPlayPaused(!isPlayPaused)}
+                onResume={handleResumePlay}
               />
             ) : (
               (humanPosition !== null || showAIBiddingOutput) && (
@@ -1783,6 +1784,12 @@ function App() {
                 setBiddingSequence([]);
                 setAiBiddingHistory([]);
                 setPassedAIPositions(new Set());
+                // 重置打牌相关状态
+                setShowPlayPanel(false);
+                setPlayState(null);
+                setAiPlayHistory([]);
+                setSelectedPlayCard(null);
+                setIsPlayPaused(false);
               }}
               onClearAllHands={clearAllHands}
               setHands={setHands}
@@ -1792,19 +1799,30 @@ function App() {
               playState={playState}
               showPlayPanel={showPlayPanel}
               declarer={isBiddingComplete() ? getFinalContract()?.declarer : null}
+              lastCompletedTrick={lastCompletedTrick}
+              isPlayPaused={isPlayPaused}
+              aiLoading={playAiLoading}
             />
             
             {/* 叫牌细节面板或打牌面板 */}
             {showPlayPanel ? (
-              <PlayPanel
+              <PlayDetailPanel
+                isMobile={true}
                 playState={playState}
-                onPlayCard={handlePlayCard}
-                onAIPlay={handleAIPlay}
+                aiPlayHistory={aiPlayHistory}
+                selectedCard={selectedPlayCard}
+                onCardSelect={setSelectedPlayCard}
+                onConfirmPlay={() => {
+                  if (selectedPlayCard && playState?.current_player) {
+                    handlePlayCard(playState.current_player, selectedPlayCard)
+                    setSelectedPlayCard(null)
+                  }
+                }}
                 loading={playLoading}
                 aiLoading={playAiLoading}
-                onBack={handleBackToBidding}
                 isPaused={isPlayPaused}
-                onPauseToggle={() => setIsPlayPaused(!isPlayPaused)}
+                onResume={handleResumePlay}
+                height="auto"
               />
             ) : (
               (humanPosition !== null || showAIBiddingOutput) && (
