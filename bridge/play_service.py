@@ -1,3 +1,4 @@
+import re
 from typing import Optional, Dict, List, Any
 
 from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER, PARTNERS
@@ -63,14 +64,11 @@ class PlayService:
         current_player = state.current_player
         playable_cards = self.engine.get_playable_cards()
         
-        print(f"[DEBUG get_ai_play] current_player={current_player}, playable_cards={[str(c) for c in playable_cards]}")
-        
         if not playable_cards:
             return {"error": "没有可出的牌"}
         
         if len(playable_cards) == 1:
             card = playable_cards[0]
-            print(f"[DEBUG get_ai_play] 只有一张牌可出: {card}")
             return {
                 "card": card.to_dict(),
                 "reasoning": "只有一张牌可出",
@@ -97,8 +95,6 @@ class PlayService:
         
         try:
             result = self.llm_client.chat_play(prompt)
-            
-            print(f"[DEBUG get_ai_play] LLM result: {result}")
             
             recommended = (
                 result.get("推荐出牌") or 
@@ -189,7 +185,6 @@ class PlayService:
             if f"{card.suit}{card.rank}" == card_str:
                 return card
         
-        import re
         matches = re.findall(r'([♠♥♦♣])([AKQJT98765432])', card_str)
         for suit, rank in matches:
             for card in playable:

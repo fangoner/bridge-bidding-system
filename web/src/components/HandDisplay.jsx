@@ -38,18 +38,18 @@ const HandTitle = styled(Typography)(({ theme }) => ({
 }));
 
 const SuitLine = styled(Box)(({ theme }) => ({
-  fontSize: '0.85rem',
-  lineHeight: 1.4,
+  fontSize: '0.95rem',
+  lineHeight: 1.3,
   whiteSpace: 'nowrap',
   display: 'flex',
   alignItems: 'center',
-  gap: '3px',
+  gap: '2px',
 }));
 
 const SuitSymbol = styled('span', {
   shouldForwardProp: (prop) => prop !== 'suitColor',
 })(({ theme, suitColor }) => ({
-  fontSize: '0.9rem',
+  fontSize: '1rem',
   fontWeight: 700,
   width: '14px',
   textAlign: 'center',
@@ -88,6 +88,7 @@ function HandDisplay({
   showContent = true,
   titleExtra = null,
   hideTitle = false,
+  playedCards = null, // Set of "suit+rank" strings, e.g. Set(["♠A", "♥K"])
 }) {
   const suitColors = {
     spades: '#1e293b',
@@ -97,6 +98,34 @@ function HandDisplay({
   };
 
   const hasCards = hand && (hand.spades || hand.hearts || hand.diamonds || hand.clubs);
+
+  // 将花色字符串转为带标记的单牌数组
+  const suitSymbolMap = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' };
+  
+  const renderSuitCards = (suitName, suitStr) => {
+    if (!suitStr || suitStr === '-') {
+      return <Box component="span">-</Box>
+    }
+    
+    const symbol = suitSymbolMap[suitName]
+    return suitStr.split('').map((rank, i) => {
+      const cardKey = symbol + rank
+      const isPlayed = playedCards && playedCards.has(cardKey)
+      return (
+        <Box
+          component="span"
+          key={i}
+          sx={{
+            textDecoration: isPlayed ? 'line-through' : 'none',
+            opacity: isPlayed ? 0.38 : 1,
+            color: isPlayed ? '#888' : 'inherit',
+          }}
+        >
+          {rank}
+        </Box>
+      )
+    })
+  }
 
   return (
     <HandCard
@@ -121,25 +150,25 @@ function HandDisplay({
           <SuitLine>
             <SuitSymbol suitColor={suitColors.spades} sx={{ color: suitColors.spades }}>♠</SuitSymbol>
             <Box component="span" sx={{ color: suitColors.spades, fontWeight: 500 }}>
-              {hand.spades || '-'}
+              {renderSuitCards('spades', hand.spades)}
             </Box>
           </SuitLine>
           <SuitLine>
             <SuitSymbol suitColor={suitColors.hearts} sx={{ color: suitColors.hearts }}>♥</SuitSymbol>
             <Box component="span" sx={{ color: suitColors.hearts, fontWeight: 500 }}>
-              {hand.hearts || '-'}
+              {renderSuitCards('hearts', hand.hearts)}
             </Box>
           </SuitLine>
           <SuitLine>
             <SuitSymbol suitColor={suitColors.diamonds} sx={{ color: suitColors.diamonds }}>♦</SuitSymbol>
             <Box component="span" sx={{ color: suitColors.diamonds, fontWeight: 500 }}>
-              {hand.diamonds || '-'}
+              {renderSuitCards('diamonds', hand.diamonds)}
             </Box>
           </SuitLine>
           <SuitLine>
             <SuitSymbol suitColor={suitColors.clubs} sx={{ color: suitColors.clubs }}>♣</SuitSymbol>
             <Box component="span" sx={{ color: suitColors.clubs, fontWeight: 500 }}>
-              {hand.clubs || '-'}
+              {renderSuitCards('clubs', hand.clubs)}
             </Box>
           </SuitLine>
         </Box>

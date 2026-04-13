@@ -6,6 +6,9 @@
 
 import sys
 import os
+import re
+import traceback
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional
 from enum import Enum
@@ -227,8 +230,6 @@ async def human_bid(request: HumanBidRequest):
         if request.bidding_sequence and len(request.bidding_sequence) > 0:
             bidding_str = "-".join([f"({b['position']}){b['bid']}" for b in request.bidding_sequence]) + "-"
         
-        print(f"[DEBUG] 收到人类叫牌请求: position={request.position}, user_input={request.user_input}, bidding_sequence={bidding_str}")
-        
         bidding_service = BiddingService(llm_client, jf_retriever)
         result = bidding_service.human_bid(
             user_input=request.user_input,
@@ -244,9 +245,6 @@ async def human_bid(request: HumanBidRequest):
         if bid.upper() == "P":
             bid = "pass"
         meaning = result.get("叫品含义", "")
-        
-        print(f"[DEBUG] human_bid result keys: {result.keys()}")
-        print(f"[DEBUG] JF约定: {result.get('JF约定', 'NOT FOUND')}")
         
         return HumanBidResponse(
             bid=bid,
@@ -341,8 +339,6 @@ async def bid(request: BidRequest):
         if request.bidding_sequence and len(request.bidding_sequence) > 0:
             bidding_str = "-".join([f"({b['position']}){b['bid']}" for b in request.bidding_sequence]) + "-"
         
-        print(f"[DEBUG] 收到叫牌请求: position={request.position}, hand={request.hand}, bidding_sequence={bidding_str}, ai_provider={request.ai_provider}")
-        
         hand_info = request.hand
         
         # 支持两种手牌格式：
@@ -373,8 +369,6 @@ async def bid(request: BidRequest):
             
             # 构建distribution字符串
             distribution = f"S{len(spades)}-H{len(hearts)}-D{len(diamonds)}-C{len(clubs)}"
-            
-            print(f"[DEBUG] 从花色构建手牌: display={hand_display}, distribution={distribution}")
         
         class SimpleHand:
             def __init__(self, display, hcp, dist):
@@ -409,8 +403,6 @@ async def bid(request: BidRequest):
         bid = result.get("选定叫品") or "pass"
         meaning = result.get("叫品含义") or result.get("叫品含义及后续建议") or ""
         selection_process = result.get("叫品筛选过程") or ""
-        
-        print(f"[DEBUG] 最终叫品: {bid}, 含义: {meaning}")
         
         if original_model:
             current_llm_client.model = original_model
@@ -505,7 +497,6 @@ async def get_output_formats(request: OutputFormatsRequest):
         )
     except Exception as e:
         print(f"[ERROR] 获取输出格式失败: {str(e)}")
-        import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -560,7 +551,6 @@ async def analyze_contract(request: AnalyzeContractRequest):
         )
     except Exception as e:
         print(f"[ERROR] 检验定约失败: {str(e)}")
-        import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -577,11 +567,60 @@ class CustomDealResponse(BaseModel):
 
 
 def convert_10_to_T(hand_str: str) -> str:
-    import re
     result = re.sub(r'([♠♥♦♣])10', r'\1T', hand_str)
     result = re.sub(r'([♠♥♦♣SsHhDdCc])10', r'\1T', result)
     result = result.replace('10', 'T')
     return result
+
+
+def _format_bidding_sequence(bidding):
+    """将AI识别返回的叫牌序列格式化为标准字符串"""
+    if not bidding or bidding == "null":
+        return None
+    if isinstance(bidding, list):
+        formatted_bids = []
+        for item in bidding:
+            if ":" in item:
+                pos, bid = item.split(":", 1)
+                formatted_bids.append(f"({pos}){bid}")
+            else:
+                formatted_bids.append(item)
+        return "-".join(formatted_bids) + "-"
+    return bidding
+
+
+def _parse_vision_hands(result):
+    """从视觉识别结果中解析手牌，返回 (hands_dict, validation_errors)"""
+    hands = {}
+    position_map = {
+        "南家手牌": Position.SOUTH,
+        "西家手牌": Position.WEST,
+        "北家手牌": Position.NORTH,
+        "东家手牌": Position.EAST
+    }
+    
+    for key, pos in position_map.items():
+        hand_str = result.get(key)
+        if hand_str and hand_str != "null":
+            hand_str_clean = convert_10_to_T(hand_str)
+            hand_str_clean = hand_str_clean.replace("♠", " ").replace("♥", " ").replace("♦", " ").replace("♣", " ")
+            hands[pos] = parse_hand_string(hand_str_clean)
+    
+    validation_errors = []
+    for pos, hand in hands.items():
+        total_cards = len(hand.spades) + len(hand.hearts) + len(hand.diamonds) + len(hand.clubs)
+        if total_cards != 13:
+            validation_errors.append(f"{get_position_name(pos)}手牌有{total_cards}张，不是13张")
+    
+    return hands, validation_errors
+
+
+def _hands_to_response_dict(hands):
+    """将 hands dict (Position -> Hand) 转为 API 响应格式"""
+    return {get_position_name(pos): hand_to_dict(hand) for pos, hand in hands.items()}
+
+
+
 
 
 @app.post("/api/custom-deal", response_model=CustomDealResponse)
@@ -604,9 +643,7 @@ async def custom_deal(request: CustomDealRequest):
                 hands[Position.SOUTH] = parse_hand_string(df_format_to_hand(df_result["south"]))
             
             if len(hands) == 4:
-                hands_dict = {}
-                for pos, hand in hands.items():
-                    hands_dict[get_position_name(pos)] = hand_to_dict(hand)
+                hands_dict = _hands_to_response_dict(hands)
                 return CustomDealResponse(
                     hands=hands_dict,
                     dealer="南",
@@ -624,9 +661,7 @@ async def custom_deal(request: CustomDealRequest):
             input_text = convert_10_to_T(request.input_text)
             hands = parse_deal_input(input_text)
             if hands:
-                hands_dict = {}
-                for pos, hand in hands.items():
-                    hands_dict[get_position_name(pos)] = hand_to_dict(hand)
+                hands_dict = _hands_to_response_dict(hands)
                 return CustomDealResponse(
                     hands=hands_dict,
                     dealer="南",
@@ -649,7 +684,6 @@ async def custom_deal(request: CustomDealRequest):
             )
     except Exception as e:
         print(f"[ERROR] 自定义牌局失败: {str(e)}")
-        import traceback
         traceback.print_exc()
         return CustomDealResponse(
             hands={},
@@ -673,8 +707,6 @@ class ImageDealResponse(BaseModel):
 async def image_deal(image: bytes = File(..., description="图片文件")):
     """从图片读取牌局接口"""
     try:
-        import os
-        import tempfile
         
         print(f"[INFO] 收到图片上传请求，大小: {len(image)} bytes")
         
@@ -705,47 +737,11 @@ async def image_deal(image: bytes = File(..., description="图片文件")):
                 message=f"识别失败: {result['error']}"
             )
         
-        hands = {}
-        position_map = {
-            "南家手牌": Position.SOUTH,
-            "西家手牌": Position.WEST,
-            "北家手牌": Position.NORTH,
-            "东家手牌": Position.EAST
-        }
-        
-        validation_errors = []
-        
-        for key, pos in position_map.items():
-            hand_str = result.get(key)
-            if hand_str and hand_str != "null":
-                hand_str_clean = convert_10_to_T(hand_str)
-                hand_str_clean = hand_str_clean.replace("♠", " ").replace("♥", " ").replace("♦", " ").replace("♣", " ")
-                hands[pos] = parse_hand_string(hand_str_clean)
-        
-        for pos, hand in hands.items():
-            total_cards = len(hand.spades) + len(hand.hearts) + len(hand.diamonds) + len(hand.clubs)
-            if total_cards != 13:
-                validation_errors.append(f"{get_position_name(pos)}手牌有{total_cards}张，不是13张")
+        hands, validation_errors = _parse_vision_hands(result)
         
         if len(hands) == 4 and not validation_errors:
-            hands_dict = {}
-            for pos, hand in hands.items():
-                hands_dict[get_position_name(pos)] = hand_to_dict(hand)
-            
-            bidding = result.get("叫牌序列")
-            bidding_str = None
-            if bidding and bidding != "null":
-                if isinstance(bidding, list):
-                    formatted_bids = []
-                    for item in bidding:
-                        if ":" in item:
-                            pos, bid = item.split(":", 1)
-                            formatted_bids.append(f"({pos}){bid}")
-                        else:
-                            formatted_bids.append(item)
-                    bidding_str = "-".join(formatted_bids) + "-"
-                else:
-                    bidding_str = bidding
+            hands_dict = _hands_to_response_dict(hands)
+            bidding_str = _format_bidding_sequence(result.get("叫牌序列"))
             
             return ImageDealResponse(
                 hands=hands_dict,
@@ -775,7 +771,6 @@ async def image_deal(image: bytes = File(..., description="图片文件")):
                 )
     except Exception as e:
         print(f"[ERROR] 图片识别失败: {str(e)}")
-        import traceback
         traceback.print_exc()
         return ImageDealResponse(
             hands={},
@@ -811,15 +806,16 @@ async def screenshot_deal():
                 screenshot_path=result.get("screenshot_path")
             )
         
+        # 截屏识别使用不同的 key 格式（南家手牌 vs 南），需要转换
         hands = {}
-        position_map = {
+        screenshot_position_map = {
             "南": Position.SOUTH,
             "西": Position.WEST,
             "北": Position.NORTH,
             "东": Position.EAST
         }
         
-        for pos_name, en_pos in position_map.items():
+        for pos_name, en_pos in screenshot_position_map.items():
             hand_str = result.get(f"{pos_name}家手牌")
             if hand_str and hand_str != "null":
                 hand_str_clean = convert_10_to_T(hand_str)
@@ -827,24 +823,8 @@ async def screenshot_deal():
                 hands[en_pos] = parse_hand_string(hand_str_clean)
         
         if len(hands) == 4:
-            hands_dict = {}
-            for pos, hand in hands.items():
-                hands_dict[get_position_name(pos)] = hand_to_dict(hand)
-            
-            bidding = result.get("叫牌序列")
-            bidding_str = None
-            if bidding and bidding != "null":
-                if isinstance(bidding, list):
-                    formatted_bids = []
-                    for item in bidding:
-                        if ":" in item:
-                            pos, bid = item.split(":", 1)
-                            formatted_bids.append(f"({pos}){bid}")
-                        else:
-                            formatted_bids.append(item)
-                    bidding_str = "-".join(formatted_bids) + "-"
-                else:
-                    bidding_str = bidding
+            hands_dict = _hands_to_response_dict(hands)
+            bidding_str = _format_bidding_sequence(result.get("叫牌序列"))
             
             return ScreenshotDealResponse(
                 hands=hands_dict,
@@ -866,7 +846,6 @@ async def screenshot_deal():
             )
     except Exception as e:
         print(f"[ERROR] 截屏识别失败: {str(e)}")
-        import traceback
         traceback.print_exc()
         return ScreenshotDealResponse(
                 hands={},
@@ -901,8 +880,6 @@ async def read_clipboard():
             return {"success": False, "message": "剪贴板中没有图片，请先截屏"}
         
         image_data, fmt = result
-        import tempfile
-        import os
         
         with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{fmt}') as tmp:
             tmp.write(image_data)
@@ -921,46 +898,11 @@ async def read_clipboard():
                 "message": f"识别失败: {result['error']}"
             }
         
-        validation_errors = []
-        hands = {}
-        position_map = {
-            "南家手牌": Position.SOUTH,
-            "西家手牌": Position.WEST,
-            "北家手牌": Position.NORTH,
-            "东家手牌": Position.EAST
-        }
-        
-        for key, pos in position_map.items():
-            hand_str = result.get(key)
-            if hand_str and hand_str != "null":
-                hand_str_clean = convert_10_to_T(hand_str)
-                hand_str_clean = hand_str_clean.replace("♠", " ").replace("♥", " ").replace("♦", " ").replace("♣", " ")
-                hands[pos] = parse_hand_string(hand_str_clean)
-        
-        for pos, hand in hands.items():
-            total_cards = len(hand.spades) + len(hand.hearts) + len(hand.diamonds) + len(hand.clubs)
-            if total_cards != 13:
-                validation_errors.append(f"{get_position_name(pos)}手牌有{total_cards}张，不是13张")
+        hands, validation_errors = _parse_vision_hands(result)
         
         if len(hands) == 4 and not validation_errors:
-            hands_dict = {}
-            for pos, hand in hands.items():
-                hands_dict[get_position_name(pos)] = hand_to_dict(hand)
-            
-            bidding = result.get("叫牌序列")
-            bidding_str = None
-            if bidding and bidding != "null":
-                if isinstance(bidding, list):
-                    formatted_bids = []
-                    for item in bidding:
-                        if ":" in item:
-                            pos, bid = item.split(":", 1)
-                            formatted_bids.append(f"({pos}){bid}")
-                        else:
-                            formatted_bids.append(item)
-                    bidding_str = "-".join(formatted_bids) + "-"
-                else:
-                    bidding_str = bidding
+            hands_dict = _hands_to_response_dict(hands)
+            bidding_str = _format_bidding_sequence(result.get("叫牌序列"))
             
             return {
                 "success": True,
@@ -986,7 +928,6 @@ async def read_clipboard():
                 
     except Exception as e:
         print(f"[ERROR] 读取剪贴板失败: {str(e)}")
-        import traceback
         traceback.print_exc()
         return {
             "success": False,
@@ -1046,7 +987,6 @@ async def double_dummy_analysis(request: DoubleDummyRequest):
             )
     except Exception as e:
         print(f"[ERROR] 双明手分析失败: {str(e)}")
-        import traceback
         traceback.print_exc()
         return DoubleDummyResponse(
             success=False,
@@ -1114,7 +1054,6 @@ async def play_init(request: PlayInitRequest):
         )
     except Exception as e:
         print(f"[ERROR] 初始化打牌失败: {str(e)}")
-        import traceback
         traceback.print_exc()
         return PlayInitResponse(
             success=False,
@@ -1146,6 +1085,9 @@ async def play_card(request: PlayCardRequest):
     try:
         service = get_play_service()
         
+        state_before = service.get_state()
+        tricks_before = len(state_before.tricks) if state_before else 0
+        
         card = Card(suit=request.card["suit"], rank=request.card["rank"])
         success, message = service.play_card(request.position, card)
         
@@ -1153,8 +1095,10 @@ async def play_card(request: PlayCardRequest):
         trick_winner = None
         trick_complete = False
         
-        if state and state.current_trick.is_complete():
-            trick_winner = state.current_trick.winner()
+        # 检查是否刚完成一墩（墩数增加了）
+        tricks_after = len(state.tricks) if state else 0
+        if tricks_after > tricks_before and state:
+            trick_winner = state.current_player  # 新一墩的首攻者就是上一墩的赢家
             trick_complete = True
         
         result = None
@@ -1175,7 +1119,6 @@ async def play_card(request: PlayCardRequest):
         )
     except Exception as e:
         print(f"[ERROR] 出牌失败: {str(e)}")
-        import traceback
         traceback.print_exc()
         return PlayCardResponse(
             success=False,
@@ -1211,8 +1154,6 @@ async def ai_play(request: PlayAIRequest):
                 risk = result.get("risk", "")
                 success, message = service.play_card(current_player, card, is_ai=True, reason=reason, risk=risk)
                 
-                print(f"[DEBUG AI出牌] player={current_player}, card={card}, is_ai=True, success={success}, reason={reason[:30] if reason else 'None'}...")
-                
                 return PlayAIResponse(
                     success=success,
                     card=result["card"],
@@ -1231,7 +1172,6 @@ async def ai_play(request: PlayAIRequest):
             )
     except Exception as e:
         print(f"[ERROR] AI出牌失败: {str(e)}")
-        import traceback
         traceback.print_exc()
         return PlayAIResponse(
             success=False,
@@ -1300,11 +1240,6 @@ async def get_play_state():
         
         playable = service.get_playable_cards()
         state_dict = service.get_state_dict()
-        
-        print(f"[DEBUG get_play_state] current_trick.is_ai_cards: {state_dict.get('current_trick', {}).get('is_ai_cards')}")
-        print(f"[DEBUG get_play_state] tricks count: {len(state_dict.get('tricks', []))}")
-        for i, t in enumerate(state_dict.get('tricks', [])):
-            print(f"[DEBUG get_play_state] tricks[{i}].is_ai_cards: {t.get('is_ai_cards')}")
         
         return PlayStateResponse(
             success=True,

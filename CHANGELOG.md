@@ -1,5 +1,104 @@
 # 开发日志
 
+## 2026-04-13 (晚间)
+
+### 打牌阶段UI优化
+
+**背景**:
+打牌阶段进入后，左右面板和牌桌中心区域有多处UI不一致和可优化之处。
+
+**改进**:
+
+1. **右侧记录下拉框切换时面板位置跳动** (`web/src/components/BiddingDetailPanel.jsx`):
+   - 问题：从"控制"切换到"细节"时，记录下拉框出现导致顶部栏变高，白色面板位置下移
+   - 修复：将下拉框用 `opacity + pointerEvents` 控制显隐（替代条件渲染），隐藏时仍占据空间
+   - 顶部栏 `minHeight` 设为 40，确保始终有足够空间
+
+2. **左右面板顶部栏高度统一** (`web/src/components/CardTablePanel.jsx`, `PlayDetailPanel.jsx`):
+   - 左侧 `CardTablePanel` 顶部栏 `minHeight` 从 32 改为 40
+   - 右侧 `PlayDetailPanel` 顶部栏 `minHeight` 从 32 改为 40
+   - 与右侧 `BiddingDetailPanel` 一致
+
+3. **左侧标题颜色与右侧统一** (`web/src/components/CardTablePanel.jsx`):
+   - 标题 Typography variant 从 `subtitle1` 改为 `h6`，与右侧 PlayDetailPanel 一致
+
+4. **打牌状态下右侧墩数标签移入白色面板** (`web/src/components/PlayDetailPanel.jsx`):
+   - "庄家方"、"防守方"、"需要"三个标签和"继续"按钮从灰色区域移入白色面板内部顶部
+
+5. **四家手牌与中间面板间距统一** (`web/src/components/CardTable.jsx`):
+   - 南北手牌与中间面板间距从 `8px` 逐步减小到 `0`，使四边间距视觉一致
+   - 手牌框 boxShadow 从 `0 4px 12px rgba(0,0,0,0.15)` 缩小为 `0 2px 6px rgba(0,0,0,0.12)`
+
+6. **牌桌中心文字和旋转控件优化** (`web/src/components/CardTable.jsx`):
+   - 中心文字（"X家出牌"、"X赢"）字体从 `0.65rem` 增大到 `0.85rem`
+   - AI出牌旋转进度条从文字侧面改为叠加在文字上（绝对定位居中）
+   - 旋转控件尺寸从 10px 增大到 22px，颜色改为深色半透明 `rgba(0,0,0,0.45)`
+
+**修改文件**:
+- `web/src/components/BiddingDetailPanel.jsx`
+- `web/src/components/CardTablePanel.jsx`
+- `web/src/components/PlayDetailPanel.jsx`
+- `web/src/components/CardTable.jsx`
+
+---
+
+## 2026-04-13
+
+### 打牌模块代码清理与优化
+
+**背景**:
+打牌过程模块刚完成，代码中遗留大量DEBUG日志、重复逻辑和死代码。网页版响应慢，需要清理优化。
+
+**改进**:
+
+1. **移除DEBUG print语句**（后端4个文件，约16处）:
+   - `play_engine.py`: 移除 `[DEBUG PlayEngine.play_card]` print
+   - `play_types.py`: 移除 `[DEBUG Trick.to_dict]` 和 `[DEBUG PlayState.play_card]` print
+   - `play_service.py`: 移除 3 处 `[DEBUG get_ai_play]` print
+   - `api/main.py`: 移除约 10 处 `[DEBUG]` print（叫牌、打牌、状态查询）
+   - 这些DEBUG语句在生产环境中每次请求都会输出，影响性能和日志可读性
+
+2. **修复死代码和冗余逻辑** (`bridge/play_types.py`):
+   - 移除 `PlayState.__post_init__` 中 NT/非NT 的重复分支（两种情况执行相同代码）
+   - 移除未使用的 `_get_right_hand()` 方法
+   - 修复 `PlayEngine.get_visible_hands()` 中搭档手牌可见性判断的死代码（`pass` 分支无效果）
+
+3. **修复 play_card API 端点 bug** (`api/main.py`):
+   - 问题：`trick_complete` 判断检查 `state.current_trick.is_complete()`，但出牌完成后一墩已被归档、`current_trick` 已重置为空，永远返回 `False`
+   - 修复：通过比较出牌前后的墩数（`len(state.tricks)`）来判断是否刚完成一墩
+   - 同时修复 `trick_winner` 的取值：新一墩的首攻者就是上一墩的赢家
+
+4. **提取 API 重复代码为辅助函数** (`api/main.py`):
+   - `_format_bidding_sequence()`: 统一叫牌序列格式化（原来在 image/screenshot/clipboard 3处重复）
+   - `_parse_vision_hands()`: 统一视觉识别结果解析（原来在 image/clipboard 2处重复）
+   - `_hands_to_response_dict()`: 统一手牌字典转换（原来在 custom-deal 等 4+处重复）
+   - 将 `import re/traceback/tempfile/os` 移到文件顶部，消除约 15 处内联 import
+
+5. **前端提取共享常量** (`web/src/constants/suits.js` - 新增):
+   - `SUIT_SYMBOLS`: 花色符号映射
+   - `SUIT_COLORS`: 花色颜色映射（按花色名）
+   - `SUIT_COLOR_MAP`: 花色颜色映射（按符号）
+   - `getSuitColor()`: 辅助函数
+   - `PlayPanel.jsx`、`PlayTable.jsx`、`PlayDetailPanel.jsx` 改为 import 共享常量
+
+6. **消除 CardTable 重复渲染逻辑** (`web/src/components/CardTable.jsx`):
+   - 提取 `renderCenterContent()` 函数，合并桌面版和手机版完全重复的 30+ 行 DoubleDummyTable/出牌状态/叫牌过程渲染代码
+
+**修改文件**:
+- `bridge/play_types.py`
+- `bridge/play_engine.py`
+- `bridge/play_service.py`
+- `api/main.py`
+- `web/src/constants/suits.js` (新增)
+- `web/src/components/PlayPanel.jsx`
+- `web/src/components/PlayTable.jsx`
+- `web/src/components/PlayDetailPanel.jsx`
+- `web/src/components/CardTable.jsx`
+
+**本地恢复点**: `backups/backup_20260412_233741/`
+
+---
+
 ## 2026-04-11
 
 ### 前端代码结构优化 - 自定义Hooks与组件提取

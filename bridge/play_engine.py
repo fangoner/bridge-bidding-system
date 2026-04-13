@@ -53,7 +53,6 @@ class PlayEngine:
         if not can_play:
             return False, message
         
-        print(f"[DEBUG PlayEngine.play_card] position={position}, card={card}, is_ai={is_ai}")
         success = self.state.play_card(position, card, is_ai, reason, risk)
         if success:
             return True, f"{position}出{card}"
@@ -127,17 +126,14 @@ class PlayEngine:
         if not self.state:
             return {}
         
+        if not for_position:
+            return {pos: cards for pos, cards in self.state.hands.items()}
+        
         visible = {}
         for pos, cards in self.state.hands.items():
-            if for_position:
-                if pos == for_position:
-                    visible[pos] = cards
-                elif pos == self.state.dummy and self.state.phase != PlayPhase.LEAD:
-                    visible[pos] = cards
-                elif self.state.player_roles.get(for_position) == PlayerRole.HUMAN.value:
-                    if pos == PARTNERS.get(for_position):
-                        pass
-            else:
+            if pos == for_position:
+                visible[pos] = cards
+            elif pos == self.state.dummy and self.state.phase != PlayPhase.LEAD:
                 visible[pos] = cards
         
         return visible

@@ -76,13 +76,20 @@ class Card:
     
     @classmethod
     def from_str(cls, card_str: str) -> "Card":
-        if len(card_str) >= 2:
-            suit = card_str[0]
-            rank = card_str[1].upper()
-            if rank == "10":
-                rank = "T"
-            return cls(suit=suit, rank=rank)
-        raise ValueError(f"Invalid card string: {card_str}")
+        card_str = card_str.strip()
+        if len(card_str) < 2:
+            raise ValueError(f"Invalid card string: {card_str}")
+        
+        suit = card_str[0]
+        rank_part = card_str[1:]
+        
+        # Handle "10" as "T"
+        if rank_part.upper() == "10":
+            rank = "T"
+        else:
+            rank = rank_part[0].upper()
+        
+        return cls(suit=suit, rank=rank)
 
 
 @dataclass
@@ -208,7 +215,6 @@ class Trick:
             "trump": self.trump,
             "winner": self.winner(),
         }
-        print(f"[DEBUG Trick.to_dict] cards count={len(self.cards)}, is_ai_cards={self.is_ai_cards}")
         return result
 
 
@@ -229,11 +235,7 @@ class PlayState:
     def __post_init__(self):
         if self.contract:
             self.current_trick = Trick(trump=self.contract.suit)
-            if self.contract.suit != "NT":
-                self.dummy = PARTNERS.get(self.contract.declarer)
-            else:
-                self.dummy = PARTNERS.get(self.contract.declarer)
-            
+            self.dummy = PARTNERS.get(self.contract.declarer)
             self.lead_player = self._get_left_hand(self.contract.declarer)
             self.current_player = self.lead_player
             self.phase = PlayPhase.LEAD
@@ -241,10 +243,6 @@ class PlayState:
     def _get_left_hand(self, position: str) -> str:
         idx = POSITION_ORDER.index(position)
         return POSITION_ORDER[(idx + 1) % 4]
-    
-    def _get_right_hand(self, position: str) -> str:
-        idx = POSITION_ORDER.index(position)
-        return POSITION_ORDER[(idx - 1) % 4]
     
     def is_human_turn(self) -> bool:
         if not self.current_player:
@@ -279,9 +277,7 @@ class PlayState:
         if card not in playable:
             return False
         
-        print(f"[DEBUG PlayState.play_card] position={position}, card={card}, is_ai={is_ai}")
         self.current_trick.add_card(position, card, is_ai, reason, risk)
-        print(f"[DEBUG PlayState.play_card] current_trick.is_ai_cards={self.current_trick.is_ai_cards}")
         self.hands[position].remove(card)
         
         if self.current_trick.is_complete():
@@ -294,7 +290,8 @@ class PlayState:
             
             self.tricks.append(self.current_trick)
             self.current_trick = Trick(trump=self.contract.suit)
-            self.current_player = winner
+            # 赢家成为下一墩的首攻者；若异常无法判断赢家，按顺序轮转
+            self.current_player = winner if winner else POSITION_ORDER[(POSITION_ORDER.index(position) + 1) % 4]
             
             if len(self.tricks) == 13:
                 self.phase = PlayPhase.COMPLETE

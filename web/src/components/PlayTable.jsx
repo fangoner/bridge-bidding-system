@@ -1,19 +1,6 @@
 import React from 'react'
 import { Box, Typography, Paper, Tooltip, Button, Chip, CircularProgress, Card as MuiCard } from '@mui/material'
-
-const SUIT_SYMBOLS = {
-  spades: '♠',
-  hearts: '♥',
-  diamonds: '♦',
-  clubs: '♣',
-}
-
-const SUIT_COLORS = {
-  spades: '#000',
-  hearts: '#e53935',
-  diamonds: '#e53935',
-  clubs: '#000',
-}
+import { getSuitColor } from '../constants/suits'
 
 function PlayTable({
   currentTrick,
@@ -85,8 +72,7 @@ function PlayTable({
       )
     }
 
-    const suitName = Object.keys(SUIT_SYMBOLS).find(k => SUIT_SYMBOLS[k] === card.suit) || card.suit
-    const color = SUIT_COLORS[suitName] || '#000'
+    const color = getSuitColor(card.suit)
 
     const cardElement = (
       <Paper
@@ -224,10 +210,7 @@ function PlayTable({
               
               const canClick = isPlayable
               
-              const suitName = Object.keys(SUIT_SYMBOLS).find(
-                key => SUIT_SYMBOLS[key] === card.suit
-              ) || card.suit
-              const color = SUIT_COLORS[suitName] || '#000'
+              const color = getSuitColor(card.suit)
               
               return (
                 <MuiCard

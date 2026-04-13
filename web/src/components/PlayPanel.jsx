@@ -15,20 +15,7 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import PauseIcon from '@mui/icons-material/Pause'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
-
-const SUIT_SYMBOLS = {
-  spades: '♠',
-  hearts: '♥',
-  diamonds: '♦',
-  clubs: '♣',
-}
-
-const SUIT_COLORS = {
-  spades: '#000',
-  hearts: '#e53935',
-  diamonds: '#e53935',
-  clubs: '#000',
-}
+import { getSuitColor } from '../constants/suits'
 
 function PlayPanel({
   playState,
@@ -164,7 +151,7 @@ function PlayPanel({
             {pos}
           </Typography>
           <Typography sx={{ 
-            color: SUIT_COLORS[Object.keys(SUIT_SYMBOLS).find(k => SUIT_SYMBOLS[k] === card.suit)] || '#000',
+            color: getSuitColor(card.suit),
             fontWeight: 'bold',
             fontSize: '1rem',
           }}>
@@ -303,10 +290,7 @@ function PlayPanel({
               
               const canClick = canSelect && isPlayable
               
-              const suitName = Object.keys(SUIT_SYMBOLS).find(
-                key => SUIT_SYMBOLS[key] === card.suit
-              ) || card.suit
-              const color = SUIT_COLORS[suitName] || '#000'
+              const color = getSuitColor(card.suit)
               
               return (
                 <MuiCard

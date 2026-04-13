@@ -309,13 +309,13 @@ function BiddingDetailPanel({
       flexDirection: 'column', 
       flex: isMobile ? undefined : '0 0 auto',
       width: isMobile ? '100%' : '600px',
-      height: isMobile ? (effectiveShowControls ? 'auto' : '400px') : height,
+      height: isMobile ? (effectiveShowControls ? 'auto' : '400px') : '640px',
       minHeight: isMobile && effectiveShowControls ? '800px' : undefined,
       overflow: isMobile ? undefined : 'hidden',
       boxSizing: 'border-box'
     }}>
       {/* 顶部切换栏 */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5, flexShrink: 0, minHeight: 32, flexWrap: 'wrap', gap: 0.5 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5, flexShrink: 0, minHeight: 40, flexWrap: isMobile ? 'wrap' : 'nowrap', gap: isMobile ? 0.5 : 0 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Typography variant={isMobile ? "h6" : "subtitle1"} sx={{ fontWeight: 600, fontSize: isMobile ? undefined : '1rem' }}>
             叫牌细节
@@ -329,13 +329,13 @@ function BiddingDetailPanel({
               }
             }}
             size="small"
-            sx={{ height: isMobile ? 26 : 24, ml: isMobile ? 1 : 0 }}
+            sx={{ height: 24 }}
             disabled={!canShowControls}
           >
-            <ToggleButton value="controls" sx={{ px: 1, py: 0, fontSize: isMobile ? '0.875rem' : '0.75rem', minWidth: isMobile ? 40 : 40 }}>
+            <ToggleButton value="controls" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 40 }}>
               控制
             </ToggleButton>
-            <ToggleButton value="details" sx={{ px: 1, py: 0, fontSize: isMobile ? '0.875rem' : '0.75rem', minWidth: isMobile ? 40 : 40 }}>
+            <ToggleButton value="details" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 40 }}>
               细节
             </ToggleButton>
           </ToggleButtonGroup>
@@ -344,9 +344,9 @@ function BiddingDetailPanel({
           <FormControlLabel
             control={<Checkbox checked={simpleDisplayMode} onChange={(e) => setSimpleDisplayMode(e.target.checked)} size="small" />}
             label="简单"
-            sx={{ '& .MuiFormControlLabel-label': { fontSize: isMobile ? '0.875rem' : '0.75rem' } }}
+            sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, height: 24 }}
           />
-          {aiBiddingHistory.length > 0 && !simpleDisplayMode && (
+          <Box sx={{ minWidth: isMobile ? 200 : 120, opacity: aiBiddingHistory.length > 0 && !simpleDisplayMode ? 1 : 0, pointerEvents: aiBiddingHistory.length > 0 && !simpleDisplayMode ? 'auto' : 'none' }}>
             <FormControl size="small" sx={{ minWidth: isMobile ? 200 : 120, '& .MuiInputBase-input': { fontSize: '0.875rem' }, '& .MuiInputLabel-root': { fontSize: '0.875rem' } }}>
               <InputLabel>{isMobile ? '选择叫牌记录' : '记录'}</InputLabel>
               <Select
@@ -363,13 +363,13 @@ function BiddingDetailPanel({
                 ))}
               </Select>
             </FormControl>
-          )}
+          </Box>
         </Box>
       </Box>
 
       {effectiveShowControls ? (
         /* 叫牌控制 + JF片段 */
-        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 1, overflow: 'hidden' }}>
+        <Box sx={{ flex: 1, overflow: 'auto', p: 1, background: '#fafafa', borderRadius: 2, border: '1px solid #ddd', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
           <Box sx={{ flex: '0 0 auto' }}>
             <BiddingControls
               hands={hands}
@@ -394,7 +394,7 @@ function BiddingDetailPanel({
         </Box>
       ) : (
         /* 叫牌细节 */
-        <Box sx={{ flex: 1, overflow: 'auto', p: 1, background: '#fafafa', borderRadius: 1, border: '1px solid #ddd', minHeight: 0 }}>
+        <Box sx={{ flex: 1, overflow: 'auto', p: 1, background: '#fafafa', borderRadius: 2, border: '1px solid #ddd', minHeight: 0 }}>
           {renderBiddingDetails()}
           {renderOutputFormats()}
         </Box>

@@ -39,6 +39,7 @@ function CardTable({
   lastCompletedTrick,
   isPlayPaused,
   aiLoading,
+  showPlayedCards = false,
 }) {
   const [handInputs, setHandInputs] = useState({
     '南': '',
@@ -87,6 +88,47 @@ function CardTable({
   const hasHand = (position) => {
     const hand = hands[position]
     return hand && (hand.spades || hand.hearts || hand.diamonds || hand.clubs)
+  }
+
+  // 计算打牌阶段已出的牌（用于显示模式）
+  const getPlayedCardsSet = () => {
+    if (!showPlayPanel || !playState) return null
+    const played = new Set()
+    // 从已完成的墩中收集
+    for (const trick of (playState.tricks || [])) {
+      for (const [pos, card] of (trick.cards || [])) {
+        played.add(card.suit + card.rank)
+      }
+    }
+    // 从当前墩中收集
+    for (const [pos, card] of (playState.current_trick?.cards || [])) {
+      played.add(card.suit + card.rank)
+    }
+    return played
+  }
+
+  // 打牌阶段的手牌：隐藏模式下用剩余手牌，显示模式下用原始手牌+已出标记
+  const getPlayHand = (position) => {
+    if (!showPlayPanel || !playState) return hands[position]
+    
+    if (showPlayedCards) {
+      // 显示模式：用原始手牌，已出的牌由 HandDisplay 标记
+      return hands[position]
+    }
+    
+    // 隐藏模式（默认）：用后端返回的剩余手牌，转为 HandDisplay 格式
+    const remainingCards = playState.hands?.[position]
+    if (!remainingCards) return hands[position]
+    
+    const suitNames = { '♠': 'spades', '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs' }
+    const newHand = { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 }
+    for (const card of remainingCards) {
+      const suitName = suitNames[card.suit]
+      if (suitName) {
+        newHand[suitName] += card.rank
+      }
+    }
+    return newHand
   }
 
   const parseHandInput = (input) => {
@@ -192,6 +234,42 @@ function CardTable({
     '♣': '#000',
   };
 
+  // 中心区域内容渲染（桌面版和手机版共用）
+  const renderCenterContent = () => {
+    if (showPlayPanel && playState) {
+      return showDoubleDummy ? (
+        doubleDummyLoading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
+            <CircularProgress size={24} />
+          </Box>
+        ) : doubleDummyResult ? (
+          <DoubleDummyTable tableData={doubleDummyResult} />
+        ) : (
+          <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
+            无分析结果
+          </div>
+        )
+      ) : renderCurrentTrick();
+    }
+    return showDoubleDummy ? (
+      doubleDummyLoading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
+          <CircularProgress size={24} />
+        </Box>
+      ) : doubleDummyResult ? (
+        <DoubleDummyTable tableData={doubleDummyResult} />
+      ) : (
+        <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
+          无分析结果
+        </div>
+      )
+    ) : renderBiddingTable ? renderBiddingTable() : (
+      <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
+        等待叫牌...
+      </div>
+    );
+  };
+
   const renderCurrentTrick = () => {
     if (!playState) return null
     
@@ -268,14 +346,17 @@ function CardTable({
         </Box>
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1 }}>
           {renderCard('西')}
-          <Box sx={{ width: 60, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Box sx={{ width: 60, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
             {getLastTrickWinner() ? (
-              <Typography variant="caption" color="primary" sx={{ fontSize: '0.65rem', fontWeight: 'bold' }}>
+              <Typography color="primary" sx={{ fontSize: '0.85rem', fontWeight: 'bold' }}>
                 {getLastTrickWinner()}赢
               </Typography>
             ) : !isComplete && current_player ? (
-              <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem', display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                {current_player}出牌{aiLoading && <CircularProgress size={10} />}
+              <Typography color="text.secondary" sx={{ fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+                {current_player}出牌
+                {aiLoading && (
+                  <CircularProgress size={22} sx={{ position: 'absolute', top: '50%', left: '50%', marginTop: '-11px', marginLeft: '-11px', color: 'rgba(0,0,0,0.45)' }} />
+                )}
               </Typography>
             ) : null}
           </Box>
@@ -294,6 +375,10 @@ function CardTable({
     const hasHandData = hasHand(position)
     const showInput = isAI && !hasHandData && !biddingStarted
     const isHuman = positionRoles && positionRoles[position] === 'human'
+    
+    // 打牌阶段：根据模式选择手牌数据和已出牌标记
+    const displayHand = getPlayHand(position)
+    const playedCardsSet = (showPlayedCards && showPlayPanel && playState) ? getPlayedCardsSet() : null
     
     return (
       <Box sx={{ ...sxProps, position: 'relative' }}>
@@ -321,7 +406,7 @@ function CardTable({
           width: handBoxSize,
           height: handBoxSize,
           flexShrink: 0,
-          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.12)',
           display: 'flex',
           flexDirection: 'column',
           border: '1px solid rgba(255,255,255,0.5)',
@@ -425,7 +510,7 @@ function CardTable({
           ) : (
             <Box sx={{ flex: 1 }}>
               <HandDisplay
-                hand={hand}
+                hand={displayHand}
                 position={position}
                 isActive={currentBidder === position}
                 isHuman={isHuman}
@@ -433,6 +518,7 @@ function CardTable({
                 isPartner={humanPosition && getPartnerPosition(humanPosition) === position}
                 showContent={shouldShowHandContent(position)}
                 hideTitle={true}
+                playedCards={playedCardsSet}
               />
             </Box>
           )}
@@ -450,12 +536,12 @@ function CardTable({
       padding: isMobile ? 0.5 : 1,
       background: scheme.table.background,
       borderRadius: 2,
-      boxShadow: 8,
-      width: isMobile ? 'calc(100vw - 16px)' : 'auto',
+      boxShadow: 0,
+      flex: 1,
       maxWidth: '100%',
       maxHeight: '100%',
       position: 'relative',
-      overflow: isMobile ? 'visible' : 'hidden',
+      overflow: 'hidden',
     }}>
       {onClearAllHands && !showPlayPanel && (!biddingStarted || (checkBiddingComplete && checkBiddingComplete())) && (
         <Box sx={{
@@ -489,7 +575,7 @@ function CardTable({
           alignItems: 'center',
           gap: 1,
         }}>
-          {biddingTotalTime !== null && (
+          {biddingTotalTime !== null && !showPlayPanel && (
             <Box sx={{
               bgcolor: 'rgba(0, 0, 0, 0.6)',
               color: 'white',
@@ -556,43 +642,13 @@ function CardTable({
               padding: 1,
               overflowY: 'auto',
             }}>
-              {showPlayPanel && playState ? (
-                showDoubleDummy ? (
-                  doubleDummyLoading ? (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
-                      <CircularProgress size={24} />
-                    </Box>
-                  ) : doubleDummyResult ? (
-                    <DoubleDummyTable tableData={doubleDummyResult} />
-                  ) : (
-                    <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
-                      无分析结果
-                    </div>
-                  )
-                ) : renderCurrentTrick()
-              ) : showDoubleDummy ? (
-                doubleDummyLoading ? (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
-                    <CircularProgress size={24} />
-                  </Box>
-                ) : doubleDummyResult ? (
-                  <DoubleDummyTable tableData={doubleDummyResult} />
-                ) : (
-                  <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
-                    无分析结果
-                  </div>
-                )
-              ) : renderBiddingTable ? renderBiddingTable() : (
-                <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
-                  等待叫牌...
-                </div>
-              )}
+              {renderCenterContent()}
             </Box>
           </Box>
         </>
       ) : (
         <>
-          {renderHandWithStatus(north, '北', { mb: '8px' })}
+          {renderHandWithStatus(north, '北', { mb: 0 })}
 
           <Box className="middle-row" sx={{
             display: 'flex',
@@ -617,44 +673,14 @@ function CardTable({
                 padding: 1,
                 overflowY: 'auto',
               }}>
-              {showPlayPanel && playState ? (
-                showDoubleDummy ? (
-                  doubleDummyLoading ? (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
-                      <CircularProgress size={24} />
-                    </Box>
-                  ) : doubleDummyResult ? (
-                    <DoubleDummyTable tableData={doubleDummyResult} />
-                  ) : (
-                    <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
-                      无分析结果
-                    </div>
-                  )
-                ) : renderCurrentTrick()
-              ) : showDoubleDummy ? (
-                  doubleDummyLoading ? (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
-                      <CircularProgress size={24} />
-                    </Box>
-                  ) : doubleDummyResult ? (
-                    <DoubleDummyTable tableData={doubleDummyResult} />
-                  ) : (
-                    <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
-                      无分析结果
-                    </div>
-                  )
-                ) : renderBiddingTable ? renderBiddingTable() : (
-                  <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
-                    等待叫牌...
-                  </div>
-                )}
+              {renderCenterContent()}
               </Box>
             </Box>
 
             {renderHandWithStatus(east, '东')}
           </Box>
 
-          {renderHandWithStatus(south, '南', { mt: '8px' })}
+          {renderHandWithStatus(south, '南', { mt: 0 })}
         </>
       )}
     </Box>

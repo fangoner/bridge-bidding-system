@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。
+本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。
 
 ## 功能模块
 
@@ -144,6 +144,39 @@
 - 四人模式：保留两个队伍各自的后续建议（南北队和东西队分别保留）
 - 叫牌含义显示：在图形化布局和紧凑型布局之间显示，自动删除标签使输出简洁
 
+### 11. 打牌模块 (`bridge/play_types.py`, `bridge/play_engine.py`, `bridge/play_service.py`) - v1.32新增
+- **数据类型** (`play_types.py`):
+  - `Card`: 牌张（花色+点数），支持从字符串解析
+  - `Trick`: 一墩牌，记录4家出牌、AI标记、理由、风险
+  - `PlayState`: 打牌状态（手牌、墩数、当前轮次、庄家/明手等）
+  - `PlayPhase`: 打牌阶段（LEAD/PLAY/COMPLETE）
+  - `PlayerRole`: 玩家角色（HUMAN/AI）
+- **打牌引擎** (`play_engine.py`):
+  - `PlayEngine.get_playable_cards()`: 获取当前可出牌张（含跟花色规则）
+  - `PlayEngine.play_card()`: 执行出牌，自动判断墩赢家、归档完成的墩
+  - `PlayEngine.get_visible_hands()`: 根据玩家角色返回可见手牌
+  - `PlayEngine.is_complete()`: 判断打牌是否结束（13墩完成或手牌出完）
+- **打牌服务** (`play_service.py`):
+  - `PlayService.get_ai_play()`: AI打牌决策，调用LLM分析可出牌张
+  - `PlayService.play_card()`: 出牌入口，支持人类和AI出牌
+  - `PlayService.get_state_dict()`: 获取完整打牌状态（含墩赢家、可出牌等）
+- **API端点** (`api/main.py`):
+  - `POST /api/play/start`: 开始打牌（传入定约信息）
+  - `POST /api/play/card`: 人类出牌
+  - `POST /api/play/ai-play`: AI出牌
+  - `GET /api/play/state`: 获取打牌状态
+  - `GET /api/play/playable`: 获取可出牌张
+- **前端组件**:
+  - `PlayPanel.jsx`: 打牌面板（出牌控制、墩数显示、AI分析）
+  - `PlayTable.jsx`: 打牌桌面（4家手牌显示、当前墩出牌）
+  - `PlayDetailPanel.jsx`: 打牌详情（已完成墩、AI出牌理由）
+
+### 12. 前端共享常量 (`web/src/constants/suits.js`) - v1.32新增
+- `SUIT_SYMBOLS`: 花色符号映射（spades→♠等）
+- `SUIT_COLORS`: 花色颜色映射（按花色名，red/black）
+- `SUIT_COLOR_MAP`: 花色颜色映射（按符号字符）
+- `getSuitColor()`: 辅助函数，统一花色颜色获取逻辑
+
 ## 文件结构
 
 ```
@@ -151,6 +184,7 @@ Bidding System/
 ├── main.py                 # 主程序入口
 ├── config.py               # 配置管理
 ├── run.py                  # 运行入口
+├── endplay_integration.py  # endplay双明手分析集成
 ├── .env                    # 环境变量（API密钥等）
 ├── .env.example            # 环境变量模板
 ├── requirements.txt        # Python依赖
@@ -164,8 +198,12 @@ Bidding System/
 ├── bridge/
 │   ├── dealer.py           # 发牌和手牌管理
 │   ├── bidding.py          # 叫牌序列解析
+│   ├── bidding_service.py  # 叫牌服务（AI/人类叫牌）
 │   ├── deep_finesse.py     # Deep Finesse集成
-│   └── output_format.py    # 输出格式生成（v1.4新增）
+│   ├── output_format.py    # 输出格式生成
+│   ├── play_types.py       # 打牌数据类型（v1.32新增）
+│   ├── play_engine.py      # 打牌引擎（v1.32新增）
+│   └── play_service.py     # 打牌服务（v1.32新增）
 ├── knowledge/
 │   └── loader.py           # JF约定加载和检索
 ├── llm/
@@ -175,6 +213,29 @@ Bidding System/
 ├── utils/
 │   ├── history.py          # 历史记录管理
 │   └── screenshot.py       # 截屏功能
+├── api/
+│   └── main.py             # FastAPI后端（叫牌+打牌API）
+├── web/
+│   └── src/
+│       ├── App.jsx         # 主应用组件
+│       ├── components/
+│       │   ├── CardTable.jsx      # 牌桌（含打牌桌面）
+│       │   ├── PlayPanel.jsx      # 打牌面板（v1.32新增）
+│       │   ├── PlayTable.jsx      # 打牌桌面（v1.32新增）
+│       │   ├── PlayDetailPanel.jsx # 打牌详情（v1.32新增）
+│       │   ├── BiddingControls.jsx # 叫牌控制
+│       │   ├── BiddingTable.jsx   # 叫牌过程表
+│       │   ├── BiddingDetailPanel.jsx # 叫牌详情
+│       │   ├── DoubleDummyTable.jsx # 双明手分析表
+│       │   ├── ControlButtons.jsx  # 公共控制按钮
+│       │   └── SettingsPanel.jsx   # 设置面板
+│       ├── hooks/                 # 自定义Hooks
+│       ├── constants/
+│       │   └── suits.js           # 花色共享常量（v1.32新增）
+│       ├── styles/
+│       │   └── constants.js       # 样式常量
+│       └── services/
+│           └── api.js             # API服务层
 ├── screenshots/            # 截屏保存目录
 ├── bidding_history.json    # 历史记录存储
 ├── release_桥牌叫牌练习/    # 发布包目录
@@ -403,7 +464,17 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 
 ## 版本历史
 
-### v1.31 (当前版本)
+### v1.32 (当前版本)
+- **打牌模块代码清理与优化**
+  - 移除后端4个文件中约16处DEBUG print语句
+  - 修复 `play_types.py` 中死代码：移除NT/非NT重复分支、未使用的 `_get_right_hand()` 方法、`get_visible_hands()` 无效的 pass 分支
+  - 修复 `play_card` API 端点 `trick_complete` 判断 bug（原判断永远为 False）
+  - 提取 API 重复代码为辅助函数：`_format_bidding_sequence()`、`_parse_vision_hands()`、`_hands_to_response_dict()`
+  - 将 `import re/traceback/tempfile/os` 移到 `api/main.py` 文件顶部，消除约15处内联 import
+  - 新增前端共享常量 `web/src/constants/suits.js`，3个组件改为 import 共享常量
+  - 提取 `CardTable.jsx` 中重复的 `renderCenterContent()` 函数，合并桌面版和手机版30+行重复渲染代码
+
+### v1.31
 - **前端代码结构优化**
   - 提取5个自定义 Hooks：`useBiddingRecords`、`useGameSettings`、`useBiddingState`、`useDoubleDummy`、`useOutputFormats`
   - 提取 `SettingsPanel` 组件，减少约57行代码

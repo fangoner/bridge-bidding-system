@@ -169,6 +169,7 @@ function App() {
   const [playLoading, setPlayLoading] = useState(false) // 打牌加载中
   const [playAiLoading, setPlayAiLoading] = useState(false) // AI出牌加载中
   const [showPlayPanel, setShowPlayPanel] = useState(false) // 显示打牌面板
+  const [showPlayedCards, setShowPlayedCards] = useState(false) // 打牌时显示已出的牌
   const [isPlayPaused, setIsPlayPaused] = useState(false) // 打牌暂停状态
   const [lastCompletedTrick, setLastCompletedTrick] = useState(null) // 暂停时保存的上一墩
   const [aiPlayHistory, setAiPlayHistory] = useState([]) // AI打牌历史记录
@@ -1685,6 +1686,8 @@ function App() {
               lastCompletedTrick={lastCompletedTrick}
               isPlayPaused={isPlayPaused}
               aiLoading={playAiLoading}
+              showPlayedCards={showPlayedCards}
+              setShowPlayedCards={setShowPlayedCards}
             />
             
             {/* 右侧面板：叫牌细节或打牌面板 */}
@@ -1802,6 +1805,8 @@ function App() {
               lastCompletedTrick={lastCompletedTrick}
               isPlayPaused={isPlayPaused}
               aiLoading={playAiLoading}
+              showPlayedCards={showPlayedCards}
+              setShowPlayedCards={setShowPlayedCards}
             />
             
             {/* 叫牌细节面板或打牌面板 */}

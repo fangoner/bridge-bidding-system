@@ -42,18 +42,19 @@ function CardTablePanel({
   lastCompletedTrick,
   isPlayPaused,
   aiLoading,
+  showPlayedCards,
+  setShowPlayedCards,
 }) {
   return (
     <Paper elevation={3} sx={{ 
-      p: isMobile ? 1 : (isMobile ? 0.5 : 1), 
+      p: 1, 
       bgcolor: isMobile ? '#f5f5f5' : '#e8e8e8', 
       display: 'flex', 
       flexDirection: 'column', 
       flex: isMobile ? undefined : '0 0 auto',
       width: isMobile ? '100%' : '600px',
-      height: isMobile ? 'auto' : height,
-      minHeight: isMobile ? '400px' : undefined,
-      overflow: isMobile ? undefined : 'hidden'
+      height: isMobile ? 'auto' : '640px',
+      overflow: 'hidden'
     }}>
       <Box sx={{ 
         display: 'flex', 
@@ -61,12 +62,12 @@ function CardTablePanel({
         alignItems: 'center', 
         mb: 0.5, 
         flexShrink: 0, 
-        minHeight: 32,
+        minHeight: 40,
         flexWrap: isMobile ? 'wrap' : 'nowrap',
-        gap: isMobile ? 0.5 : 0
+        gap: isMobile ? 0.5 : 0,
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <Typography variant={isMobile ? "h6" : "subtitle1"} sx={{ fontWeight: 600, fontSize: isMobile ? undefined : '1rem' }}>
+          <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1rem' }}>
             {showPlayPanel ? '打牌阶段' : '当前牌局'}
           </Typography>
           {!showPlayPanel && (
@@ -79,13 +80,13 @@ function CardTablePanel({
                 }
               }}
               size="small"
-              sx={{ height: isMobile ? 26 : 24 }}
+              sx={{ height: 24 }}
               disabled={!isBiddingComplete()}
             >
-              <ToggleButton value="table" sx={{ px: 1, py: 0, fontSize: isMobile ? '0.875rem' : '0.75rem', minWidth: 50 }}>
+              <ToggleButton value="table" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 50 }}>
                 叫牌过程
               </ToggleButton>
-              <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: isMobile ? '0.875rem' : '0.75rem', minWidth: 50 }}>
+              <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 50 }}>
                 小房子
               </ToggleButton>
             </ToggleButtonGroup>
@@ -100,12 +101,12 @@ function CardTablePanel({
                 }
               }}
               size="small"
-              sx={{ height: isMobile ? 26 : 24 }}
+              sx={{ height: 24 }}
             >
-              <ToggleButton value="play" sx={{ px: 1, py: 0, fontSize: isMobile ? '0.875rem' : '0.75rem', minWidth: 50 }}>
+              <ToggleButton value="play" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 50 }}>
                 出牌状态
               </ToggleButton>
-              <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: isMobile ? '0.875rem' : '0.75rem', minWidth: 50 }}>
+              <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 50 }}>
                 双明手
               </ToggleButton>
             </ToggleButtonGroup>
@@ -121,7 +122,7 @@ function CardTablePanel({
                 />
               }
               label="队友手牌"
-              sx={{ '& .MuiFormControlLabel-label': { fontSize: isMobile ? '0.875rem' : '0.75rem' }, ml: 0.5, mr: isMobile ? 0 : undefined }}
+              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, ml: 0.5, mr: 0, height: 24 }}
             />
           )}
         </Box>
@@ -136,9 +137,22 @@ function CardTablePanel({
                 />
               }
               label="AI手牌"
-              sx={{ '& .MuiFormControlLabel-label': { fontSize: isMobile ? '0.875rem' : '0.75rem' }, mr: isMobile ? 0 : undefined }}
+              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
             />
           ) : null}
+          {showPlayPanel && (
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={showPlayedCards}
+                  onChange={(e) => setShowPlayedCards(e.target.checked)}
+                  size="small"
+                />
+              }
+              label="显示已出"
+              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
+            />
+          )}
         </Box>
       </Box>
       <Box sx={{ 
@@ -147,7 +161,7 @@ function CardTablePanel({
         justifyContent: 'center', 
         flex: isMobile ? 1 : '1 1 auto', 
         minHeight: 0, 
-        overflow: 'hidden' 
+        overflow: 'hidden',
       }}>
         <CardTable
           hands={hands}
@@ -184,6 +198,7 @@ function CardTablePanel({
           lastCompletedTrick={lastCompletedTrick}
           isPlayPaused={isPlayPaused}
           aiLoading={aiLoading}
+          showPlayedCards={showPlayedCards}
         />
       </Box>
     </Paper>

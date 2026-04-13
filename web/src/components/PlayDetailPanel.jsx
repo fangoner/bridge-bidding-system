@@ -1,12 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Box, Typography, Paper, Chip, Divider, CircularProgress, Button, Card as MuiCard } from '@mui/material'
-
-const SUIT_COLORS = {
-  '♠': '#000',
-  '♥': '#e53935',
-  '♦': '#e53935',
-  '♣': '#000',
-}
+import { SUIT_COLOR_MAP } from '../constants/suits'
 
 function PlayDetailPanel({
   isMobile,
@@ -54,48 +48,9 @@ function PlayDetailPanel({
   
   const playableCards = getPlayableCards()
 
-  const renderAIOutput = () => {
-    if (!isPaused) {
-      if (aiPlayHistory && aiPlayHistory.length > 0) {
-        const displayRecord = aiPlayHistory[aiPlayHistory.length - 1]
-        const fullOutput = displayRecord.full_output || {}
-
-        return (
-          <Box sx={{ p: 1.5, background: 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#1976d2', fontSize: '0.85rem' }}>
-                {displayRecord.position}家 - {displayRecord.card?.suit}{displayRecord.card?.rank}
-              </Typography>
-            </Box>
-            
-            {displayRecord.reasoning && (
-              <Typography variant="body2" sx={{ mt: 0.5, fontSize: '0.8rem' }}>
-                <strong>理由:</strong> {displayRecord.reasoning}
-              </Typography>
-            )}
-            
-            {displayRecord.risk && (
-              <Typography variant="body2" sx={{ mt: 0.5, fontSize: '0.8rem', color: 'warning.main' }}>
-                <strong>风险提示:</strong> {displayRecord.risk}
-              </Typography>
-            )}
-            
-            {fullOutput["局面分析"] && (
-              <Typography variant="body2" sx={{ mt: 0.5, fontSize: '0.8rem' }}>
-                <strong>局面分析:</strong>
-                <Box component="pre" sx={{ 
-                  mt: 0.5, p: 0.5, background: '#f8f9fa', borderRadius: 1,
-                  fontSize: '0.75rem', lineHeight: 1.3,
-                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                  border: '1px solid #e9ecef', maxHeight: '100px', overflow: 'auto'
-                }}>
-                  {fullOutput["局面分析"]}
-                </Box>
-              </Typography>
-            )}
-          </Box>
-        )
-      }
+  // 渲染AI输出卡片的通用组件
+  const renderAIOutputCard = (record, showClose = false) => {
+    if (!record) {
       return (
         <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 2 }}>
           等待AI出牌...
@@ -103,93 +58,60 @@ function PlayDetailPanel({
       )
     }
 
-    if (selectedRecord) {
-      const fullOutput = selectedRecord.full_output || {}
-
-      return (
-        <Box sx={{ p: 1.5, background: 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#1976d2', fontSize: '0.85rem' }}>
-              {selectedRecord.position}家 - {selectedRecord.card?.suit}{selectedRecord.card?.rank}
-            </Typography>
-            <Button size="small" onClick={() => setSelectedRecord(null)}>关闭</Button>
-          </Box>
-          
-          {selectedRecord.reasoning && (
-            <Typography variant="body2" sx={{ mt: 0.5, fontSize: '0.8rem' }}>
-              <strong>理由:</strong> {selectedRecord.reasoning}
-            </Typography>
-          )}
-          
-          {selectedRecord.risk && (
-            <Typography variant="body2" sx={{ mt: 0.5, fontSize: '0.8rem', color: 'warning.main' }}>
-              <strong>风险提示:</strong> {selectedRecord.risk}
-            </Typography>
-          )}
-          
-          {fullOutput["局面分析"] && (
-            <Typography variant="body2" sx={{ mt: 0.5, fontSize: '0.8rem' }}>
-              <strong>局面分析:</strong>
-              <Box component="pre" sx={{ 
-                mt: 0.5, p: 0.5, background: '#f8f9fa', borderRadius: 1,
-                fontSize: '0.75rem', lineHeight: 1.3,
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                border: '1px solid #e9ecef', maxHeight: '100px', overflow: 'auto'
-              }}>
-                {fullOutput["局面分析"]}
-              </Box>
-            </Typography>
-          )}
-        </Box>
-      )
-    }
-
-    if (aiPlayHistory && aiPlayHistory.length > 0) {
-      const displayRecord = aiPlayHistory[aiPlayHistory.length - 1]
-      const fullOutput = displayRecord.full_output || {}
-
-      return (
-        <Box sx={{ p: 1.5, background: 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#1976d2', fontSize: '0.85rem' }}>
-              {displayRecord.position}家 - {displayRecord.card?.suit}{displayRecord.card?.rank}
-            </Typography>
-          </Box>
-          
-          {displayRecord.reasoning && (
-            <Typography variant="body2" sx={{ mt: 0.5, fontSize: '0.8rem' }}>
-              <strong>理由:</strong> {displayRecord.reasoning}
-            </Typography>
-          )}
-          
-          {displayRecord.risk && (
-            <Typography variant="body2" sx={{ mt: 0.5, fontSize: '0.8rem', color: 'warning.main' }}>
-              <strong>风险提示:</strong> {displayRecord.risk}
-            </Typography>
-          )}
-          
-          {fullOutput["局面分析"] && (
-            <Typography variant="body2" sx={{ mt: 0.5, fontSize: '0.8rem' }}>
-              <strong>局面分析:</strong>
-              <Box component="pre" sx={{ 
-                mt: 0.5, p: 0.5, background: '#f8f9fa', borderRadius: 1,
-                fontSize: '0.75rem', lineHeight: 1.3,
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                border: '1px solid #e9ecef', maxHeight: '100px', overflow: 'auto'
-              }}>
-                {fullOutput["局面分析"]}
-              </Box>
-            </Typography>
-          )}
-        </Box>
-      )
-    }
+    const fullOutput = record.full_output || {}
 
     return (
-      <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 2 }}>
-        等待AI出牌...
-      </Typography>
+      <Box sx={{ p: 1.5, background: 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#1976d2', fontSize: '0.85rem' }}>
+            {record.position}家 - {record.card?.suit}{record.card?.rank}
+          </Typography>
+          {showClose && (
+            <Button size="small" onClick={() => setSelectedRecord(null)}>关闭</Button>
+          )}
+        </Box>
+        
+        {record.reasoning && (
+          <Typography variant="body2" sx={{ mt: 0.5, fontSize: '0.8rem' }}>
+            <strong>理由:</strong> {record.reasoning}
+          </Typography>
+        )}
+        
+        {record.risk && (
+          <Typography variant="body2" sx={{ mt: 0.5, fontSize: '0.8rem', color: 'warning.main' }}>
+            <strong>风险提示:</strong> {record.risk}
+          </Typography>
+        )}
+        
+        {fullOutput["局面分析"] && (
+          <Typography variant="body2" sx={{ mt: 0.5, fontSize: '0.8rem' }}>
+            <strong>局面分析:</strong>
+            <Box component="pre" sx={{ 
+              mt: 0.5, p: 0.5, background: '#f8f9fa', borderRadius: 1,
+              fontSize: '0.75rem', lineHeight: 1.3,
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              border: '1px solid #e9ecef', maxHeight: '100px', overflow: 'auto'
+            }}>
+              {fullOutput["局面分析"]}
+            </Box>
+          </Typography>
+        )}
+      </Box>
     )
+  }
+
+  const renderAIOutput = () => {
+    if (!isPaused) {
+      const latestRecord = aiPlayHistory?.[aiPlayHistory.length - 1]
+      return renderAIOutputCard(latestRecord || null)
+    }
+
+    if (selectedRecord) {
+      return renderAIOutputCard(selectedRecord, true)
+    }
+
+    const latestRecord = aiPlayHistory?.[aiPlayHistory.length - 1]
+    return renderAIOutputCard(latestRecord || null)
   }
 
   const renderCardSelector = () => {
@@ -244,7 +166,7 @@ function PlayDetailPanel({
               const isSelected = selectedCard?.suit === card.suit && 
                                  selectedCard?.rank === card.rank
               
-              const color = SUIT_COLORS[card.suit] || '#000'
+              const color = SUIT_COLOR_MAP[card.suit] || '#000'
               
               return (
                 <MuiCard
@@ -325,7 +247,7 @@ function PlayDetailPanel({
           </Typography>
           <Box sx={{ display: 'flex', gap: 0.25 }}>
             {trick.cards && trick.cards.map(([pos, card]) => {
-              const color = SUIT_COLORS[card.suit] || '#000'
+              const color = SUIT_COLOR_MAP[card.suit] || '#000'
               const aiRecord = getAIRecordForCard(pos, card)
               const isSelected = selectedRecord === aiRecord
               const canClick = isPaused && aiRecord
@@ -374,15 +296,16 @@ function PlayDetailPanel({
   }
 
   return (
-    <Paper sx={{ 
-      p: 2, 
+    <Paper elevation={3} sx={{ 
+      p: 1, 
+      bgcolor: isMobile ? '#f5f5f5' : '#e8e8e8',
       width: isMobile ? '100%' : '600px',
-      height: height,
+      height: '640px',
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden'
     }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1, flexShrink: 0 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5, flexShrink: 0, minHeight: 40 }}>
         <Typography variant="h6" sx={{ fontSize: '1rem' }}>打牌详情</Typography>
         <Box sx={{ display: 'flex', gap: 0.5 }}>
           <Chip 
@@ -408,42 +331,42 @@ function PlayDetailPanel({
         </Box>
       </Box>
 
-      <Box sx={{ display: 'flex', gap: 1, mb: 1, flexShrink: 0 }}>
-        <Paper sx={{ p: 0.5, bgcolor: '#e3f2fd', textAlign: 'center', minWidth: 50 }}>
-          <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>庄家方</Typography>
-          <Typography variant="body2" fontWeight="bold" color="primary">{declarerTricks}</Typography>
-        </Paper>
-        <Paper sx={{ p: 0.5, bgcolor: '#fff3e0', textAlign: 'center', minWidth: 50 }}>
-          <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>防守方</Typography>
-          <Typography variant="body2" fontWeight="bold" color="warning.main">{defenderTricks}</Typography>
-        </Paper>
-        <Paper sx={{ p: 0.5, bgcolor: '#f5f5f5', textAlign: 'center', minWidth: 50 }}>
-          <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>需要</Typography>
-          <Typography variant="body2" fontWeight="bold">{contract?.tricks_needed || '?'}</Typography>
-        </Paper>
-        {isPaused && onResume && (
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={onResume}
-            size="small"
-          >
-            继续
-          </Button>
-        )}
-      </Box>
+      <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#fafafa', borderRadius: 2, border: '1px solid #ddd', minHeight: 0, p: 1 }}>
+        <Box sx={{ display: 'flex', gap: 1, mb: 1, flexShrink: 0 }}>
+          <Paper sx={{ p: 0.5, bgcolor: '#e3f2fd', textAlign: 'center', minWidth: 50 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>庄家方</Typography>
+            <Typography variant="body2" fontWeight="bold" color="primary">{declarerTricks}</Typography>
+          </Paper>
+          <Paper sx={{ p: 0.5, bgcolor: '#fff3e0', textAlign: 'center', minWidth: 50 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>防守方</Typography>
+            <Typography variant="body2" fontWeight="bold" color="warning.main">{defenderTricks}</Typography>
+          </Paper>
+          <Paper sx={{ p: 0.5, bgcolor: '#f5f5f5', textAlign: 'center', minWidth: 50 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>需要</Typography>
+            <Typography variant="body2" fontWeight="bold">{contract?.tricks_needed || '?'}</Typography>
+          </Paper>
+          {isPaused && onResume && (
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={onResume}
+              size="small"
+            >
+              继续
+            </Button>
+          )}
+        </Box>
 
-      <Divider sx={{ mb: 1, flexShrink: 0 }} />
+        <Box sx={{ flex: 2, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+          {renderAIOutput()}
+        </Box>
 
-      <Box sx={{ flex: 2, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
-        {renderAIOutput()}
-      </Box>
+        <Divider sx={{ my: 1, flexShrink: 0 }} />
 
-      <Divider sx={{ my: 1, flexShrink: 0 }} />
-
-      <Box sx={{ flexShrink: 0 }}>
-        {renderCardSelector()}
-        {renderCompletedTricks()}
+        <Box sx={{ flexShrink: 0 }}>
+          {renderCardSelector()}
+          {renderCompletedTricks()}
+        </Box>
       </Box>
     </Paper>
   )
