@@ -231,6 +231,7 @@ class PlayState:
     declarer_tricks: int = 0
     defender_tricks: int = 0
     phase: PlayPhase = PlayPhase.LEAD
+    bidding_sequence: str = "未提供"
     
     def __post_init__(self):
         if self.contract:

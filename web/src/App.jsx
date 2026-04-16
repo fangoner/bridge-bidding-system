@@ -44,9 +44,10 @@ import SettingsPanel from './components/SettingsPanel'
 import PlayPanel from './components/PlayPanel'
 import PlayDetailPanel from './components/PlayDetailPanel'
 import { colorSchemes, defaultScheme } from './theme/colorSchemes'
+import useBiddingState from './hooks/useBiddingState'
+import useBiddingRecords from './hooks/useBiddingRecords'
 import './App.css'
 
-const BIDDING_RECORDS_KEY = 'bridge_bidding_records'
 const COLOR_SCHEME_KEY = 'bridge_color_scheme'
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
 
@@ -63,17 +64,32 @@ function App() {
   })
   const [loading, setLoading] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
-  const [suggestionLoading, setSuggestionLoading] = useState(false)
   const [error, setError] = useState(null)
   const [apiStatus, setApiStatus] = useState(null)
-  const [biddingSequence, setBiddingSequence] = useState([])
-  const [currentBidder, setCurrentBidder] = useState('南')
-  const [bidSuggestion, setBidSuggestion] = useState(null)
-  const [aiBiddingHistory, setAiBiddingHistory] = useState([]) // AI叫牌历史记录
-  const [currentBiddingPosition, setCurrentBiddingPosition] = useState(null) // 当前正在叫牌的位置
-  const [selectedBiddingIndex, setSelectedBiddingIndex] = useState(-1) // 选择的叫牌记录索引，-1表示最新
-  const [simpleDisplayMode, setSimpleDisplayMode] = useState(false) // 简单显示模式
-  const [showBiddingControls, setShowBiddingControls] = useState(false) // 右侧面板显示叫牌控制+JF片段
+
+  // 叫牌状态（使用 hook 管理）
+  const {
+    biddingSequence, setBiddingSequence,
+    currentBidder, setCurrentBidder,
+    bidSuggestion, setBidSuggestion,
+    aiBiddingHistory, setAiBiddingHistory,
+    currentBiddingPosition, setCurrentBiddingPosition,
+    selectedBiddingIndex, setSelectedBiddingIndex,
+    simpleDisplayMode, setSimpleDisplayMode,
+    showBiddingControls, setShowBiddingControls,
+    biddingStarted, setBiddingStarted,
+    isNewDeal, setIsNewDeal,
+    stopBidding, setStopBidding,
+    passedAIPositions, setPassedAIPositions,
+    biddingStartTime,
+    biddingTotalTime, setBiddingTotalTime,
+    customBidMeaning, setCustomBidMeaning,
+    suggestionLoading, setSuggestionLoading,
+    isBiddingComplete,
+    initBiddingState,
+    toggleStopBiddingState,
+    markBiddingStarted,
+  } = useBiddingState()
   const [dealSystem, setDealSystem] = useState('2D/2H/2S：自然阻击') // 阻击叫牌体系
   
   // 叫牌回退历史
@@ -109,15 +125,9 @@ function App() {
   }) // 每个位置的角色：'human' 或 'ai'
   const [showPartnerHand, setShowPartnerHand] = useState(false) // 显示队友手牌
   const [showAIHands, setShowAIHands] = useState(false) // 显示AI手牌
+  const [showDeclarerHand, setShowDeclarerHand] = useState(false) // 显示庄家手牌
   const [showOpponentHands, setShowOpponentHands] = useState(false) // 显示对方手牌
-  const [biddingStarted, setBiddingStarted] = useState(false) // 叫牌是否已开始
   const [showAIBiddingOutput, setShowAIBiddingOutput] = useState(true) // 显示AI叫牌完整输出
-  const [isNewDeal, setIsNewDeal] = useState(true) // 是否是新发牌
-  const [stopBidding, setStopBidding] = useState(false) // 是否停止叫牌
-  const [passedAIPositions, setPassedAIPositions] = useState(new Set()) // 因搭档相继pass而需要自动pass的AI位置
-  const [biddingStartTime, setBiddingStartTime] = useState(null) // 叫牌开始时间
-  const [biddingTotalTime, setBiddingTotalTime] = useState(null) // 叫牌总时间（秒）
-  const [customBidMeaning, setCustomBidMeaning] = useState('') // 用户自定义叫牌含义
   const [useFallback, setUseFallback] = useState(false) // 是否使用备用提示词
   const [dealMode, setDealMode] = useState('free') // 发牌模式：free/game/slam
   const [showSettings, setShowSettings] = useState(false) // 显示设置面板
@@ -146,13 +156,24 @@ function App() {
   const [analyzeLoading, setAnalyzeLoading] = useState(false) // 检验定约加载中
   const [analyzeResult, setAnalyzeResult] = useState(null) // 检验定约结果
   
-  // 叫牌记录管理
-  const [biddingRecords, setBiddingRecords] = useState([]) // 历史叫牌记录列表
-  const [historyDialogOpen, setHistoryDialogOpen] = useState(false) // 历史记录对话框
-  const [editNoteDialogOpen, setEditNoteDialogOpen] = useState(false) // 编辑注释对话框
-  const [editingRecordId, setEditingRecordId] = useState(null) // 正在编辑的记录ID
-  const [editingNote, setEditingNote] = useState('') // 编辑中的注释
-  const [selectedRecordIds, setSelectedRecordIds] = useState(new Set()) // 多选的记录ID
+  // 叫牌记录管理（使用 hook 管理）
+  const {
+    biddingRecords, setBiddingRecords,
+    historyDialogOpen, setHistoryDialogOpen,
+    editNoteDialogOpen, setEditNoteDialogOpen,
+    editingRecordId, setEditingRecordId,
+    editingNote, setEditingNote,
+    selectedRecordIds, setSelectedRecordIds,
+    loadBiddingRecords,
+    saveBiddingRecord,
+    deleteBiddingRecord,
+    deleteBiddingRecords,
+    updateRecordNote,
+    toggleSelectAll,
+    toggleRecordSelection,
+    exportRecords,
+    importRecords,
+  } = useBiddingRecords()
   const [customDealOpen, setCustomDealOpen] = useState(false) // 自定义牌局对话框
   const [imageDealOpen, setImageDealOpen] = useState(false) // 图片牌局对话框
   const [customDealText, setCustomDealText] = useState('') // 自定义牌局文本
@@ -170,6 +191,7 @@ function App() {
   const [playAiLoading, setPlayAiLoading] = useState(false) // AI出牌加载中
   const [showPlayPanel, setShowPlayPanel] = useState(false) // 显示打牌面板
   const [showPlayedCards, setShowPlayedCards] = useState(false) // 打牌时显示已出的牌
+  const [playCenterView, setPlayCenterView] = useState('play') // 打牌阶段中心区域视图: 'play'/'bidding'/'result'
   const [isPlayPaused, setIsPlayPaused] = useState(false) // 打牌暂停状态
   const [lastCompletedTrick, setLastCompletedTrick] = useState(null) // 暂停时保存的上一墩
   const [aiPlayHistory, setAiPlayHistory] = useState([]) // AI打牌历史记录
@@ -249,149 +271,6 @@ function App() {
     }
   }
 
-  // 加载历史叫牌记录
-  const loadBiddingRecords = () => {
-    try {
-      const records = localStorage.getItem(BIDDING_RECORDS_KEY)
-      if (records) {
-        setBiddingRecords(JSON.parse(records))
-      }
-    } catch (err) {
-      console.error('加载历史记录失败:', err)
-    }
-  }
-
-  // 保存叫牌记录
-  const saveBiddingRecord = (record) => {
-    try {
-      const newRecords = [record, ...biddingRecords].slice(0, 100) // 最多保存100条
-      setBiddingRecords(newRecords)
-      localStorage.setItem(BIDDING_RECORDS_KEY, JSON.stringify(newRecords))
-    } catch (err) {
-      console.error('保存记录失败:', err)
-    }
-  }
-
-  // 删除叫牌记录
-  const deleteBiddingRecord = (id) => {
-    try {
-      const newRecords = biddingRecords.filter(r => r.id !== id)
-      setBiddingRecords(newRecords)
-      localStorage.setItem(BIDDING_RECORDS_KEY, JSON.stringify(newRecords))
-    } catch (err) {
-      console.error('删除记录失败:', err)
-    }
-  }
-
-  // 批量删除叫牌记录
-  const deleteBiddingRecords = (ids) => {
-    try {
-      const idsSet = new Set(ids)
-      const newRecords = biddingRecords.filter(r => !idsSet.has(r.id))
-      setBiddingRecords(newRecords)
-      localStorage.setItem(BIDDING_RECORDS_KEY, JSON.stringify(newRecords))
-      setSelectedRecordIds(new Set())
-    } catch (err) {
-      console.error('批量删除记录失败:', err)
-    }
-  }
-
-  // 更新记录注释
-  const updateRecordNote = (id, note) => {
-    try {
-      const newRecords = biddingRecords.map(r => 
-        r.id === id ? { ...r, note } : r
-      )
-      setBiddingRecords(newRecords)
-      localStorage.setItem(BIDDING_RECORDS_KEY, JSON.stringify(newRecords))
-    } catch (err) {
-      console.error('更新注释失败:', err)
-    }
-  }
-
-  // 导出记录为JSON文件
-  const exportRecords = () => {
-    try {
-      const recordsToExport = selectedRecordIds.size > 0 
-        ? biddingRecords.filter(r => selectedRecordIds.has(r.id))
-        : biddingRecords
-      
-      if (recordsToExport.length === 0) {
-        setError('没有可导出的记录')
-        return
-      }
-
-      const exportData = {
-        version: '1.0',
-        exportDate: new Date().toISOString(),
-        records: recordsToExport
-      }
-      const dataStr = JSON.stringify(exportData, null, 2)
-      const blob = new Blob([dataStr], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `bridge_bidding_records_${new Date().toISOString().slice(0, 10)}.json`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(url)
-    } catch (err) {
-      console.error('导出记录失败:', err)
-      setError('导出记录失败')
-    }
-  }
-
-  // 全选/取消全选
-  const toggleSelectAll = () => {
-    if (selectedRecordIds.size === biddingRecords.length) {
-      setSelectedRecordIds(new Set())
-    } else {
-      setSelectedRecordIds(new Set(biddingRecords.map(r => r.id)))
-    }
-  }
-
-  // 切换单个记录选择
-  const toggleRecordSelection = (id) => {
-    const newSelected = new Set(selectedRecordIds)
-    if (newSelected.has(id)) {
-      newSelected.delete(id)
-    } else {
-      newSelected.add(id)
-    }
-    setSelectedRecordIds(newSelected)
-  }
-
-  // 导入记录从JSON文件
-  const importRecords = (event) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      try {
-        const importData = JSON.parse(e.target.result)
-        if (!importData.records || !Array.isArray(importData.records)) {
-          setError('无效的记录文件格式')
-          return
-        }
-
-        const importedRecords = importData.records
-        const existingIds = new Set(biddingRecords.map(r => r.id))
-        const newRecords = importedRecords.filter(r => !existingIds.has(r.id))
-        const mergedRecords = [...newRecords, ...biddingRecords].slice(0, 100)
-
-        setBiddingRecords(mergedRecords)
-        localStorage.setItem(BIDDING_RECORDS_KEY, JSON.stringify(mergedRecords))
-        setError(null)
-      } catch (err) {
-        console.error('导入记录失败:', err)
-        setError('导入记录失败: 文件格式错误')
-      }
-    }
-    reader.readAsText(file)
-    event.target.value = ''
-  }
 
   // 加载历史记录到牌桌
   const loadRecordToTable = (record) => {
@@ -657,17 +536,15 @@ function App() {
         }
       }
       
-      // 重置叫牌序列
+      // 重置叫牌序列并标记开始
       setBiddingSequence([])
-      setCurrentBidder(dealer) // 从发牌人开始叫牌
-      setBiddingStarted(true) // 标记叫牌已开始
-      setIsNewDeal(false) // 标记为非新发牌
-      setAiBiddingHistory([]) // 清理上次叫牌输出
-      setStopBidding(false) // 重置停止叫牌状态
-      setPassedAIPositions(new Set()) // 重置已pass的AI位置
-      setBiddingStartTime(Date.now()) // 记录开始时间
-      setBiddingTotalTime(null) // 重置总时间
-      setError(null) // 清除错误
+      setCurrentBidder(dealer)
+      markBiddingStarted()
+      setAiBiddingHistory([])
+      setStopBidding(false)
+      setPassedAIPositions(new Set())
+      setBiddingTotalTime(null)
+      setError(null)
       // 重置回退历史并保存初始快照
       const initialSnapshot = {
         biddingSequence: [],
@@ -681,15 +558,8 @@ function App() {
 
   // 重新叫牌（保持当前牌局）
   const resetBidding = () => {
-    setBiddingSequence([])
-    setCurrentBidder(dealer)
-    setBiddingStarted(false)
-    setAiBiddingHistory([])
-    setStopBidding(false)
-    setPassedAIPositions(new Set())
+    initBiddingState(dealer)
     setIsNewDeal(false)
-    setBiddingStartTime(null)
-    setBiddingTotalTime(null)
     setBiddingHistory([])
     setHistoryIndex(-1)
   }
@@ -702,14 +572,7 @@ function App() {
       '东': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
       '西': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 }
     })
-    setBiddingSequence([])
-    setBidSuggestion(null)
-    setAiBiddingHistory([])
-    setCurrentBidder(dealer)
-    setBiddingStarted(false)
-    setIsNewDeal(true)
-    setStopBidding(false)
-    setPassedAIPositions(new Set())
+    initBiddingState(dealer)
     setOutputFormats(null)
     setShowDoubleDummy(false)
     setDoubleDummyResult(null)
@@ -725,7 +588,7 @@ function App() {
 
   // 切换停止/继续叫牌
   const toggleStopBidding = () => {
-    setStopBidding(!stopBidding)
+    toggleStopBiddingState()
   }
 
   // 添加叫牌
@@ -1054,32 +917,8 @@ function App() {
     }
   }, [currentBidder, positionRoles, hands, aiLoading, biddingSequence, biddingStarted, stopBidding, passedAIPositions])
 
-  // 判断叫牌是否结束
-  const isBiddingComplete = () => {
-    if (biddingSequence.length < 4) return false
 
-    // 检查最后四个是否都是pass
-    const lastFour = biddingSequence.slice(-4)
-    if (lastFour.length === 4 && lastFour.every(b => b.bid === 'pass')) {
-      return true
-    }
 
-    // 检查是否有3个连续的pass在第一个实质性叫品之后
-    let hasRealBid = false
-    for (let i = 0; i < biddingSequence.length; i++) {
-      if (biddingSequence[i].bid !== 'pass') {
-        hasRealBid = true
-      }
-      if (hasRealBid && i >= 2) {
-        const lastThree = biddingSequence.slice(i - 2, i + 1)
-        if (lastThree.every(b => b.bid === 'pass')) {
-          return true
-        }
-      }
-    }
-
-    return false
-  }
 
   // 确定最终定约
   const getFinalContract = () => {
@@ -1261,6 +1100,21 @@ function App() {
     setIsPlayPaused(false) // 重置暂停状态
     prevTricksCountRef.current = 0 // 重置墩数计数器
     
+    // 构建包含叫牌含义的叫牌历史字符串
+    let biddingStr = null
+    if (biddingSequence.length > 0) {
+      // 纯叫牌序列
+      const seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
+      // 含义历史（每条记录含叫品含义）
+      const meaningLines = aiBiddingHistory
+        .filter(r => r.result?.meaning)
+        .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
+        .join('\n')
+      biddingStr = meaningLines
+        ? `${seqStr}\n\n叫牌含义:\n${meaningLines}`
+        : seqStr
+    }
+    
     try {
       const result = await playInit(
         hands,
@@ -1268,7 +1122,8 @@ function App() {
         contract.declarer,
         positionRoles,
         contract.isDouble,
-        contract.isRedouble
+        contract.isRedouble,
+        biddingStr
       )
       
       if (result.success) {
@@ -1324,16 +1179,17 @@ function App() {
           position: playState?.current_player,
           card: result.card,
           reasoning: result.reasoning,
+          analysis: result.analysis,
           risk: result.risk,
+          follow_up: result.follow_up,
           full_output: result.full_output,
+          prompt: result.prompt,
           timestamp: new Date().toLocaleTimeString(),
         }
         setAiPlayHistory(prev => [...prev, aiRecord])
         
         const stateResult = await getPlayState()
         if (stateResult.success) {
-          console.log('[DEBUG handleAIPlay] FULL state:', JSON.stringify(stateResult.state, null, 2))
-          console.log('[DEBUG handleAIPlay] current_trick:', JSON.stringify(stateResult.state?.current_trick, null, 2))
           setPlayState(stateResult.state)
         }
       } else {
@@ -1351,6 +1207,18 @@ function App() {
     setIsPlayPaused(false)
     setLastCompletedTrick(null)
     setShowDoubleDummy(false)
+  }
+
+  // 重新打牌（保持当前牌局和叫牌，重置打牌状态）
+  const handleResetPlay = () => {
+    setShowPlayPanel(false)
+    setPlayState(null)
+    setAiPlayHistory([])
+    setSelectedPlayCard(null)
+    setIsPlayPaused(false)
+    setLastCompletedTrick(null)
+    setPlayCenterView('play')
+    prevTricksCountRef.current = 0
   }
 
   // AI自动出牌
@@ -1642,6 +1510,8 @@ function App() {
               setShowPartnerHand={setShowPartnerHand}
               showAIHands={showAIHands}
               setShowAIHands={setShowAIHands}
+              showDeclarerHand={showDeclarerHand}
+              setShowDeclarerHand={setShowDeclarerHand}
               showOpponentHands={showOpponentHands}
               getPartnerPosition={getPartnerPosition}
               biddingSequence={biddingSequence}
@@ -1688,6 +1558,9 @@ function App() {
               aiLoading={playAiLoading}
               showPlayedCards={showPlayedCards}
               setShowPlayedCards={setShowPlayedCards}
+              playCenterView={playCenterView}
+              setPlayCenterView={setPlayCenterView}
+              aiBiddingHistory={aiBiddingHistory}
             />
             
             {/* 右侧面板：叫牌细节或打牌面板 */}
@@ -1708,6 +1581,7 @@ function App() {
                 aiLoading={playAiLoading}
                 isPaused={isPlayPaused}
                 onResume={handleResumePlay}
+                onResetPlay={handleResetPlay}
               />
             ) : (
               (humanPosition !== null || showAIBiddingOutput) && (
@@ -1761,6 +1635,8 @@ function App() {
               setShowPartnerHand={setShowPartnerHand}
               showAIHands={showAIHands}
               setShowAIHands={setShowAIHands}
+              showDeclarerHand={showDeclarerHand}
+              setShowDeclarerHand={setShowDeclarerHand}
               showOpponentHands={showOpponentHands}
               getPartnerPosition={getPartnerPosition}
               biddingSequence={biddingSequence}
@@ -1807,6 +1683,9 @@ function App() {
               aiLoading={playAiLoading}
               showPlayedCards={showPlayedCards}
               setShowPlayedCards={setShowPlayedCards}
+              playCenterView={playCenterView}
+              setPlayCenterView={setPlayCenterView}
+              aiBiddingHistory={aiBiddingHistory}
             />
             
             {/* 叫牌细节面板或打牌面板 */}
@@ -1827,6 +1706,7 @@ function App() {
                 aiLoading={playAiLoading}
                 isPaused={isPlayPaused}
                 onResume={handleResumePlay}
+                onResetPlay={handleResetPlay}
                 height="auto"
               />
             ) : (
@@ -2001,7 +1881,7 @@ function App() {
             导入
             <input type="file" accept=".json" hidden onChange={importRecords} />
           </Button>
-          <Button onClick={exportRecords} disabled={biddingRecords.length === 0} size="small">
+          <Button onClick={() => { const result = exportRecords(); if (!result.success) setError(result.error) }} disabled={biddingRecords.length === 0} size="small">
             导出{selectedRecordIds.size > 0 && ` (${selectedRecordIds.size})`}
           </Button>
           <Button onClick={() => {

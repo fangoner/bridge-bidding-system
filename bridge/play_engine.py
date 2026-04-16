@@ -14,7 +14,8 @@ class PlayEngine:
         self,
         hands: Dict[str, dict],
         contract: Contract,
-        player_roles: Dict[str, str] = None
+        player_roles: Dict[str, str] = None,
+        bidding_sequence: str = "未提供"
     ) -> PlayState:
         parsed_hands = parse_hands_dict(hands)
         
@@ -24,7 +25,8 @@ class PlayEngine:
         self.state = PlayState(
             contract=contract,
             hands=parsed_hands,
-            player_roles=player_roles
+            player_roles=player_roles,
+            bidding_sequence=bidding_sequence
         )
         
         return self.state

@@ -100,7 +100,11 @@ function useBiddingRecords() {
 
   const exportRecords = useCallback(() => {
     try {
-      const recordsToExport = biddingRecords.filter(r => selectedRecordIds.has(r.id))
+      // 无选中记录时导出全部，有选中记录时只导出选中的
+      const recordsToExport = selectedRecordIds.size > 0 
+        ? biddingRecords.filter(r => selectedRecordIds.has(r.id))
+        : biddingRecords
+
       if (recordsToExport.length === 0) {
         return { success: false, error: '没有可导出的记录' }
       }
@@ -134,27 +138,27 @@ function useBiddingRecords() {
     const reader = new FileReader()
     reader.onload = (e) => {
       try {
-        const data = JSON.parse(e.target.result)
-        if (data.records && Array.isArray(data.records)) {
-          setBiddingRecords(prev => {
-            const newRecords = [...data.records, ...prev].slice(0, 100)
-            localStorage.setItem(BIDDING_RECORDS_KEY, JSON.stringify(newRecords))
-            return newRecords
-          })
-          return { success: true, count: data.records.length }
+        const importData = JSON.parse(e.target.result)
+        if (!importData.records || !Array.isArray(importData.records)) {
+          console.error('无效的记录文件格式')
+          return
         }
-        return { success: false, error: '无效的文件格式' }
+
+        const importedRecords = importData.records
+        setBiddingRecords(prev => {
+          const existingIds = new Set(prev.map(r => r.id))
+          const newRecords = importedRecords.filter(r => !existingIds.has(r.id))
+          const mergedRecords = [...newRecords, ...prev].slice(0, 100)
+          localStorage.setItem(BIDDING_RECORDS_KEY, JSON.stringify(mergedRecords))
+          return mergedRecords
+        })
       } catch (err) {
         console.error('导入记录失败:', err)
-        return { success: false, error: '导入记录失败' }
       }
     }
     reader.readAsText(file)
+    if (event.target) event.target.value = ''
     return { success: true }
-  }, [])
-
-  const loadRecordToTable = useCallback((record) => {
-    return record
   }, [])
 
   return {
@@ -179,7 +183,6 @@ function useBiddingRecords() {
     toggleRecordSelection,
     exportRecords,
     importRecords,
-    loadRecordToTable,
   }
 }
 

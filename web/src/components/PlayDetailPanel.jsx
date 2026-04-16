@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Box, Typography, Paper, Chip, Divider, CircularProgress, Button, Card as MuiCard } from '@mui/material'
+import { Box, Typography, Paper, Chip, Divider, CircularProgress, Button, Card as MuiCard, ToggleButtonGroup, ToggleButton } from '@mui/material'
 import { SUIT_COLOR_MAP } from '../constants/suits'
 
 function PlayDetailPanel({
@@ -13,9 +13,11 @@ function PlayDetailPanel({
   aiLoading,
   isPaused,
   onResume,
+  onResetPlay,
   height = '680px',
 }) {
   const [selectedRecord, setSelectedRecord] = useState(null)
+  const [viewMode, setViewMode] = useState('output')  // 'output' or 'input'
   const prevIsPausedRef = useRef(isPaused)
   
   useEffect(() => {
@@ -59,6 +61,21 @@ function PlayDetailPanel({
     }
 
     const fullOutput = record.full_output || {}
+    const prompt = record.prompt || ''
+
+    // 输出模式的字段定义
+    const fields = [
+      { key: '推理过程', label: '推理过程', color: 'text.primary', multiline: true },
+      { key: '立场分析', label: '立场分析', color: '#1976d2' },
+      { key: '核心逻辑', label: '核心逻辑', color: '#2e7d32' },
+      { key: '风险提示', label: '风险提示', color: '#ed6c02' },
+      { key: '后续路线建议', label: '后续路线', color: '#7b1fa2' },
+    ]
+
+    // 兼容旧字段名
+    const getValue = (key) => {
+      return fullOutput[key] || record[key] || ''
+    }
 
     return (
       <Box sx={{ p: 1.5, background: 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
@@ -66,35 +83,69 @@ function PlayDetailPanel({
           <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#1976d2', fontSize: '0.85rem' }}>
             {record.position}家 - {record.card?.suit}{record.card?.rank}
           </Typography>
-          {showClose && (
-            <Button size="small" onClick={() => setSelectedRecord(null)}>关闭</Button>
-          )}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <ToggleButtonGroup
+              value={viewMode}
+              exclusive
+              onChange={(_, v) => v && setViewMode(v)}
+              size="small"
+              sx={{ height: 24, '& .MuiToggleButton-root': { py: 0, px: 1, fontSize: '0.7rem' } }}
+            >
+              <ToggleButton value="output" sx={{ textTransform: 'none' }}>输出</ToggleButton>
+              <ToggleButton value="input" sx={{ textTransform: 'none' }}>输入</ToggleButton>
+            </ToggleButtonGroup>
+            {showClose && (
+              <Button size="small" onClick={() => setSelectedRecord(null)}>关闭</Button>
+            )}
+          </Box>
         </Box>
         
-        {record.reasoning && (
-          <Typography variant="body2" sx={{ mt: 0.5, fontSize: '0.8rem' }}>
-            <strong>理由:</strong> {record.reasoning}
-          </Typography>
-        )}
-        
-        {record.risk && (
-          <Typography variant="body2" sx={{ mt: 0.5, fontSize: '0.8rem', color: 'warning.main' }}>
-            <strong>风险提示:</strong> {record.risk}
-          </Typography>
-        )}
-        
-        {fullOutput["局面分析"] && (
-          <Typography variant="body2" sx={{ mt: 0.5, fontSize: '0.8rem' }}>
-            <strong>局面分析:</strong>
+        {viewMode === 'output' ? (
+          // 输出模式：显示AI返回的字段
+          fields.map(({ key, label, color, multiline }) => {
+            const value = getValue(key)
+            if (!value) return null
+            return (
+              <Box key={key} sx={{ mt: 0.5 }}>
+                {multiline ? (
+                  <Box>
+                    <Typography variant="body2" sx={{ fontSize: '0.8rem', color, fontWeight: 500 }}>
+                      {label}:
+                    </Typography>
+                    <Box component="pre" sx={{ 
+                      mt: 0.25, p: 0.5, background: '#f8f9fa', borderRadius: 1,
+                      fontSize: '0.75rem', lineHeight: 1.3,
+                      whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                      border: '1px solid #e9ecef', maxHeight: '120px', overflow: 'auto',
+                      color,
+                    }}>
+                      {value}
+                    </Box>
+                  </Box>
+                ) : (
+                  <Typography variant="body2" sx={{ fontSize: '0.8rem', color }}>
+                    <strong>{label}:</strong> {value}
+                  </Typography>
+                )}
+              </Box>
+            )
+          })
+        ) : (
+          // 输入模式：显示传给AI的完整提示词
+          prompt ? (
             <Box component="pre" sx={{ 
-              mt: 0.5, p: 0.5, background: '#f8f9fa', borderRadius: 1,
-              fontSize: '0.75rem', lineHeight: 1.3,
+              p: 0.75, background: '#f8f9fa', borderRadius: 1,
+              fontSize: '0.7rem', lineHeight: 1.4,
               whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              border: '1px solid #e9ecef', maxHeight: '100px', overflow: 'auto'
+              border: '1px solid #e9ecef', maxHeight: '400px', overflow: 'auto',
             }}>
-              {fullOutput["局面分析"]}
+              {prompt}
             </Box>
-          </Typography>
+          ) : (
+            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem' }}>
+              无输入数据
+            </Typography>
+          )
         )}
       </Box>
     )
@@ -307,7 +358,7 @@ function PlayDetailPanel({
     }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5, flexShrink: 0, minHeight: 40 }}>
         <Typography variant="h6" sx={{ fontSize: '1rem' }}>打牌详情</Typography>
-        <Box sx={{ display: 'flex', gap: 0.5 }}>
+        <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
           <Chip 
             label={`${contract?.level || '?'}${contract?.suit || 'NT'}`} 
             color="primary" 
@@ -327,6 +378,17 @@ function PlayDetailPanel({
               size="small"
               sx={{ fontSize: '0.75rem' }}
             />
+          )}
+          {onResetPlay && (
+            <Button
+              variant="outlined"
+              color="warning"
+              size="small"
+              onClick={onResetPlay}
+              sx={{ fontSize: '0.7rem', py: 0.2, px: 1, minWidth: 'auto', textTransform: 'none' }}
+            >
+              重新打牌
+            </Button>
           )}
         </Box>
       </Box>

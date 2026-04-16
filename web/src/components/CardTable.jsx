@@ -12,6 +12,7 @@ function CardTable({
   gameMode,
   showPartnerHand,
   showAIHands,
+  showDeclarerHand,
   showOpponentHands,
   getPartnerPosition,
   renderBiddingTable,
@@ -40,6 +41,8 @@ function CardTable({
   isPlayPaused,
   aiLoading,
   showPlayedCards = false,
+  playCenterView = 'play',
+  aiBiddingHistory = [],
 }) {
   const [handInputs, setHandInputs] = useState({
     '南': '',
@@ -194,10 +197,16 @@ function CardTable({
   const shouldShowHandContent = (position) => {
     if (showPlayPanel && playState) {
       const dummy = playState.dummy
+      const declarerPos = playState.contract?.declarer
       const playerRoles = playState.player_roles || positionRoles
       
       if (position === dummy) {
         return true
+      }
+      
+      // 庄家手牌：仅当 showDeclarerHand 开启时显示
+      if (position === declarerPos) {
+        return showDeclarerHand
       }
       
       const isHumanPosition = playerRoles && playerRoles[position] === 'human'
@@ -234,11 +243,136 @@ function CardTable({
     '♣': '#000',
   };
 
+  // 打牌阶段的叫牌过程表格（带tooltip显示叫牌含义）
+  const renderPlayBiddingTable = () => {
+    const positions = ['南', '西', '北', '东']
+
+    // 构建 bid -> meaning 的映射（按位置和叫品匹配）
+    const meaningMap = {}
+    if (aiBiddingHistory && aiBiddingHistory.length > 0) {
+      for (const record of aiBiddingHistory) {
+        if (record.position && record.result?.bid != null) {
+          const key = `${record.position}:${record.result.bid}`
+          if (!meaningMap[key]) {
+            meaningMap[key] = record.result.meaning || ''
+          }
+        }
+      }
+    }
+
+    // 用 renderBiddingTable 的数据源（biddingSequence）来构建行
+    // 但需要获取 biddingSequence —— 从 renderBiddingTable 间接获取不了
+    // 所以从 aiBiddingHistory 提取序列
+    let seq = []
+    if (aiBiddingHistory && aiBiddingHistory.length > 0) {
+      seq = aiBiddingHistory.map(r => ({ position: r.position, bid: r.result?.bid || 'pass', meaning: r.result?.meaning || '' }))
+    }
+
+    if (seq.length === 0) {
+      return renderBiddingTable ? renderBiddingTable() : (
+        <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
+          无叫牌记录
+        </div>
+      )
+    }
+
+    const rows = []
+    let currentRow = Array(4).fill(null)
+    let currentRowInfo = Array(4).fill(null)
+
+    seq.forEach((bid) => {
+      const posIndex = positions.indexOf(bid.position)
+      currentRow[posIndex] = bid.bid
+      currentRowInfo[posIndex] = bid.meaning
+
+      if (posIndex === 3) {
+        rows.push({ bids: [...currentRow], info: [...currentRowInfo] })
+        currentRow = Array(4).fill(null)
+        currentRowInfo = Array(4).fill(null)
+      }
+    })
+
+    if (currentRow.some(cell => cell !== null)) {
+      rows.push({ bids: [...currentRow], info: [...currentRowInfo] })
+    }
+
+    return (
+      <Box sx={{
+        width: '100%',
+        fontFamily: '"Courier New", monospace',
+        fontSize: '0.9rem',
+      }}>
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'space-around',
+          borderBottom: '2px solid #333',
+          paddingBottom: 0.5,
+          marginBottom: 0.5,
+          fontWeight: 'bold',
+          color: '#333',
+        }}>
+          {positions.map(pos => (
+            <Box key={pos} component="span" sx={{ flex: 1, textAlign: 'center', minWidth: 50, color: pos === dealer ? '#d32f2f' : 'inherit' }}>
+              {pos}
+            </Box>
+          ))}
+        </Box>
+        {rows.map((row, rowIndex) => (
+          <Box key={rowIndex} sx={{
+            display: 'flex',
+            justifyContent: 'space-around',
+            padding: '4px 0',
+            borderBottom: '1px solid #ddd',
+            '&:last-child': { borderBottom: 'none' },
+          }}>
+            {positions.map((pos, colIndex) => {
+              const bid = row.bids[colIndex]
+              const meaning = row.info[colIndex]
+              if (!bid) {
+                return <Box key={colIndex} component="span" sx={{ flex: 1, textAlign: 'center', minWidth: 50 }} />
+              }
+              const displayText = bid === 'pass' ? 'P' : bid
+              const cellEl = (
+                <Box
+                  component="span"
+                  sx={{
+                    flex: 1,
+                    textAlign: 'center',
+                    minWidth: 50,
+                    fontWeight: 500,
+                    color: '#333',
+                    backgroundColor: '#e3f2fd',
+                    borderRadius: 1,
+                    cursor: meaning ? 'pointer' : 'default',
+                    padding: '2px 0',
+                  }}
+                >
+                  {displayText}
+                </Box>
+              )
+              if (meaning) {
+                return (
+                  <Tooltip key={colIndex} title={meaning} arrow placement="top">
+                    {cellEl}
+                  </Tooltip>
+                )
+              }
+              return cellEl
+            })}
+          </Box>
+        ))}
+      </Box>
+    )
+  }
+
   // 中心区域内容渲染（桌面版和手机版共用）
   const renderCenterContent = () => {
     if (showPlayPanel && playState) {
-      return showDoubleDummy ? (
-        doubleDummyLoading ? (
+      if (playCenterView === 'bidding') {
+        return renderPlayBiddingTable()
+      }
+      if (playCenterView === 'result' || showDoubleDummy) {
+        return doubleDummyLoading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
             <CircularProgress size={24} />
           </Box>
@@ -249,7 +383,8 @@ function CardTable({
             无分析结果
           </div>
         )
-      ) : renderCurrentTrick();
+      }
+      return renderCurrentTrick()
     }
     return showDoubleDummy ? (
       doubleDummyLoading ? (

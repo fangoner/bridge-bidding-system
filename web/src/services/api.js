@@ -253,7 +253,7 @@ export const doubleDummyAnalysis = async (hands) => {
 // ==================== 打牌相关API ====================
 
 // 初始化打牌
-export const playInit = async (hands, contract, declarer, playerRoles = null, doubled = false, redoubled = false) => {
+export const playInit = async (hands, contract, declarer, playerRoles = null, doubled = false, redoubled = false, biddingSequence = null) => {
   try {
     const response = await api.post('/api/play/init', {
       hands,
@@ -262,6 +262,7 @@ export const playInit = async (hands, contract, declarer, playerRoles = null, do
       player_roles: playerRoles,
       doubled,
       redoubled,
+      bidding_sequence: biddingSequence,
     });
     return response.data;
   } catch (error) {

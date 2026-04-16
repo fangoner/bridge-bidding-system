@@ -1,5 +1,118 @@
 # 开发日志
 
+## 2026-04-15
+
+### 打牌提示词准确性加强
+
+**背景**:
+AI在打牌推理中出现多个概念性错误，需要加强提示词的关键概念定义和出牌位置策略。
+
+**问题与修复**:
+
+1. **连张概念误判** (`llm/prompts.py`):
+   - 问题：AI把KJ称为"连张"，误用01首攻规则从KJ75中攻J
+   - 修复：首攻规则开头增加"连张 vs 间张"概念澄清
+     - 连张(Sequence)：大牌相邻连续，如KQJ、QJT、JT9
+     - 间张：大牌之间有间隔，如KJ、AQ，**不是连张**
+     - 中间连张：首攻牌之下紧挨着有牌，如KJ10（J10相邻）、AJ10
+     - 直接点名常见错误：KJ75既没有连张也没有中间连张
+   - 首攻示例增加反例：`KJ75 | 5 | KJ不是连张！长四首攻`、`AQ754 | 4 | AQ不是连张！长四首攻`
+   - 首攻表格注释加强：攻J前提是J10相邻，KJ后面没有10时不适用
+   - 首攻规则条目细化："有连张大牌攻大牌" → "攻连张中最顶上的一张（如KQJ攻K，QJT攻Q）"
+
+2. **第四家出牌误判** (`llm/prompts.py` + `bridge/play_service.py`):
+   - 问题：AI在第四家位置时猜测"如果后面还有人出更大的牌"
+   - 修复：新增"出牌位置策略"规则
+     - 第一家：选择攻击方向
+     - 第二家：防守方遵守"首攻与信号"部分的规定
+     - 第三家：防守方遵守"首攻与信号"部分的规定（优先盖过前两家，盖不过时考虑信号）
+     - 第四家：**你之后不再有人出牌！** 用能赢的最小牌赢墩或出最小牌
+   - 新增模板变量：`play_position`（第几家出牌）、`current_trick_count`（当前墩已有牌数）、`remaining_players`（你之后还有几家未出牌）
+   - 全局局面新增"本墩出牌位置"信息行
+
+3. **领出者误认** (`llm/prompts.py` + `bridge/play_service.py`):
+   - 问题：AI看到"(南)♠5"却认为"北家首攻♠5"，混淆领出者
+   - 修复：墩记录格式增加领出者标注
+     - 已完成墩：`第1墩[领出:南]: (南)♠5 (西)♠2 (北)♠A (东)♠8 - 赢家: 北`
+     - 当前墩：`[领出:南] (南)♠5 (西)♠2`
+     - 空墩：`尚未开始（你是本墩领出者）`
+
+4. **领出信号误判** (`llm/prompts.py`):
+   - 问题：AI把领出的小牌解读为"不欢迎信号"（如北家赢墩后领出♠4被解读为姿态信号）
+   - 修复：信号定义部分增加关键说明
+     - **信号仅适用于跟牌，领出时不存在信号！**
+     - 不能把领出的小牌解读为"不欢迎信号"
+
+**修改文件**:
+- `llm/prompts.py` — 连张定义、出牌位置策略、信号适用范围、领出者标注
+- `bridge/play_service.py` — 出牌位置计算、墩记录格式化（领出者标注、play_position变量）
+
+---
+
+### 打牌提示词重大修改
+
+**背景**:
+原打牌提示词（`PLAY_SYSTEM_PROMPT`）结构简单，缺少关键信息，AI出牌决策质量不佳。需要重新设计提示词，增强AI对牌局的理解能力。
+
+**改进**:
+
+1. **提示词全面重写** (`llm/prompts.py`):
+   - 新增模板变量：`{bidding_sequence}`（叫牌过程）、`{trick_number}`（当前墩数）、`{side}`（庄家方/防守方）、`{declarer_remaining}`（庄家还需墩数）、`{defender_remaining}`（防守方还需墩数）、`{trump_cleared}`（将牌是否清完）、`{defense_signals_section}`（防守信号体系）、`{played_cards_info}`（已见牌张与花色轮次）
+   - 新增"已见牌张与花色轮次"信息区，帮助AI推断剩余大牌位置
+   - 新增"防守信号体系约定"条件区（仅防守方出牌时提供）
+   - 新增"庄家分析逻辑"7步框架（赢墩计算→输墩计算→读防守→时效性→联通与进手→安全打法→终局打法）
+   - "推理过程"从隐含改为必须显式输出的字段
+   - 输出格式全面升级：`推理过程`、`立场分析`、`推荐出牌`、`核心逻辑`、`备选方案`（数组）、`备选逻辑差异`、`风险提示`、`后续路线建议`
+
+2. **输出Schema更新** (`llm/deepseek_client.py`):
+   - `PLAY_SCHEMA` 字段从旧格式更新为新格式
+   - 必填字段：`推理过程`、`立场分析`、`推荐出牌`、`核心逻辑`
+   - 新增字段：`备选方案`（数组类型）、`备选逻辑差异`、`风险提示`、`后续路线建议`
+
+3. **打牌服务增强** (`bridge/play_service.py`):
+   - `get_ai_play` 方法：新增6个格式变量计算和注入
+   - 新增 `_format_played_cards_info(state)`: 按花色统计已出/未见牌张，生成逐花色摘要
+   - 新增 `_check_trump_cleared(state)`: 检查将牌是否已全部清出（区分庄家方/防守方剩余将牌）
+   - 新增 `_format_defense_signals(state, current_player)`: 返回防守信号体系约定文本（姿态信号、张数信号、花色选择信号、首攻约定）
+   - 结果解析更新：适配新的字段名（`推理过程`、`立场分析`、`备选方案`、`后续路线建议`等）
+
+**修改文件**:
+- `llm/prompts.py` — 全面重写 `PLAY_SYSTEM_PROMPT`
+- `llm/deepseek_client.py` — 更新 `PLAY_SCHEMA`
+- `bridge/play_service.py` — 新增3个辅助方法，更新提示词格式化和结果解析
+
+---
+
+### 前端：移除重复的叫牌记录管理逻辑
+
+**问题**:
+`App.jsx` 中存在两处与自定义 Hook 完全重复的逻辑：
+1. `useBiddingState` hook 已抽取叫牌状态管理，但 App.jsx 未使用，直接用 `useState` 重新声明了所有状态
+2. `useBiddingRecords` hook 已抽取叫牌记录持久化管理，但 App.jsx 未使用，内联重写了所有函数
+3. `isBiddingComplete` 函数在 App.jsx 和 hook 中各有一份（App.jsx 版本更完整）
+
+**改进**:
+
+1. **App.jsx 使用 `useBiddingState` hook** 替代内联的叫牌状态声明（`biddingSequence`, `currentBidder`, `aiBiddingHistory` 等15个状态），删除 App.jsx 中的重复 `isBiddingComplete` 定义
+2. **App.jsx 使用 `useBiddingRecords` hook** 替代内联的叫牌记录管理（`biddingRecords`, `loadBiddingRecords`, `saveBiddingRecord` 等6个状态+9个函数），删除约140行重复代码
+3. **更新 `useBiddingState` hook**：
+   - `isBiddingComplete` 逻辑更新为与 App.jsx 一致的完整版本（支持3个连续pass检测）
+   - `resetBidding` 移除 `setDealer` 调用（dealer 不在 hook 管理范围），重命名为 `initBiddingState`
+   - `startBidding` 重命名为 `markBiddingStarted`（App.jsx 中的 `startBidding` 包含更多业务逻辑）
+   - `toggleStopBidding` 重命名为 `toggleStopBiddingState`
+4. **更新 `useBiddingRecords` hook**：
+   - `exportRecords` 支持无选中时导出全部记录（与 App.jsx 行为一致）
+   - `importRecords` 添加去重逻辑和文件格式校验
+   - 移除 `loadRecordToTable`（它依赖 App 级别的状态设置函数）
+5. **App.jsx 中保留的业务逻辑函数**：`startBidding`（手牌验证+完整初始化）、`resetBidding`（调用 `initBiddingState`）、`clearAllHands`、`loadRecordToTable`
+
+**修改文件**:
+- `web/src/App.jsx` — 删除约170行重复代码，使用两个 hook
+- `web/src/hooks/useBiddingState.js` — 更新逻辑匹配 App.jsx
+- `web/src/hooks/useBiddingRecords.js` — 更新逻辑匹配 App.jsx
+
+---
+
 ## 2026-04-13 (晚间)
 
 ### 打牌阶段UI优化

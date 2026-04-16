@@ -1018,6 +1018,7 @@ class PlayInitRequest(BaseModel):
     player_roles: Optional[Dict[str, str]] = None
     doubled: bool = False
     redoubled: bool = False
+    bidding_sequence: Optional[str] = None
 
 
 class PlayInitResponse(BaseModel):
@@ -1041,7 +1042,8 @@ async def play_init(request: PlayInitRequest):
             declarer=request.declarer,
             player_roles=request.player_roles,
             doubled=request.doubled,
-            redoubled=request.redoubled
+            redoubled=request.redoubled,
+            bidding_sequence=request.bidding_sequence or "未提供"
         )
         
         return PlayInitResponse(
@@ -1135,6 +1137,10 @@ class PlayAIResponse(BaseModel):
     card: Optional[dict] = None
     reasoning: Optional[str] = None
     analysis: Optional[str] = None
+    risk: Optional[str] = None
+    follow_up: Optional[str] = None
+    full_output: Optional[dict] = None
+    prompt: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -1158,7 +1164,11 @@ async def ai_play(request: PlayAIRequest):
                     success=success,
                     card=result["card"],
                     reasoning=result.get("reasoning"),
-                    analysis=result.get("analysis")
+                    analysis=result.get("analysis"),
+                    risk=result.get("risk"),
+                    follow_up=result.get("follow_up"),
+                    full_output=result.get("full_output"),
+                    prompt=result.get("prompt"),
                 )
             else:
                 return PlayAIResponse(

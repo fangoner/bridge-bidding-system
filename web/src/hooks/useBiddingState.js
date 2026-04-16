@@ -20,13 +20,31 @@ function useBiddingState() {
 
   const isBiddingComplete = useCallback(() => {
     if (biddingSequence.length < 4) return false
-    
+
+    // 检查最后四个是否都是pass
     const lastFour = biddingSequence.slice(-4)
-    return lastFour.every(bid => bid.bid === 'pass')
+    if (lastFour.length === 4 && lastFour.every(b => b.bid === 'pass')) {
+      return true
+    }
+
+    // 检查是否有3个连续的pass在第一个实质性叫品之后
+    let hasRealBid = false
+    for (let i = 0; i < biddingSequence.length; i++) {
+      if (biddingSequence[i].bid !== 'pass') {
+        hasRealBid = true
+      }
+      if (hasRealBid && i >= 2) {
+        const lastThree = biddingSequence.slice(i - 2, i + 1)
+        if (lastThree.every(b => b.bid === 'pass')) {
+          return true
+        }
+      }
+    }
+
+    return false
   }, [biddingSequence])
 
-  const resetBidding = useCallback((newDealer) => {
-    setDealer(newDealer)
+  const initBiddingState = useCallback((newDealer) => {
     setCurrentBidder(newDealer)
     setBiddingStarted(false)
     setStopBidding(false)
@@ -42,11 +60,11 @@ function useBiddingState() {
     setSelectedBiddingIndex(-1)
   }, [])
 
-  const toggleStopBidding = useCallback(() => {
+  const toggleStopBiddingState = useCallback(() => {
     setStopBidding(prev => !prev)
   }, [])
 
-  const startBidding = useCallback(() => {
+  const markBiddingStarted = useCallback(() => {
     setBiddingStarted(true)
     setIsNewDeal(false)
     setBiddingStartTime(Date.now())
@@ -86,9 +104,9 @@ function useBiddingState() {
     suggestionLoading,
     setSuggestionLoading,
     isBiddingComplete,
-    resetBidding,
-    toggleStopBidding,
-    startBidding,
+    initBiddingState,
+    toggleStopBiddingState,
+    markBiddingStarted,
   }
 }
 

@@ -101,13 +101,14 @@ HUMAN_BID_SCHEMA = {
 PLAY_SCHEMA = {
     "type": "object",
     "properties": {
-        "局面分析": {"type": "string"},
-        "可选牌张": {"type": "string"},
+        "推理过程": {"type": "string"},
+        "立场分析": {"type": "string"},
         "推荐出牌": {"type": "string"},
-        "理由": {"type": "string"},
-        "风险提示": {"type": "string"}
+        "核心逻辑": {"type": "string"},
+        "风险提示": {"type": "string"},
+        "后续路线建议": {"type": "string"}
     },
-    "required": ["局面分析", "可选牌张", "推荐出牌", "理由"]
+    "required": ["推理过程", "立场分析", "推荐出牌", "核心逻辑"]
 }
 
 

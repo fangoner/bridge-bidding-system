@@ -13,6 +13,8 @@ function CardTablePanel({
   setShowPartnerHand,
   showAIHands,
   setShowAIHands,
+  showDeclarerHand,
+  setShowDeclarerHand,
   showOpponentHands,
   getPartnerPosition,
   biddingSequence,
@@ -44,6 +46,9 @@ function CardTablePanel({
   aiLoading,
   showPlayedCards,
   setShowPlayedCards,
+  playCenterView,
+  setPlayCenterView,
+  aiBiddingHistory,
 }) {
   return (
     <Paper elevation={3} sx={{ 
@@ -93,21 +98,25 @@ function CardTablePanel({
           )}
           {showPlayPanel && (
             <ToggleButtonGroup
-              value={showDoubleDummy ? 'result' : 'play'}
+              value={playCenterView || 'play'}
               exclusive
               onChange={(e, newValue) => {
                 if (newValue !== null) {
+                  setPlayCenterView(newValue)
                   toggleDoubleDummy(newValue === 'result')
                 }
               }}
               size="small"
               sx={{ height: 24 }}
             >
-              <ToggleButton value="play" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 50 }}>
+              <ToggleButton value="play" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 40 }}>
                 出牌状态
               </ToggleButton>
-              <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 50 }}>
-                双明手
+              <ToggleButton value="bidding" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 40 }}>
+                叫牌过程
+              </ToggleButton>
+              <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 40 }}>
+                小房子
               </ToggleButton>
             </ToggleButtonGroup>
           )}
@@ -144,6 +153,19 @@ function CardTablePanel({
             <FormControlLabel
               control={
                 <Checkbox
+                  checked={showDeclarerHand}
+                  onChange={(e) => setShowDeclarerHand(e.target.checked)}
+                  size="small"
+                />
+              }
+              label="庄家手牌"
+              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
+            />
+          )}
+          {showPlayPanel && (
+            <FormControlLabel
+              control={
+                <Checkbox
                   checked={showPlayedCards}
                   onChange={(e) => setShowPlayedCards(e.target.checked)}
                   size="small"
@@ -171,6 +193,7 @@ function CardTablePanel({
           gameMode={gameMode}
           showPartnerHand={showPartnerHand}
           showAIHands={showAIHands}
+          showDeclarerHand={showDeclarerHand}
           showOpponentHands={showOpponentHands}
           getPartnerPosition={getPartnerPosition}
           renderBiddingTable={() => <BiddingTable biddingSequence={biddingSequence} dealer={dealer} />}
@@ -199,6 +222,8 @@ function CardTablePanel({
           isPlayPaused={isPlayPaused}
           aiLoading={aiLoading}
           showPlayedCards={showPlayedCards}
+          playCenterView={playCenterView}
+          aiBiddingHistory={aiBiddingHistory}
         />
       </Box>
     </Paper>
