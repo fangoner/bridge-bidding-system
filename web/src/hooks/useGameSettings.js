@@ -3,6 +3,7 @@ import { getFallbackModel, setFallbackModel, getAIProvider, setAIProvider } from
 
 const COLOR_SCHEME_KEY = 'bridge_color_scheme'
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
+const PLAY_MODEL_KEY = 'bridge_play_model'
 
 function useGameSettings(colorSchemes, defaultScheme) {
   const [gameMode, setGameMode] = useState('four')
@@ -51,6 +52,15 @@ function useGameSettings(colorSchemes, defaultScheme) {
     }
   })
 
+  const [playModel, setPlayModelState] = useState(() => {
+    try {
+      const saved = localStorage.getItem(PLAY_MODEL_KEY)
+      return saved || 'deepseek-chat'
+    } catch {
+      return 'deepseek-chat'
+    }
+  })
+
   const handleColorSchemeChange = useCallback((event) => {
     const newScheme = event.target.value
     setColorSchemeKey(newScheme)
@@ -93,6 +103,12 @@ function useGameSettings(colorSchemes, defaultScheme) {
     } catch (err) {
       console.error('设置AI提供商失败:', err)
     }
+  }, [])
+
+  const handlePlayModelChange = useCallback((event) => {
+    const newModel = event.target.value
+    setPlayModelState(newModel)
+    localStorage.setItem(PLAY_MODEL_KEY, newModel)
   }, [])
 
   const getPartnerPosition = useCallback((position) => {
@@ -157,11 +173,13 @@ function useGameSettings(colorSchemes, defaultScheme) {
     setFallbackModelState,
     aiProvider,
     setAIProviderState,
+    playModel,
     handleColorSchemeChange,
     syncFallbackModel,
     syncAIProvider,
     handleFallbackModelChange,
     handleAIProviderChange,
+    handlePlayModelChange,
     getPartnerPosition,
     handlePositionRoleChange,
   }

@@ -148,6 +148,16 @@ function App() {
       return 'deepseek'
     }
   })
+
+  const PLAY_MODEL_KEY = 'bridge_play_model'
+  const [playModel, setPlayModelState] = useState(() => {
+    try {
+      const saved = localStorage.getItem(PLAY_MODEL_KEY)
+      return saved || 'deepseek-chat'
+    } catch {
+      return 'deepseek-chat'
+    }
+  })
   
   // 更多输出格式
   const [showMoreFormats, setShowMoreFormats] = useState(false) // 显示更多格式
@@ -246,6 +256,12 @@ function App() {
     } catch (err) {
       console.error('设置AI提供商失败:', err)
     }
+  }
+
+  const handlePlayModelChange = (event) => {
+    const newModel = event.target.value
+    setPlayModelState(newModel)
+    localStorage.setItem(PLAY_MODEL_KEY, newModel)
   }
 
   const checkApiStatus = async () => {
@@ -1172,7 +1188,8 @@ function App() {
     setError(null)
     
     try {
-      const result = await aiPlay()
+      const result = await aiPlay(playModel)
+      console.log('[AI Play] playModel:', playModel, 'used_model:', result.used_model)
       
       if (result.success) {
         const aiRecord = {
@@ -1184,6 +1201,7 @@ function App() {
           follow_up: result.follow_up,
           full_output: result.full_output,
           prompt: result.prompt,
+          used_model: result.used_model,
           timestamp: new Date().toLocaleTimeString(),
         }
         setAiPlayHistory(prev => [...prev, aiRecord])
@@ -1477,6 +1495,8 @@ function App() {
         handleAIProviderChange={handleAIProviderChange}
         fallbackModel={fallbackModel}
         handleFallbackModelChange={handleFallbackModelChange}
+        playModel={playModel}
+        handlePlayModelChange={handlePlayModelChange}
         dealSystem={dealSystem}
         setDealSystem={setDealSystem}
         dealMode={dealMode}

@@ -286,11 +286,19 @@ export const playCard = async (position, card) => {
 };
 
 // AI出牌
-export const aiPlay = async (useReasoning = true) => {
+export const aiPlay = async (playModel = null) => {
   try {
-    const response = await api.post('/api/play/ai-play', {
-      use_reasoning: useReasoning,
-    });
+    const requestData = {
+      use_reasoning: playModel === 'deepseek-reasoner',
+    };
+    
+    if (playModel) {
+      requestData.play_model = playModel;
+    }
+    
+    // Reasoner模型需要更长超时（5分钟），Chat模型2分钟
+    const timeout = playModel === 'deepseek-reasoner' ? 300000 : 120000;
+    const response = await api.post('/api/play/ai-play', requestData, { timeout });
     return response.data;
   } catch (error) {
     console.error('AI出牌失败:', error);

@@ -8,6 +8,8 @@ function SettingsPanel({
   handleAIProviderChange,
   fallbackModel,
   handleFallbackModelChange,
+  playModel,
+  handlePlayModelChange,
   dealSystem,
   setDealSystem,
   dealMode,
@@ -58,6 +60,23 @@ function SettingsPanel({
               <Select value={dealSystem} label="阻击叫牌体系" onChange={(e) => setDealSystem(e.target.value)}>
                 <MenuItem value="2D/2H/2S：自然阻击">2D/2H/2S：自然阻击</MenuItem>
                 <MenuItem value="2D：多功能，2H/S：麦德伯格，2NT：双低花">多功能/麦德伯格</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
+        </Box>
+
+        <Divider orientation="vertical" flexItem sx={{ borderColor: 'rgba(0, 0, 0, 0.2)' }} />
+
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Typography variant="h6">
+            打牌设置
+          </Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
+            <FormControl sx={{ minWidth: 160 }} size="small">
+              <InputLabel>打牌模型</InputLabel>
+              <Select value={playModel} label="打牌模型" onChange={handlePlayModelChange}>
+                <MenuItem value="deepseek-chat">Chat(快)</MenuItem>
+                <MenuItem value="deepseek-reasoner">Reasoner(准)</MenuItem>
               </Select>
             </FormControl>
           </Box>

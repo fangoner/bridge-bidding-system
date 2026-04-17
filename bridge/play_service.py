@@ -3,7 +3,7 @@ from typing import Optional, Dict, List, Any
 
 from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER, PARTNERS
 from bridge.play_engine import PlayEngine
-from llm.prompts import PLAY_SYSTEM_PROMPT, DEFENSE_SIGNALS_SECTION, DECLARER_ANALYSIS_FRAMEWORK, DEFENDER_ANALYSIS_FRAMEWORK
+from llm.prompts import PLAY_COMMON_RULES, PLAY_COMMON_SITUATION, PLAY_DECLARER_PROMPT, PLAY_DEFENDER_PROMPT
 
 
 class PlayService:
@@ -94,12 +94,6 @@ class PlayService:
         # 判断将牌是否已清完
         trump_cleared = self._check_trump_cleared(state)
         
-        # 防守信号（仅防守方出牌时提供）
-        defense_signals_section = self._format_defense_signals(state, current_player) if not is_declarer_side else ""
-        
-        # 分析框架（根据出牌方选择）
-        analysis_framework_section = self._format_analysis_framework(is_declarer_side)
-        
         # 当前墩数
         trick_number = len(state.tricks) + 1
         
@@ -108,7 +102,8 @@ class PlayService:
         play_position = current_trick_count + 1  # 第1家=领出，第2/3/4家=跟牌
         remaining_players = 4 - play_position  # 你之后还有几家未出牌
         
-        prompt = PLAY_SYSTEM_PROMPT.format(
+        # 公共局面信息
+        common_situation = PLAY_COMMON_SITUATION.format(
             contract=str(state.contract),
             bidding_sequence=state.bidding_sequence,
             declarer=state.contract.declarer,
@@ -129,9 +124,23 @@ class PlayService:
             declarer_remaining=declarer_remaining,
             defender_remaining=defender_remaining,
             trump_cleared=trump_cleared,
-            defense_signals_section=defense_signals_section,
-            analysis_framework_section=analysis_framework_section,
         )
+        
+        # 根据角色选择不同提示词模板
+        if is_declarer_side:
+            prompt = PLAY_DECLARER_PROMPT.format(
+                common_rules=PLAY_COMMON_RULES,
+                play_position=play_position,
+                current_trick_count=current_trick_count,
+                common_situation=common_situation,
+            )
+        else:
+            prompt = PLAY_DEFENDER_PROMPT.format(
+                common_rules=PLAY_COMMON_RULES,
+                play_position=play_position,
+                current_trick_count=current_trick_count,
+                common_situation=common_situation,
+            )
         
         try:
             result = self.llm_client.chat_play(prompt)
@@ -312,17 +321,6 @@ class PlayService:
             return "庄家方仍有将牌"
         else:
             return "否"
-    
-    def _format_defense_signals(self, state: PlayState, current_player: str) -> str:
-        """格式化防守信号体系约定（仅防守方出牌时提供）"""
-        return DEFENSE_SIGNALS_SECTION
-    
-    def _format_analysis_framework(self, is_declarer_side: bool) -> str:
-        """根据出牌方返回对应的分析框架"""
-        if is_declarer_side:
-            return DECLARER_ANALYSIS_FRAMEWORK
-        else:
-            return DEFENDER_ANALYSIS_FRAMEWORK
     
     def _parse_card_from_str(self, card_str: str, playable: List[Card]) -> Optional[Card]:
         if not card_str:

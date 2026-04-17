@@ -1130,6 +1130,7 @@ async def play_card(request: PlayCardRequest):
 
 class PlayAIRequest(BaseModel):
     use_reasoning: bool = True
+    play_model: Optional[str] = None
 
 
 class PlayAIResponse(BaseModel):
@@ -1141,6 +1142,7 @@ class PlayAIResponse(BaseModel):
     follow_up: Optional[str] = None
     full_output: Optional[dict] = None
     prompt: Optional[str] = None
+    used_model: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -1150,36 +1152,52 @@ async def ai_play(request: PlayAIRequest):
     try:
         service = get_play_service()
         
-        if not service.is_human_turn():
-            result = await service.get_ai_play(use_reasoning=request.use_reasoning)
-            
-            if result.get("card"):
-                card = Card(suit=result["card"]["suit"], rank=result["card"]["rank"])
-                current_player = service.get_current_player()
-                reason = result.get("reasoning", "")
-                risk = result.get("risk", "")
-                success, message = service.play_card(current_player, card, is_ai=True, reason=reason, risk=risk)
+        # 临时切换打牌模型（不影响叫牌模型）
+        original_model = None
+        actual_model = llm_client.model
+        if request.play_model and request.play_model in ["deepseek-chat", "deepseek-reasoner"]:
+            original_model = llm_client.model
+            llm_client.model = request.play_model
+            actual_model = request.play_model
+        
+        try:
+            if not service.is_human_turn():
+                result = await service.get_ai_play(use_reasoning=request.use_reasoning)
                 
-                return PlayAIResponse(
-                    success=success,
-                    card=result["card"],
-                    reasoning=result.get("reasoning"),
-                    analysis=result.get("analysis"),
-                    risk=result.get("risk"),
-                    follow_up=result.get("follow_up"),
-                    full_output=result.get("full_output"),
-                    prompt=result.get("prompt"),
-                )
+                if result.get("card"):
+                    card = Card(suit=result["card"]["suit"], rank=result["card"]["rank"])
+                    current_player = service.get_current_player()
+                    reason = result.get("reasoning", "")
+                    risk = result.get("risk", "")
+                    success, message = service.play_card(current_player, card, is_ai=True, reason=reason, risk=risk)
+                    
+                    return PlayAIResponse(
+                        success=success,
+                        card=result["card"],
+                        reasoning=result.get("reasoning"),
+                        analysis=result.get("analysis"),
+                        risk=result.get("risk"),
+                        follow_up=result.get("follow_up"),
+                        full_output=result.get("full_output"),
+                        prompt=result.get("prompt"),
+                        used_model=actual_model,
+                    )
+                else:
+                    return PlayAIResponse(
+                        success=False,
+                        used_model=actual_model,
+                        error=result.get("error", "AI无法选择出牌")
+                    )
             else:
                 return PlayAIResponse(
                     success=False,
-                    error=result.get("error", "AI无法选择出牌")
+                    used_model=actual_model,
+                    error="当前是人类玩家回合"
                 )
-        else:
-            return PlayAIResponse(
-                success=False,
-                error="当前是人类玩家回合"
-            )
+        finally:
+            # 恢复原始模型
+            if original_model:
+                llm_client.model = original_model
     except Exception as e:
         print(f"[ERROR] AI出牌失败: {str(e)}")
         traceback.print_exc()

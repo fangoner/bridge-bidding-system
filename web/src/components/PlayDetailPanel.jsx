@@ -83,6 +83,11 @@ function PlayDetailPanel({
           <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#1976d2', fontSize: '0.85rem' }}>
             {record.position}家 - {record.card?.suit}{record.card?.rank}
           </Typography>
+          {record.used_model && (
+            <Typography variant="caption" sx={{ color: '#888', fontSize: '0.7rem' }}>
+              {record.used_model === 'deepseek-reasoner' ? 'Reasoner' : 'Chat'}
+            </Typography>
+          )}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <ToggleButtonGroup
               value={viewMode}
