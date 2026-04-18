@@ -1,6 +1,53 @@
 # 开发日志
 
-## 2026-04-15
+## 2026-04-18
+
+### 打牌系统多项增强与Bug修复
+
+**背景**:
+打牌模块存在多个关键Bug和体验问题，包括将牌将吃无法识别赢墩、全局规划字段缺失、有将/无将策略未区分、出牌交互不佳等。
+
+**Bug修复**:
+
+1. **将牌将吃无法识别赢墩** (`bridge/play_types.py`):
+   - 问题：`Contract.from_str()` 解析定约字符串时 `suit` 保存为英文代码（如 `H`），但 `Card.suit` 使用中文符号（如 `♥`），导致 `Trick.winner()` 中 `card.suit == self.trump` 永远为 `False`
+   - 影响：将牌将吃不会被识别为赢墩，将牌相关逻辑全部失效（清将判断、跟花色判断等）
+   - 修复：在 `Contract.from_str()` 中将英文花色代码 `S/H/D/C` 转换为中文符号 `♠/♥/♦/♣`，与 `Card.suit` 保持一致
+
+**功能增强**:
+
+2. **全局规划字段显示** (`web/src/components/PlayDetailPanel.jsx`):
+   - 问题：前端输出字段列表缺少"全局规划"字段
+   - 修复：在 `fields` 数组中添加"全局规划"字段（青色 `#00838f`，多行显示），"后续路线建议"也改为多行显示
+
+3. **有将定约数输墩 vs 无将定约数赢墩** (`llm/prompts.py`):
+   - 将"计算赢墩与失墩"部分分为两种模式：
+   - **有将定约**：按输墩评估清单5步（逐花色输墩→汇总对比→消除手段扫描→清将时机→安全验证）
+   - **无将定约**：按赢墩规划五问（快速赢墩→哪个花色补足→危险方→忍让策略→后备方案）
+   - 输出格式"全局规划"字段同步分为有将/无将两种模板
+
+4. **打牌按钮交互重构** (`web/src/App.jsx`, `web/src/components/PlayDetailPanel.jsx`, `web/src/components/BiddingDetailPanel.jsx`):
+   - 叫牌面板"开始打牌"按钮改名为"切换到打牌"
+   - 点击"切换到打牌"后只切换到打牌状态，不自动开始
+   - 打牌面板新增开始/暂停/继续三态按钮（第一张牌打出后显示暂停）
+   - 重新打牌按钮从顶部移到开始/暂停/继续旁边，右对齐，统一 `outlined` 风格
+   - 打牌结束后隐藏开始/暂停/继续按钮，只保留重新打牌
+   - 新增 `playInitiated` 状态区分"已点击开始"和"已出第一张牌"
+   - 重新打牌后不再切回叫牌界面，AI首攻则自动开始，人类首攻则等待出牌
+
+5. **人类出牌交互优化** (`web/src/components/PlayDetailPanel.jsx`):
+   - 取消"出牌"确认按钮
+   - 第一次点击牌选中，再次点击同一张牌确认出牌
+   - 提示文字动态显示"点击选择"或"再次点击确认"
+
+**修改文件**:
+- `bridge/play_types.py` — Contract.from_str() 花色代码转中文符号
+- `llm/prompts.py` — 有将/无将策略分离、输墩评估清单、赢墩规划五问
+- `web/src/App.jsx` — playInitiated 状态、handleResetPlay 重构、按钮逻辑
+- `web/src/components/PlayDetailPanel.jsx` — 全局规划字段、按钮三态、出牌交互
+- `web/src/components/BiddingDetailPanel.jsx` — "切换到打牌"按钮改名
+
+---
 
 ### 打牌提示词准确性加强
 

@@ -1137,8 +1137,6 @@ class PlayAIResponse(BaseModel):
     success: bool
     card: Optional[dict] = None
     reasoning: Optional[str] = None
-    analysis: Optional[str] = None
-    risk: Optional[str] = None
     follow_up: Optional[str] = None
     full_output: Optional[dict] = None
     prompt: Optional[str] = None
@@ -1168,15 +1166,12 @@ async def ai_play(request: PlayAIRequest):
                     card = Card(suit=result["card"]["suit"], rank=result["card"]["rank"])
                     current_player = service.get_current_player()
                     reason = result.get("reasoning", "")
-                    risk = result.get("risk", "")
-                    success, message = service.play_card(current_player, card, is_ai=True, reason=reason, risk=risk)
+                    success, message = service.play_card(current_player, card, is_ai=True, reason=reason)
                     
                     return PlayAIResponse(
                         success=success,
                         card=result["card"],
                         reasoning=result.get("reasoning"),
-                        analysis=result.get("analysis"),
-                        risk=result.get("risk"),
                         follow_up=result.get("follow_up"),
                         full_output=result.get("full_output"),
                         prompt=result.get("prompt"),

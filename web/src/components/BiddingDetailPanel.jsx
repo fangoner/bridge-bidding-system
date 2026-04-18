@@ -248,7 +248,7 @@ function BiddingDetailPanel({
               disabled={playLoading}
               sx={{ mt: 1 }}
             >
-              {playLoading ? <CircularProgress size={24} /> : '开始打牌'}
+              {playLoading ? <CircularProgress size={24} /> : '切换到打牌'}
             </Button>
           </>
         )}

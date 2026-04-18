@@ -141,7 +141,11 @@ class Contract:
         
         level = int(contract_str[0])
         suit = contract_str[1]
-        if suit == "N":
+        # 将英文花色代码转换为中文符号，与Card.suit保持一致
+        suit_map = {"S": "♠", "H": "♥", "D": "♦", "C": "♣"}
+        if suit in suit_map:
+            suit = suit_map[suit]
+        elif suit == "N":
             suit = "NT"
         
         return cls(level=level, suit=suit, declarer=declarer, doubled=doubled, redoubled=redoubled)

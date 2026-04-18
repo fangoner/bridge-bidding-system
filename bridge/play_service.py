@@ -11,6 +11,12 @@ class PlayService:
     def __init__(self, llm_client):
         self.llm_client = llm_client
         self.engine = PlayEngine()
+        # 做庄计划：庄家和明手之间共享传递
+        self.declarer_plan = ""
+        # 做庄全局规划：明手摊牌后首次出牌时生成，贯穿整个打牌过程
+        self.declarer_global_plan = ""
+        # 防守计划：每个防守者各自维护，key=位置
+        self.defender_plans = {}
     
     def initialize(
         self,
@@ -27,6 +33,11 @@ class PlayService:
         contract = Contract.from_str(contract_str, declarer)
         contract.doubled = doubled
         contract.redoubled = redoubled
+        
+        # 重置做庄和防守计划
+        self.declarer_plan = ""
+        self.declarer_global_plan = ""
+        self.defender_plans = {}
         
         return self.engine.initialize(hands, contract, player_roles, bidding_sequence)
     
@@ -126,6 +137,18 @@ class PlayService:
             trump_cleared=trump_cleared,
         )
         
+        # 获取上一轮计划
+        if is_declarer_side:
+            parts = []
+            if self.declarer_global_plan:
+                parts.append(f"## 全局规划（明手摊牌后制定，贯穿全程）\n{self.declarer_global_plan}")
+            if self.declarer_plan:
+                parts.append(f"## 上一轮做庄进度与调整\n{self.declarer_plan}")
+            previous_plan = "\n\n".join(parts) if parts else "（首轮出牌，尚无做庄计划）"
+        else:
+            prev = self.defender_plans.get(current_player, "")
+            previous_plan = f"## 上一轮防守计划\n{prev}" if prev else "（首次出牌，尚无防守计划）"
+        
         # 根据角色选择不同提示词模板
         if is_declarer_side:
             prompt = PLAY_DECLARER_PROMPT.format(
@@ -133,6 +156,7 @@ class PlayService:
                 play_position=play_position,
                 current_trick_count=current_trick_count,
                 common_situation=common_situation,
+                previous_plan=previous_plan,
             )
         else:
             prompt = PLAY_DEFENDER_PROMPT.format(
@@ -140,6 +164,7 @@ class PlayService:
                 play_position=play_position,
                 current_trick_count=current_trick_count,
                 common_situation=common_situation,
+                previous_plan=previous_plan,
             )
         
         try:
@@ -163,24 +188,23 @@ class PlayService:
                 result.get("reasoning") or 
                 ""
             )
-            analysis = (
-                result.get("立场分析") or
-                result.get("局面分析") or 
-                result.get("analysis") or 
-                ""
-            )
-            risk = (
-                result.get("风险提示") or 
-                result.get("risk") or 
-                ""
-            )
             follow_up = result.get("后续路线建议", "")
+            
+            # 保存全局规划（仅首次出牌时AI会输出此字段）
+            global_plan = result.get("全局规划", "")
+            if global_plan and is_declarer_side and not self.declarer_global_plan:
+                self.declarer_global_plan = global_plan
+            
+            # 保存后续路线建议作为下一轮计划
+            if follow_up:
+                if is_declarer_side:
+                    self.declarer_plan = follow_up
+                else:
+                    self.defender_plans[current_player] = follow_up
             
             return {
                 "card": card.to_dict() if card else None,
                 "reasoning": reasoning,
-                "analysis": analysis,
-                "risk": risk,
                 "follow_up": follow_up,
                 "full_output": result,
                 "prompt": prompt

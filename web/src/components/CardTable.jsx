@@ -43,6 +43,7 @@ function CardTable({
   showPlayedCards = false,
   playCenterView = 'play',
   aiBiddingHistory = [],
+  onPlayCardClick,
 }) {
   const [handInputs, setHandInputs] = useState({
     '南': '',
@@ -446,19 +447,26 @@ function CardTable({
       }
       
       const color = SUIT_COLORS[card.suit] || '#000'
+      const canClick = onPlayCardClick
       
       return (
-        <Box sx={{
-          width: 44,
-          height: 60,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          bgcolor: '#fff',
-          border: '1px solid #ddd',
-          borderRadius: 1,
-          boxShadow: 1,
-        }}>
+        <Box
+          onClick={() => canClick && onPlayCardClick(position, card)}
+          sx={{
+            width: 44,
+            height: 60,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            bgcolor: '#fff',
+            border: '1px solid #ddd',
+            borderRadius: 1,
+            boxShadow: 1,
+            cursor: canClick ? 'pointer' : 'default',
+            transition: 'all 0.15s',
+            '&:hover': canClick ? { bgcolor: '#e3f2fd', transform: 'scale(1.05)' } : {},
+          }}
+        >
           <Typography sx={{ color, fontWeight: 'bold', fontSize: '1.1rem' }}>
             {card.suit}{card.rank}
           </Typography>

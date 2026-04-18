@@ -49,6 +49,7 @@ function CardTablePanel({
   playCenterView,
   setPlayCenterView,
   aiBiddingHistory,
+  onPlayCardClick,
 }) {
   return (
     <Paper elevation={3} sx={{ 
@@ -224,6 +225,7 @@ function CardTablePanel({
           showPlayedCards={showPlayedCards}
           playCenterView={playCenterView}
           aiBiddingHistory={aiBiddingHistory}
+          onPlayCardClick={onPlayCardClick}
         />
       </Box>
     </Paper>

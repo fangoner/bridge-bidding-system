@@ -15,6 +15,12 @@ function PlayDetailPanel({
   onResume,
   onResetPlay,
   height = '680px',
+  externalSelectedRecord,
+  onClearExternalRecord,
+  playStarted,
+  onBeginPlay,
+  onPausePlay,
+  playInitiated,
 }) {
   const [selectedRecord, setSelectedRecord] = useState(null)
   const [viewMode, setViewMode] = useState('output')  // 'output' or 'input'
@@ -51,7 +57,7 @@ function PlayDetailPanel({
   const playableCards = getPlayableCards()
 
   // 渲染AI输出卡片的通用组件
-  const renderAIOutputCard = (record, showClose = false) => {
+  const renderAIOutputCard = (record, showClose = false, onCloseExternal = null) => {
     if (!record) {
       return (
         <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 2 }}>
@@ -68,8 +74,9 @@ function PlayDetailPanel({
       { key: '推理过程', label: '推理过程', color: 'text.primary', multiline: true },
       { key: '立场分析', label: '立场分析', color: '#1976d2' },
       { key: '核心逻辑', label: '核心逻辑', color: '#2e7d32' },
+      { key: '全局规划', label: '全局规划', color: '#00838f', multiline: true },
       { key: '风险提示', label: '风险提示', color: '#ed6c02' },
-      { key: '后续路线建议', label: '后续路线', color: '#7b1fa2' },
+      { key: '后续路线建议', label: '后续路线', color: '#7b1fa2', multiline: true },
     ]
 
     // 兼容旧字段名
@@ -100,7 +107,10 @@ function PlayDetailPanel({
               <ToggleButton value="input" sx={{ textTransform: 'none' }}>输入</ToggleButton>
             </ToggleButtonGroup>
             {showClose && (
-              <Button size="small" onClick={() => setSelectedRecord(null)}>关闭</Button>
+              <Button size="small" onClick={() => {
+                setSelectedRecord(null)
+                if (onCloseExternal) onCloseExternal()
+              }}>关闭</Button>
             )}
           </Box>
         </Box>
@@ -157,6 +167,11 @@ function PlayDetailPanel({
   }
 
   const renderAIOutput = () => {
+    // 优先使用外部传入的记录（桌面点击的牌）
+    if (externalSelectedRecord) {
+      return renderAIOutputCard(externalSelectedRecord, true, onClearExternalRecord)
+    }
+
     if (!isPaused) {
       const latestRecord = aiPlayHistory?.[aiPlayHistory.length - 1]
       return renderAIOutputCard(latestRecord || null)
@@ -199,7 +214,13 @@ function PlayDetailPanel({
       const isPlayable = playableCards.some(
         c => c.suit === card.suit && c.rank === card.rank
       )
-      if (isPlayable) {
+      if (!isPlayable) return
+
+      // 如果点击的是已选中的牌，确认出牌
+      if (selectedCard?.suit === card.suit && selectedCard?.rank === card.rank) {
+        onConfirmPlay()
+      } else {
+        // 否则选中该牌
         onCardSelect(card)
       }
     }
@@ -207,7 +228,7 @@ function PlayDetailPanel({
     return (
       <Box>
         <Typography variant="subtitle2" gutterBottom sx={{ fontSize: '0.85rem' }}>
-          {currentPlayer}家出牌 (点击选择)
+          {currentPlayer}家出牌 {selectedCard ? '(再次点击确认)' : '(点击选择)'}
         </Typography>
         <Paper sx={{ 
           p: 0.5, 
@@ -253,18 +274,6 @@ function PlayDetailPanel({
             })}
           </Box>
         </Paper>
-        <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={onConfirmPlay}
-            disabled={!selectedCard || loading || aiLoading}
-            size="small"
-          >
-            出牌 {selectedCard ? `${selectedCard.suit}${selectedCard.rank}` : ''}
-          </Button>
-          {(loading || aiLoading) && <CircularProgress size={16} />}
-        </Box>
       </Box>
     )
   }
@@ -311,7 +320,12 @@ function PlayDetailPanel({
               return (
                 <Box 
                   key={pos}
-                  onClick={() => canClick && setSelectedRecord(aiRecord)}
+                  onClick={() => {
+                    if (canClick) {
+                      setSelectedRecord(aiRecord)
+                      if (onClearExternalRecord) onClearExternalRecord()
+                    }
+                  }}
                   sx={{ 
                     display: 'flex', 
                     alignItems: 'center', 
@@ -384,17 +398,6 @@ function PlayDetailPanel({
               sx={{ fontSize: '0.75rem' }}
             />
           )}
-          {onResetPlay && (
-            <Button
-              variant="outlined"
-              color="warning"
-              size="small"
-              onClick={onResetPlay}
-              sx={{ fontSize: '0.7rem', py: 0.2, px: 1, minWidth: 'auto', textTransform: 'none' }}
-            >
-              重新打牌
-            </Button>
-          )}
         </Box>
       </Box>
 
@@ -412,16 +415,53 @@ function PlayDetailPanel({
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>需要</Typography>
             <Typography variant="body2" fontWeight="bold">{contract?.tricks_needed || '?'}</Typography>
           </Paper>
-          {isPaused && onResume && (
-            <Button
-              variant="contained"
-              color="primary"
-              onClick={onResume}
-              size="small"
-            >
-              继续
-            </Button>
-          )}
+          {/* 开始/暂停/继续 + 重新打牌按钮，右对齐 */}
+          <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', ml: 'auto' }}>
+            {!isComplete && !playInitiated && (
+              <Button
+                variant="outlined"
+                color="success"
+                onClick={onBeginPlay}
+                size="small"
+                sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+              >
+                开始
+              </Button>
+            )}
+            {!isComplete && playStarted && isPaused && (
+              <Button
+                variant="outlined"
+                color="primary"
+                onClick={onResume}
+                size="small"
+                sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+              >
+                继续
+              </Button>
+            )}
+            {!isComplete && playStarted && !isPaused && (
+              <Button
+                variant="outlined"
+                color="warning"
+                onClick={onPausePlay}
+                size="small"
+                sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+              >
+                暂停
+              </Button>
+            )}
+            {onResetPlay && (
+              <Button
+                variant="outlined"
+                color="error"
+                size="small"
+                onClick={onResetPlay}
+                sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+              >
+                重新打牌
+              </Button>
+            )}
+          </Box>
         </Box>
 
         <Box sx={{ flex: 2, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>

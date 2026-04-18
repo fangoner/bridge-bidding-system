@@ -206,6 +206,9 @@ function App() {
   const [lastCompletedTrick, setLastCompletedTrick] = useState(null) // 暂停时保存的上一墩
   const [aiPlayHistory, setAiPlayHistory] = useState([]) // AI打牌历史记录
   const [selectedPlayCard, setSelectedPlayCard] = useState(null) // 选中的出牌
+  const [selectedPlayRecord, setSelectedPlayRecord] = useState(null) // 桌面点击选中的AI打牌记录
+  const [playStarted, setPlayStarted] = useState(false) // 打牌是否已开始（第一张牌打出后）
+  const [playInitiated, setPlayInitiated] = useState(false) // 打牌是否已启动（点击"开始"后或重新打牌AI首攻）
   const prevTricksCountRef = useRef(0) // 用于检测一墩完成
 
   // 检查API状态
@@ -600,6 +603,8 @@ function App() {
     setAiPlayHistory([])
     setSelectedPlayCard(null)
     setIsPlayPaused(false)
+    setPlayStarted(false)
+    setPlayInitiated(false)
   }
 
   // 切换停止/继续叫牌
@@ -1114,6 +1119,8 @@ function App() {
     setPlayLoading(true)
     setError(null)
     setIsPlayPaused(false) // 重置暂停状态
+    setPlayStarted(false) // 初始化为未开始，第一张牌打出后才变为暂停按钮
+    setPlayInitiated(false) // 初始化为未启动，等用户点击"开始"才启动
     prevTricksCountRef.current = 0 // 重置墩数计数器
     
     // 构建包含叫牌含义的叫牌历史字符串
@@ -1167,6 +1174,7 @@ function App() {
       if (result.success) {
         console.log('[DEBUG handlePlayCard] result.state.current_trick:', result.state.current_trick)
         setPlayState(result.state)
+        setPlayStarted(true) // 人类出牌后标记打牌已开始，按钮变为暂停
         
         if (result.is_complete && result.result) {
           console.log('打牌结束:', result.result)
@@ -1196,8 +1204,6 @@ function App() {
           position: playState?.current_player,
           card: result.card,
           reasoning: result.reasoning,
-          analysis: result.analysis,
-          risk: result.risk,
           follow_up: result.follow_up,
           full_output: result.full_output,
           prompt: result.prompt,
@@ -1205,6 +1211,7 @@ function App() {
           timestamp: new Date().toLocaleTimeString(),
         }
         setAiPlayHistory(prev => [...prev, aiRecord])
+        setPlayStarted(true) // AI出牌后标记打牌已开始，按钮变为暂停
         
         const stateResult = await getPlayState()
         if (stateResult.success) {
@@ -1225,23 +1232,98 @@ function App() {
     setIsPlayPaused(false)
     setLastCompletedTrick(null)
     setShowDoubleDummy(false)
+    setSelectedPlayRecord(null)
   }
 
-  // 重新打牌（保持当前牌局和叫牌，重置打牌状态）
-  const handleResetPlay = () => {
-    setShowPlayPanel(false)
-    setPlayState(null)
+  // 开始打牌（从初始未开始状态进入打牌）
+  const handleBeginPlay = () => {
+    setPlayInitiated(true)
+    setIsPlayPaused(false)
+  }
+
+  // 暂停打牌（AI返回后暂停）
+  const handlePausePlay = () => {
+    setIsPlayPaused(true)
+  }
+
+  // 重新打牌（保持当前牌局和叫牌，重置打牌状态并重新初始化）
+  const handleResetPlay = async () => {
+    const contract = getFinalContract()
+    if (!contract) {
+      setError('无法确定定约')
+      return
+    }
+
+    setPlayLoading(true)
+    setError(null)
     setAiPlayHistory([])
     setSelectedPlayCard(null)
+    setSelectedPlayRecord(null)
     setIsPlayPaused(false)
+    setPlayStarted(false)
+    setPlayInitiated(false)
     setLastCompletedTrick(null)
     setPlayCenterView('play')
     prevTricksCountRef.current = 0
+
+    // 构建包含叫牌含义的叫牌历史字符串
+    let biddingStr = null
+    if (biddingSequence.length > 0) {
+      const seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
+      const meaningLines = aiBiddingHistory
+        .filter(r => r.result?.meaning)
+        .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
+        .join('\n')
+      biddingStr = meaningLines
+        ? `${seqStr}\n\n叫牌含义:\n${meaningLines}`
+        : seqStr
+    }
+
+    try {
+      const result = await playInit(
+        hands,
+        `${contract.level}${contract.suit}`,
+        contract.declarer,
+        positionRoles,
+        contract.isDouble,
+        contract.isRedouble,
+        biddingStr
+      )
+
+      if (result.success) {
+        setPlayState(result.state)
+        setShowPlayPanel(true)
+        // 如果是AI首攻，自动开始；否则等待人类出牌
+        if (!result.state.is_human_turn && result.state.phase !== 'complete') {
+          setPlayInitiated(true)
+        }
+      } else {
+        setError(result.error || '重新初始化打牌失败')
+      }
+    } catch (err) {
+      console.error('重新初始化打牌失败:', err)
+      setError('重新初始化打牌失败: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setPlayLoading(false)
+    }
+  }
+
+  // 桌面点击已出牌，切换到对应的打牌细节
+  const handlePlayCardClick = (position, card) => {
+    if (!aiPlayHistory || aiPlayHistory.length === 0) return
+    const found = aiPlayHistory.find(record =>
+      record.position === position &&
+      record.card?.suit === card.suit &&
+      record.card?.rank === card.rank
+    )
+    if (found) {
+      setSelectedPlayRecord(found)
+    }
   }
 
   // AI自动出牌
   useEffect(() => {
-    if (!showPlayPanel || !playState || playAiLoading || playLoading || isPlayPaused) return
+    if (!showPlayPanel || !playState || playAiLoading || playLoading || isPlayPaused || !playInitiated) return
     
     const { is_human_turn, phase } = playState
     
@@ -1253,7 +1335,7 @@ function App() {
       
       return () => clearTimeout(timer)
     }
-  }, [playState?.is_human_turn, playState?.phase, showPlayPanel, playAiLoading, playLoading, isPlayPaused])
+  }, [playState?.is_human_turn, playState?.phase, showPlayPanel, playAiLoading, playLoading, isPlayPaused, playInitiated])
 
   // 检测一墩完成，自动暂停
   useEffect(() => {
@@ -1267,6 +1349,7 @@ function App() {
       const lastTrick = playState.tricks[playState.tricks.length - 1]
       setLastCompletedTrick(lastTrick)
       setIsPlayPaused(true)
+      setSelectedPlayRecord(null)
     }
     
     prevTricksCountRef.current = currentTricksCount
@@ -1581,6 +1664,7 @@ function App() {
               playCenterView={playCenterView}
               setPlayCenterView={setPlayCenterView}
               aiBiddingHistory={aiBiddingHistory}
+              onPlayCardClick={handlePlayCardClick}
             />
             
             {/* 右侧面板：叫牌细节或打牌面板 */}
@@ -1602,6 +1686,12 @@ function App() {
                 isPaused={isPlayPaused}
                 onResume={handleResumePlay}
                 onResetPlay={handleResetPlay}
+                externalSelectedRecord={selectedPlayRecord}
+                onClearExternalRecord={() => setSelectedPlayRecord(null)}
+                playStarted={playStarted}
+                onBeginPlay={handleBeginPlay}
+                onPausePlay={handlePausePlay}
+                playInitiated={playInitiated}
               />
             ) : (
               (humanPosition !== null || showAIBiddingOutput) && (
@@ -1706,6 +1796,7 @@ function App() {
               playCenterView={playCenterView}
               setPlayCenterView={setPlayCenterView}
               aiBiddingHistory={aiBiddingHistory}
+              onPlayCardClick={handlePlayCardClick}
             />
             
             {/* 叫牌细节面板或打牌面板 */}
@@ -1728,6 +1819,12 @@ function App() {
                 onResume={handleResumePlay}
                 onResetPlay={handleResetPlay}
                 height="auto"
+                externalSelectedRecord={selectedPlayRecord}
+                onClearExternalRecord={() => setSelectedPlayRecord(null)}
+                playStarted={playStarted}
+                onBeginPlay={handleBeginPlay}
+                onPausePlay={handlePausePlay}
+                playInitiated={playInitiated}
               />
             ) : (
               (humanPosition !== null || showAIBiddingOutput) && (
