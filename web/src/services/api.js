@@ -285,6 +285,17 @@ export const playCard = async (position, card) => {
   }
 };
 
+// 撤销出牌
+export const undoPlay = async () => {
+  try {
+    const response = await api.post('/api/play/undo');
+    return response.data;
+  } catch (error) {
+    console.error('撤销出牌失败:', error);
+    throw error;
+  }
+};
+
 // AI出牌
 export const aiPlay = async (playModel = null) => {
   try {

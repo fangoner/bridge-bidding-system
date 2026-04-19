@@ -21,6 +21,7 @@ function PlayDetailPanel({
   onBeginPlay,
   onPausePlay,
   playInitiated,
+  onUndoPlay,
 }) {
   const [selectedRecord, setSelectedRecord] = useState(null)
   const [viewMode, setViewMode] = useState('output')  // 'output' or 'input'
@@ -279,7 +280,23 @@ function PlayDetailPanel({
   }
 
   const renderCompletedTricks = () => {
-    if (tricks.length === 0) return null
+    // 合并已完成的墩和当前墩进行中的牌
+    const currentTrick = playState?.current_trick
+    const currentTrickCards = currentTrick?.cards || []
+    
+    // 构建完整的出牌列表：已完成墩 + 当前墩（进行中）
+    const allTricks = [...tricks]
+    if (currentTrickCards.length > 0) {
+      // 当前墩未完成，构造一个"进行中"的墩对象
+      allTricks.push({
+        cards: currentTrickCards,
+        leader: currentTrick?.leader,
+        winner: null, // 未完成，无赢家
+        isCurrentTrick: true,
+      })
+    }
+
+    if (allTricks.length === 0) return null
 
     const getAIRecordForCard = (position, card) => {
       if (!aiPlayHistory || aiPlayHistory.length === 0) return null
@@ -292,7 +309,8 @@ function PlayDetailPanel({
     }
 
     const renderTrickRow = (trick, idx) => {
-      const isDeclarerSide = trick.winner === contract?.declarer || trick.winner === dummy
+      const isCurrentTrick = trick.isCurrentTrick
+      const isDeclarerSide = !isCurrentTrick && (trick.winner === contract?.declarer || trick.winner === dummy)
       
       return (
         <Box 
@@ -303,15 +321,16 @@ function PlayDetailPanel({
             gap: 0.5,
             py: 0.25,
             px: 0.5,
-            bgcolor: isDeclarerSide ? '#e3f2fd' : '#fff3e0',
+            bgcolor: isCurrentTrick ? '#f3e5f5' : (isDeclarerSide ? '#e3f2fd' : '#fff3e0'),
             borderRadius: 0.5,
+            border: isCurrentTrick ? '1px dashed #9c27b0' : 'none',
           }}
         >
           <Typography variant="caption" sx={{ fontWeight: 'bold', fontSize: '0.75rem', minWidth: 35 }}>
-            {idx + 1}:{trick.winner || '?'}
+            {isCurrentTrick ? `${idx + 1}:...` : `${idx + 1}:${trick.winner || '?'}`}
           </Typography>
           <Box sx={{ display: 'flex', gap: 0.25 }}>
-            {trick.cards && trick.cards.map(([pos, card]) => {
+            {trick.cards && trick.cards.map(([pos, card], cardIdx) => {
               const color = SUIT_COLOR_MAP[card.suit] || '#000'
               const aiRecord = getAIRecordForCard(pos, card)
               const isSelected = selectedRecord === aiRecord
@@ -319,7 +338,7 @@ function PlayDetailPanel({
               
               return (
                 <Box 
-                  key={pos}
+                  key={cardIdx}
                   onClick={() => {
                     if (canClick) {
                       setSelectedRecord(aiRecord)
@@ -351,14 +370,14 @@ function PlayDetailPanel({
     return (
       <Box sx={{ mt: 1 }}>
         <Typography variant="subtitle2" gutterBottom sx={{ fontSize: '0.75rem' }}>
-          已完成墩 ({tricks.length}/13)
+          出牌记录 ({tricks.length}/13)
         </Typography>
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
-            {tricks.slice(0, 7).map((trick, idx) => renderTrickRow(trick, idx))}
+            {allTricks.slice(0, 7).map((trick, idx) => renderTrickRow(trick, idx))}
           </Box>
           <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
-            {tricks.slice(7).map((trick, idx) => renderTrickRow(trick, idx + 7))}
+            {allTricks.slice(7).map((trick, idx) => renderTrickRow(trick, idx + 7))}
           </Box>
         </Box>
       </Box>
@@ -415,7 +434,7 @@ function PlayDetailPanel({
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>需要</Typography>
             <Typography variant="body2" fontWeight="bold">{contract?.tricks_needed || '?'}</Typography>
           </Paper>
-          {/* 开始/暂停/继续 + 重新打牌按钮，右对齐 */}
+          {/* 开始/暂停/继续 + 撤销 + 重新打牌按钮，右对齐 */}
           <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', ml: 'auto' }}>
             {!isComplete && !playInitiated && (
               <Button
@@ -437,6 +456,17 @@ function PlayDetailPanel({
                 sx={{ fontSize: '0.75rem', textTransform: 'none' }}
               >
                 继续
+              </Button>
+            )}
+            {((!isComplete && playStarted && isPaused) || isComplete) && onUndoPlay && (
+              <Button
+                variant="outlined"
+                color="secondary"
+                onClick={onUndoPlay}
+                size="small"
+                sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+              >
+                撤销
               </Button>
             )}
             {!isComplete && playStarted && !isPaused && (

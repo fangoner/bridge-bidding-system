@@ -124,6 +124,19 @@ class PlayEngine:
             return None
         return self.state.to_dict()
     
+    def undo_last_card(self) -> Tuple[bool, str]:
+        """撤销最近一次出牌"""
+        if not self.state:
+            return False, "游戏未初始化"
+        
+        if not self.state.current_trick.cards and not self.state.tricks:
+            return False, "没有可撤销的出牌"
+        
+        success = self.state.undo_last_card()
+        if success:
+            return True, "撤销成功"
+        return False, "撤销失败"
+    
     def get_visible_hands(self, for_position: str = None) -> Dict[str, List[Card]]:
         if not self.state:
             return {}

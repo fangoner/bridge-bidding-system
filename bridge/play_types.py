@@ -313,6 +313,66 @@ class PlayState:
         
         return True
     
+    def undo_last_card(self) -> bool:
+        """撤销最近一次出牌，恢复手牌和状态"""
+        # 情况1: 当前墩有牌 → 撤销当前墩最后一张
+        if self.current_trick.cards:
+            position, card = self.current_trick.cards[-1]
+            
+            # 从当前墩移除
+            self.current_trick.cards.pop()
+            self.current_trick.is_ai_cards.pop()
+            self.current_trick.ai_reasons.pop()
+            self.current_trick.ai_risks.pop()
+            if not self.current_trick.cards:
+                self.current_trick.leader = None
+            
+            # 将牌放回手牌（保持花色顺序）
+            self.hands[position].append(card)
+            self._sort_hand(position)
+            
+            # 恢复 current_player
+            self.current_player = position
+            
+            # 恢复 phase
+            if len(self.tricks) == 0 and not self.current_trick.cards:
+                self.phase = PlayPhase.LEAD
+            elif len(self.tricks) == 0 and len(self.current_trick.cards) == 1:
+                self.phase = PlayPhase.DUMMY_REVEAL
+            else:
+                self.phase = PlayPhase.PLAYING
+            
+            return True
+        
+        # 情况2: 当前墩为空但有已完成的墩 → 恢复上一墩，然后撤销最后一张
+        if self.tricks:
+            last_trick = self.tricks.pop()
+            
+            # 恢复墩数
+            winner = last_trick.winner()
+            if winner:
+                if winner in [self.contract.declarer, self.dummy]:
+                    self.declarer_tricks -= 1
+                else:
+                    self.defender_tricks -= 1
+            
+            # 恢复当前墩为上一墩（牌还在 trick 中，不在手牌中）
+            self.current_trick = last_trick
+            
+            # 恢复 phase
+            self.phase = PlayPhase.PLAYING
+            
+            # 递归撤销当前墩的最后一张
+            return self.undo_last_card()
+        
+        return False
+    
+    def _sort_hand(self, position: str):
+        """按花色和牌值排序手牌，花色顺序SHDC，牌面从大到小"""
+        suit_order = {"♠": 0, "♥": 1, "♦": 2, "♣": 3}
+        rank_order = {"A": 0, "K": 1, "Q": 2, "J": 3, "T": 4, "9": 5, "8": 6, "7": 7, "6": 8, "5": 9, "4": 10, "3": 11, "2": 12}
+        self.hands[position].sort(key=lambda c: (suit_order.get(c.suit, 0), rank_order.get(c.rank, 0)))
+    
     def to_dict(self) -> dict:
         return {
             "contract": self.contract.to_dict() if self.contract else None,

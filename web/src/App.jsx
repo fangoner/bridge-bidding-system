@@ -35,7 +35,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import HistoryIcon from '@mui/icons-material/History'
-import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, doubleDummyAnalysis, getFallbackModel, setFallbackModel, getAIProvider, setAIProvider, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles } from './services/api'
+import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, doubleDummyAnalysis, getFallbackModel, setFallbackModel, getAIProvider, setAIProvider, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles, undoPlay } from './services/api'
 import HandDisplay from './components/HandDisplay'
 import ControlButtons from './components/ControlButtons'
 import BiddingDetailPanel from './components/BiddingDetailPanel'
@@ -1246,6 +1246,68 @@ function App() {
     setIsPlayPaused(true)
   }
 
+  // 撤销最近一次出牌
+  const handleUndoPlay = async () => {
+    try {
+      // 记录撤销前的状态，用于判断撤销了谁出的牌
+      const prevPlayer = playState?.current_player
+      const prevTricksCount = playState?.tricks?.length || 0
+      
+      const result = await undoPlay()
+      if (result.success) {
+        const state = result.state
+        setPlayState(state)
+        setSelectedPlayCard(null)
+        setSelectedPlayRecord(null)
+        
+        // 撤销的牌是刚出的那张，出牌者现在是current_player（撤销后轮到他重新出牌）
+        // 如果这张牌是AI出的，从aiPlayHistory中删除对应记录
+        const undonePlayer = state.current_player
+        // 检查aiPlayHistory最后一条是否属于被撤销的出牌者
+        setAiPlayHistory(prev => {
+          if (prev.length > 0) {
+            const lastRecord = prev[prev.length - 1]
+            // 如果最后一条AI记录的位置和被撤销的出牌者匹配，删除它
+            if (lastRecord.position === undonePlayer) {
+              return prev.slice(0, -1)
+            }
+          }
+          return prev
+        })
+        
+        // 同步更新墩数计数器，避免"一墩完成自动暂停"误触发
+        const newTricksCount = state.tricks?.length || 0
+        prevTricksCountRef.current = newTricksCount
+        
+        // 更新lastCompletedTrick以匹配撤销后的状态
+        if (newTricksCount > 0) {
+          setLastCompletedTrick(state.tricks[newTricksCount - 1])
+        } else {
+          setLastCompletedTrick(null)
+        }
+        
+        // 判断撤销后是否还有已出牌
+        const hasPlayedCards = newTricksCount > 0 || 
+                               (state.current_trick?.cards && state.current_trick.cards.length > 0)
+        if (!hasPlayedCards) {
+          // 撤销到没有已出牌时，重置为未开始状态
+          setPlayStarted(false)
+          setPlayInitiated(false)
+        } else {
+          setPlayStarted(true)
+        }
+        
+        // 撤销后暂停，让用户决定下一步
+        setIsPlayPaused(true)
+      } else {
+        setError(result.error || result.message || '撤销失败')
+      }
+    } catch (err) {
+      console.error('撤销出牌失败:', err)
+      setError('撤销出牌失败')
+    }
+  }
+
   // 重新打牌（保持当前牌局和叫牌，重置打牌状态并重新初始化）
   const handleResetPlay = async () => {
     const contract = getFinalContract()
@@ -1692,6 +1754,7 @@ function App() {
                 onBeginPlay={handleBeginPlay}
                 onPausePlay={handlePausePlay}
                 playInitiated={playInitiated}
+                onUndoPlay={handleUndoPlay}
               />
             ) : (
               (humanPosition !== null || showAIBiddingOutput) && (
@@ -1825,6 +1888,7 @@ function App() {
                 onBeginPlay={handleBeginPlay}
                 onPausePlay={handlePausePlay}
                 playInitiated={playInitiated}
+                onUndoPlay={handleUndoPlay}
               />
             ) : (
               (humanPosition !== null || showAIBiddingOutput) && (

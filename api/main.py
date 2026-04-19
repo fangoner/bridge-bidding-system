@@ -1128,6 +1128,42 @@ async def play_card(request: PlayCardRequest):
         )
 
 
+class PlayUndoResponse(BaseModel):
+    success: bool
+    state: Optional[dict] = None
+    declarer_tricks: Optional[int] = None
+    defender_tricks: Optional[int] = None
+    is_complete: Optional[bool] = None
+    message: Optional[str] = None
+    error: Optional[str] = None
+
+
+@app.post("/api/play/undo", response_model=PlayUndoResponse)
+async def undo_play():
+    """撤销最近一次出牌"""
+    try:
+        service = get_play_service()
+        success, message = service.undo_last_card()
+        
+        state = service.get_state()
+        
+        return PlayUndoResponse(
+            success=success,
+            state=service.get_state_dict(),
+            declarer_tricks=state.declarer_tricks if state else 0,
+            defender_tricks=state.defender_tricks if state else 0,
+            is_complete=service.is_complete(),
+            message=message
+        )
+    except Exception as e:
+        print(f"[ERROR] 撤销失败: {str(e)}")
+        traceback.print_exc()
+        return PlayUndoResponse(
+            success=False,
+            error=f"撤销失败: {str(e)}"
+        )
+
+
 class PlayAIRequest(BaseModel):
     use_reasoning: bool = True
     play_model: Optional[str] = None

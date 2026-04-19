@@ -62,6 +62,43 @@ class PlayService:
     def get_current_player(self) -> Optional[str]:
         return self.engine.get_current_player()
     
+    def undo_last_card(self) -> tuple:
+        """撤销最近一次出牌，同步清理做庄/防守计划"""
+        # 记录撤销前的墩数，用于判断是否需要清理全局规划
+        state_before = self.engine.get_state()
+        tricks_before = len(state_before.tricks) if state_before else 0
+        
+        success, message = self.engine.undo_last_card()
+        
+        if success and state_before:
+            state_after = self.engine.get_state()
+            tricks_after = len(state_after.tricks) if state_after else 0
+            
+            # 撤销的牌对应的出牌者
+            undone_position = state_after.current_player if state_after else None
+            
+            if undone_position:
+                # 如果撤销的是防守方出牌，丢弃该防守者的计划
+                declarer = state_after.contract.declarer if state_after else None
+                dummy = state_after.dummy if state_after else None
+                is_declarer_side = undone_position in (declarer, dummy)
+                
+                if not is_declarer_side:
+                    # 防守方撤销：丢弃该位置的计划
+                    self.defender_plans.pop(undone_position, None)
+                else:
+                    # 庄家方撤销：丢弃做庄进度（但保留全局规划）
+                    self.declarer_plan = ""
+            
+            # 如果墩数回退（从已完成墩恢复），需要丢弃全局规划
+            # 因为全局规划是基于已完成的墩数制定的
+            if tricks_after < tricks_before:
+                self.declarer_global_plan = ""
+                self.declarer_plan = ""
+                self.defender_plans.clear()
+        
+        return success, message
+    
     def is_complete(self) -> bool:
         return self.engine.is_complete()
     

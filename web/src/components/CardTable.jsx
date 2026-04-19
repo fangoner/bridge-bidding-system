@@ -125,12 +125,19 @@ function CardTable({
     if (!remainingCards) return hands[position]
     
     const suitNames = { '♠': 'spades', '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs' }
+    const rankOrder = 'AKQJT98765432'
     const newHand = { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 }
+    // 按花色分组，每个花色内按从大到小排序
+    const suitGroups = { spades: [], hearts: [], diamonds: [], clubs: [] }
     for (const card of remainingCards) {
       const suitName = suitNames[card.suit]
       if (suitName) {
-        newHand[suitName] += card.rank
+        suitGroups[suitName].push(card.rank)
       }
+    }
+    for (const [suitName, ranks] of Object.entries(suitGroups)) {
+      ranks.sort((a, b) => rankOrder.indexOf(a) - rankOrder.indexOf(b))
+      newHand[suitName] = ranks.join('')
     }
     return newHand
   }
@@ -412,8 +419,10 @@ function CardTable({
     const { current_trick, current_player, phase } = playState
     const isComplete = phase === 'complete'
     
-    // 如果暂停且有已完成的墩，显示上一墩的牌
-    const displayTrick = (isPlayPaused && lastCompletedTrick) ? lastCompletedTrick : current_trick
+    // 优先显示当前墩（有牌时），暂停时才回退到上一墩
+    const displayTrick = (current_trick?.cards && current_trick.cards.length > 0)
+      ? current_trick
+      : (isPlayPaused && lastCompletedTrick) ? lastCompletedTrick : current_trick
     
     const getCardAtPosition = (position) => {
       if (!displayTrick?.cards) return null
