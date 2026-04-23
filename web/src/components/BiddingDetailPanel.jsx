@@ -237,21 +237,6 @@ function BiddingDetailPanel({
           {outputFormats.deep_finesse}
         </Typography>
         
-        {onStartPlay && (
-          <>
-            <Divider sx={{ my: 2 }} />
-            <Button
-              variant="contained"
-              color="primary"
-              fullWidth
-              onClick={onStartPlay}
-              disabled={playLoading}
-              sx={{ mt: 1 }}
-            >
-              {playLoading ? <CircularProgress size={24} /> : '切换到打牌'}
-            </Button>
-          </>
-        )}
       </Box>
     )
   }
@@ -397,6 +382,21 @@ function BiddingDetailPanel({
         <Box sx={{ flex: 1, overflow: 'auto', p: 1, background: '#fafafa', borderRadius: 2, border: '1px solid #ddd', minHeight: 0 }}>
           {renderBiddingDetails()}
           {renderOutputFormats()}
+          {isBiddingCompleteFn && isBiddingCompleteFn() && onStartPlay && (
+            <>
+              <Divider sx={{ my: 2 }} />
+              <Button
+                variant="contained"
+                color="primary"
+                fullWidth
+                onClick={onStartPlay}
+                disabled={playLoading}
+                sx={{ mt: 1 }}
+              >
+                {playLoading ? <CircularProgress size={24} /> : '切换到打牌'}
+              </Button>
+            </>
+          )}
         </Box>
       )}
     </Paper>

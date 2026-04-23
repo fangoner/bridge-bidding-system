@@ -45,7 +45,7 @@ import PlayPanel from './components/PlayPanel'
 import PlayDetailPanel from './components/PlayDetailPanel'
 import { colorSchemes, defaultScheme } from './theme/colorSchemes'
 import useBiddingState from './hooks/useBiddingState'
-import useBiddingRecords from './hooks/useBiddingRecords'
+import useBridgeRecords from './hooks/useBridgeRecords'
 import './App.css'
 
 const COLOR_SCHEME_KEY = 'bridge_color_scheme'
@@ -166,24 +166,24 @@ function App() {
   const [analyzeLoading, setAnalyzeLoading] = useState(false) // 检验定约加载中
   const [analyzeResult, setAnalyzeResult] = useState(null) // 检验定约结果
   
-  // 叫牌记录管理（使用 hook 管理）
+  // 牌局记录管理（叫牌+打牌统一存储）
   const {
-    biddingRecords, setBiddingRecords,
+    records: bridgeRecords, setRecords: setBridgeRecords,
     historyDialogOpen, setHistoryDialogOpen,
     editNoteDialogOpen, setEditNoteDialogOpen,
     editingRecordId, setEditingRecordId,
     editingNote, setEditingNote,
     selectedRecordIds, setSelectedRecordIds,
-    loadBiddingRecords,
-    saveBiddingRecord,
-    deleteBiddingRecord,
-    deleteBiddingRecords,
+    loadRecords: loadBridgeRecords,
+    saveRecord: saveBridgeRecord,
+    deleteRecord: deleteBridgeRecord,
+    deleteRecords: deleteBridgeRecords,
     updateRecordNote,
     toggleSelectAll,
     toggleRecordSelection,
     exportRecords,
     importRecords,
-  } = useBiddingRecords()
+  } = useBridgeRecords()
   const [customDealOpen, setCustomDealOpen] = useState(false) // 自定义牌局对话框
   const [imageDealOpen, setImageDealOpen] = useState(false) // 图片牌局对话框
   const [customDealText, setCustomDealText] = useState('') // 自定义牌局文本
@@ -214,7 +214,7 @@ function App() {
   // 检查API状态
   useEffect(() => {
     checkApiStatus()
-    loadBiddingRecords()
+    loadBridgeRecords()
     syncFallbackModel()
     syncAIProvider()
   }, [])
@@ -294,19 +294,22 @@ function App() {
   // 加载历史记录到牌桌
   const loadRecordToTable = (record) => {
     isLoadingRecordRef.current = true
-    setHands(record.hands)
-    setBiddingSequence(record.biddingSequence)
-    setDealer(record.dealer)
+    // 兼容新旧格式
+    const board = record.board || record
+    const bidding = record.bidding || record
+    setHands(board.hands || record.hands)
+    setBiddingSequence(board.bidding_sequence || record.biddingSequence || [])
+    setDealer(board.dealer || record.dealer)
     // 恢复叫牌设置
-    if (record.gameMode) {
-      setGameMode(record.gameMode)
+    if (board.game_mode || record.gameMode) {
+      setGameMode(board.game_mode || record.gameMode)
     }
-    if (record.humanPosition) {
-      setHumanPosition(record.humanPosition)
+    if (board.human_position || record.humanPosition) {
+      setHumanPosition(board.human_position || record.humanPosition)
     }
-    setAiBiddingHistory(record.aiBiddingHistory || [])
-    if (record.dealSystem) {
-      setDealSystem(record.dealSystem)
+    setAiBiddingHistory(bidding.ai_bidding_history || record.aiBiddingHistory || [])
+    if (bidding.deal_system || record.dealSystem) {
+      setDealSystem(bidding.deal_system || record.dealSystem)
     }
     setBiddingStarted(true)
     setHistoryDialogOpen(false)
@@ -320,9 +323,9 @@ function App() {
     setAiPlayHistory([])
     setSelectedPlayCard(null)
     setIsPlayPaused(false)
-    
+
     // 加载历史记录后获取更多输出格式
-    if (record.hands && record.biddingSequence && record.biddingSequence.length > 0) {
+    if ((board.hands || record.hands) && (board.bidding_sequence || record.biddingSequence) && (board.bidding_sequence || record.biddingSequence).length > 0) {
       // 延迟调用，确保状态已更新
       setTimeout(() => {
         fetchOutputFormatsForRecord(record)
@@ -335,13 +338,18 @@ function App() {
   
   // 为历史记录获取输出格式
   const fetchOutputFormatsForRecord = async (record) => {
-    if (!record.hands || !record.biddingSequence || record.biddingSequence.length === 0) return
+    // 兼容新旧格式
+    const hands = record.board?.hands || record.hands
+    const biddingSequence = record.board?.bidding_sequence || record.biddingSequence
+    const dealer = record.board?.dealer || record.dealer
+    
+    if (!hands || !biddingSequence || biddingSequence.length === 0) return
     
     setOutputFormatsLoading(true)
     try {
-      const biddingStr = record.biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
-      console.log('[DEBUG] 加载历史记录获取输出格式, biddingStr:', biddingStr, 'dealer:', record.dealer)
-      const result = await getOutputFormats(record.hands, biddingStr, record.dealer, gameMode, humanPosition)
+      const biddingStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
+      console.log('[DEBUG] 加载历史记录获取输出格式, biddingStr:', biddingStr, 'dealer:', dealer)
+      const result = await getOutputFormats(hands, biddingStr, dealer, gameMode, humanPosition)
       console.log('[DEBUG] 输出格式结果:', result)
       setOutputFormats(result)
     } catch (err) {
@@ -1022,17 +1030,24 @@ function App() {
       const record = {
         id: Date.now().toString(),
         timestamp: new Date().toLocaleString(),
-        hands: hands,
-        biddingSequence: biddingSequence,
-        aiBiddingHistory: aiBiddingHistory,
-        dealer: dealer,
-        gameMode: gameMode,
-        humanPosition: humanPosition,
-        finalContract: finalContract,
-        dealSystem: dealSystem,
+        type: 'bidding_only',
+        board: {
+          hands: hands,
+          bidding_sequence: biddingSequence,
+          contract: finalContract,
+          dealer: dealer,
+          game_mode: gameMode,
+          human_position: humanPosition,
+          player_roles: positionRoles,
+        },
+        bidding: {
+          ai_bidding_history: aiBiddingHistory,
+          deal_system: dealSystem,
+        },
+        play: null,
         note: ''
       }
-      saveBiddingRecord(record)
+      saveBridgeRecord(record)
       
       // 获取更多输出格式
       fetchOutputFormats()
@@ -1399,13 +1414,14 @@ function App() {
     }
   }, [playState?.is_human_turn, playState?.phase, showPlayPanel, playAiLoading, playLoading, isPlayPaused, playInitiated])
 
-  // 检测一墩完成，自动暂停
+  // 检测一墩完成，自动暂停；检测打牌完成，自动保存记录
   useEffect(() => {
     if (!showPlayPanel || !playState) return
-    
+
     const currentTricksCount = playState.tricks?.length || 0
     const prevTricksCount = prevTricksCountRef.current
-    
+    const phase = playState.phase
+
     // 如果墩数增加了，说明一墩完成，自动暂停
     if (currentTricksCount > prevTricksCount && playState.tricks && playState.tricks.length > 0) {
       const lastTrick = playState.tricks[playState.tricks.length - 1]
@@ -1413,9 +1429,47 @@ function App() {
       setIsPlayPaused(true)
       setSelectedPlayRecord(null)
     }
-    
+
+    // 打牌完成，自动保存完整记录
+    if (phase === 'complete' && prevTricksCount < 13) {
+      saveCompletePlayRecord()
+    }
+
     prevTricksCountRef.current = currentTricksCount
-  }, [playState?.tricks?.length, showPlayPanel])
+  }, [playState?.tricks?.length, playState?.phase, showPlayPanel])
+
+  // 保存打牌完成的完整记录
+  const saveCompletePlayRecord = useCallback(() => {
+    if (!playState || playState.phase !== 'complete') return
+
+    const finalContract = getFinalContract()
+    const record = {
+      id: Date.now().toString(),
+      timestamp: new Date().toLocaleString(),
+      type: 'complete',
+      board: {
+        hands: hands,
+        bidding_sequence: biddingSequence,
+        contract: finalContract,
+        dealer: dealer,
+        game_mode: gameMode,
+        human_position: humanPosition,
+        player_roles: positionRoles,
+      },
+      bidding: {
+        ai_bidding_history: aiBiddingHistory,
+        deal_system: dealSystem,
+      },
+      play: {
+        tricks: playState.tricks,
+        ai_play_history: aiPlayHistory,
+        declarer_tricks: playState.declarer_tricks,
+        defender_tricks: playState.defender_tricks,
+      },
+      note: ''
+    }
+    saveBridgeRecord(record)
+  }, [playState, hands, biddingSequence, dealer, gameMode, humanPosition, positionRoles, aiBiddingHistory, dealSystem, aiPlayHistory])
 
   // 获取队友位置
   const getPartnerPosition = (pos) => {
@@ -1589,7 +1643,7 @@ function App() {
           toggleStopBidding={toggleStopBidding}
           isNewDeal={isNewDeal}
           startBidding={startBidding}
-          biddingRecords={biddingRecords}
+          biddingRecords={bridgeRecords}
           setHistoryDialogOpen={setHistoryDialogOpen}
           checkApiStatus={checkApiStatus}
           apiStatus={apiStatus}
@@ -1617,7 +1671,7 @@ function App() {
           toggleStopBidding={toggleStopBidding}
           isNewDeal={isNewDeal}
           startBidding={startBidding}
-          biddingRecords={biddingRecords}
+          biddingRecords={bridgeRecords}
           setHistoryDialogOpen={setHistoryDialogOpen}
           checkApiStatus={checkApiStatus}
           apiStatus={apiStatus}
@@ -1949,27 +2003,27 @@ function App() {
       <Dialog open={historyDialogOpen} onClose={() => setHistoryDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            叫牌历史记录
-            {biddingRecords.length > 0 && (
+            牌局历史记录
+            {bridgeRecords.length > 0 && (
               <Button size="small" onClick={toggleSelectAll}>
-                {selectedRecordIds.size === biddingRecords.length ? '取消全选' : '全选'}
+                {selectedRecordIds.size === bridgeRecords.length ? '取消全选' : '全选'}
               </Button>
             )}
           </Box>
         </DialogTitle>
         <DialogContent dividers>
-          {biddingRecords.length === 0 ? (
+          {bridgeRecords.length === 0 ? (
             <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 4 }}>
               暂无历史记录
             </Typography>
           ) : (
             <List>
-              {biddingRecords.map((record, index) => (
+              {bridgeRecords.map((record, index) => (
                 <Box key={record.id}>
                   {index > 0 && <Divider />}
-                  <ListItem 
-                    alignItems="flex-start" 
-                    sx={{ 
+                  <ListItem
+                    alignItems="flex-start"
+                    sx={{
                       flexDirection: 'column',
                       bgcolor: selectedRecordIds.has(record.id) ? 'action.selected' : 'inherit',
                       borderRadius: 1
@@ -1990,16 +2044,21 @@ function App() {
                             {record.timestamp}
                           </Typography>
                           <Typography variant="body2" color="text.secondary">
-                            发牌人: {record.dealer}家
+                            {record.type === 'complete' ? '叫牌+打牌' : record.type === 'play_in_progress' ? '打牌中' : '仅叫牌'} | 发牌人: {(record.board?.dealer || record.dealer)}家
                           </Typography>
                         </Box>
                         <Box sx={{ mt: 1 }}>
                           <Typography variant="body2">
-                            <strong>定约:</strong> {record.finalContract ? `${record.finalContract.level}${record.finalContract.suit} (${record.finalContract.partnership} - ${record.finalContract.declarer}家)` : '全部Pass'}
+                            <strong>定约:</strong> {record.board?.contract ? `${record.board.contract.level}${record.board.contract.suit} (${record.board.contract.partnership} - ${record.board.contract.declarer}家)` : (record.finalContract ? `${record.finalContract.level}${record.finalContract.suit} (${record.finalContract.partnership} - ${record.finalContract.declarer}家)` : '全部Pass')}
                           </Typography>
                           <Typography variant="body2" sx={{ mt: 0.5 }}>
-                            <strong>叫牌序列:</strong> {record.biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')}
+                            <strong>叫牌序列:</strong> {(record.board?.bidding_sequence || record.biddingSequence || []).map(b => `(${b.position})${b.bid}`).join('-') || '-'}
                           </Typography>
+                          {record.play && (
+                            <Typography variant="body2" sx={{ mt: 0.5, color: 'primary.main' }}>
+                              <strong>打牌结果:</strong> {record.play.declarer_tricks >= (record.board?.contract?.level || 0) + 6 ? '完成' : `宕${(record.board?.contract?.level || 0) + 6 - record.play.declarer_tricks}`} ({record.play.declarer_tricks}:{record.play.defender_tricks})
+                            </Typography>
+                          )}
                           {record.note && (
                             <Typography variant="body2" sx={{ mt: 0.5, color: '#666' }}>
                               <strong>注释:</strong> {record.note}
@@ -2015,21 +2074,21 @@ function App() {
           )}
         </DialogContent>
         <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
-          <Button 
-            size="small" 
+          <Button
+            size="small"
             disabled={selectedRecordIds.size !== 1}
             onClick={() => {
-              const record = biddingRecords.find(r => selectedRecordIds.has(r.id))
+              const record = bridgeRecords.find(r => selectedRecordIds.has(r.id))
               if (record) loadRecordToTable(record)
             }}
           >
             加载
           </Button>
-          <Button 
-            size="small" 
+          <Button
+            size="small"
             disabled={selectedRecordIds.size !== 1}
             onClick={() => {
-              const record = biddingRecords.find(r => selectedRecordIds.has(r.id))
+              const record = bridgeRecords.find(r => selectedRecordIds.has(r.id))
               if (record) {
                 setEditingRecordId(record.id)
                 setEditingNote(record.note || '')
@@ -2039,12 +2098,12 @@ function App() {
           >
             编辑注释
           </Button>
-          <Button 
-            size="small" 
+          <Button
+            size="small"
             color="error"
             disabled={selectedRecordIds.size === 0}
             onClick={() => {
-              const selectedRecords = biddingRecords.filter(r => selectedRecordIds.has(r.id))
+              const selectedRecords = bridgeRecords.filter(r => selectedRecordIds.has(r.id))
               const hasNotes = selectedRecords.some(r => r.note && r.note.trim() !== '')
               if (hasNotes) {
                 const noteCount = selectedRecords.filter(r => r.note && r.note.trim() !== '').length
@@ -2052,7 +2111,7 @@ function App() {
                   return
                 }
               }
-              deleteBiddingRecords(Array.from(selectedRecordIds))
+              deleteBridgeRecords(Array.from(selectedRecordIds))
             }}
           >
             删除{selectedRecordIds.size > 0 && ` (${selectedRecordIds.size})`}
@@ -2062,7 +2121,7 @@ function App() {
             导入
             <input type="file" accept=".json" hidden onChange={importRecords} />
           </Button>
-          <Button onClick={() => { const result = exportRecords(); if (!result.success) setError(result.error) }} disabled={biddingRecords.length === 0} size="small">
+          <Button onClick={() => { const result = exportRecords(); if (!result.success) setError(result.error) }} disabled={bridgeRecords.length === 0} size="small">
             导出{selectedRecordIds.size > 0 && ` (${selectedRecordIds.size})`}
           </Button>
           <Button onClick={() => {
