@@ -11855,7 +11855,7 @@ powershell -Command "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass;
 | 环境变量 | 值 |
 |---------|---|
 | ANTHROPIC_BASE_URL | https://api.deepseek.com/anthropic |
-| ANTHROPIC_MODEL | deepseek-chat |
+| ANTHROPIC_MODEL | deepseek-v4-flash |
 | API_TIMEOUT_MS | 600000 (10分钟) |
 
 现在你可以使用DeepSeek API来运行Claude Code了！
@@ -24288,8 +24288,8 @@ just typo
 ### 1. config.py
 添加了主提示词AI模型的配置：
 ```python
-MAIN_PROMPT_MODEL_CHAT = "deepseek-chat"
-MAIN_PROMPT_MODEL_REASONER = "deepseek-reasoner"
+MAIN_PROMPT_MODEL_CHAT = "deepseek-v4-flash"
+MAIN_PROMPT_MODEL_REASONER = "deepseek-v4-pro"
 DEFAULT_MAIN_PROMPT_MODEL = MAIN_PROMPT_MODEL_CHAT
 ```
 
@@ -25554,7 +25554,7 @@ E 如果队友最近叫品为成局叫品（包括3NT, 4C, 4D, 4H, 4S, 5C, 5D, 5
 把备用提示词的默认AI设置为deep seek chat
 
 ## Assistant
-已完成！将备用提示词的默认AI模型从 `deepseek-reasoner` 改为 `deepseek-chat`。
+已完成！将备用提示词的默认AI模型从 `deepseek-v4-pro` 改为 `deepseek-v4-flash`。
 
 ## User
 AI是不5+D的含义？只有4张却选了2D. 不要直接修改，有建议先沟通 
@@ -25680,7 +25680,7 @@ AI误解了两个关键表述：
 1. **牌型表示规则优化** - 解决AI误解"5+"和"没有4张或以上高花"的问题
 2. **序列匹配和牌型严格检查规则优化** - 解决AI跨序列混用和模糊匹配牌型的问题
 3. **点力范围严格检查规则优化** - 解决AI使用模糊表述突破点力范围限制的问题
-4. **备用提示词默认AI模型调整** - 将默认模型改为deepseek-chat
+4. **备用提示词默认AI模型调整** - 将默认模型改为deepseek-v4-flash
 
 还有其他文档需要更新吗？
 
@@ -29199,10 +29199,10 @@ sixth_bid = bids[5]  # = 'pass'
 我想把备用提示词AI改成deepseek reasoning，你帮我改一下。
 
 ## Assistant
-已修改。备用提示词现在使用 `deepseek-reasoner` 模型（reasoning 模式），而主提示词仍然使用 `deepseek-chat` 模型。
+已修改。备用提示词现在使用 `deepseek-v4-pro` 模型（reasoning 模式），而主提示词仍然使用 `deepseek-v4-flash` 模型。
 
 **修改内容**：
-- `chat_bidding_fallback` 方法现在调用 `deepseek-reasoner` 模型
+- `chat_bidding_fallback` 方法现在调用 `deepseek-v4-pro` 模型
 - 保留了 JSON 格式输出和错误处理逻辑
 
 ## User
@@ -29502,14 +29502,14 @@ South    West     North    East
 
 ### 1. **config.py** - 新增模型配置常量
 ```python
-FALLBACK_MODEL_CHAT = "deepseek-chat"
-FALLBACK_MODEL_REASONER = "deepseek-reasoner"
+FALLBACK_MODEL_CHAT = "deepseek-v4-flash"
+FALLBACK_MODEL_REASONER = "deepseek-v4-pro"
 DEFAULT_FALLBACK_MODEL = FALLBACK_MODEL_REASONER  # 默认使用 Reasoner
 ```
 
 ### 2. **llm/deepseek_client.py** - 支持动态模型切换
 - `DeepSeekClient.__init__()` 新增 `fallback_model` 参数
-- `chat_bidding_fallback()` 使用 `self.fallback_model` 替代硬编码的 "deepseek-reasoner"
+- `chat_bidding_fallback()` 使用 `self.fallback_model` 替代硬编码的 "deepseek-v4-pro"
 
 ### 3. **main.py** - 添加设置选项
 - `BiddingGame.__init__()` 新增 `fallback_model` 属性

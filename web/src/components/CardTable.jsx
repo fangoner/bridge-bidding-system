@@ -741,26 +741,6 @@ function CardTable({
             </Box>
           )}
           {outputFormatsLoading && <CircularProgress size={20} sx={{ color: 'white' }} />}
-          <Button
-            variant="contained"
-            size="small"
-            onClick={handleAnalyzeContract}
-            disabled={!outputFormats?.deep_finesse || analyzeLoading}
-            startIcon={analyzeLoading ? <CircularProgress size={16} /> : null}
-            sx={{
-              bgcolor: scheme.button.primary,
-              color: scheme.button.text,
-              '&:hover': {
-                bgcolor: scheme.button.primaryHover,
-              },
-              '&.Mui-disabled': {
-                bgcolor: 'rgba(255,255,255,0.5)',
-                color: 'rgba(0,0,0,0.4)',
-              }
-            }}
-          >
-            检验定约
-          </Button>
         </Box>
       )}
 

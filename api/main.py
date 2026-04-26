@@ -103,7 +103,7 @@ class BidRequest(BaseModel):
 
 
 class FallbackModelRequest(BaseModel):
-    fallback_model: str  # deepseek-chat 或 deepseek-reasoner
+    fallback_model: str  # deepseek-v4-flash 或 deepseek-v4-pro
 
 
 class FallbackModelResponse(BaseModel):
@@ -267,14 +267,14 @@ async def get_fallback_model():
     """获取当前模型配置"""
     return {
         "fallback_model": llm_client.model,
-        "available_models": ["deepseek-chat", "deepseek-reasoner"]
+        "available_models": ["deepseek-v4-flash", "deepseek-v4-pro"]
     }
 
 
 @app.post("/api/fallback-model", response_model=FallbackModelResponse)
 async def set_fallback_model(request: FallbackModelRequest):
     """设置模型"""
-    valid_models = ["deepseek-chat", "deepseek-reasoner"]
+    valid_models = ["deepseek-v4-flash", "deepseek-v4-pro"]
     if request.fallback_model not in valid_models:
         raise HTTPException(
             status_code=400,
@@ -304,7 +304,7 @@ async def get_ai_provider():
     return {
         "ai_provider": current_ai_provider,
         "available_providers": [
-            {"id": AI_PROVIDER_DEEPSEEK, "name": "DeepSeek", "models": ["deepseek-chat", "deepseek-reasoner"]},
+            {"id": AI_PROVIDER_DEEPSEEK, "name": "DeepSeek", "models": ["deepseek-v4-flash", "deepseek-v4-pro"]},
             {"id": AI_PROVIDER_DOUBAO, "name": "Doubao (豆包)", "models": ["Doubao-Seed-2.0-lite"]}
         ]
     }
@@ -1189,7 +1189,7 @@ async def ai_play(request: PlayAIRequest):
         # 临时切换打牌模型（不影响叫牌模型）
         original_model = None
         actual_model = llm_client.model
-        if request.play_model and request.play_model in ["deepseek-chat", "deepseek-reasoner"]:
+        if request.play_model and request.play_model in ["deepseek-v4-flash", "deepseek-v4-pro"]:
             original_model = llm_client.model
             llm_client.model = request.play_model
             actual_model = request.play_model

@@ -93,7 +93,7 @@ function PlayDetailPanel({
           </Typography>
           {record.used_model && (
             <Typography variant="caption" sx={{ color: '#888', fontSize: '0.7rem' }}>
-              {record.used_model === 'deepseek-reasoner' ? 'Reasoner' : 'Chat'}
+              {record.used_model === 'deepseek-v4-pro' ? 'V4-Pro' : 'V4-Flash'}
             </Typography>
           )}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>

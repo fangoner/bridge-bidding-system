@@ -116,7 +116,7 @@ class DeepSeekClient:
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, model: Optional[str] = None):
         self.api_key = api_key or DEEPSEEK_API_KEY
         self.base_url = base_url or DEEPSEEK_BASE_URL
-        self.model = model or "deepseek-chat"
+        self.model = model or "deepseek-v4-flash"
         self.client = None
         
         if self.api_key:

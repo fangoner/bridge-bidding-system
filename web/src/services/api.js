@@ -300,7 +300,7 @@ export const undoPlay = async () => {
 export const aiPlay = async (playModel = null) => {
   try {
     const requestData = {
-      use_reasoning: playModel === 'deepseek-reasoner',
+      use_reasoning: playModel === 'deepseek-v4-pro',
     };
     
     if (playModel) {
@@ -308,7 +308,7 @@ export const aiPlay = async (playModel = null) => {
     }
     
     // Reasoner模型需要更长超时（5分钟），Chat模型2分钟
-    const timeout = playModel === 'deepseek-reasoner' ? 300000 : 120000;
+    const timeout = playModel === 'deepseek-v4-pro' ? 300000 : 120000;
     const response = await api.post('/api/play/ai-play', requestData, { timeout });
     return response.data;
   } catch (error) {

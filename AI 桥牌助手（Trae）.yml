@@ -1634,7 +1634,7 @@ workflow:
         model:
           completion_params: {}
           mode: chat
-          name: deepseek-chat
+          name: deepseek-v4-flash
           provider: langgenius/deepseek/deepseek
         prompt_config:
           jinja2_variables: []
@@ -1888,7 +1888,7 @@ workflow:
           completion_params:
             temperature: 0
           mode: chat
-          name: deepseek-chat
+          name: deepseek-v4-flash
           provider: langgenius/deepseek/deepseek
         prompt_template:
         - id: 112832fd-b874-49bc-9c5f-0c144d142232
@@ -2169,7 +2169,7 @@ workflow:
           completion_params:
             temperature: 0
           mode: chat
-          name: deepseek-chat
+          name: deepseek-v4-flash
           provider: langgenius/deepseek/deepseek
         prompt_template:
         - id: e0d734da-7e04-43ef-a628-9127a2ab5625
@@ -2957,7 +2957,7 @@ workflow:
           completion_params:
             temperature: 0
           mode: chat
-          name: deepseek-chat
+          name: deepseek-v4-flash
           provider: langgenius/deepseek/deepseek
         prompt_template:
         - id: ab475a4d-5726-4174-aa41-cf6fe0d020d7
@@ -3072,7 +3072,7 @@ workflow:
           completion_params:
             temperature: 0.7
           mode: chat
-          name: deepseek-chat
+          name: deepseek-v4-flash
           provider: langgenius/deepseek/deepseek
         prompt_template:
         - id: 3ca0eb49-2390-41d8-93d1-2f75b4e83909

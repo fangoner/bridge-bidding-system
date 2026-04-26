@@ -49,8 +49,8 @@ function SettingsPanel({
               <FormControl sx={{ minWidth: 140 }} size="small">
                 <InputLabel>备用模型</InputLabel>
                 <Select value={fallbackModel} label="备用模型" onChange={handleFallbackModelChange}>
-                  <MenuItem value="deepseek-chat">Chat(快)</MenuItem>
-                  <MenuItem value="deepseek-reasoner">Reasoner(准)</MenuItem>
+                  <MenuItem value="deepseek-v4-flash">V4-Flash(快)</MenuItem>
+                  <MenuItem value="deepseek-v4-pro">V4-Pro(准)</MenuItem>
                 </Select>
               </FormControl>
             )}
@@ -75,8 +75,8 @@ function SettingsPanel({
             <FormControl sx={{ minWidth: 160 }} size="small">
               <InputLabel>打牌模型</InputLabel>
               <Select value={playModel} label="打牌模型" onChange={handlePlayModelChange}>
-                <MenuItem value="deepseek-chat">Chat(快)</MenuItem>
-                <MenuItem value="deepseek-reasoner">Reasoner(准)</MenuItem>
+                <MenuItem value="deepseek-v4-flash">V4-Flash(快)</MenuItem>
+                <MenuItem value="deepseek-v4-pro">V4-Pro(准)</MenuItem>
               </Select>
             </FormControl>
           </Box>

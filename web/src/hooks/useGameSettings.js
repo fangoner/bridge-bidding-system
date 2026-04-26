@@ -37,9 +37,9 @@ function useGameSettings(colorSchemes, defaultScheme) {
   const [fallbackModel, setFallbackModelState] = useState(() => {
     try {
       const saved = localStorage.getItem(FALLBACK_MODEL_KEY)
-      return saved || 'deepseek-chat'
+      return saved || 'deepseek-v4-flash'
     } catch {
-      return 'deepseek-chat'
+      return 'deepseek-v4-flash'
     }
   })
   
@@ -55,9 +55,9 @@ function useGameSettings(colorSchemes, defaultScheme) {
   const [playModel, setPlayModelState] = useState(() => {
     try {
       const saved = localStorage.getItem(PLAY_MODEL_KEY)
-      return saved || 'deepseek-chat'
+      return saved || 'deepseek-v4-flash'
     } catch {
-      return 'deepseek-chat'
+      return 'deepseek-v4-flash'
     }
   })
 

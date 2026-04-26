@@ -132,12 +132,12 @@ function App() {
   const [dealMode, setDealMode] = useState('free') // 发牌模式：free/game/slam
   const [showSettings, setShowSettings] = useState(false) // 显示设置面板
   const [fallbackModel, setFallbackModelState] = useState(() => {
-    // 从 localStorage 读取保存的备用模型配置，默认使用 deepseek-chat
+    // 从 localStorage 读取保存的备用模型配置，默认使用 deepseek-v4-flash
     try {
       const saved = localStorage.getItem(FALLBACK_MODEL_KEY)
-      return saved || 'deepseek-chat'
+      return saved || 'deepseek-v4-flash'
     } catch {
-      return 'deepseek-chat'
+      return 'deepseek-v4-flash'
     }
   })
   const [aiProvider, setAIProviderState] = useState(() => {
@@ -153,9 +153,9 @@ function App() {
   const [playModel, setPlayModelState] = useState(() => {
     try {
       const saved = localStorage.getItem(PLAY_MODEL_KEY)
-      return saved || 'deepseek-chat'
+      return saved || 'deepseek-v4-flash'
     } catch {
-      return 'deepseek-chat'
+      return 'deepseek-v4-flash'
     }
   })
   
