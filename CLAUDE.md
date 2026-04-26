@@ -62,7 +62,7 @@ claude-deepseek.bat
 
 The script sets the following environment variables:
 - `ANTHROPIC_BASE_URL`: Points to DeepSeek API endpoint
-- `ANTHROPIC_MODEL`: Set to `deepseek-chat`
+- `ANTHROPIC_MODEL`: Set to `deepseek-v4-flash`
 - `API_TIMEOUT_MS`: Increased to 600000ms (10 minutes)
 
 ### Packaging
@@ -173,7 +173,7 @@ DOUBAO_VISION_ENDPOINT=your_vision_endpoint_id
 
 ### AI Client
 - `DeepSeekClient` in `llm/deepseek_client.py` uses OpenAI SDK with JSON schema validation.
-- Models: `deepseek-chat` (default) and `deepseek-reasoner` (optional).
+- Models: `deepseek-v4-flash` (default) and `deepseek-v4-pro` (optional).
 - Temperature: 0.2 for main prompt, 0.5 for fallback prompt.
 
 ## Important Conventions
