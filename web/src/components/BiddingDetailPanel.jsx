@@ -1,4 +1,4 @@
-import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, FormControl, InputLabel, Select, MenuItem, CircularProgress, Alert, Button, Divider } from '@mui/material'
+import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, FormControl, InputLabel, Select, MenuItem, CircularProgress, Alert, Button, Divider, useTheme } from '@mui/material'
 import BiddingControls from './BiddingControls'
 
 function BiddingDetailPanel({
@@ -30,6 +30,16 @@ function BiddingDetailPanel({
   onStartPlay,
   playLoading,
 }) {
+  const theme = useTheme()
+  const isDark = theme.palette.mode === 'dark'
+  const bgWhite = isDark ? 'rgba(30, 41, 59, 0.7)' : 'white'
+  const bgCode = isDark ? 'rgba(255,255,255,0.05)' : '#f8f9fa'
+  const bgPanel = isDark ? 'rgba(255,255,255,0.04)' : '#fafafa'
+  const bgWarn = isDark ? 'rgba(255, 243, 224, 0.12)' : '#fff3e0'
+  const borderCode = isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid #e9ecef'
+  const borderPanel = isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #e0e0e0'
+  const borderLine = isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd'
+  const colorMuted = isDark ? '#94a3b8' : '#666'
   const isHumanTurn = humanPosition !== null && (
     Array.isArray(humanPosition) 
       ? humanPosition.includes(currentBidder) 
@@ -49,10 +59,10 @@ function BiddingDetailPanel({
 
     if (simpleDisplayMode) {
       return aiBiddingHistory.map((record, index) => (
-        <Box key={index} sx={{ mb: 1, p: 1.5, background: 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>
+        <Box key={index} sx={{ mb: 1, p: 1.5, background: isDark ? 'rgba(30, 41, 59, 0.7)' : 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>
           <Typography variant="body2">
             <strong>{record.position}家</strong> → <span style={{ color: '#d32f2f', fontWeight: 'bold' }}>{record.result.bid}</span>
-            {record.result.meaning && <span style={{ color: '#666' }}> ({record.result.meaning})</span>}
+            {record.result.meaning && <span style={{ color: isDark ? '#94a3b8' : '#666' }}> ({record.result.meaning})</span>}
           </Typography>
         </Box>
       ))
@@ -66,7 +76,7 @@ function BiddingDetailPanel({
     const fullOutput = record.result.full_output || {}
 
     return (
-      <Box sx={{ p: 2, background: 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+      <Box sx={{ p: 2, background: isDark ? 'rgba(30, 41, 59, 0.7)' : 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
         <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 'bold', color: '#1976d2' }}>
           {record.timestamp} - {record.position}家
         </Typography>
@@ -101,10 +111,10 @@ function BiddingDetailPanel({
           <Typography variant="body2" sx={{ mt: 1 }}>
             <strong>手牌分析:</strong>
             <Box component="pre" sx={{ 
-              mt: 0.5, p: 1, background: '#f8f9fa', borderRadius: 1,
+              mt: 0.5, p: 1, background: bgCode, borderRadius: 1,
               fontSize: '0.85rem', lineHeight: 1.4,
               whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              border: '1px solid #e9ecef', maxHeight: '150px', overflow: 'auto'
+              border: borderCode, maxHeight: '150px', overflow: 'auto'
             }}>
               {fullOutput["手牌分析"]}
             </Box>
@@ -114,10 +124,10 @@ function BiddingDetailPanel({
           <Typography variant="body2" sx={{ mt: 1 }}>
             <strong>叫牌历史:</strong>
             <Box component="pre" sx={{ 
-              mt: 0.5, p: 1, background: '#f8f9fa', borderRadius: 1,
+              mt: 0.5, p: 1, background: bgCode, borderRadius: 1,
               fontSize: '0.85rem', lineHeight: 1.4,
               whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              border: '1px solid #e9ecef', maxHeight: '150px', overflow: 'auto'
+              border: borderCode, maxHeight: '150px', overflow: 'auto'
             }}>
               {fullOutput["叫牌历史"]}
             </Box>
@@ -152,10 +162,10 @@ function BiddingDetailPanel({
           <Typography variant="body2" sx={{ mt: 1 }}>
             <strong>扣叫控制:</strong>
             <Box component="pre" sx={{ 
-              mt: 0.5, p: 1, background: '#f8f9fa', borderRadius: 1,
+              mt: 0.5, p: 1, background: bgCode, borderRadius: 1,
               fontSize: '0.85rem', lineHeight: 1.4,
               whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              border: '1px solid #e9ecef', maxHeight: '150px', overflow: 'auto'
+              border: borderCode, maxHeight: '150px', overflow: 'auto'
             }}>
               {fullOutput["扣叫控制"]}
             </Box>
@@ -170,10 +180,10 @@ function BiddingDetailPanel({
           <Typography variant="body2" sx={{ mt: 1 }}>
             <strong>主提示词输出:</strong>
             <Box component="pre" sx={{ 
-              mt: 0.5, p: 1, background: '#fff3e0', borderRadius: 1,
+              mt: 0.5, p: 1, background: bgWarn, borderRadius: 1,
               fontSize: '0.85rem', lineHeight: 1.4,
               whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              border: '1px solid #ffcc80'
+              border: isDark ? '1px solid rgba(255, 204, 128, 0.3)' : '1px solid #ffcc80'
             }}>
               选定叫品: {fullOutput["主提示词输出"]["选定叫品"]}
               {'\n'}叫品筛选过程: {fullOutput["主提示词输出"]["叫品筛选过程"]}
@@ -193,10 +203,10 @@ function BiddingDetailPanel({
           <Typography variant="body2" sx={{ mt: 1 }}>
             <strong>叫品筛选过程:</strong>
             <Box component="pre" sx={{ 
-              mt: 1, p: 1, background: '#f8f9fa', borderRadius: 1,
+              mt: 1, p: 1, background: bgCode, borderRadius: 1,
               fontSize: '0.85rem', lineHeight: 1.4,
               whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              border: '1px solid #e9ecef', maxHeight: '200px', overflow: 'auto'
+              border: borderCode, maxHeight: '200px', overflow: 'auto'
             }}>
               {record.result.selection_process}
             </Box>
@@ -215,14 +225,14 @@ function BiddingDetailPanel({
     if (!isBiddingCompleteFn || !isBiddingCompleteFn() || !outputFormats) return null
 
     return (
-      <Box sx={{ mt: 2, p: 2, background: 'white', borderRadius: 1, border: '1px solid #e0e0e0' }}>
+      <Box sx={{ mt: 2, p: 2, background: bgWhite, borderRadius: 1, border: borderPanel }}>
         <Typography variant="subtitle2" sx={{ mb: 1, color: '#1976d2', fontWeight: 'bold' }}>
           牌局格式
         </Typography>
         <Typography variant="body2" component="pre" sx={{
           whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0,
           fontFamily: 'monospace', fontSize: '0.75rem', p: 1,
-          background: '#fafafa', borderRadius: 1, border: '1px solid #e0e0e0',
+          background: bgPanel, borderRadius: 1, border: borderPanel,
         }}>
           {outputFormats.compact}
         </Typography>
@@ -232,7 +242,7 @@ function BiddingDetailPanel({
         <Typography variant="body2" component="pre" sx={{
           whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0,
           fontFamily: 'monospace', fontSize: '0.75rem', p: 1,
-          background: '#fafafa', borderRadius: 1, border: '1px solid #e0e0e0',
+          background: bgPanel, borderRadius: 1, border: borderPanel,
         }}>
           {outputFormats.deep_finesse}
         </Typography>
@@ -261,11 +271,11 @@ function BiddingDetailPanel({
           </Box>
         ) : bidSuggestion ? (
           <Box>
-            <Typography variant="subtitle2" gutterBottom sx={{ color: '#666' }}>
+            <Typography variant="subtitle2" gutterBottom sx={{ color: colorMuted }}>
               检索关键字: <strong style={{ color: '#1976d2' }}>{bidSuggestion.keyword}</strong>
             </Typography>
             {bidSuggestion.content ? (
-              <Box sx={{ mt: 1, p: 1.5, background: '#fafafa', borderRadius: 1, border: '1px solid #e0e0e0', overflow: 'auto', maxWidth: '100%' }}>
+              <Box sx={{ mt: 1, p: 1.5, background: bgPanel, borderRadius: 1, border: borderPanel, overflow: 'auto', maxWidth: '100%' }}>
                 <Typography variant="body2" component="pre" sx={{
                   whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                   margin: 0, fontFamily: 'inherit', fontSize: '0.9rem', maxWidth: '100%',
@@ -289,7 +299,7 @@ function BiddingDetailPanel({
   return (
     <Paper elevation={3} sx={{ 
       p: isMobile ? 0.5 : 1, 
-      bgcolor: isMobile ? '#f5f5f5' : '#e8e8e8', 
+      bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : (isMobile ? '#f5f5f5' : '#e8e8e8'), 
       display: 'flex', 
       flexDirection: 'column', 
       flex: isMobile ? undefined : '0 0 auto',
@@ -299,10 +309,9 @@ function BiddingDetailPanel({
       overflow: isMobile ? undefined : 'hidden',
       boxSizing: 'border-box'
     }}>
-      {/* 顶部切换栏 */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5, flexShrink: 0, minHeight: 40, flexWrap: isMobile ? 'wrap' : 'nowrap', gap: isMobile ? 0.5 : 0 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant={isMobile ? "h6" : "subtitle1"} sx={{ fontWeight: 600, fontSize: isMobile ? undefined : '1rem' }}>
+          <Typography variant={isMobile ? "h6" : "subtitle1"} sx={{ fontWeight: 600, fontSize: isMobile ? undefined : '1rem', color: isDark ? '#e2e8f0' : undefined }}>
             叫牌细节
           </Typography>
           <ToggleButtonGroup
@@ -354,7 +363,7 @@ function BiddingDetailPanel({
 
       {effectiveShowControls ? (
         /* 叫牌控制 + JF片段 */
-        <Box sx={{ flex: 1, overflow: 'auto', p: 1, background: '#fafafa', borderRadius: 2, border: '1px solid #ddd', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <Box sx={{ flex: 1, overflow: 'auto', p: 1, background: bgPanel, borderRadius: 2, border: borderLine, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
           <Box sx={{ flex: '0 0 auto' }}>
             <BiddingControls
               hands={hands}
@@ -379,7 +388,7 @@ function BiddingDetailPanel({
         </Box>
       ) : (
         /* 叫牌细节 */
-        <Box sx={{ flex: 1, overflow: 'auto', p: 1, background: '#fafafa', borderRadius: 2, border: '1px solid #ddd', minHeight: 0 }}>
+        <Box sx={{ flex: 1, overflow: 'auto', p: 1, background: bgPanel, borderRadius: 2, border: borderLine, minHeight: 0 }}>
           {renderBiddingDetails()}
           {renderOutputFormats()}
           {isBiddingCompleteFn && isBiddingCompleteFn() && onStartPlay && (

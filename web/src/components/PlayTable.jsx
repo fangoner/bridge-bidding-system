@@ -1,5 +1,5 @@
 import React from 'react'
-import { Box, Typography, Paper, Tooltip, Button, Chip, CircularProgress, Card as MuiCard } from '@mui/material'
+import { Box, Typography, Paper, Tooltip, Button, Chip, CircularProgress, Card as MuiCard, useTheme } from '@mui/material'
 import { getSuitColor } from '../constants/suits'
 
 function PlayTable({
@@ -21,6 +21,9 @@ function PlayTable({
   playableCards,
   onResume,
 }) {
+  const theme = useTheme()
+  const isDark = theme.palette.mode === 'dark'
+
   const getCardAtPosition = (position) => {
     if (!currentTrick?.cards) return null
     const cardEntry = currentTrick.cards.find(([pos]) => pos === position)
@@ -57,12 +60,12 @@ function PlayTable({
           sx={{
             width: 52,
             height: 68,
-            border: '2px dashed #ccc',
+            border: isDark ? '2px dashed rgba(255,255,255,0.15)' : '2px dashed #ccc',
             borderRadius: 1,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            bgcolor: '#fafafa',
+            bgcolor: isDark ? 'rgba(255,255,255,0.04)' : '#fafafa',
           }}
         >
           <Typography variant="caption" color="text.disabled">
@@ -83,8 +86,8 @@ function PlayTable({
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          bgcolor: isAI ? '#f0f0f0' : '#fff',
-          border: isAI ? '1px solid #bbb' : '1px solid #ddd',
+          bgcolor: isAI ? (isDark ? 'rgba(255,255,255,0.08)' : '#f0f0f0') : (isDark ? 'rgba(30, 41, 59, 0.9)' : '#fff'),
+          border: isAI ? (isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid #bbb') : (isDark ? '1px solid rgba(255,255,255,0.15)' : '1px solid #ddd'),
           boxShadow: 1,
         }}
       >
@@ -197,8 +200,8 @@ function PlayTable({
         </Typography>
         <Paper sx={{ 
           p: 1, 
-          bgcolor: '#fffde7', 
-          border: '2px solid #ffc107',
+          bgcolor: isDark ? 'rgba(255, 253, 231, 0.12)' : '#fffde7', 
+          border: isDark ? '2px solid rgba(255, 193, 7, 0.4)' : '2px solid #ffc107',
         }}>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
             {currentHand.map((card, idx) => {
@@ -220,15 +223,17 @@ function PlayTable({
                     width: 36,
                     height: 46,
                     cursor: canClick ? 'pointer' : 'default',
-                    bgcolor: isSelected ? '#bbdefb' : (isPlayable ? '#fff' : '#f5f5f5'),
-                    border: isSelected ? '2px solid #1976d2' : '1px solid #ddd',
+                    bgcolor: isSelected 
+                      ? (isDark ? 'rgba(25, 118, 210, 0.25)' : '#bbdefb')
+                      : (isPlayable ? (isDark ? 'rgba(30, 41, 59, 0.9)' : '#fff') : (isDark ? 'rgba(255,255,255,0.05)' : '#f5f5f5')),
+                    border: isSelected ? '2px solid #1976d2' : (isDark ? '1px solid rgba(255,255,255,0.15)' : '1px solid #ddd'),
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     transition: 'all 0.15s',
                     opacity: isPlayable ? 1 : 0.5,
                     '&:hover': canClick ? {
-                      bgcolor: '#bbdefb',
+                      bgcolor: isDark ? 'rgba(25, 118, 210, 0.35)' : '#bbdefb',
                       transform: 'translateY(-2px)',
                     } : {},
                   }}
@@ -270,15 +275,15 @@ function PlayTable({
       </Box>
 
       <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-        <Paper sx={{ p: 0.5, bgcolor: '#e3f2fd', textAlign: 'center', minWidth: 60 }}>
+        <Paper sx={{ p: 0.5, bgcolor: isDark ? 'rgba(99, 102, 241, 0.15)' : '#e3f2fd', textAlign: 'center', minWidth: 60 }}>
           <Typography variant="caption" color="text.secondary">庄家方</Typography>
           <Typography variant="h6" fontWeight="bold" color="primary">{declarerTricks}</Typography>
         </Paper>
-        <Paper sx={{ p: 0.5, bgcolor: '#fff3e0', textAlign: 'center', minWidth: 60 }}>
+        <Paper sx={{ p: 0.5, bgcolor: isDark ? 'rgba(255, 152, 0, 0.1)' : '#fff3e0', textAlign: 'center', minWidth: 60 }}>
           <Typography variant="caption" color="text.secondary">防守方</Typography>
           <Typography variant="h6" fontWeight="bold" color="warning.main">{defenderTricks}</Typography>
         </Paper>
-        <Paper sx={{ p: 0.5, bgcolor: '#f5f5f5', textAlign: 'center', minWidth: 60 }}>
+        <Paper sx={{ p: 0.5, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : '#f5f5f5', textAlign: 'center', minWidth: 60 }}>
           <Typography variant="caption" color="text.secondary">需要</Typography>
           <Typography variant="h6" fontWeight="bold">{contract?.tricks_needed || '?'}</Typography>
         </Paper>

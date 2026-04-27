@@ -1,6 +1,8 @@
-import { Button, Badge, CircularProgress, Tooltip } from '@mui/material'
+import { Button, Badge, CircularProgress, Tooltip, IconButton } from '@mui/material'
 import HistoryIcon from '@mui/icons-material/History'
 import UndoIcon from '@mui/icons-material/Undo'
+import DarkModeIcon from '@mui/icons-material/DarkMode'
+import LightModeIcon from '@mui/icons-material/LightMode'
 
 function ControlButtons({
   size = 'large',
@@ -25,6 +27,8 @@ function ControlButtons({
   canUndo,
   onUndo,
   showPlayPanel,
+  darkMode,
+  onToggleDarkMode,
 }) {
   const isLarge = size === 'large'
   const gap = isLarge ? 2 : 1
@@ -129,6 +133,12 @@ function ControlButtons({
           {isLarge ? '重新加载约定' : '约定'}
         </Button>
       </Badge>
+      
+      <Tooltip title={darkMode ? '切换明亮模式' : '切换暗色模式'}>
+        <IconButton onClick={onToggleDarkMode} size={buttonSize} sx={{ ml: 1 }}>
+          {darkMode ? <LightModeIcon /> : <DarkModeIcon />}
+        </IconButton>
+      </Tooltip>
     </>
   )
 }

@@ -1,5 +1,6 @@
 import json
 from typing import Optional, Dict, Any
+import httpx
 from openai import OpenAI
 
 import sys
@@ -101,14 +102,12 @@ HUMAN_BID_SCHEMA = {
 PLAY_SCHEMA = {
     "type": "object",
     "properties": {
-        "推理过程": {"type": "string"},
-        "立场分析": {"type": "string"},
-        "推荐出牌": {"type": "string"},
+        "局面评估": {"type": "string"},
+        "候选对比": {"type": "string"},
         "核心逻辑": {"type": "string"},
-        "风险提示": {"type": "string"},
-        "后续路线建议": {"type": "string"}
+        "推荐出牌": {"type": "string"}
     },
-    "required": ["推理过程", "立场分析", "推荐出牌", "核心逻辑"]
+    "required": ["局面评估", "候选对比", "核心逻辑", "推荐出牌"]
 }
 
 
@@ -122,7 +121,8 @@ class DeepSeekClient:
         if self.api_key:
             self.client = OpenAI(
                 api_key=self.api_key,
-                base_url=self.base_url
+                base_url=self.base_url,
+                timeout=httpx.Timeout(90.0, connect=15.0)
             )
     
     def is_configured(self) -> bool:
@@ -139,7 +139,8 @@ class DeepSeekClient:
         response = self.client.chat.completions.create(
             model=model or self.model,
             messages=messages,
-            temperature=temperature
+            temperature=temperature,
+            timeout=httpx.Timeout(90.0, connect=15.0)
         )
         
         return response.choices[0].message.content
@@ -152,19 +153,39 @@ class DeepSeekClient:
         if user_prompt:
             messages.append({"role": "user", "content": user_prompt})
         
-        try:
-            response = self.client.chat.completions.create(
-                model=model or self.model,
-                messages=messages,
-                temperature=temperature,
-                response_format={"type": "json_object"},
-                max_tokens=8192
-            )
-            return json.loads(response.choices[0].message.content)
-        except Exception as e:
-            pass
+        import time
+        max_retries = 2
+        last_error = None
         
-        response_text = self.chat(system_prompt, user_prompt, temperature, model)
+        for attempt in range(max_retries + 1):
+            try:
+                response = self.client.chat.completions.create(
+                    model=model or self.model,
+                    messages=messages,
+                    temperature=temperature,
+                    response_format={"type": "json_object"},
+                    max_tokens=8192
+                )
+                return json.loads(response.choices[0].message.content)
+            except (json.JSONDecodeError, KeyError):
+                # JSON 解析失败，降级到普通模式（仅尝试一次）
+                break
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries:
+                    wait = (attempt + 1) * 3
+                    print(f"[DeepSeek] JSON mode retry {attempt+1}/{max_retries} after {wait}s: {e}")
+                    time.sleep(wait)
+                else:
+                    print(f"[DeepSeek] JSON mode failed after {max_retries} retries: {e}")
+        
+        # JSON 模式失败，降级到普通文本模式（仅一次，不重试）
+        try:
+            response_text = self.chat(system_prompt, user_prompt, temperature, model)
+        except Exception as e:
+            error_msg = f"json解析失败: {last_error}, 普通模式也失败: {e}"
+            print(f"[DeepSeek] {error_msg}")
+            return {"raw_response": "", "error": error_msg}
         
         try:
             json_match = response_text

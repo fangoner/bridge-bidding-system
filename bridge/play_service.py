@@ -1,3 +1,4 @@
+import asyncio
 import re
 from typing import Optional, Dict, List, Any
 
@@ -13,8 +14,6 @@ class PlayService:
         self.engine = PlayEngine()
         # 做庄计划：庄家和明手之间共享传递
         self.declarer_plan = ""
-        # 做庄全局规划：明手摊牌后首次出牌时生成，贯穿整个打牌过程
-        self.declarer_global_plan = ""
         # 防守计划：每个防守者各自维护，key=位置
         self.defender_plans = {}
     
@@ -36,7 +35,6 @@ class PlayService:
         
         # 重置做庄和防守计划
         self.declarer_plan = ""
-        self.declarer_global_plan = ""
         self.defender_plans = {}
         
         return self.engine.initialize(hands, contract, player_roles, bidding_sequence)
@@ -87,13 +85,11 @@ class PlayService:
                     # 防守方撤销：丢弃该位置的计划
                     self.defender_plans.pop(undone_position, None)
                 else:
-                    # 庄家方撤销：丢弃做庄进度（但保留全局规划）
+                    # 庄家方撤销：丢弃做庄进度
                     self.declarer_plan = ""
             
-            # 如果墩数回退（从已完成墩恢复），需要丢弃全局规划
-            # 因为全局规划是基于已完成的墩数制定的
+            # 如果墩数回退（从已完成墩恢复），清空所有计划
             if tricks_after < tricks_before:
-                self.declarer_global_plan = ""
                 self.declarer_plan = ""
                 self.defender_plans.clear()
         
@@ -176,12 +172,7 @@ class PlayService:
         
         # 获取上一轮计划
         if is_declarer_side:
-            parts = []
-            if self.declarer_global_plan:
-                parts.append(f"## 全局规划（明手摊牌后制定，贯穿全程）\n{self.declarer_global_plan}")
-            if self.declarer_plan:
-                parts.append(f"## 上一轮做庄进度与调整\n{self.declarer_plan}")
-            previous_plan = "\n\n".join(parts) if parts else "（首轮出牌，尚无做庄计划）"
+            previous_plan = f"## 上一轮做庄进度与调整\n{self.declarer_plan}" if self.declarer_plan else "（首轮出牌，尚无做庄计划）"
         else:
             prev = self.defender_plans.get(current_player, "")
             previous_plan = f"## 上一轮防守计划\n{prev}" if prev else "（首次出牌，尚无防守计划）"
@@ -204,8 +195,10 @@ class PlayService:
                 previous_plan=previous_plan,
             )
         
+        print(f"[Play] Prompt {len(prompt)} chars, model={self.llm_client.model}")
         try:
-            result = self.llm_client.chat_play(prompt)
+            # 在线程池中执行同步 LLM 调用，避免阻塞事件循环
+            result = await asyncio.to_thread(self.llm_client.chat_play, prompt)
             
             recommended = (
                 result.get("推荐出牌") or 
@@ -219,30 +212,26 @@ class PlayService:
                 card = self._select_best_card(playable_cards, state)
             
             reasoning = (
-                result.get("推理过程") or
-                result.get("核心逻辑") or 
+                result.get("核心逻辑") or
+                result.get("候选对比") or
+                result.get("局面评估") or
+                result.get("推理过程") or  # 兼容旧字段
                 result.get("理由") or 
                 result.get("reasoning") or 
                 ""
             )
-            follow_up = result.get("后续路线建议", "")
             
-            # 保存全局规划（仅首次出牌时AI会输出此字段）
-            global_plan = result.get("全局规划", "")
-            if global_plan and is_declarer_side and not self.declarer_global_plan:
-                self.declarer_global_plan = global_plan
-            
-            # 保存后续路线建议作为下一轮计划
-            if follow_up:
+            # 保存候选对比作为下一轮计划参考
+            candidate_analysis = result.get("候选对比", "")
+            if candidate_analysis:
                 if is_declarer_side:
-                    self.declarer_plan = follow_up
+                    self.declarer_plan = candidate_analysis
                 else:
-                    self.defender_plans[current_player] = follow_up
+                    self.defender_plans[current_player] = candidate_analysis
             
             return {
                 "card": card.to_dict() if card else None,
                 "reasoning": reasoning,
-                "follow_up": follow_up,
                 "full_output": result,
                 "prompt": prompt
             }

@@ -1,11 +1,11 @@
-import React from 'react';
-import { Box, Typography } from '@mui/material';
-import { styled } from '@mui/material/styles';
+import React from 'react'
+import { Box, Typography, useTheme } from '@mui/material'
+import { styled } from '@mui/material/styles'
 
 const HandCard = styled(Box, {
   shouldForwardProp: (prop) => !['isActive', 'isHuman', 'isPartner'].includes(prop),
 })(({ theme, isActive, isHuman, isPartner }) => ({
-  background: 'white',
+  background: theme.palette.mode === 'dark' ? 'rgba(30, 41, 59, 0.8)' : 'white',
   borderRadius: 12,
   padding: theme.spacing(1),
   boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
@@ -13,26 +13,30 @@ const HandCard = styled(Box, {
   fontFamily: '"SF Mono", "Monaco", "Inconsolata", "Fira Code", monospace',
   transition: 'all 0.25s ease',
   border: '1px solid',
-  borderColor: '#e2e8f0',
+  borderColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.1)' : '#e2e8f0',
   ...(isActive && {
     boxShadow: '0 0 0 2px #6366f1, 0 4px 12px rgba(99, 102, 241, 0.2)',
     transform: 'scale(1.02)',
     borderColor: '#6366f1',
   }),
   ...(isHuman && {
-    background: 'linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)',
-    borderColor: '#a5b4fc',
+    background: theme.palette.mode === 'dark'
+      ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(99, 102, 241, 0.08) 100%)'
+      : 'linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)',
+    borderColor: theme.palette.mode === 'dark' ? 'rgba(165, 180, 252, 0.4)' : '#a5b4fc',
   }),
   ...(isPartner && {
-    background: 'linear-gradient(135deg, #fdf4ff 0%, #fae8ff 100%)',
-    borderColor: '#e879f9',
+    background: theme.palette.mode === 'dark'
+      ? 'linear-gradient(135deg, rgba(236, 72, 153, 0.12) 0%, rgba(236, 72, 153, 0.06) 100%)'
+      : 'linear-gradient(135deg, #fdf4ff 0%, #fae8ff 100%)',
+    borderColor: theme.palette.mode === 'dark' ? 'rgba(232, 121, 249, 0.35)' : '#e879f9',
   }),
 }));
 
 const HandTitle = styled(Typography)(({ theme }) => ({
   fontWeight: 600,
   marginBottom: theme.spacing(0.5),
-  color: '#1e293b',
+  color: theme.palette.mode === 'dark' ? '#e2e8f0' : '#1e293b',
   fontSize: '0.8rem',
   letterSpacing: '0.01em',
 }));
@@ -62,8 +66,8 @@ const HiddenHand = styled(Box)(({ theme }) => ({
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  color: '#94a3b8',
-}));
+  color: theme.palette.mode === 'dark' ? '#64748b' : '#94a3b8',
+}))
 
 const HCPBadge = styled(Box)(({ theme }) => ({
   display: 'inline-flex',
@@ -71,10 +75,12 @@ const HCPBadge = styled(Box)(({ theme }) => ({
   justifyContent: 'center',
   padding: '2px 8px',
   borderRadius: 12,
-  background: 'linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%)',
+  background: theme.palette.mode === 'dark'
+    ? 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.04) 100%)'
+    : 'linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%)',
   fontSize: '0.75rem',
   fontWeight: 600,
-  color: '#475569',
+  color: theme.palette.mode === 'dark' ? '#94a3b8' : '#475569',
   marginLeft: 'auto',
 }));
 
@@ -88,13 +94,15 @@ function HandDisplay({
   showContent = true,
   titleExtra = null,
   hideTitle = false,
-  playedCards = null, // Set of "suit+rank" strings, e.g. Set(["♠A", "♥K"])
+  playedCards = null,
 }) {
+  const theme = useTheme()
+  const isDark = theme.palette.mode === 'dark'
   const suitColors = {
-    spades: '#1e293b',
-    hearts: '#dc2626',
-    diamonds: '#ea580c',
-    clubs: '#16a34a',
+    spades: isDark ? '#e2e8f0' : '#1e293b',
+    hearts: isDark ? '#f87171' : '#dc2626',
+    diamonds: isDark ? '#fbbf24' : '#ea580c',
+    clubs: isDark ? '#4ade80' : '#16a34a',
   };
 
   const hasCards = hand && (hand.spades || hand.hearts || hand.diamonds || hand.clubs);

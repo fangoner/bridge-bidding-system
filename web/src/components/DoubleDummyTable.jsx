@@ -1,8 +1,11 @@
-import React from 'react';
-import { Box } from '@mui/material';
+import React from 'react'
+import { Box, useTheme } from '@mui/material'
 
 function DoubleDummyTable({ tableData }) {
-  if (!tableData) return null;
+  const theme = useTheme()
+  const isDark = theme.palette.mode === 'dark'
+
+  if (!tableData) return null
 
   const positions = ['南', '西', '北', '东'];
   const trumpOrder = ['S', 'H', 'D', 'C', 'NT'];
@@ -29,11 +32,11 @@ function DoubleDummyTable({ tableData }) {
       <Box className="bidding-header" sx={{
         display: 'flex',
         justifyContent: 'space-around',
-        borderBottom: '1px solid #333',
+        borderBottom: isDark ? '1px solid rgba(255,255,255,0.2)' : '1px solid #333',
         paddingBottom: { xs: 0.5, md: 1 },
         marginBottom: { xs: 0.5, md: 1 },
         fontWeight: 'bold',
-        color: '#333',
+        color: isDark ? '#e2e8f0' : '#333',
       }}>
         {positions.map(pos => (
           <Box
@@ -43,7 +46,7 @@ function DoubleDummyTable({ tableData }) {
               flex: 1,
               textAlign: 'center',
               minWidth: { xs: 35, md: 50 },
-              color: '#333',
+              color: isDark ? '#e2e8f0' : '#333',
             }}
           >
             {pos}
@@ -59,7 +62,7 @@ function DoubleDummyTable({ tableData }) {
             display: 'flex',
             justifyContent: 'space-around',
             padding: '4px 0',
-            borderBottom: '1px solid #ddd',
+            borderBottom: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd',
             '&:last-child': {
               borderBottom: 'none',
             },
@@ -69,14 +72,14 @@ function DoubleDummyTable({ tableData }) {
             <Box
               key={cellIndex}
               component="span"
-              className={`bidding-cell ${cell !== '-' ? 'has-bid' : ''}`}
+              className="bidding-cell"
               sx={{
                 flex: 1,
                 textAlign: 'center',
                 minWidth: 50,
                 fontWeight: 500,
-                color: '#333',
-                backgroundColor: '#e3f2fd',
+                color: isDark ? '#e2e8f0' : '#333',
+                backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e3f2fd',
                 borderRadius: 1,
               }}
             >

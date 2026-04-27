@@ -3,6 +3,7 @@ import {
   Box,
   Paper,
   Typography,
+  useTheme,
   Button,
   Chip,
   Divider,
@@ -26,6 +27,8 @@ function PlayPanel({
   isPaused,
   onPauseToggle,
 }) {
+  const theme = useTheme()
+  const isDark = theme.palette.mode === 'dark'
   const [selectedCard, setSelectedCard] = useState(null)
   const prevPlayerRef = useRef(playState?.current_player)
   
@@ -143,8 +146,8 @@ function PlayPanel({
             alignItems: 'center',
             minWidth: 50,
             minHeight: 45,
-            bgcolor: isAI ? '#f0f0f0' : '#fff',
-            border: isAI ? '1px solid #bbb' : '1px solid #ddd',
+            bgcolor: isAI ? (isDark ? 'rgba(255,255,255,0.08)' : '#f0f0f0') : (isDark ? 'rgba(30, 41, 59, 0.9)' : '#fff'),
+            border: isAI ? (isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid #bbb') : (isDark ? '1px solid rgba(255,255,255,0.15)' : '1px solid #ddd'),
           }}
         >
           <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
@@ -275,8 +278,10 @@ function PlayPanel({
         </Box>
         <Paper sx={{ 
           p: 1, 
-          bgcolor: is_human_turn ? '#fffde7' : '#fafafa', 
-          border: is_human_turn ? '2px solid #ffc107' : '1px solid #ddd',
+          bgcolor: is_human_turn 
+            ? (isDark ? 'rgba(255, 253, 231, 0.12)' : '#fffde7')
+            : (isDark ? 'rgba(255,255,255,0.04)' : '#fafafa'), 
+          border: is_human_turn ? '2px solid #ffc107' : (isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd'),
           flex: 1,
           overflow: 'hidden'
         }}>
@@ -300,8 +305,10 @@ function PlayPanel({
                     width: 38,
                     height: 48,
                     cursor: canClick ? 'pointer' : 'default',
-                    bgcolor: isSelected ? '#bbdefb' : (isPlayable ? '#fff' : '#f5f5f5'),
-                    border: isSelected ? '2px solid #1976d2' : '1px solid #ddd',
+                    bgcolor: isSelected 
+                      ? (isDark ? 'rgba(25, 118, 210, 0.25)' : '#bbdefb')
+                      : (isPlayable ? (isDark ? 'rgba(30, 41, 59, 0.9)' : '#fff') : (isDark ? 'rgba(255,255,255,0.05)' : '#f5f5f5')),
+                    border: isSelected ? '2px solid #1976d2' : (isDark ? '1px solid rgba(255,255,255,0.15)' : '1px solid #ddd'),
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -309,7 +316,7 @@ function PlayPanel({
                     opacity: isPlayable ? 1 : 0.5,
                     flexShrink: 0,
                     '&:hover': canClick ? {
-                      bgcolor: '#bbdefb',
+                      bgcolor: isDark ? 'rgba(25, 118, 210, 0.35)' : '#bbdefb',
                       transform: 'translateY(-2px)',
                     } : {},
                   }}
@@ -403,19 +410,19 @@ function PlayPanel({
         flexShrink: 0,
         height: '50px'
       }}>
-        <Paper sx={{ p: 0.5, bgcolor: '#e3f2fd', textAlign: 'center', minWidth: '70px', height: '40px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <Paper sx={{ p: 0.5, bgcolor: isDark ? 'rgba(99, 102, 241, 0.15)' : '#e3f2fd', textAlign: 'center', minWidth: '70px', height: '40px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
           <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.7rem' }}>庄家方</Typography>
           <Typography variant="h6" fontWeight="bold" color="primary">
             {declarer_tricks}
           </Typography>
         </Paper>
-        <Paper sx={{ p: 0.5, bgcolor: '#fff3e0', textAlign: 'center', minWidth: '70px', height: '40px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <Paper sx={{ p: 0.5, bgcolor: isDark ? 'rgba(255, 152, 0, 0.1)' : '#fff3e0', textAlign: 'center', minWidth: '70px', height: '40px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
           <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.7rem' }}>防守方</Typography>
           <Typography variant="h6" fontWeight="bold" color="warning.main">
             {defender_tricks}
           </Typography>
         </Paper>
-        <Paper sx={{ p: 0.5, bgcolor: '#f5f5f5', textAlign: 'center', minWidth: '70px', height: '40px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <Paper sx={{ p: 0.5, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : '#f5f5f5', textAlign: 'center', minWidth: '70px', height: '40px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
           <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.7rem' }}>需要</Typography>
           <Typography variant="h6" fontWeight="bold">
             {contract?.tricks_needed || '?'}

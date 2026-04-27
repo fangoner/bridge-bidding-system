@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Box, Typography, Paper, Chip, Divider, CircularProgress, Button, Card as MuiCard, ToggleButtonGroup, ToggleButton } from '@mui/material'
+import { Box, Typography, Paper, Chip, Divider, CircularProgress, Button, Card as MuiCard, ToggleButtonGroup, ToggleButton, useTheme } from '@mui/material'
 import { SUIT_COLOR_MAP } from '../constants/suits'
 
 function PlayDetailPanel({
@@ -34,6 +34,13 @@ function PlayDetailPanel({
     prevIsPausedRef.current = isPaused
   }, [isPaused])
   
+  const theme = useTheme()
+  const isDark = theme.palette.mode === 'dark'
+  const bgWhite = isDark ? 'rgba(30, 41, 59, 0.7)' : 'white'
+  const bgCode = isDark ? 'rgba(255,255,255,0.05)' : '#f8f9fa'
+  const borderCode = isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid #e9ecef'
+  const colorMuted = isDark ? '#94a3b8' : '#888'
+  
   const contract = playState?.contract
   const dummy = playState?.dummy
   const tricks = playState?.tricks || []
@@ -57,6 +64,18 @@ function PlayDetailPanel({
   
   const playableCards = getPlayableCards()
 
+  // 估算token数（中文字符≈1 token，其他≈4字符/token）
+  const estimateTokens = (text) => {
+    if (!text) return 0
+    let chinese = 0
+    let other = 0
+    for (const ch of text) {
+      if (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(ch)) chinese++
+      else other++
+    }
+    return Math.ceil(chinese + other / 4)
+  }
+
   // 渲染AI输出卡片的通用组件
   const renderAIOutputCard = (record, showClose = false, onCloseExternal = null) => {
     if (!record) {
@@ -70,29 +89,26 @@ function PlayDetailPanel({
     const fullOutput = record.full_output || {}
     const prompt = record.prompt || ''
 
-    // 输出模式的字段定义
+    // 输出模式的字段定义（v1.38 精简：局面评估+候选对比+核心逻辑）
     const fields = [
-      { key: '推理过程', label: '推理过程', color: 'text.primary', multiline: true },
-      { key: '立场分析', label: '立场分析', color: '#1976d2' },
+      { key: '候选对比', label: '抉择过程', color: 'text.primary', multiline: true },
       { key: '核心逻辑', label: '核心逻辑', color: '#2e7d32' },
-      { key: '全局规划', label: '全局规划', color: '#00838f', multiline: true },
-      { key: '风险提示', label: '风险提示', color: '#ed6c02' },
-      { key: '后续路线建议', label: '后续路线', color: '#7b1fa2', multiline: true },
+      { key: '局面评估', label: '局面评估', color: '#1976d2', multiline: true },
     ]
 
-    // 兼容旧字段名
+    // 兼容旧字段名，确保旧记录也能显示
     const getValue = (key) => {
       return fullOutput[key] || record[key] || ''
     }
 
     return (
-      <Box sx={{ p: 1.5, background: 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+      <Box sx={{ p: 1.5, background: bgWhite, borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#1976d2', fontSize: '0.85rem' }}>
             {record.position}家 - {record.card?.suit}{record.card?.rank}
           </Typography>
           {record.used_model && (
-            <Typography variant="caption" sx={{ color: '#888', fontSize: '0.7rem' }}>
+            <Typography variant="caption" sx={{ color: colorMuted, fontSize: '0.7rem' }}>
               {record.used_model === 'deepseek-v4-pro' ? 'V4-Pro' : 'V4-Flash'}
             </Typography>
           )}
@@ -129,10 +145,10 @@ function PlayDetailPanel({
                       {label}:
                     </Typography>
                     <Box component="pre" sx={{ 
-                      mt: 0.25, p: 0.5, background: '#f8f9fa', borderRadius: 1,
+                      mt: 0.25, p: 0.5, background: bgCode, borderRadius: 1,
                       fontSize: '0.75rem', lineHeight: 1.3,
                       whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                      border: '1px solid #e9ecef', maxHeight: '120px', overflow: 'auto',
+                      border: borderCode, maxHeight: '120px', overflow: 'auto',
                       color,
                     }}>
                       {value}
@@ -149,13 +165,19 @@ function PlayDetailPanel({
         ) : (
           // 输入模式：显示传给AI的完整提示词
           prompt ? (
-            <Box component="pre" sx={{ 
-              p: 0.75, background: '#f8f9fa', borderRadius: 1,
-              fontSize: '0.7rem', lineHeight: 1.4,
-              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              border: '1px solid #e9ecef', maxHeight: '400px', overflow: 'auto',
-            }}>
-              {prompt}
+            <Box>
+              <Typography variant="caption" sx={{ display: 'block', color: colorMuted, fontSize: '0.7rem', mb: 0.25 }}>
+                提示词长度: {prompt.length.toLocaleString()} 字符
+                &nbsp;·&nbsp;约 {(estimateTokens(prompt)).toLocaleString()} token
+              </Typography>
+              <Box component="pre" sx={{ 
+                p: 0.75, background: bgCode, borderRadius: 1,
+                fontSize: '0.7rem', lineHeight: 1.4,
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                border: '1px solid #e9ecef', maxHeight: '400px', overflow: 'auto',
+              }}>
+                {prompt}
+              </Box>
             </Box>
           ) : (
             <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem' }}>
@@ -233,8 +255,8 @@ function PlayDetailPanel({
         </Typography>
         <Paper sx={{ 
           p: 0.5, 
-          bgcolor: '#fffde7', 
-          border: '2px solid #ffc107',
+          bgcolor: isDark ? 'rgba(255, 253, 231, 0.12)' : '#fffde7', 
+          border: isDark ? '2px solid rgba(255, 193, 7, 0.4)' : '2px solid #ffc107',
         }}>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
             {currentHand.map((card, idx) => {
@@ -254,8 +276,10 @@ function PlayDetailPanel({
                     width: 32,
                     height: 42,
                     cursor: isPlayable ? 'pointer' : 'default',
-                    bgcolor: isSelected ? '#bbdefb' : (isPlayable ? '#fff' : '#f5f5f5'),
-                    border: isSelected ? '2px solid #1976d2' : '1px solid #ddd',
+                    bgcolor: isSelected 
+                      ? (isDark ? 'rgba(25, 118, 210, 0.25)' : '#bbdefb') 
+                      : (isPlayable ? (isDark ? 'rgba(30, 41, 59, 0.9)' : '#fff') : (isDark ? 'rgba(255,255,255,0.05)' : '#f5f5f5')),
+                    border: isSelected ? '2px solid #1976d2' : (isDark ? '1px solid rgba(255,255,255,0.15)' : '1px solid #ddd'),
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -321,9 +345,11 @@ function PlayDetailPanel({
             gap: 0.5,
             py: 0.25,
             px: 0.5,
-            bgcolor: isCurrentTrick ? '#f3e5f5' : (isDeclarerSide ? '#e3f2fd' : '#fff3e0'),
+            bgcolor: isCurrentTrick 
+              ? (isDark ? 'rgba(156, 39, 176, 0.15)' : '#f3e5f5')
+              : (isDeclarerSide ? (isDark ? 'rgba(99, 102, 241, 0.12)' : '#e3f2fd') : (isDark ? 'rgba(255, 152, 0, 0.1)' : '#fff3e0')),
             borderRadius: 0.5,
-            border: isCurrentTrick ? '1px dashed #9c27b0' : 'none',
+            border: isCurrentTrick ? (isDark ? '1px dashed rgba(156, 39, 176, 0.5)' : '1px dashed #9c27b0') : 'none',
           }}
         >
           <Typography variant="caption" sx={{ fontWeight: 'bold', fontSize: '0.75rem', minWidth: 35 }}>
@@ -387,7 +413,7 @@ function PlayDetailPanel({
   return (
     <Paper elevation={3} sx={{ 
       p: 1, 
-      bgcolor: isMobile ? '#f5f5f5' : '#e8e8e8',
+      bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : (isMobile ? '#f5f5f5' : '#e8e8e8'),
       width: isMobile ? '100%' : '600px',
       height: '640px',
       display: 'flex',
@@ -395,7 +421,7 @@ function PlayDetailPanel({
       overflow: 'hidden'
     }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5, flexShrink: 0, minHeight: 40 }}>
-        <Typography variant="h6" sx={{ fontSize: '1rem' }}>打牌详情</Typography>
+        <Typography variant="h6" sx={{ fontSize: '1rem', color: isDark ? '#e2e8f0' : undefined }}>打牌详情</Typography>
         <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
           <Chip 
             label={`${contract?.level || '?'}${contract?.suit || 'NT'}`} 
@@ -420,17 +446,17 @@ function PlayDetailPanel({
         </Box>
       </Box>
 
-      <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#fafafa', borderRadius: 2, border: '1px solid #ddd', minHeight: 0, p: 1 }}>
+      <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: isDark ? 'rgba(255,255,255,0.04)' : '#fafafa', borderRadius: 2, border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd', minHeight: 0, p: 1 }}>
         <Box sx={{ display: 'flex', gap: 1, mb: 1, flexShrink: 0 }}>
-          <Paper sx={{ p: 0.5, bgcolor: '#e3f2fd', textAlign: 'center', minWidth: 50 }}>
+          <Paper sx={{ p: 0.5, bgcolor: isDark ? 'rgba(99, 102, 241, 0.15)' : '#e3f2fd', textAlign: 'center', minWidth: 50 }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>庄家方</Typography>
             <Typography variant="body2" fontWeight="bold" color="primary">{declarerTricks}</Typography>
           </Paper>
-          <Paper sx={{ p: 0.5, bgcolor: '#fff3e0', textAlign: 'center', minWidth: 50 }}>
+          <Paper sx={{ p: 0.5, bgcolor: isDark ? 'rgba(255, 152, 0, 0.1)' : '#fff3e0', textAlign: 'center', minWidth: 50 }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>防守方</Typography>
             <Typography variant="body2" fontWeight="bold" color="warning.main">{defenderTricks}</Typography>
           </Paper>
-          <Paper sx={{ p: 0.5, bgcolor: '#f5f5f5', textAlign: 'center', minWidth: 50 }}>
+          <Paper sx={{ p: 0.5, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : '#f5f5f5', textAlign: 'center', minWidth: 50 }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>需要</Typography>
             <Typography variant="body2" fontWeight="bold">{contract?.tricks_needed || '?'}</Typography>
           </Paper>

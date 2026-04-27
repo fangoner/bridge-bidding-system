@@ -1,4 +1,4 @@
-import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox } from '@mui/material'
+import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, useTheme } from '@mui/material'
 import CardTable from './CardTable'
 import BiddingTable from './BiddingTable'
 
@@ -51,10 +51,12 @@ function CardTablePanel({
   aiBiddingHistory,
   onPlayCardClick,
 }) {
+  const theme = useTheme()
+  const isDark = theme.palette.mode === 'dark'
   return (
     <Paper elevation={3} sx={{ 
       p: 1, 
-      bgcolor: isMobile ? '#f5f5f5' : '#e8e8e8', 
+      bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : (isMobile ? '#f5f5f5' : '#e8e8e8'), 
       display: 'flex', 
       flexDirection: 'column', 
       flex: isMobile ? undefined : '0 0 auto',
@@ -73,7 +75,7 @@ function CardTablePanel({
         gap: isMobile ? 0.5 : 0,
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1rem' }}>
+          <Typography variant="h6" sx={{ fontWeight: 600, fontSize: '1rem', color: isDark ? '#e2e8f0' : undefined }}>
             {showPlayPanel ? '打牌阶段' : '当前牌局'}
           </Typography>
           {!showPlayPanel && (
@@ -136,7 +138,7 @@ function CardTablePanel({
             />
           )}
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {(gameMode === 'four' && humanPosition) || showPlayPanel ? (
             <FormControlLabel
               control={

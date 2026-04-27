@@ -113,9 +113,6 @@ body {
   min-width: 50px;
   font-weight: 500;
   color: #333;
-}
-
-.bidding-cell.has-bid {
   background-color: #e3f2fd;
   border-radius: 4px;
 }
@@ -184,6 +181,43 @@ body {
     text-align: center;
     padding: 0;
   }
+}
+
+/* ========== 暗色模式 ========== */
+
+[data-theme="dark"] body {
+  background-color: #0f172a;
+}
+
+[data-theme="dark"] .card-table-container {
+  background: linear-gradient(135deg, #1a3a1c 0%, #0d1f0f 100%);
+}
+
+[data-theme="dark"] .table-border {
+  background: rgba(30, 41, 59, 0.95);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme="dark"] .bidding-empty {
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .bidding-header {
+  border-bottom-color: rgba(255, 255, 255, 0.2);
+  color: #e2e8f0;
+}
+
+[data-theme="dark"] .bidding-row {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .bidding-cell {
+  color: #e2e8f0;
+  background-color: rgba(99, 102, 241, 0.2);
+}
+
+[data-theme="dark"] .bidding-header span.dealer {
+  color: #f87171;
 }
 
 @media (max-width: 360px) {

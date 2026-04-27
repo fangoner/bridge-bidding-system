@@ -50,12 +50,15 @@ import './App.css'
 
 const COLOR_SCHEME_KEY = 'bridge_color_scheme'
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
+const BIDDING_DRAFT_KEY = 'bridge_bidding_draft'
 
-function App() {
+function App({ darkMode, onToggleDarkMode }) {
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   
   const isLoadingRecordRef = useRef(false) // 用于标记是否正在加载历史记录（不触发保存）
+  const draftRestoredRef = useRef(false) // 防止重复恢复草稿
+  const [showDraftBanner, setShowDraftBanner] = useState(false) // 显示草稿恢复提示
   const [hands, setHands] = useState({
     '南': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
     '北': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
@@ -105,6 +108,60 @@ function App() {
       return defaultScheme
     }
   })
+
+  // 页面加载时检测是否有未完成的叫牌草稿
+  useEffect(() => {
+    try {
+      const draftStr = localStorage.getItem(BIDDING_DRAFT_KEY)
+      if (!draftStr) return
+      const draft = JSON.parse(draftStr)
+      // 超过 2 小时的草稿视为过期
+      if (Date.now() - draft.timestamp > 2 * 60 * 60 * 1000) {
+        localStorage.removeItem(BIDDING_DRAFT_KEY)
+        return
+      }
+      setShowDraftBanner(true)
+    } catch (e) {
+      localStorage.removeItem(BIDDING_DRAFT_KEY)
+    }
+  }, [])
+
+  // 清除叫牌草稿
+  const clearBiddingDraft = () => {
+    try {
+      localStorage.removeItem(BIDDING_DRAFT_KEY)
+    } catch (e) { /* ignore */ }
+    setShowDraftBanner(false)
+  }
+
+  // 恢复叫牌草稿
+  const restoreBiddingDraft = () => {
+    try {
+      const draftStr = localStorage.getItem(BIDDING_DRAFT_KEY)
+      if (!draftStr) return
+      const draft = JSON.parse(draftStr)
+      draftRestoredRef.current = true
+      setHands(draft.hands)
+      setDealer(draft.dealer)
+      setGameMode(draft.gameMode)
+      setHumanPosition(draft.humanPosition)
+      setPositionRoles(draft.positionRoles)
+      setDealSystem(draft.dealSystem)
+      setDealMode(draft.dealMode)
+      setBiddingSequence(draft.biddingSequence)
+      setCurrentBidder(draft.currentBidder)
+      setAiBiddingHistory(draft.aiBiddingHistory)
+      setBiddingHistory(draft.biddingHistory || [])
+      setHistoryIndex(draft.historyIndex ?? -1)
+      setBiddingStarted(draft.biddingStarted)
+      setStopBidding(draft.stopBidding)
+      setPassedAIPositions(new Set(draft.passedAIPositions || []))
+      setShowDraftBanner(false)
+    } catch (e) {
+      console.warn('恢复叫牌草稿失败:', e)
+      clearBiddingDraft()
+    }
+  }
   const currentColorScheme = colorSchemes[colorSchemeKey]
   
   const handleColorSchemeChange = (event) => {
@@ -390,6 +447,7 @@ function App() {
 
   // 发牌
   const handleDeal = async (mode = 'free') => {
+    clearBiddingDraft()
     setLoading(true)
     setError(null)
     try {
@@ -424,6 +482,7 @@ function App() {
 
   // 自定义牌局
   const handleCustomDeal = async (inputText) => {
+    clearBiddingDraft()
     setLoading(true)
     setError(null)
     try {
@@ -461,6 +520,7 @@ function App() {
 
   // 从图片读取牌局
   const handleImageDeal = async (imageFile) => {
+    clearBiddingDraft()
     setLoading(true)
     setError(null)
     try {
@@ -585,6 +645,7 @@ function App() {
 
   // 重新叫牌（保持当前牌局）
   const resetBidding = () => {
+    clearBiddingDraft()
     initBiddingState(dealer)
     setIsNewDeal(false)
     setBiddingHistory([])
@@ -593,6 +654,7 @@ function App() {
 
   // 清除所有手牌（重新开始一局）
   const clearAllHands = () => {
+    clearBiddingDraft()
     setHands({
       '南': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
       '北': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
@@ -946,6 +1008,40 @@ function App() {
     }
   }, [currentBidder, positionRoles, hands, aiLoading, biddingSequence, biddingStarted, stopBidding, passedAIPositions])
 
+  // 叫牌进度草稿自动保存 —— 每次叫牌序列变化时持久化到 localStorage
+  useEffect(() => {
+    // 只在叫牌进行中保存（空序列或已完成都不保存）
+    if (!biddingSequence || biddingSequence.length === 0) return
+    if (isBiddingComplete()) return
+
+    const draft = {
+      hands,
+      dealer,
+      gameMode,
+      humanPosition,
+      positionRoles,
+      dealSystem,
+      dealMode,
+      biddingSequence,
+      currentBidder,
+      aiBiddingHistory,
+      biddingHistory,
+      historyIndex,
+      biddingStarted,
+      stopBidding,
+      passedAIPositions: Array.from(passedAIPositions),
+      biddingStartTime,
+      timestamp: Date.now(),
+    }
+    try {
+      localStorage.setItem(BIDDING_DRAFT_KEY, JSON.stringify(draft))
+    } catch (e) {
+      console.warn('保存叫牌草稿失败:', e)
+    }
+  }, [biddingSequence, currentBidder, aiBiddingHistory, biddingHistory, historyIndex, biddingStarted, stopBidding, passedAIPositions])
+
+
+
 
 
 
@@ -1020,6 +1116,7 @@ function App() {
   // 叫牌结束时自动保存记录
   useEffect(() => {
     if (isBiddingComplete() && biddingSequence.length > 0 && hands && !isLoadingRecordRef.current) {
+      clearBiddingDraft() // 叫牌完成，清除草稿
       // 计算总时间
       if (biddingStartTime) {
         const totalTime = Math.round((Date.now() - biddingStartTime) / 1000)
@@ -1613,6 +1710,25 @@ function App() {
 
   return (
     <Box sx={{ display: 'block', width: '100%', py: { xs: 2, md: 4 }, px: { xs: 1, md: 3 } }}>
+      {/* 草稿恢复提示横幅 */}
+      {showDraftBanner && (
+        <Alert
+          severity="warning"
+          sx={{ mb: 2 }}
+          action={
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button color="inherit" size="small" onClick={clearBiddingDraft}>
+                忽略
+              </Button>
+              <Button color="primary" size="small" variant="outlined" onClick={restoreBiddingDraft}>
+                恢复
+              </Button>
+            </Box>
+          }
+        >
+          检测到上次未完成的叫牌，是否需要恢复？
+        </Alert>
+      )}
       <Divider sx={{ mb: 2, borderColor: 'rgba(0, 0, 0, 0.3)', borderBottomWidth: 2 }} />
 
       {/* 标题 */}
@@ -1652,6 +1768,8 @@ function App() {
           canUndo={canUndo}
           onUndo={undoBidding}
           showPlayPanel={showPlayPanel}
+          darkMode={darkMode}
+          onToggleDarkMode={onToggleDarkMode}
         />
       </Box>
 
@@ -1680,6 +1798,8 @@ function App() {
           canUndo={canUndo}
           onUndo={undoBidding}
           showPlayPanel={showPlayPanel}
+          darkMode={darkMode}
+          onToggleDarkMode={onToggleDarkMode}
         />
       </Box>
 

@@ -60,7 +60,9 @@ function CardTable({
 
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
-  
+  const isDark = theme.palette.mode === 'dark'
+  const textMuted = isDark ? '#94a3b8' : '#666'
+  const textPrimary = isDark ? '#e2e8f0' : '#333'
   const handBoxSize = isMobile ? 'calc((100vw - 12px) * 0.42)' : 160
   const biddingTableWidth = isMobile ? 'calc((100vw - 12px) * 0.5)' : 160
   const centerBoxSize = isMobile ? 120 : 220
@@ -72,7 +74,7 @@ function CardTable({
   const east = hands['东'];
   const west = hands['西'];
 
-  const scheme = colorScheme || {
+  const defaultScheme = {
     table: {
       background: 'linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%)',
       border: '3px solid rgba(255, 255, 255, 0.5)',
@@ -82,6 +84,18 @@ function CardTable({
       primary: '#1976d2',
       primaryHover: '#1565c0',
       text: 'white',
+    },
+  }
+
+  const scheme = {
+    ...(colorScheme || defaultScheme),
+    table: {
+      ...((colorScheme || defaultScheme).table),
+      ...(isDark ? {
+        background: 'linear-gradient(135deg, #1a3a1c 0%, #0d1f0f 100%)',
+        border: '3px solid rgba(255, 255, 255, 0.15)',
+        centerBg: 'rgba(30, 41, 59, 0.95)',
+      } : {}),
     },
   };
 
@@ -278,7 +292,7 @@ function CardTable({
 
     if (seq.length === 0) {
       return renderBiddingTable ? renderBiddingTable() : (
-        <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
+        <div style={{ color: textMuted, fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
           无叫牌记录
         </div>
       )
@@ -313,11 +327,11 @@ function CardTable({
         <Box sx={{
           display: 'flex',
           justifyContent: 'space-around',
-          borderBottom: '2px solid #333',
+          borderBottom: isDark ? '2px solid rgba(255,255,255,0.2)' : '2px solid #333',
           paddingBottom: 0.5,
           marginBottom: 0.5,
           fontWeight: 'bold',
-          color: '#333',
+          color: textPrimary,
         }}>
           {positions.map(pos => (
             <Box key={pos} component="span" sx={{ flex: 1, textAlign: 'center', minWidth: 50, color: pos === dealer ? '#d32f2f' : 'inherit' }}>
@@ -330,7 +344,7 @@ function CardTable({
             display: 'flex',
             justifyContent: 'space-around',
             padding: '4px 0',
-            borderBottom: '1px solid #ddd',
+            borderBottom: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd',
             '&:last-child': { borderBottom: 'none' },
           }}>
             {positions.map((pos, colIndex) => {
@@ -348,8 +362,8 @@ function CardTable({
                     textAlign: 'center',
                     minWidth: 50,
                     fontWeight: 500,
-                    color: '#333',
-                    backgroundColor: '#e3f2fd',
+                    color: textPrimary,
+                    backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e3f2fd',
                     borderRadius: 1,
                     cursor: meaning ? 'pointer' : 'default',
                     padding: '2px 0',
@@ -387,7 +401,7 @@ function CardTable({
         ) : doubleDummyResult ? (
           <DoubleDummyTable tableData={doubleDummyResult} />
         ) : (
-          <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
+          <div style={{ color: textMuted, fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
             无分析结果
           </div>
         )
@@ -402,12 +416,12 @@ function CardTable({
       ) : doubleDummyResult ? (
         <DoubleDummyTable tableData={doubleDummyResult} />
       ) : (
-        <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
+        <div style={{ color: textMuted, fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
           无分析结果
         </div>
       )
     ) : renderBiddingTable ? renderBiddingTable() : (
-      <div style={{ color: '#666', fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
+      <div style={{ color: textMuted, fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
         等待叫牌...
       </div>
     );
@@ -445,12 +459,12 @@ function CardTable({
           <Box sx={{
             width: 44,
             height: 60,
-            border: '1px dashed #ccc',
+            border: isDark ? '1px dashed rgba(255,255,255,0.15)' : '1px dashed #ccc',
             borderRadius: 1,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            bgcolor: '#fafafa',
+            bgcolor: isDark ? 'rgba(255,255,255,0.04)' : '#fafafa',
           }} />
         )
       }
@@ -467,13 +481,13 @@ function CardTable({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            bgcolor: '#fff',
-            border: '1px solid #ddd',
+            bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : '#fff',
+            border: isDark ? '1px solid rgba(255,255,255,0.15)' : '1px solid #ddd',
             borderRadius: 1,
             boxShadow: 1,
             cursor: canClick ? 'pointer' : 'default',
             transition: 'all 0.15s',
-            '&:hover': canClick ? { bgcolor: '#e3f2fd', transform: 'scale(1.05)' } : {},
+            '&:hover': canClick ? { bgcolor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e3f2fd', transform: 'scale(1.05)' } : {},
           }}
         >
           <Typography sx={{ color, fontWeight: 'bold', fontSize: '1.1rem' }}>
@@ -552,7 +566,7 @@ function CardTable({
         )}
         
         <Box sx={{
-          bgcolor: 'rgba(255, 255, 255, 0.98)',
+          bgcolor: isDark ? 'rgba(30, 41, 59, 0.95)' : 'rgba(255, 255, 255, 0.98)',
           borderRadius: 2,
           p: isMobile ? 0.5 : 1,
           width: handBoxSize,
@@ -561,7 +575,7 @@ function CardTable({
           boxShadow: '0 2px 6px rgba(0,0,0,0.12)',
           display: 'flex',
           flexDirection: 'column',
-          border: '1px solid rgba(255,255,255,0.5)',
+          border: isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(255,255,255,0.5)',
           backdropFilter: 'blur(10px)',
         }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
@@ -707,8 +721,9 @@ function CardTable({
               size="small"
               onClick={onClearAllHands}
               sx={{
-                bgcolor: 'rgba(255, 255, 255, 0.9)',
-                '&:hover': { bgcolor: 'rgba(255, 255, 255, 1)' }
+                bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : 'rgba(255, 255, 255, 0.9)',
+                color: isDark ? '#e2e8f0' : undefined,
+                '&:hover': { bgcolor: isDark ? 'rgba(30, 41, 59, 1)' : 'rgba(255, 255, 255, 1)' }
               }}
             >
               <DeleteSweepIcon />
