@@ -1,6 +1,64 @@
 # 开发日志
 
+## 2026-04-29
+
+### 修复主提示词pass叫品误触发fallback的问题
+
+**背景**:
+当预处理结果中包含pass选项（如"花色开叫"片段中的`pass：以上没有合适叫品`），LLM选择pass后，`_is_no_valid_bid`方法会继续检查筛选过程中是否包含"无合格叫品"关键词。由于LLM输出具有随机性，有时在描述pass选择时会使用"无合格叫品"这样的措辞，导致系统误判为没有合格叫品而切换到备用提示词，JF约定从"花色开叫"错误地变为"成局与满贯"。
+
+**根因分析**:
+- 主提示词约定：无合格叫品时输出`"JF无合格叫品"`；pass是合法叫品时输出`"pass"`
+- `_is_no_valid_bid`在`bid="pass"`时仍检查筛选过程中的"无合格叫品"关键词
+- LLM描述随机性导致同一场景有时切换fallback有时不切换
+
+**改进**:
+- `_is_no_valid_bid`方法增加判断：当`bid="pass"`时直接返回`False`，不再检查筛选过程
+- 主提示词路径添加verbose模式调试日志，记录关键字提取、预处理结果和决策路径
+- fallback各分支添加路径追踪日志（no jf_content / not structural / no subsequent bids）
+
+**修改文件**:
+- `bridge/bidding_service.py` — `_is_no_valid_bid`增加pass直接返回False逻辑；`ai_bid`添加verbose调试日志
+
+**测试验证**: API测试确认`(南)pass-`后西家开叫位置正确返回`JF约定: 花色开叫`，不再误切换到`成局与满贯`
+
+---
+
 ## 2026-04-18
+
+### 暗色模式全面适配
+
+**背景**:
+系统此前未做暗色模式适配，大量组件使用硬编码的白色/浅灰背景和深色文字，在暗色模式下显示异常（白底在深色主题中刺眼，浅灰文字不可见）。
+
+**改进**:
+- **手牌面板（HandDisplay）**: 标题颜色、卡片背景、花色符号颜色、HCP标签、人类/队友手牌渐变背景及边框暗色适配
+- **牌桌面板（CardTablePanel）**: 面板背景色、标题"当前牌局"/"打牌阶段"文字颜色暗色适配
+- **叫牌细节面板（BiddingDetailPanel）**: 全部硬编码白色背景→深色半透明；代码块`#f8f9fa`/`#fafafa`→深色；`#666`文字→浅色；`#ddd`/`#e0e0e0`边框→深色
+- **打牌详情面板（PlayDetailPanel）**: AI输出卡片背景、模型标签、代码块、出牌卡片选中/禁用态、已完成墩行背景、庄家方/防守方/"需要"统计面板暗色适配
+- **牌桌中心（CardTable）**: 叫牌表格文字/标题栏/格子背景暗色适配；出牌区域空位占位框/已出牌卡片/hover态暗色适配
+- **双明手表格（DoubleDummyTable）**: 表头文字、分隔线、单元格文字及背景暗色适配；统一"-"与定约方块样式
+- **打牌交互（PlayPanel/PlayTable）**: 出牌选择卡片三态暗色适配；人类出牌区/墩数统计面板暗色适配；hover高亮色适配
+- **绿色牌桌背景暗色调整**: `#2e7d32→#1b5e20` 改为 `#1a3a1c→#0d1f0f`；中心面板白色→深蓝灰
+- **主题切换开关移出设置面板**: 从SettingsPanel中移除Switch，改为顶部按钮栏最右端☀/🌙图标按钮
+
+**修改文件**:
+- `web/src/components/HandDisplay.jsx` — 全部硬编码颜色改为`isDark`条件分支
+- `web/src/components/CardTable.jsx` — 四家手牌外框、牌桌中心出牌区域、叫牌表格暗色适配
+- `web/src/components/CardTablePanel.jsx` — 面板背景和标题暗色适配
+- `web/src/components/BiddingDetailPanel.jsx` — 白色/浅灰/代码块/边框暗色适配
+- `web/src/components/PlayDetailPanel.jsx` — AI输出卡片/代码块/统计面板/出牌卡片暗色适配
+- `web/src/components/PlayPanel.jsx` — 出牌选择区/卡片/统计面板暗色适配
+- `web/src/components/PlayTable.jsx` — 出牌位置/卡片/统计面板暗色适配
+- `web/src/components/DoubleDummyTable.jsx` — 全部硬编码颜色暗色适配
+- `web/src/components/ControlButtons.jsx` — 新增暗色模式图标按钮
+- `web/src/components/SettingsPanel.jsx` — 移除暗色模式Switch
+- `web/src/App.css` — `.bidding-cell`样式合并、`.card-table-container`暗色渐变
+- `web/src/App.jsx` — 传递`darkMode`/`onToggleDarkMode`到ControlButtons
+
+**测试验证**: Vite HMR实时更新无编译错误；暗色模式下所有面板、卡片、表格、文字均清晰可见
+
+---
 
 ### 打牌系统多项增强与Bug修复
 

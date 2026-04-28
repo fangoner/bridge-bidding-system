@@ -25,6 +25,9 @@ class BiddingService:
         if bid and bid not in ["pass", "JF无合格叫品", ""]:
             return False
         
+        if bid == "pass":
+            return False
+        
         no_valid_keywords = ["JF无合格叫品", "无合格叫品", "没有合格叫品"]
         
         for keyword in no_valid_keywords:
@@ -86,11 +89,18 @@ class BiddingService:
         is_structural = jf_result.get("is_structural_convention", False)
         has_subsequent = len(jf_result.get("subsequent_bids", [])) > 0
         
+        if verbose:
+            print(f"[ai_bid] bidding_sequence={bidding_sequence!r}, position={player_name}, jf_keyword={jf_keyword!r}")
+            print(f"[ai_bid] is_opener={is_opener}, jf_content_empty={not jf_content}, is_structural={is_structural}, has_subsequent={has_subsequent}")
+            print(f"[ai_bid] subsequent_bids_count={len(jf_result.get('subsequent_bids', []))}, use_fallback={self.use_fallback}")
+        
         hand_display = hand.to_display_string() if hasattr(hand, 'to_display_string') else str(hand)
         hcp = hand.hcp if hasattr(hand, 'hcp') else 0
         dist = hand.distribution if hasattr(hand, 'distribution') else ""
         
         if not jf_content:
+            if verbose:
+                print(f"[ai_bid] PATH: fallback - no jf_content, using 成局与满贯")
             slam_result = self.jf_retriever.retrieve_with_preprocess("成局与满贯", bidding_sequence, partner_name)
             return self._fallback_bid(
                 slam_result.get("original_content", ""),
@@ -108,6 +118,8 @@ class BiddingService:
             )
         
         if not is_structural:
+            if verbose:
+                print(f"[ai_bid] PATH: fallback - not structural, jf_keyword={jf_keyword!r}")
             return self._fallback_bid(
                 jf_content,
                 "",
@@ -124,6 +136,8 @@ class BiddingService:
             )
         
         if not has_subsequent:
+            if verbose:
+                print(f"[ai_bid] PATH: fallback - no subsequent bids, using 成局与满贯")
             slam_result = self.jf_retriever.retrieve_with_preprocess("成局与满贯", bidding_sequence, partner_name)
             return self._fallback_bid(
                 slam_result.get("original_content", ""),

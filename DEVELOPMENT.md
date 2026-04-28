@@ -492,7 +492,29 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 
 ## 版本历史
 
-### v1.34 (当前版本)
+### v1.36 (当前版本)
+- **修复主提示词pass叫品误触发fallback**
+  - `_is_no_valid_bid`方法：当`bid="pass"`时直接返回`False`，不再检查筛选过程中的"无合格叫品"关键词
+  - 主提示词约定无合格叫品输出`"JF无合格叫品"`，pass是合法叫品时输出`"pass"`，两者不应混淆
+  - 修复前：LLM选择pass时，若筛选过程描述中含"无合格叫品"措辞，会误切换到备用提示词，JF约定从"花色开叫"变为"成局与满贯"
+  - 修复后：pass作为合法叫品直接返回，不再误触发fallback
+  - 添加verbose模式调试日志，记录关键字提取、预处理结果和决策路径
+  - 修改文件: `bridge/bidding_service.py`
+
+### v1.35
+- **暗色模式全面适配**
+  - 所有前端组件硬编码颜色替换为 `theme.palette.mode === 'dark'` 条件分支
+  - 手牌面板（HandDisplay）、牌桌面板（CardTablePanel）、叫牌细节面板（BiddingDetailPanel）、打牌详情面板（PlayDetailPanel）暗色适配
+  - 双明手表格（DoubleDummyTable）暗色适配，统一"-"与定约方块样式
+  - 牌桌中心出牌区域空位/卡片/hover暗色适配
+  - 打牌选择卡片选中/可选/不可选三态暗色适配
+  - 墩数统计面板（庄家方/防守方/需要）暗色适配
+  - 绿色牌桌背景暗色调整（`#2e7d32→#1b5e20` → `#1a3a1c→#0d1f0f`）
+  - 清除手牌按钮暗色适配
+  - 主题切换开关从SettingsPanel移至顶部ControlButtons最右端图标按钮
+  - 修改文件: 12个前端文件 + App.css + App.jsx
+
+### v1.34
 - **将牌将吃Bug修复**（关键修复）
   - 修复 `Contract.from_str()` 花色代码与 `Card.suit` 不匹配：英文代码（S/H/D/C）转换为中文符号（♠/♥/♦/♣）
   - 修复前将牌将吃永远不会被识别为赢墩，将牌相关逻辑全部失效
