@@ -521,7 +521,7 @@ function CardTable({
               <Typography color="text.secondary" sx={{ fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
                 {current_player}出牌
                 {aiLoading && (
-                  <CircularProgress size={22} sx={{ position: 'absolute', top: '50%', left: '50%', marginTop: '-11px', marginLeft: '-11px', color: 'rgba(0,0,0,0.45)' }} />
+                  <CircularProgress size={22} sx={{ position: 'absolute', top: '50%', left: '50%', marginTop: '-11px', marginLeft: '-11px', color: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.45)' }} />
                 )}
               </Typography>
             ) : null}

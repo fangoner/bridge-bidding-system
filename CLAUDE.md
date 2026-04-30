@@ -25,7 +25,7 @@ Main menu: deal hands, settings, run bidding, analyze contracts, view history, t
 cd api
 uvicorn main:app --host 127.0.0.1 --port 8003
 ```
-Or use the convenience script: `start-web-service.bat` (starts both backend and frontend).
+Or use convenience scripts: `start_backend.bat` (backend only), `start_web.bat` (frontend only), or chain both.
 
 ### Running the Web Frontend
 ```bash
@@ -35,7 +35,7 @@ Frontend runs on `http://localhost:5173` (Vite). Requires backend API on port 80
 
 ### Testing
 - **Bidding sequence test** (menu option 7): Tests keyword extraction, JF retrieval, and preprocessing interactively.
-- **Unit tests**: Individual scripts in `tests/`, e.g. `python tests/test_1c_1d.py`.
+- **Unit tests**: ~30 individual scripts in `tests/`, covering bidding sequences (openings, responses, 1NT, 2D, third-fourth seat, etc.), keyword extraction, tree navigation, and preprocessing. E.g. `python tests/test_1c_1d.py`.
 - **API tests**: `python test_api.py` (requires running backend).
 - **endplay test**: `python endplay_integration.py`.
 
@@ -66,6 +66,7 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DOUBAO_API_KEY=your_doubao_api_key
 DOUBAO_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
 DOUBAO_VISION_ENDPOINT=your_vision_endpoint_id
+DOUBAO_SEED_ENDPOINT=your_seed_endpoint_id
 ```
 
 ## Project Architecture
@@ -87,7 +88,7 @@ DOUBAO_VISION_ENDPOINT=your_vision_endpoint_id
 ├── knowledge/
 │   └── loader.py           # JF document parsing, tree retrieval
 ├── llm/
-│   ├── prompts.py          # System/fallback/human/play prompts (920 lines)
+│   ├── prompts.py          # System/fallback/human/play prompts (~590 lines)
 │   ├── deepseek_client.py  # DeepSeek API via OpenAI SDK
 │   └── doubao_client.py    # Doubao Vision API client
 ├── utils/
@@ -95,9 +96,14 @@ DOUBAO_VISION_ENDPOINT=your_vision_endpoint_id
 │   └── screenshot.py       # Screen capture via MSS
 ├── endplay_integration.py  # Batch double dummy analysis via endplay library
 └── web/                    # React frontend
-    ├── src/App.jsx         # Main app with all game state (2255 lines)
-    ├── src/components/     # 13 React components
-    └── src/hooks/          # 6 custom hooks
+    ├── src/App.jsx         # Main app with all game state (~2375 lines)
+    ├── src/components/     # 14+ React components + layout/, mobile/ subdirs
+    ├── src/hooks/          # 6 custom hooks
+    ├── src/services/       # API service layer (api.js)
+    ├── src/theme/          # Theme system (colorSchemes.js, dark mode)
+    ├── src/constants/      # Shared constants (suits.js)
+    ├── src/utils/          # Frontend utilities (biddingUtils.js)
+    └── src/styles/         # Separated style modules
 ```
 
 ### Core Modules
@@ -120,7 +126,7 @@ DOUBAO_VISION_ENDPOINT=your_vision_endpoint_id
   - Play: `POST /api/play/init`, `/api/play/card`, `/api/play/ai-play`, `/api/play/undo`, `/api/play/update-roles`, `GET /api/play/state`
   - Analysis: `POST /api/double-dummy`
   - Config: `GET/POST /api/fallback-model`, `/api/ai-provider`, `GET /api/health`
-- **Frontend** (React 19 + Vite + MUI, `web/`): 13 components in `src/components/`, 6 custom hooks in `src/hooks/`. State managed via `useBiddingState` and `useBridgeRecords` hooks. Color scheme system via `theme/colorSchemes.js` with local storage persistence.
+- **Frontend** (React 19 + Vite + MUI, `web/`): 14+ components in `src/components/` (plus `layout/` and `mobile/` subdirs), 6 custom hooks in `src/hooks/`. State managed via `useBiddingState` and `useBridgeRecords` hooks. Dark mode via `theme/colorSchemes.js` with local storage persistence. API calls centralized in `services/api.js`. Error boundary via `ErrorBoundary.jsx`.
 - **Shared logic**: CLI and web API both use `BiddingService` for bidding, `PlayService` for card play.
 
 ### Key Data Structures
@@ -176,7 +182,9 @@ DOUBAO_VISION_ENDPOINT=your_vision_endpoint_id
 ### AI Client
 - `DeepSeekClient` in `llm/deepseek_client.py`: OpenAI SDK with JSON schema validation.
 - Dual provider support: DeepSeek (`deepseek-v4-flash`/`deepseek-v4-pro`) or Doubao Seed API.
+- Separate model selection for main prompt (default `deepseek-v4-flash`) and fallback prompt (default `deepseek-v4-flash`), each configurable to chat or reasoner model.
 - Temperature: 0.2 for main prompt, 0.5 for fallback prompt.
+- Config keys in `config.py`: `DEFAULT_MAIN_PROMPT_MODEL`, `DEFAULT_FALLBACK_MODEL`, `DEFAULT_AI_PROVIDER`, `SHOW_FULL_LLM_OUTPUT`.
 
 ### Double Dummy Analysis
 - **endplay integration** (`endplay_integration.py`): Batch analysis of all 20 declarer-trump combos via `calc_dd_table()`.
@@ -191,7 +199,7 @@ DOUBAO_VISION_ENDPOINT=your_vision_endpoint_id
 - **Bid priority**: At same level, higher-ranking suits (S > H > D > C) over NT.
 - **Partner consecutive pass**: In four-player bidding, when both partners have passed consecutively after first substantive bid, they auto-pass (no AI calls).
 - **Terminology**: "发牌人" (dealer) for first bidder; "庄家" (declarer) for final contract display.
-- **Config**: Centralized in `config.py` - modify constants for project-wide changes.
+- **Config**: Centralized in `config.py` - includes AI provider, main/fallback models, temperatures, DF paths, deal system default, output modes.
 - **Output formats**: Three display formats (graphic, compact, Deep Finesse) generated without LLM calls.
 
 ## Code Style

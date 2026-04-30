@@ -96,9 +96,13 @@ function PlayDetailPanel({
       { key: '局面评估', label: '局面评估', color: '#1976d2', multiline: true },
     ]
 
-    // 兼容旧字段名，确保旧记录也能显示
+    // 兼容旧字段名，确保旧记录也能显示；防御性转为字符串避免React渲染报错
     const getValue = (key) => {
-      return fullOutput[key] || record[key] || ''
+      const val = fullOutput[key] || record[key]
+      if (val === null || val === undefined) return ''
+      if (typeof val === 'string') return val
+      if (typeof val === 'object') return JSON.stringify(val, null, 2)
+      return String(val)
     }
 
     return (

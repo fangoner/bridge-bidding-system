@@ -1,20 +1,50 @@
 @echo off
+setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
-echo Starting backend with auto-reload...
-start /b "" "C:\Users\Fanyi\AppData\Local\Programs\Python\Python313\python.exe" -m uvicorn api.main:app --host 0.0.0.0 --port 8003 --reload >nul 2>&1
+echo ========================================
+echo   Bridge Bidding System - Web Startup
+echo ========================================
+echo.
 
-timeout /t 3 /nobreak >nul
+echo [1/2] Starting backend (port 8003)...
+start "Bridge Backend API" cmd /c "python -m uvicorn api.main:app --host 0.0.0.0 --port 8003 --reload && pause"
 
-echo Starting frontend...
+echo [2/2] Starting frontend (port 5173)...
 cd web
-start /b "" npm run dev >nul 2>&1
+start "Bridge Frontend" cmd /c "npm run dev && pause"
+cd ..
 
 echo.
-echo Services started in background!
-echo Frontend: http://localhost:5173
-echo API: http://localhost:8003
+echo Waiting for services to start...
 echo.
-echo Note: Backend auto-reloads on code changes.
-echo Close this window to stop services.
+
+:: Wait and verify backend
+for /L %%i in (1,1,10) do (
+    timeout /t 1 /nobreak >nul
+    curl -s http://localhost:8003/api/health >nul 2>&1
+    if !errorlevel! equ 0 (
+        echo Backend:  http://localhost:8003 [OK]
+        goto :check_frontend
+    )
+)
+echo Backend:  http://localhost:8003 [FAILED - check window]
+
+:check_frontend
+:: Wait and verify frontend
+for /L %%i in (1,1,15) do (
+    timeout /t 1 /nobreak >nul
+    curl -s http://localhost:5173 >nul 2>&1
+    if !errorlevel! equ 0 (
+        echo Frontend: http://localhost:5173 [OK]
+        goto :done
+    )
+)
+echo Frontend: http://localhost:5173 [FAILED - check window]
+
+:done
+echo.
+echo ========================================
+echo Close the service windows to stop.
+echo ========================================
 pause

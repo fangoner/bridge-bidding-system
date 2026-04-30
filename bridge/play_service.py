@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 from typing import Optional, Dict, List, Any
 
@@ -200,39 +201,53 @@ class PlayService:
             # 在线程池中执行同步 LLM 调用，避免阻塞事件循环
             result = await asyncio.to_thread(self.llm_client.chat_play, prompt)
             
-            recommended = (
-                result.get("推荐出牌") or 
-                result.get("recommended_card") or 
-                result.get("recommended_play") or 
-                ""
-            )
+            # 提取推荐出牌：兼容dict嵌套对象（DeepSeek偶发格式偏差）
+            recommended = result.get("推荐出牌") or result.get("recommended_card") or result.get("recommended_play")
+            if isinstance(recommended, dict):
+                # 从嵌套对象中提取牌张字符串
+                recommended = (recommended.get("出牌") or recommended.get("card")
+                    or recommended.get("推荐") or recommended.get("牌") or "")
+            if not isinstance(recommended, str):
+                recommended = ""
             card = self._parse_card_from_str(recommended, playable_cards)
-            
+
             if not card:
                 card = self._select_best_card(playable_cards, state)
-            
+
             reasoning = (
                 result.get("核心逻辑") or
                 result.get("候选对比") or
                 result.get("局面评估") or
                 result.get("推理过程") or  # 兼容旧字段
-                result.get("理由") or 
-                result.get("reasoning") or 
+                result.get("理由") or
+                result.get("reasoning") or
                 ""
             )
-            
+            if not isinstance(reasoning, str):
+                reasoning = json.dumps(reasoning, ensure_ascii=False)
+
             # 保存候选对比作为下一轮计划参考
             candidate_analysis = result.get("候选对比", "")
-            if candidate_analysis:
+            if isinstance(candidate_analysis, str) and candidate_analysis:
                 if is_declarer_side:
                     self.declarer_plan = candidate_analysis
                 else:
                     self.defender_plans[current_player] = candidate_analysis
-            
+
+            # 防御：将 full_output 中所有非字符串值转为 JSON 字符串，避免 React 渲染报错
+            safe_output = {}
+            for key, value in result.items():
+                if isinstance(value, str):
+                    safe_output[key] = value
+                elif isinstance(value, (dict, list)):
+                    safe_output[key] = json.dumps(value, ensure_ascii=False)
+                else:
+                    safe_output[key] = str(value) if value is not None else ""
+
             return {
                 "card": card.to_dict() if card else None,
                 "reasoning": reasoning,
-                "full_output": result,
+                "full_output": safe_output,
                 "prompt": prompt
             }
             
