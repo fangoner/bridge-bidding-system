@@ -32,7 +32,9 @@ When invoked, this skill creates a backup of the current codebase state.
    - Location: `backups/` directory
    - Example: `backups/backup_20260308_234500`
 
-3. **Copy key files and directories**:
+3. **Copy ALL files and directories listed below**:
+
+   **⚠️ 强制规则：必须复制以下所有项目，不得遗漏任何一项。不允许只备份"本次修改相关"的文件。备份的目的是完整恢复，不是增量保存。**
 
    **终端（后端）文件:**
    - `main.py`
@@ -74,9 +76,15 @@ When invoked, this skill creates a backup of the current codebase state.
    **案例数据:**
    - `bidding-cases/` directory (叫牌案例库，包含 case-XXX.json 和 cases-index.json)
 
-4. **Report backup summary**:
+4. **验证备份完整性**:
+   - 逐项检查上述列表中的每一项是否存在于备份目录中
+   - 如果某项在源目录中不存在（如尚未创建的文件），在报告中标注"不存在（已跳过）"
+   - 不允许以"本次修改不涉及"为由跳过任何项
+
+5. **Report backup summary**:
    - Backup location
-   - Files copied
+   - 逐项列出所有已备份的文件/目录（按上述分类）
+   - 标注跳过的项目及原因
    - Total size
    - Git commit hash (if available)
 

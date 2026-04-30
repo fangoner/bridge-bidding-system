@@ -1733,13 +1733,13 @@ function App({ darkMode, onToggleDarkMode }) {
 
       {/* 标题 */}
       <Typography variant="h4" component="h1" align="center" sx={{ fontSize: { xs: '1.25rem', md: '1.75rem' }, mb: { xs: 2, md: 0 }, display: { xs: 'block', md: 'none' } }}>
-        桥牌叫牌练习系统
+        桥牌练习系统
       </Typography>
 
       {/* 标题 - 桌面版 */}
       <Box sx={{ mb: 2, display: { xs: 'none', md: 'flex' }, flexWrap: 'wrap', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
         <Typography variant="h4" component="h1" sx={{ fontSize: '1.75rem', mr: 3, whiteSpace: 'nowrap' }}>
-          桥牌叫牌练习系统
+          桥牌练习系统
         </Typography>
       </Box>
 
