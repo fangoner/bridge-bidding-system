@@ -117,12 +117,16 @@ class DeepSeekClient:
         self.base_url = base_url or DEEPSEEK_BASE_URL
         self.model = model or "deepseek-v4-flash"
         self.client = None
-        
+
         if self.api_key:
+            self._http_client = httpx.Client(
+                limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+                timeout=httpx.Timeout(90.0, connect=15.0)
+            )
             self.client = OpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url,
-                timeout=httpx.Timeout(90.0, connect=15.0)
+                http_client=self._http_client
             )
     
     def is_configured(self) -> bool:

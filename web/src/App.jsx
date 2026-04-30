@@ -266,6 +266,7 @@ function App({ darkMode, onToggleDarkMode }) {
   const [selectedPlayRecord, setSelectedPlayRecord] = useState(null) // 桌面点击选中的AI打牌记录
   const [playStarted, setPlayStarted] = useState(false) // 打牌是否已开始（第一张牌打出后）
   const [playInitiated, setPlayInitiated] = useState(false) // 打牌是否已启动（点击"开始"后或重新打牌AI首攻）
+  const [loadedPlayRecord, setLoadedPlayRecord] = useState(null) // 从历史记录预加载的打牌数据
   const prevTricksCountRef = useRef(0) // 用于检测一墩完成
 
   // 检查API状态
@@ -275,6 +276,13 @@ function App({ darkMode, onToggleDarkMode }) {
     syncFallbackModel()
     syncAIProvider()
   }, [])
+
+  // 打开历史记录对话框时清除上次的选中状态
+  useEffect(() => {
+    if (historyDialogOpen) {
+      setSelectedRecordIds(new Set())
+    }
+  }, [historyDialogOpen])
 
   // 同步备用模型到后端
   const syncFallbackModel = async () => {
@@ -369,17 +377,59 @@ function App({ darkMode, onToggleDarkMode }) {
       setDealSystem(bidding.deal_system || record.dealSystem)
     }
     setBiddingStarted(true)
+    setStopBidding(true) // 加载历史记录后允许切换发牌人
     setHistoryDialogOpen(false)
     setOutputFormats(null) // 重置输出格式
     setIsNewDeal(false) // 标记为历史记录加载，显示"重新叫牌"
     setShowDoubleDummy(false) // 切换到显示叫牌过程
     setDoubleDummyResult(null) // 清除双明手结果
-    setShowPlayPanel(false) // 确保显示叫牌面板
-    // 重置打牌相关状态
-    setPlayState(null)
-    setAiPlayHistory([])
-    setSelectedPlayCard(null)
-    setIsPlayPaused(false)
+    // 预加载打牌数据（完整记录含打牌数据时保存到 loadedPlayRecord，切换到打牌时直接使用）
+    if (record.play && record.play.tricks && record.play.tricks.length > 0) {
+      const contractFromRecord = board.contract
+      const suitMap = { S: '♠', H: '♥', D: '♦', C: '♣', NT: 'NT' }
+      const partnerMap = { '北': '南', '南': '北', '东': '西', '西': '东' }
+
+      const contract = contractFromRecord ? {
+        level: contractFromRecord.level,
+        suit: suitMap[contractFromRecord.suit] || contractFromRecord.suit || 'NT',
+        declarer: contractFromRecord.declarer,
+        doubled: contractFromRecord.isDouble || false,
+        redoubled: contractFromRecord.isRedouble || false,
+        tricks_needed: (contractFromRecord.level || 0) + 6,
+      } : null
+
+      const restoredPlayState = {
+        contract,
+        hands: { '北': [], '南': [], '东': [], '西': [] },
+        dummy: contract ? partnerMap[contract.declarer] : null,
+        player_roles: board.player_roles || {},
+        tricks: record.play.tricks,
+        current_trick: { cards: [], leader: null, trump: contract?.suit || null },
+        current_player: null,
+        lead_player: null,
+        declarer_tricks: record.play.declarer_tricks || 0,
+        defender_tricks: record.play.defender_tricks || 0,
+        phase: 'complete',
+        is_human_turn: false,
+      }
+
+      setLoadedPlayRecord({
+        playState: restoredPlayState,
+        aiPlayHistory: record.play.ai_play_history || [],
+      })
+      setShowPlayPanel(false)
+      setPlayState(null)
+      setAiPlayHistory([])
+      setSelectedPlayCard(null)
+      setIsPlayPaused(false)
+    } else {
+      setLoadedPlayRecord(null)
+      setShowPlayPanel(false)
+      setPlayState(null)
+      setAiPlayHistory([])
+      setSelectedPlayCard(null)
+      setIsPlayPaused(false)
+    }
 
     // 加载历史记录后获取更多输出格式
     if ((board.hands || record.hands) && (board.bidding_sequence || record.biddingSequence) && (board.bidding_sequence || record.biddingSequence).length > 0) {
@@ -473,6 +523,7 @@ function App({ darkMode, onToggleDarkMode }) {
       setAiPlayHistory([])
       setSelectedPlayCard(null)
       setIsPlayPaused(false)
+      setLoadedPlayRecord(null)
     } catch (err) {
       setError('发牌失败，请检查API服务是否正常运行')
     } finally {
@@ -508,6 +559,7 @@ function App({ darkMode, onToggleDarkMode }) {
         setAiPlayHistory([])
         setSelectedPlayCard(null)
         setIsPlayPaused(false)
+        setLoadedPlayRecord(null)
       } else {
         setError(data.message || '牌局解析失败')
       }
@@ -546,6 +598,7 @@ function App({ darkMode, onToggleDarkMode }) {
         setAiPlayHistory([])
         setSelectedPlayCard(null)
         setIsPlayPaused(false)
+        setLoadedPlayRecord(null)
       } else {
         setError(data.message || '图片识别失败')
       }
@@ -597,6 +650,7 @@ function App({ darkMode, onToggleDarkMode }) {
         setAiPlayHistory([])
         setSelectedPlayCard(null)
         setIsPlayPaused(false)
+        setLoadedPlayRecord(null)
       } else {
         setError(data.message || '识别失败，请确保已截取图片')
       }
@@ -650,6 +704,7 @@ function App({ darkMode, onToggleDarkMode }) {
     setIsNewDeal(false)
     setBiddingHistory([])
     setHistoryIndex(-1)
+    setLoadedPlayRecord(null)
   }
 
   // 清除所有手牌（重新开始一局）
@@ -675,6 +730,7 @@ function App({ darkMode, onToggleDarkMode }) {
     setIsPlayPaused(false)
     setPlayStarted(false)
     setPlayInitiated(false)
+    setLoadedPlayRecord(null)
   }
 
   // 切换停止/继续叫牌
@@ -1221,6 +1277,16 @@ function App({ darkMode, onToggleDarkMode }) {
 
   // 开始打牌
   const handleStartPlay = async () => {
+    // 如果有从历史记录预加载的打牌数据，直接切换显示
+    if (loadedPlayRecord) {
+      setPlayState(loadedPlayRecord.playState)
+      setAiPlayHistory(loadedPlayRecord.aiPlayHistory)
+      setShowPlayPanel(true)
+      setIsPlayPaused(true)
+      setPlayLoading(false)
+      return
+    }
+
     const contract = getFinalContract()
     
     if (!contract) {
@@ -1286,8 +1352,10 @@ function App({ darkMode, onToggleDarkMode }) {
       if (result.success) {
         console.log('[DEBUG handlePlayCard] result.state.current_trick:', result.state.current_trick)
         setPlayState(result.state)
-        setPlayStarted(true) // 人类出牌后标记打牌已开始，按钮变为暂停
-        
+        setPlayStarted(true)
+        // 人类出牌后取消暂停，让下家（AI或人类）自动衔接
+        setIsPlayPaused(false)
+
         if (result.is_complete && result.result) {
           console.log('打牌结束:', result.result)
         }
@@ -1438,6 +1506,7 @@ function App({ darkMode, onToggleDarkMode }) {
     setPlayInitiated(false)
     setLastCompletedTrick(null)
     setPlayCenterView('play')
+    setLoadedPlayRecord(null)
     prevTricksCountRef.current = 0
 
     // 构建包含叫牌含义的叫牌历史字符串
@@ -1467,10 +1536,6 @@ function App({ darkMode, onToggleDarkMode }) {
       if (result.success) {
         setPlayState(result.state)
         setShowPlayPanel(true)
-        // 如果是AI首攻，自动开始；否则等待人类出牌
-        if (!result.state.is_human_turn && result.state.phase !== 'complete') {
-          setPlayInitiated(true)
-        }
       } else {
         setError(result.error || '重新初始化打牌失败')
       }
@@ -1495,21 +1560,43 @@ function App({ darkMode, onToggleDarkMode }) {
     }
   }
 
+  // 根据前端 positionRoles 计算当前回合是否为人类
+  const isCurrentPlayerHuman = () => {
+    if (!playState) return false
+    const cp = playState.current_player
+    if (!cp) return false
+    if (cp === playState.dummy) {
+      return positionRoles[playState.contract?.declarer] === 'human'
+    }
+    return positionRoles[cp] === 'human'
+  }
+
   // AI自动出牌
   useEffect(() => {
     if (!showPlayPanel || !playState || playAiLoading || playLoading || isPlayPaused || !playInitiated) return
-    
-    const { is_human_turn, phase } = playState
-    
+
+    const { phase } = playState
+    const isHuman = isCurrentPlayerHuman()
+
     // 如果不是人类回合且游戏未结束，自动AI出牌
-    if (!is_human_turn && phase !== 'complete') {
+    if (!isHuman && phase !== 'complete') {
       const timer = setTimeout(() => {
         handleAIPlay()
       }, 500) // 延迟500ms让用户看到状态变化
-      
+
       return () => clearTimeout(timer)
     }
-  }, [playState?.is_human_turn, playState?.phase, showPlayPanel, playAiLoading, playLoading, isPlayPaused, playInitiated])
+  }, [playState?.is_human_turn, playState?.phase, showPlayPanel, playAiLoading, playLoading, isPlayPaused, playInitiated, positionRoles])
+
+  // 轮到人类出牌时自动暂停（每墩首张除外，由继续按钮控制）
+  useEffect(() => {
+    if (!showPlayPanel || !playState || playAiLoading || playLoading || !playInitiated) return
+    const isHuman = isCurrentPlayerHuman()
+    const isStartOfTrick = (playState.current_trick?.cards?.length || 0) === 0
+    if (isHuman && playState.phase !== 'complete' && !isPlayPaused && !isStartOfTrick) {
+      setIsPlayPaused(true)
+    }
+  }, [playState?.is_human_turn, playState?.phase, showPlayPanel, playInitiated, playAiLoading, playLoading, isPlayPaused, positionRoles])
 
   // 检测一墩完成，自动暂停；检测打牌完成，自动保存记录
   useEffect(() => {
@@ -1581,10 +1668,28 @@ function App({ darkMode, onToggleDarkMode }) {
 
   // 处理位置角色变化
   const handlePositionRoleChange = async (position, role) => {
-    const newRoles = { ...positionRoles, [position]: role }
-    
+    // 打牌阶段：庄家和明手角色双向同步（庄家替明手打牌）
+    const dummy = playState?.dummy
+    const declarer = playState?.contract?.declarer
+    let syncPosition = null
+    let newRoles = { ...positionRoles, [position]: role }
+
+    if (showPlayPanel && playState && dummy) {
+      if (position === dummy && declarer) {
+        syncPosition = declarer
+      } else if (position === declarer && dummy) {
+        syncPosition = dummy
+      }
+      if (syncPosition) {
+        newRoles = { ...newRoles, [syncPosition]: role }
+      }
+    }
+
     setPositionRoles(prev => {
-      const updatedRoles = { ...prev, [position]: role }
+      let updatedRoles = { ...prev, [position]: role }
+      if (syncPosition) {
+        updatedRoles = { ...updatedRoles, [syncPosition]: role }
+      }
       // 更新 humanPosition 以保持兼容性
       const humanPositions = Object.entries(updatedRoles)
         .filter(([, r]) => r === 'human')
@@ -1599,7 +1704,15 @@ function App({ darkMode, onToggleDarkMode }) {
       }
       return updatedRoles
     })
-    
+
+    // 每墩开头：当前玩家从人类切为AI时自动暂停，显示继续按钮
+    if (showPlayPanel && playState && !isPlayPaused && playState.phase !== 'complete') {
+      const isStartOfTrick = (playState.current_trick?.cards?.length || 0) === 0
+      if (isStartOfTrick && newRoles[playState.current_player] === 'ai') {
+        setIsPlayPaused(true)
+      }
+    }
+
     // 如果在打牌阶段，同步更新后端的 player_roles
     if (showPlayPanel && playState) {
       try {
@@ -1883,6 +1996,7 @@ function App({ darkMode, onToggleDarkMode }) {
                 setAiPlayHistory([]);
                 setSelectedPlayCard(null);
                 setIsPlayPaused(false);
+                setLoadedPlayRecord(null);
               }}
               onClearAllHands={clearAllHands}
               setHands={setHands}
@@ -1894,6 +2008,7 @@ function App({ darkMode, onToggleDarkMode }) {
               declarer={isBiddingComplete() ? getFinalContract()?.declarer : null}
               lastCompletedTrick={lastCompletedTrick}
               isPlayPaused={isPlayPaused}
+              playInitiated={playInitiated}
               aiLoading={playAiLoading}
               showPlayedCards={showPlayedCards}
               setShowPlayedCards={setShowPlayedCards}
@@ -1902,7 +2017,7 @@ function App({ darkMode, onToggleDarkMode }) {
               aiBiddingHistory={aiBiddingHistory}
               onPlayCardClick={handlePlayCardClick}
             />
-            
+
             {/* 右侧面板：叫牌细节或打牌面板 */}
             {showPlayPanel ? (
               <PlayDetailPanel
@@ -1929,6 +2044,8 @@ function App({ darkMode, onToggleDarkMode }) {
                 onPausePlay={handlePausePlay}
                 playInitiated={playInitiated}
                 onUndoPlay={handleUndoPlay}
+                isHistoryRecord={!!loadedPlayRecord}
+                positionRoles={positionRoles}
               />
             ) : (
               (humanPosition !== null || showAIBiddingOutput) && (
@@ -2016,6 +2133,7 @@ function App({ darkMode, onToggleDarkMode }) {
                 setAiPlayHistory([]);
                 setSelectedPlayCard(null);
                 setIsPlayPaused(false);
+                setLoadedPlayRecord(null);
               }}
               onClearAllHands={clearAllHands}
               setHands={setHands}
@@ -2027,6 +2145,7 @@ function App({ darkMode, onToggleDarkMode }) {
               declarer={isBiddingComplete() ? getFinalContract()?.declarer : null}
               lastCompletedTrick={lastCompletedTrick}
               isPlayPaused={isPlayPaused}
+              playInitiated={playInitiated}
               aiLoading={playAiLoading}
               showPlayedCards={showPlayedCards}
               setShowPlayedCards={setShowPlayedCards}
@@ -2035,7 +2154,7 @@ function App({ darkMode, onToggleDarkMode }) {
               aiBiddingHistory={aiBiddingHistory}
               onPlayCardClick={handlePlayCardClick}
             />
-            
+
             {/* 叫牌细节面板或打牌面板 */}
             {showPlayPanel ? (
               <PlayDetailPanel
@@ -2063,6 +2182,8 @@ function App({ darkMode, onToggleDarkMode }) {
                 onPausePlay={handlePausePlay}
                 playInitiated={playInitiated}
                 onUndoPlay={handleUndoPlay}
+                isHistoryRecord={!!loadedPlayRecord}
+                positionRoles={positionRoles}
               />
             ) : (
               (humanPosition !== null || showAIBiddingOutput) && (
@@ -2120,7 +2241,7 @@ function App({ darkMode, onToggleDarkMode }) {
       )}
 
       {/* 历史记录对话框 */}
-      <Dialog open={historyDialogOpen} onClose={() => setHistoryDialogOpen(false)} maxWidth="md" fullWidth>
+      <Dialog open={historyDialogOpen} onClose={() => { setHistoryDialogOpen(false); setSelectedRecordIds(new Set()) }} maxWidth="md" fullWidth>
         <DialogTitle>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             牌局历史记录

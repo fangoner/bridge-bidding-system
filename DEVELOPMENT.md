@@ -175,7 +175,108 @@
   - `PlayTable.jsx`: 打牌桌面（4家手牌显示、当前墩出牌）
   - `PlayDetailPanel.jsx`: 打牌详情（已完成墩、AI出牌理由）
 
-### 11.1 打牌提示词系统 - v1.33重大修改
+### 11.1 打牌交互流程 — 前端状态机设计
+
+**状态变量**（App.jsx）:
+| 变量 | 含义 | 触发时机 |
+|------|------|----------|
+| `playState` | 后端返回的完整打牌状态 | API调用后 set |
+| `playInitiated` | 打牌已启动 | 点击"开始"按钮 或 重新打牌AI首攻 |
+| `playStarted` | 第一张牌已打出 | `handlePlayCard` / `handleAIPlay` 成功后 |
+| `isPlayPaused` | 暂停中 | 人类回合（墩中）/ 墩完成 / 手动暂停 / 墩首人类→AI切换 |
+| `positionRoles` | 前端角色配置 `{位置: 'ai'|'human'}` | 角色切换Toggle触发 |
+
+**核心逻辑函数**:
+
+1. **`isCurrentPlayerHuman()`**（App.jsx:1564）:
+   - 从 `positionRoles` 即时计算（非后端 `playState.is_human_turn`）
+   - 当前玩家=明手时，读取庄家角色（桥牌规则：庄家替明手出牌）
+
+2. **AI自动出牌**（App.jsx:1574-1589）:
+   ```
+   条件: showPlayPanel && playState && !playAiLoading && !playLoading && !isPlayPaused && playInitiated
+   行为: 非人类回合 && 未完成 → 延迟500ms调用 handleAIPlay()
+   依赖: [playState?.is_human_turn, playState?.phase, showPlayPanel, playAiLoading, playLoading, isPlayPaused, playInitiated, positionRoles]
+   ```
+
+3. **人类回合自动暂停**（App.jsx:1591-1599）:
+   ```
+   条件: showPlayPanel && playState && !playAiLoading && !playLoading && playInitiated
+   行为: 人类回合 && 未完成 && 未暂停 && 非墩首 → setIsPlayPaused(true)
+   注意: 墩首跳过，由"继续"按钮控制节奏
+   ```
+
+4. **墩完成检测**（App.jsx:1601-1623）:
+   ```
+   条件: showPlayPanel && playState
+   行为: tricks.length增加 → 保存lastCompletedTrick → setIsPlayPaused(true)
+        phase === 'complete' && tricks < 13 → saveCompletePlayRecord()
+   ```
+
+**角色切换逻辑** `handlePositionRoleChange`（App.jsx:1670-1729）:
+- **庄家/明手双向同步**: 切换任一方→另一方同步更新（桥牌规则：庄家替明手出牌）
+- **墩首人类→AI切换**: 自动暂停，显示"继续"按钮，点击后AI自动出牌
+- **前端即时生效**: `setPositionRoles` 立即更新 → `isCurrentPlayerHuman()` 立即反映新角色
+- **后端异步同步**: `updatePlayPlayerRoles(newRoles)` → 更新 `playState.player_roles`
+
+**Toggle禁用条件**（CardTable.jsx:603）:
+```
+disabled = showPlayPanel && playInitiated
+           && (!isPlayPaused || aiLoading)
+           && !(isStartOfTrick && !aiLoading)
+
+可切换场景:
+- !playInitiated: 打牌尚未开始
+- isPlayPaused && !aiLoading: 暂停中且AI空闲
+- isStartOfTrick && !aiLoading: 每墩开头且AI空闲
+
+不可切换场景:
+- playInitiated && !isPlayPaused: AI自动出牌中（含暂停按钮可见时）
+- aiLoading: AI正在思考
+```
+
+**按钮显隐规则**（PlayDetailPanel.jsx:487-545）:
+| 按钮 | 显示条件 | 禁用条件 |
+|------|----------|----------|
+| 开始 | `!isComplete && !playInitiated` | — |
+| 继续 | `!isComplete && playInitiated && isPaused && (!isHumanTurn \|\| isStartOfTrick)` | `aiLoading \|\| loading` |
+| 暂停 | `!isComplete && playInitiated && !isPaused && !isHumanTurn` | — |
+| 撤销 | `(!isComplete && playStarted && isPaused) \|\| (isComplete && !isHistoryRecord)` | `aiLoading \|\| loading` |
+
+**选牌面板显隐**（PlayDetailPanel.jsx:226-246）:
+```
+1. isComplete → "打牌已结束"占位
+2. !playInitiated || (isPaused && isStartOfTrick) → 隐藏（等待"开始"/"继续"）
+3. isPaused && !isHumanTurn → 隐藏（AI回合暂停）
+4. !isHumanTurn → 隐藏（AI思考中）
+5. 否则 → 显示选牌面板
+```
+
+**每墩生命周期**:
+
+```
+墩首 (current_trick.cards.length === 0)
+├─ 显示"继续"按钮（即使领出者是人类）
+├─ 隐藏选牌面板
+├─ 角色Toggle可切换
+├─ 点击"继续":
+│  ├─ 人类领出者 → 显示选牌面板（不暂停）
+│  └─ AI领出者 → 自动出牌
+└─ 人类→AI切换: 自动暂停，重新显示"继续"
+
+墩中 (1 ≤ cards.length ≤ 3)
+├─ 人类回合 → 自动暂停 + 选牌面板
+├─ AI回合 → 自动出牌（可手动暂停）
+├─ 暂停中角色Toggle可切换
+└─ 点击"暂停" → 显示"继续" + "撤销"
+
+墩完成 (cards.length === 4)
+├─ 自动暂停，保存lastCompletedTrick
+├─ 显示"继续" + "撤销"
+└─ 第13墩完成 → phase='complete' → 自动保存记录
+```
+
+### 11.2 打牌提示词系统 - v1.33重大修改
 - **提示词全面重写** (`llm/prompts.py` - `PLAY_SYSTEM_PROMPT`):
   - 新增8个模板变量：`bidding_sequence`、`trick_number`、`side`、`declarer_remaining`、`defender_remaining`、`trump_cleared`、`defense_signals_section`、`played_cards_info`
   - 信息区增强：

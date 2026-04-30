@@ -625,6 +625,7 @@ class JFRetriever:
     def __init__(self, segments: List[Dict[str, str]]):
         self.segments = segments
         self.keyword_index: Dict[str, int] = {}
+        self._preprocess_cache: Dict[Tuple[str, str], Dict[str, any]] = {}
         self._build_index()
     
     def _build_index(self):
@@ -644,16 +645,23 @@ class JFRetriever:
         return ""
     
     def retrieve_with_preprocess(self, query: str, bidding_sequence: str, partner_name: str) -> Dict[str, any]:
+        cache_key = (query, bidding_sequence)
+        if cache_key in self._preprocess_cache:
+            return self._preprocess_cache[cache_key]
+
         content = self.retrieve(query)
         if not content:
-            return {
+            result = {
                 "original_content": "",
                 "partner_bid": None,
                 "subsequent_bids": [],
                 "is_structural_convention": False
             }
-        
-        return preprocess_jf_content(content, bidding_sequence, partner_name, query)
+        else:
+            result = preprocess_jf_content(content, bidding_sequence, partner_name, query)
+
+        self._preprocess_cache[cache_key] = result
+        return result
     
     def list_keywords(self) -> List[str]:
         return list(self.keyword_index.keys())

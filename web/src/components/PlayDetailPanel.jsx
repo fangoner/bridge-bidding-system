@@ -22,6 +22,8 @@ function PlayDetailPanel({
   onPausePlay,
   playInitiated,
   onUndoPlay,
+  isHistoryRecord = false,
+  positionRoles,
 }) {
   const [selectedRecord, setSelectedRecord] = useState(null)
   const [viewMode, setViewMode] = useState('output')  // 'output' or 'input'
@@ -47,8 +49,17 @@ function PlayDetailPanel({
   const declarerTricks = playState?.declarer_tricks || 0
   const defenderTricks = playState?.defender_tricks || 0
   const currentPlayer = playState?.current_player
-  const isHumanTurn = playState?.is_human_turn
+  const isHumanTurn = (() => {
+    const cp = playState?.current_player
+    if (!cp || !positionRoles) return false
+    // 明手时由庄家操作
+    if (cp === playState?.dummy) {
+      return positionRoles[playState?.contract?.declarer] === 'human'
+    }
+    return positionRoles[cp] === 'human'
+  })()
   const isComplete = playState?.phase === 'complete'
+  const isStartOfTrick = (playState?.current_trick?.cards?.length || 0) === 0
   const currentHand = playState?.hands?.[currentPlayer] || []
   
   const getPlayableCards = () => {
@@ -221,7 +232,12 @@ function PlayDetailPanel({
       )
     }
 
-    if (isPaused) {
+    // 每墩开始前隐藏选牌面板，显示开始/继续按钮
+    if (!playInitiated || (isPaused && isStartOfTrick)) {
+      return null
+    }
+
+    if (isPaused && !isHumanTurn) {
       return null
     }
 
@@ -255,7 +271,11 @@ function PlayDetailPanel({
     return (
       <Box>
         <Typography variant="subtitle2" gutterBottom sx={{ fontSize: '0.85rem' }}>
-          {currentPlayer}家出牌 {selectedCard ? '(再次点击确认)' : '(点击选择)'}
+          {currentPlayer === playState?.dummy
+            ? `${playState?.contract?.declarer}家替明手${currentPlayer}家出牌`
+            : `${currentPlayer}家出牌`
+          }
+          {selectedCard ? ' (再次点击确认)' : ' (点击选择)'}
         </Typography>
         <Paper sx={{ 
           p: 0.5, 
@@ -477,29 +497,19 @@ function PlayDetailPanel({
                 开始
               </Button>
             )}
-            {!isComplete && playStarted && isPaused && (
+            {!isComplete && playInitiated && isPaused && (!isHumanTurn || isStartOfTrick) && (
               <Button
                 variant="outlined"
                 color="primary"
                 onClick={onResume}
+                disabled={aiLoading || loading}
                 size="small"
                 sx={{ fontSize: '0.75rem', textTransform: 'none' }}
               >
                 继续
               </Button>
             )}
-            {((!isComplete && playStarted && isPaused) || isComplete) && onUndoPlay && (
-              <Button
-                variant="outlined"
-                color="secondary"
-                onClick={onUndoPlay}
-                size="small"
-                sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-              >
-                撤销
-              </Button>
-            )}
-            {!isComplete && playStarted && !isPaused && (
+            {!isComplete && playInitiated && !isPaused && !isHumanTurn && (
               <Button
                 variant="outlined"
                 color="warning"
@@ -508,6 +518,18 @@ function PlayDetailPanel({
                 sx={{ fontSize: '0.75rem', textTransform: 'none' }}
               >
                 暂停
+              </Button>
+            )}
+            {((!isComplete && playStarted && isPaused) || (isComplete && !isHistoryRecord)) && onUndoPlay && (
+              <Button
+                variant="outlined"
+                color="secondary"
+                onClick={onUndoPlay}
+                disabled={aiLoading || loading}
+                size="small"
+                sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+              >
+                撤销
               </Button>
             )}
             {onResetPlay && (

@@ -43,6 +43,7 @@ function CardTablePanel({
   declarer,
   lastCompletedTrick,
   isPlayPaused,
+  playInitiated,
   aiLoading,
   showPlayedCards,
   setShowPlayedCards,
@@ -223,6 +224,7 @@ function CardTablePanel({
           showPlayPanel={showPlayPanel}
           lastCompletedTrick={lastCompletedTrick}
           isPlayPaused={isPlayPaused}
+          playInitiated={playInitiated}
           aiLoading={aiLoading}
           showPlayedCards={showPlayedCards}
           playCenterView={playCenterView}

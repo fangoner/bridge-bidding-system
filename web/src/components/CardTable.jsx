@@ -39,6 +39,7 @@ function CardTable({
   showPlayPanel,
   lastCompletedTrick,
   isPlayPaused,
+  playInitiated,
   aiLoading,
   showPlayedCards = false,
   playCenterView = 'play',
@@ -585,11 +586,11 @@ function CardTable({
                 fontWeight: declarer === position ? 700 : 600, 
                 fontSize: '0.85rem',
                 color: declarer === position ? '#d32f2f' : 'inherit',
-                cursor: onDealerChange && (!biddingStarted || stopBidding) ? 'pointer' : 'default',
+                cursor: onDealerChange && (!biddingStarted || stopBidding) && !showPlayPanel ? 'pointer' : 'default',
                 transition: 'color 0.2s',
-                '&:hover': onDealerChange && (!biddingStarted || stopBidding) ? { color: 'primary.main' } : {}
+                '&:hover': onDealerChange && (!biddingStarted || stopBidding) && !showPlayPanel ? { color: 'primary.main' } : {}
               }}
-              onClick={() => onDealerChange && (!biddingStarted || stopBidding) && onDealerChange(position)}
+              onClick={() => onDealerChange && (!biddingStarted || stopBidding) && !showPlayPanel && onDealerChange(position)}
             >
               {position}家
               {dealer === position && ' *'}
@@ -599,6 +600,7 @@ function CardTable({
               <ToggleButtonGroup
                 value={positionRoles[position]}
                 exclusive
+                disabled={showPlayPanel && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading)}
                 onChange={(e, newRole) => {
                   if (newRole !== null) {
                     onPositionRoleChange(position, newRole)

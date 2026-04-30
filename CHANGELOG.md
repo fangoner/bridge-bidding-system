@@ -1,5 +1,94 @@
 # 开发日志
 
+## 2026-05-01
+
+### 打牌流程全面重构
+
+**背景**:
+打牌交互流程存在多处逻辑问题：角色切换不能立即生效、墩首/墩中/墩完成的行为不一致、暂停/继续按钮在特定场景不显示或显示错误、明手角色切换无效。需要从根本上重新设计打牌流程的状态机和交互逻辑。
+
+**核心设计原则**:
+
+1. **前端 `positionRoles` 作为角色判断的唯一真相源** — 不再依赖后端 `playState.is_human_turn`，所有人类/AI判断从前端 `positionRoles` 即时计算，确保角色切换后UI立即响应。
+
+2. **三个关键状态变量**：
+   - `playInitiated`：打牌已启动（点击"开始"或重新打牌AI首攻后），区别于 `playStarted`（第一张牌打出后）
+   - `isPlayPaused`：暂停状态，暂停时显示"继续"按钮、启用角色切换
+   - `playStarted`：第一张牌已打出，"撤销"按钮依赖此状态
+
+3. **每墩生命周期**：
+   - **墩首**（`current_trick.cards.length === 0`）：显示"继续"按钮（即使领出者是人类），隐藏选牌面板。点击"继续"后：人类→显示选牌面板；AI→自动出牌。
+   - **墩中**（`current_trick.cards.length > 0 && < 4`）：人类回合自动暂停并显示选牌面板；AI回合自动出牌。
+   - **墩完成**（`current_trick.cards.length === 4`）：自动暂停，保存最后一墩信息。
+
+**具体改进**:
+
+1. **人类回合判断函数 `isCurrentPlayerHuman()`**（App.jsx）:
+   - 读取前端 `positionRoles` 而非后端 `playState.is_human_turn`
+   - 桥牌规则：当前玩家为明手（dummy）时，检查庄家（declarer）的角色
+   - PlayDetailPanel 中同步计算 `isHumanTurn`，保证UI即时响应
+
+2. **AI自动出牌 Effect**（App.jsx）:
+   - 前置条件：`showPlayPanel && playState && !playAiLoading && !playLoading && !isPlayPaused && playInitiated`
+   - 非人类回合且未结束时，延迟500ms自动调用 `handleAIPlay()`
+   - 依赖数组包含 `positionRoles`，角色切换后立即重新评估
+
+3. **人类回合自动暂停 Effect**（App.jsx）:
+   - 墩首跳过（`!isStartOfTrick`），由"继续"按钮控制
+   - 墩中人类回合自动设置 `isPlayPaused = true`
+
+4. **墩完成检测 Effect**（App.jsx）:
+   - 通过 `prevTricksCountRef` 比对墩数变化
+   - 墩数增加→保存最后一墩信息→自动暂停
+   - 打牌完成（phase === 'complete'）→自动保存完整打牌记录
+
+5. **角色切换按钮禁用条件**（CardTable.jsx）:
+   ```
+   禁用条件 = showPlayPanel && playInitiated && (!isPlayPaused || aiLoading)
+              && !(isStartOfTrick && !aiLoading)
+   ```
+   - 未开始打牌：始终启用
+   - 暂停状态 + 非AI加载中：启用
+   - 墩首 + 非AI加载中：启用（允许人类领出者切换为AI）
+   - AI思考中（`aiLoading`）：禁用（防止并发冲突）
+   - AI自动出牌中（未暂停）：禁用
+
+6. **开始/继续/暂停/撤销按钮逻辑**（PlayDetailPanel.jsx）:
+   - **"开始"按钮**：`!isComplete && !playInitiated` — 打牌前显示
+   - **"继续"按钮**：`!isComplete && playInitiated && isPaused && (!isHumanTurn || isStartOfTrick)` — 墩首（含人类领出者）或AI回合暂停时显示；AI加载中时 disabled
+   - **"暂停"按钮**：`!isComplete && playInitiated && !isPaused && !isHumanTurn` — AI自动出牌时可手动暂停
+   - **"撤销"按钮**：`(!isComplete && playStarted && isPaused) || (isComplete && !isHistoryRecord)` — 暂停时或完成后（非历史记录）可撤销；AI加载中时 disabled
+
+7. **选牌面板显隐逻辑**（PlayDetailPanel.jsx）:
+   ```
+   隐藏条件（优先级从高到低）：
+   1. isComplete → "打牌已结束"
+   2. !playInitiated || (isPaused && isStartOfTrick) → 隐藏（等待点击开始/继续）
+   3. isPaused && !isHumanTurn → 隐藏（AI回合暂停，显示继续按钮）
+   4. !isHumanTurn → 隐藏（AI正在思考）
+   ```
+
+8. **庄家/明手角色双向同步**（App.jsx `handlePositionRoleChange`）:
+   - 切换庄家→同步更新明手角色
+   - 切换明手→同步更新庄家角色
+   - 原因：桥牌规则中庄家替明手打牌，两者角色必须一致
+   - 同步通过 `setPositionRoles` 立即生效（前端），再异步调用 `updatePlayPlayerRoles` 更新后端
+
+9. **墩首人类→AI切换自动暂停**（App.jsx `handlePositionRoleChange`）:
+   - 墩首切换领出者从人类到AI后，自动设置 `isPlayPaused = true`
+   - 显示"继续"按钮，点击后AI自动出牌
+   - 保证用户在角色切换后有确认机会
+
+**修改文件**:
+- `web/src/App.jsx` — 新增 `isCurrentPlayerHuman()`、重写3个打牌Effect、重写 `handlePositionRoleChange`（庄家/明手同步 + 墩首人类→AI暂停）
+- `web/src/components/PlayDetailPanel.jsx` — 选牌面板显隐逻辑重构、按钮显隐/禁用条件重构、`isHumanTurn` 从 `positionRoles` 即时计算、明手出牌提示（"X家替明手Y家出牌"）
+- `web/src/components/CardTable.jsx` — 角色切换Toggle禁用条件重构（新增 `playInitiated` prop、`isStartOfTrick` 例外）
+- `web/src/components/CardTablePanel.jsx` — 传递 `playInitiated`、`positionRoles` 到子组件
+
+**测试验证**: Vite build 通过，无编译错误。需在实际叫牌+打牌流程中端到端验证各场景。
+
+---
+
 ## 2026-04-29
 
 ### 修复主提示词pass叫品误触发fallback的问题
