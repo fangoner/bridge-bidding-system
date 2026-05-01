@@ -24,6 +24,8 @@ function PlayDetailPanel({
   onUndoPlay,
   isHistoryRecord = false,
   positionRoles,
+  onSave,
+  canSave,
 }) {
   const [selectedRecord, setSelectedRecord] = useState(null)
   const [viewMode, setViewMode] = useState('output')  // 'output' or 'input'
@@ -491,18 +493,19 @@ function PlayDetailPanel({
                 variant="outlined"
                 color="success"
                 onClick={onBeginPlay}
+                disabled={aiLoading}
                 size="small"
                 sx={{ fontSize: '0.75rem', textTransform: 'none' }}
               >
                 开始
               </Button>
             )}
-            {!isComplete && playInitiated && isPaused && (!isHumanTurn || isStartOfTrick) && (
+            {!isComplete && playInitiated && isPaused && (isHistoryRecord || !isHumanTurn || isStartOfTrick) && (
               <Button
                 variant="outlined"
                 color="primary"
                 onClick={onResume}
-                disabled={aiLoading || loading}
+                disabled={aiLoading}
                 size="small"
                 sx={{ fontSize: '0.75rem', textTransform: 'none' }}
               >
@@ -525,11 +528,23 @@ function PlayDetailPanel({
                 variant="outlined"
                 color="secondary"
                 onClick={onUndoPlay}
-                disabled={aiLoading || loading}
+                disabled={aiLoading}
                 size="small"
                 sx={{ fontSize: '0.75rem', textTransform: 'none' }}
               >
                 撤销
+              </Button>
+            )}
+            {onSave && (
+              <Button
+                variant="outlined"
+                color="info"
+                size="small"
+                onClick={onSave}
+                disabled={!canSave}
+                sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+              >
+                保存
               </Button>
             )}
             {onResetPlay && (
@@ -538,6 +553,7 @@ function PlayDetailPanel({
                 color="error"
                 size="small"
                 onClick={onResetPlay}
+                disabled={aiLoading}
                 sx={{ fontSize: '0.75rem', textTransform: 'none' }}
               >
                 重新打牌

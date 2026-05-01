@@ -89,16 +89,21 @@ function useBridgeRecords() {
   const saveRecord = useCallback((record) => {
     setRecords(prev => {
       try {
-        // 查找是否已有同一副牌的记录
-        const existingIndex = prev.findIndex(r => isSameBoard(r, record))
         let newRecords
         
-        if (existingIndex >= 0) {
-          // 同一副牌已存在：用新记录替换旧的
-          newRecords = [...prev]
-          newRecords[existingIndex] = record
+        // 如果有 sourceRecordId，优先查找并覆盖该记录
+        if (record.sourceRecordId) {
+          const existingIndex = prev.findIndex(r => 
+            r.id === record.sourceRecordId || r.sourceRecordId === record.sourceRecordId
+          )
+          if (existingIndex >= 0) {
+            newRecords = [...prev]
+            newRecords[existingIndex] = { ...record, id: prev[existingIndex].id }
+          } else {
+            newRecords = [record, ...prev]
+          }
         } else {
-          // 新牌局：添加到最前面
+          // 没有sourceRecordId时，始终创建新记录
           newRecords = [record, ...prev]
         }
         

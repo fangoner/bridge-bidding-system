@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。
+本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。
 
 ## 功能模块
 
@@ -593,7 +593,28 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 
 ## 版本历史
 
-### v1.36 (当前版本)
+### v1.37 (当前版本)
+- **叫牌操作按钮迁移至BiddingDetailPanel**
+  - 开始叫牌/重新叫牌、暂停/继续、撤销、保存按钮从顶部ControlButtons移至BiddingDetailPanel按钮行
+  - 按钮右对齐，与打牌面板布局一致
+  - 暂停按钮加 `disabled={stopBidding && aiThinking}`：暂停后切换为"继续"，AI未返回时禁用
+  - 叫牌进行中时开始/重新叫牌按钮隐藏；叫牌暂停时只显示"继续"按钮
+- **已保存未完成牌局加载后"继续"按钮修复**
+  - 打牌详情面板"继续"按钮条件增加 `isHistoryRecord`，从历史加载时不受回合限制
+  - 修复人类回合保存再加载后无法继续的问题
+- **加载完整叫牌记录后重新叫牌不自动开始**
+  - `resetBidding` 移除 `startBidding()` 调用，改为显示"开始"按钮等待用户点击
+  - 发牌人是人类时点击"开始"自动显示叫牌控制面板
+- **humanPosition 与 positionRoles 同步修复**
+  - 新增 `useEffect` 监听 `positionRoles` 自动同步到 `humanPosition`
+  - `loadRecordToTable` 恢复 `positionRoles` 状态
+  - 移除 `handlePositionRoleChange` 中的重复同步
+- **记录类型枚举重构**
+  - 4种保存类型：`bidding_in_progress`（叫牌进行中）、`bidding_complete`（仅叫牌完成）、`play_in_progress`（打牌进行中）、`play_complete`（打牌完成）
+  - 历史记录面板标签更新，精确反映各记录状态
+  - 修改文件: `web/src/App.jsx`, `web/src/components/PlayDetailPanel.jsx`, `web/src/components/BiddingDetailPanel.jsx`, `web/src/components/ControlButtons.jsx`
+
+### v1.36
 - **修复主提示词pass叫品误触发fallback**
   - `_is_no_valid_bid`方法：当`bid="pass"`时直接返回`False`，不再检查筛选过程中的"无合格叫品"关键词
   - 主提示词约定无合格叫品输出`"JF无合格叫品"`，pass是合法叫品时输出`"pass"`，两者不应混淆
@@ -865,6 +886,14 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
   - 任何位置设为人类玩家时都激活
 - **搭档相继pass逻辑修复**
   - 只在第一个实质性叫牌后触发
+  - 修复bug：找搭档pass时排除第一个实质性叫牌之前的pass
+  - 场景 `(东)pass-(南)1D-(西)pass-(北)1H-(东)?` 不再错误触发自动pass
+- **主动保存进度功能**
+  - 叫牌进行中可手动点击"保存"按钮保存进度
+  - 记录类型统一：`in_progress`（进行中）、`complete`（完成）
+  - 通过 `sourceRecordId` 关联同一牌局的多次保存
+  - 重新叫牌/重新打牌不重置记录关联，继续覆盖同一记录
+  - 新发牌时创建新记录
 - **Deep Finesse格式庄家修复**
   - 移除重复格式转换
 - **远程访问配置**

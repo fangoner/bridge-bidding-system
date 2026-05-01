@@ -29,6 +29,18 @@ function BiddingDetailPanel({
   height = '680px',
   onStartPlay,
   playLoading,
+  // 叫牌按钮相关
+  biddingStarted,
+  isNewDeal,
+  onStartBidding,
+  onResetBidding,
+  onToggleStopBidding,
+  showUndo,
+  canUndo,
+  onUndo,
+  onSave,
+  canSave,
+  aiThinking,
 }) {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
@@ -359,6 +371,55 @@ function BiddingDetailPanel({
             </FormControl>
           </Box>
         </Box>
+      </Box>
+
+      {/* 叫牌按钮区域 */}
+      <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', mb: 0.5, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        {(!biddingStarted || isBiddingCompleteFn()) && (
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={isNewDeal ? onStartBidding : onResetBidding}
+            disabled={!hands || aiThinking}
+            sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+          >
+            {isNewDeal ? '开始' : '重新叫牌'}
+          </Button>
+        )}
+        {biddingStarted && !isBiddingCompleteFn() && (
+          <Button
+            variant={stopBidding ? "contained" : "outlined"}
+            color={stopBidding ? "success" : "warning"}
+            size="small"
+            onClick={onToggleStopBidding}
+            disabled={stopBidding && aiThinking}
+            sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+          >
+            {stopBidding ? '继续' : '暂停'}
+          </Button>
+        )}
+        {showUndo && (
+          <Button
+            variant="outlined"
+            color="secondary"
+            size="small"
+            onClick={onUndo}
+            disabled={!canUndo}
+            sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+          >
+            撤销
+          </Button>
+        )}
+        <Button
+          variant="outlined"
+          color="info"
+          size="small"
+          onClick={onSave}
+          disabled={!canSave}
+          sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+        >
+          保存
+        </Button>
       </Box>
 
       {effectiveShowControls ? (

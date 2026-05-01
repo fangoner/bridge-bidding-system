@@ -1,5 +1,140 @@
 # 开发日志
 
+## 2026-05-02
+
+### 叫牌操作按钮迁移至叫牌细节面板
+
+**背景**:
+叫牌操作按钮（开始叫牌、暂停/继续、撤销、保存）位于顶部 ControlButtons 区域，和系统级操作（发牌、历史记录、设置等）混在一起。打牌面板已有独立的按钮行，叫牌面板也需要统一。
+
+**改进**:
+- BiddingDetailPanel 新增按钮行（开始/重新叫牌、暂停/继续、撤销、保存），右对齐
+- ControlButtons 移除叫牌相关按钮，仅保留系统级操作（发牌、设置、历史记录、API、约定、暗色模式）
+- 按钮文字简化：`开始叫牌→开始`，`继续叫牌→继续`，`停止叫牌→暂停`
+- 叫牌暂停时开始按钮隐藏，只显示"继续"
+- 暂停按钮切换为"继续"后 `disabled={stopBidding && aiThinking}`，AI未返回不可继续
+
+**修改文件**:
+- `web/src/components/BiddingDetailPanel.jsx` — 新增按钮行、props
+- `web/src/components/ControlButtons.jsx` — 移除叫牌相关按钮和props
+- `web/src/App.jsx` — 更新两组件props传递
+
+---
+
+### 已保存未完成打牌加载后继续按钮修复
+
+**背景**:
+未打完的牌局保存后加载，切换到打牌界面时，"继续"按钮不显示。原因是显示条件 `(!isHumanTurn || isStartOfTrick)` 在人类玩家回合且非每墩首张时全不满足。
+
+**改进**:
+- "继续"按钮条件增加 `isHistoryRecord` 分支：从历史加载时始终显示，不受回合限制
+- 用户点击"继续"后恢复正常的打牌流程
+
+**修改文件**:
+- `web/src/components/PlayDetailPanel.jsx` — 继续按钮条件增加 isHistoryRecord
+
+---
+
+### 加载完整叫牌后重新叫牌不自动开始
+
+**背景**:
+导入完整叫牌记录后点击"重新叫牌"，之前会直接调用 `startBidding()` 自动开始叫牌。对于人类发牌人的场景，用户需要先看到叫牌控制面板再开始。
+
+**改进**:
+- `resetBidding` 移除 `startBidding()` 调用，改为重置状态后显示"开始"按钮
+- `startBidding` 中发牌人是人类时同步 `setShowBiddingControls(true)`，确保控制面板出现
+- 重新叫牌后的行为和新发牌完全一致
+
+**修改文件**:
+- `web/src/App.jsx` — resetBidding 移除自动 startBidding，startBidding 增加 human turn 控制面板显示
+
+---
+
+### humanPosition 与 positionRoles 状态同步修复
+
+**背景**:
+`humanPosition` 初始值为 `null`，从不与 `positionRoles` 同步。`loadRecordToTable` 只恢复 `humanPosition` 不恢复 `positionRoles`。导致发牌人是人类时无法正确识别回合。
+
+**改进**:
+- 新增 `useEffect` 监听 `positionRoles` 自动同步到 `humanPosition`
+- `loadRecordToTable` 从 `humanPosition` 推导并恢复 `positionRoles`
+- 移除 `handlePositionRoleChange` 中的重复同步代码，由 effect 统一管理
+
+**修改文件**:
+- `web/src/App.jsx` — 同步 effect、loadRecordToTable 恢复 positionRoles、移除重复同步
+
+---
+
+### 记录类型枚举重构
+
+**背景**:
+原有记录类型只有 `in_progress` 和 `complete` 两种，无法区分叫牌进行中、打牌进行中、仅叫牌完成、全部完成等不同状态。历史记录标签也经常误标（如无打牌数据却显示"叫牌+打牌"）。
+
+**改进**:
+- 4种新类型：`bidding_in_progress`、`play_in_progress`、`bidding_complete`、`play_complete`
+- 历史记录标签：叫牌进行中 / 打牌进行中 / 仅叫牌完成 / 打牌完成
+- 兼容旧记录：有 `play.state` 或 `play.tricks` 数据时正确判断为有打牌数据
+
+**修改文件**:
+- `web/src/App.jsx` — 4个保存点的 type 更新 + 历史标签显示逻辑
+
+### 添加主动保存进度功能
+
+**背景**:
+之前只有叫牌/打牌完成后的自动保存，没有进行中的手动保存。用户希望能在叫牌或打牌过程中保存进度，导入后继续。
+
+**功能设计**:
+1. **记录类型统一**:
+   - `in_progress`: 进行中（叫牌中或打牌中）
+   - `complete`: 完成（叫牌完成或打牌完成）
+
+2. **覆盖保存逻辑**:
+   - 每个牌局通过 `sourceRecordId` 关联
+   - 保存时优先覆盖同 `sourceRecordId` 的记录
+   - 重新叫牌/重新打牌不重置 `sourceRecordId`，继续覆盖同一记录
+   - 新发牌时重置 `sourceRecordId`，创建新记录
+
+3. **手动保存按钮**:
+   - 叫牌进行中显示"保存"按钮
+   - 点击后保存当前叫牌进度到历史记录
+
+4. **导入后继续**:
+   - 导入进行中记录后，`sourceRecordId` 指向原记录
+   - 继续叫牌后保存会覆盖原记录
+
+**修改文件**:
+- `web/src/hooks/useBridgeRecords.js` — `saveRecord` 支持 `sourceRecordId` 覆盖逻辑
+- `web/src/App.jsx` — 添加 `currentRecordId` 状态、手动保存逻辑、自动保存添加 `sourceRecordId`
+- `web/src/components/ControlButtons.jsx` — 添加"保存"按钮
+
+---
+
+## 2026-05-02
+
+### 修复四人模式相继pass判断bug
+
+**背景**:
+四人模式下，当一家搭档两人相继pass后，后续该家两个位置自动pass。但代码在判断"搭档最近一次pass"时，没有排除第一个实质性叫牌之前的pass，导致错误触发。
+
+**问题场景**:
+叫牌序列 `(东)pass-(南)1D-(西)pass-(北)1H-(东)?`
+- 东的第一次pass在1D之前（开叫前pass）
+- 西在1D之后pass
+- 代码错误地认为东西已相继pass，导致东自动pass
+
+**根因**:
+找搭档pass的循环遍历整个序列，没有跳过第一个实质性叫牌之前的pass。
+
+**修复**:
+- 新增 `firstRealBidIndex` 变量，记录第一个实质性叫牌的位置
+- 找搭档pass时，跳过索引小于 `firstRealBidIndex` 的pass
+- 确保只考虑第一个实质性叫牌之后的pass才算"放弃叫牌"
+
+**修改文件**:
+- `web/src/App.jsx` — 相继pass判断逻辑增加 `firstRealBidIndex` 过滤
+
+---
+
 ## 2026-05-01
 
 ### 打牌流程全面重构

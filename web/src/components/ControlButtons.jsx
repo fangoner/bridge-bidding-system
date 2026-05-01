@@ -1,6 +1,5 @@
 import { Button, Badge, CircularProgress, Tooltip, IconButton } from '@mui/material'
 import HistoryIcon from '@mui/icons-material/History'
-import UndoIcon from '@mui/icons-material/Undo'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import LightModeIcon from '@mui/icons-material/LightMode'
 
@@ -11,24 +10,14 @@ function ControlButtons({
   loading,
   handleDeal,
   dealMode,
-  hands,
-  biddingStarted,
-  isBiddingComplete,
-  stopBidding,
-  toggleStopBidding,
-  isNewDeal,
-  startBidding,
   biddingRecords,
   setHistoryDialogOpen,
   checkApiStatus,
   apiStatus,
   handleReloadJF,
-  showUndo,
-  canUndo,
-  onUndo,
-  showPlayPanel,
   darkMode,
   onToggleDarkMode,
+  aiThinking,
 }) {
   const isLarge = size === 'large'
   const gap = isLarge ? 2 : 1
@@ -42,58 +31,19 @@ function ControlButtons({
         size={buttonSize}
         onClick={() => setShowSettings(!showSettings)}
       >
-        {showSettings ? '隐藏设置' : '显示设置'}
+        {showSettings ? '隐藏设置' : '设置'}
       </Button>
 
       <Button
         variant="contained"
         size={buttonSize}
         onClick={() => handleDeal(dealMode)}
-        disabled={loading}
+        disabled={loading || aiThinking}
         startIcon={loading && <CircularProgress size={progressSize} />}
       >
         {loading ? '发牌中...' : '发牌'}
       </Button>
 
-      {!showPlayPanel && (
-        <Button
-          variant="outlined"
-          size={buttonSize}
-          onClick={startBidding}
-          disabled={!hands || (biddingStarted && !isBiddingComplete() && !stopBidding)}
-        >
-          {isNewDeal ? '开始叫牌' : '重新叫牌'}
-        </Button>
-      )}
-      
-      {biddingStarted && !isBiddingComplete() && !showPlayPanel && (
-        <Button
-          variant={stopBidding ? "contained" : "outlined"}
-          color={stopBidding ? "success" : "warning"}
-          size={buttonSize}
-          onClick={toggleStopBidding}
-        >
-          {stopBidding ? (isLarge ? '继续叫牌' : '继续') : (isLarge ? '停止叫牌' : '暂停')}
-        </Button>
-      )}
-      
-      {showUndo && !showPlayPanel && (
-        <Tooltip title={canUndo ? "撤销上一步叫牌" : "AI正在思考..."}>
-          <span>
-            <Button
-              variant="outlined"
-              color="secondary"
-              size={buttonSize}
-              onClick={onUndo}
-              disabled={!canUndo}
-              startIcon={<UndoIcon />}
-            >
-              {isLarge ? '撤销' : ''}
-            </Button>
-          </span>
-        </Tooltip>
-      )}
-      
       <Badge 
         badgeContent={biddingRecords.length} 
         color="primary"
@@ -104,6 +54,7 @@ function ControlButtons({
           variant="outlined"
           size={buttonSize}
           onClick={() => setHistoryDialogOpen(true)}
+          disabled={aiThinking}
           startIcon={<HistoryIcon />}
         >
           {isLarge ? '历史记录' : '历史'}

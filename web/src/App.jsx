@@ -66,9 +66,10 @@ function App({ darkMode, onToggleDarkMode }) {
     '西': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 }
   })
   const [loading, setLoading] = useState(false)
-  const [aiLoading, setAiLoading] = useState(false)
+  const [aiThinking, setAiThinking] = useState(false)
   const [error, setError] = useState(null)
   const [apiStatus, setApiStatus] = useState(null)
+  const [currentRecordId, setCurrentRecordId] = useState(null) // 当前牌局的记录ID（用于覆盖保存）
 
   // 叫牌状态（使用 hook 管理）
   const {
@@ -255,7 +256,6 @@ function App({ darkMode, onToggleDarkMode }) {
   // 打牌相关状态
   const [playState, setPlayState] = useState(null) // 打牌状态
   const [playLoading, setPlayLoading] = useState(false) // 打牌加载中
-  const [playAiLoading, setPlayAiLoading] = useState(false) // AI出牌加载中
   const [showPlayPanel, setShowPlayPanel] = useState(false) // 显示打牌面板
   const [showPlayedCards, setShowPlayedCards] = useState(false) // 打牌时显示已出的牌
   const [playCenterView, setPlayCenterView] = useState('play') // 打牌阶段中心区域视图: 'play'/'bidding'/'result'
@@ -359,6 +359,8 @@ function App({ darkMode, onToggleDarkMode }) {
   // 加载历史记录到牌桌
   const loadRecordToTable = (record) => {
     isLoadingRecordRef.current = true
+    // 设置当前记录ID，用于后续覆盖保存
+    setCurrentRecordId(record.id)
     // 兼容新旧格式
     const board = record.board || record
     const bidding = record.bidding || record
@@ -370,7 +372,13 @@ function App({ darkMode, onToggleDarkMode }) {
       setGameMode(board.game_mode || record.gameMode)
     }
     if (board.human_position || record.humanPosition) {
-      setHumanPosition(board.human_position || record.humanPosition)
+      const hp = board.human_position || record.humanPosition
+      setHumanPosition(hp)
+      // 同步恢复 positionRoles
+      const positions = ['北', '南', '东', '西']
+      const humans = Array.isArray(hp) ? hp : [hp]
+      const newRoles = Object.fromEntries(positions.map(p => [p, humans.includes(p) ? 'human' : 'ai']))
+      setPositionRoles(newRoles)
     }
     setAiBiddingHistory(bidding.ai_bidding_history || record.aiBiddingHistory || [])
     if (bidding.deal_system || record.dealSystem) {
@@ -383,8 +391,20 @@ function App({ darkMode, onToggleDarkMode }) {
     setIsNewDeal(false) // 标记为历史记录加载，显示"重新叫牌"
     setShowDoubleDummy(false) // 切换到显示叫牌过程
     setDoubleDummyResult(null) // 清除双明手结果
-    // 预加载打牌数据（完整记录含打牌数据时保存到 loadedPlayRecord，切换到打牌时直接使用）
-    if (record.play && record.play.tricks && record.play.tricks.length > 0) {
+    // 预加载打牌数据（记录含打牌数据时保存到 loadedPlayRecord，切换到打牌时直接使用）
+    if (record.play && record.play.state) {
+      // 保存中有完整打牌状态对象（进行中或已完成）
+      setLoadedPlayRecord({
+        playState: record.play.state,
+        aiPlayHistory: record.play.ai_play_history || [],
+      })
+      setShowPlayPanel(false)
+      setPlayState(null)
+      setAiPlayHistory([])
+      setSelectedPlayCard(null)
+      setIsPlayPaused(false)
+    } else if (record.play && record.play.tricks && record.play.tricks.length > 0) {
+      // 兼容旧格式：完整记录含 tricks 数组
       const contractFromRecord = board.contract
       const suitMap = { S: '♠', H: '♥', D: '♦', C: '♣', NT: 'NT' }
       const partnerMap = { '北': '南', '南': '北', '东': '西', '西': '东' }
@@ -493,11 +513,104 @@ function App({ darkMode, onToggleDarkMode }) {
 
   // 只有停止叫牌后才能撤销，且AI不在加载中（包括AI叫牌和获取叫品含义）
   const showUndo = stopBidding && historyIndex > 0
-  const canUndo = !aiLoading && !currentBiddingPosition
+  const canUndo = !aiThinking && !currentBiddingPosition
+
+  // 判断是否可以保存进度（叫牌模式）
+  const canSaveProgress = biddingStarted && !isBiddingComplete() && !showPlayPanel && hands && stopBidding && !aiThinking
+
+  // 打牌模式下是否可以保存
+  const playCanSave = showPlayPanel && playState && playState.phase !== 'complete' && isPlayPaused && !aiThinking && !playLoading
+
+  // 手动保存进度
+  const handleSaveProgress = useCallback(() => {
+    if (!hands || !biddingSequence || biddingSequence.length === 0) return
+
+    // 打牌进行中：保存打牌状态
+    if (showPlayPanel && playState && playState.phase !== 'complete') {
+      const record = {
+        id: Date.now().toString(),
+        timestamp: new Date().toLocaleString(),
+        type: 'play_in_progress',
+        sourceRecordId: currentRecordId || undefined,
+        board: {
+          hands: hands,
+          bidding_sequence: biddingSequence,
+          contract: playState.contract ? {
+            level: playState.contract.level,
+            suit: playState.contract.suit,
+            declarer: playState.contract.declarer,
+            isDouble: playState.contract.is_double,
+            isRedouble: playState.contract.is_redouble,
+          } : null,
+          dealer: dealer,
+          game_mode: gameMode,
+          human_position: humanPosition,
+          player_roles: positionRoles,
+        },
+        bidding: {
+          ai_bidding_history: aiBiddingHistory,
+          deal_system: dealSystem,
+        },
+        play: {
+          state: playState,
+          ai_play_history: aiPlayHistory,
+        },
+        note: ''
+      }
+      saveBridgeRecord(record)
+      if (!currentRecordId) {
+        setCurrentRecordId(record.id)
+      }
+      return
+    }
+
+    // 叫牌进行中：保存叫牌状态
+    const record = {
+      id: Date.now().toString(),
+      timestamp: new Date().toLocaleString(),
+      type: 'bidding_in_progress',
+      sourceRecordId: currentRecordId || undefined,
+      board: {
+        hands: hands,
+        bidding_sequence: biddingSequence,
+        contract: null,
+        dealer: dealer,
+        game_mode: gameMode,
+        human_position: humanPosition,
+        player_roles: positionRoles,
+      },
+      bidding: {
+        ai_bidding_history: aiBiddingHistory,
+        deal_system: dealSystem,
+      },
+      play: null,
+      note: ''
+    }
+    saveBridgeRecord(record)
+    // 如果之前没有记录ID，保存后设置当前记录ID
+    if (!currentRecordId) {
+      setCurrentRecordId(record.id)
+    }
+  }, [hands, biddingSequence, dealer, gameMode, humanPosition, positionRoles, aiBiddingHistory, dealSystem, currentRecordId, showPlayPanel, playState, aiPlayHistory])
+
+  // 同步 humanPosition 到 positionRoles
+  useEffect(() => {
+    const humans = Object.entries(positionRoles)
+      .filter(([, r]) => r === 'human')
+      .map(([p]) => p)
+    if (humans.length === 0) {
+      setHumanPosition(null)
+    } else if (humans.length === 1) {
+      setHumanPosition(humans[0])
+    } else {
+      setHumanPosition(humans)
+    }
+  }, [positionRoles])
 
   // 发牌
   const handleDeal = async (mode = 'free') => {
     clearBiddingDraft()
+    setCurrentRecordId(null) // 新发牌，重置记录ID
     setLoading(true)
     setError(null)
     try {
@@ -534,6 +647,7 @@ function App({ darkMode, onToggleDarkMode }) {
   // 自定义牌局
   const handleCustomDeal = async (inputText) => {
     clearBiddingDraft()
+    setCurrentRecordId(null) // 新牌局，重置记录ID
     setLoading(true)
     setError(null)
     try {
@@ -573,6 +687,7 @@ function App({ darkMode, onToggleDarkMode }) {
   // 从图片读取牌局
   const handleImageDeal = async (imageFile) => {
     clearBiddingDraft()
+    setCurrentRecordId(null) // 新牌局，重置记录ID
     setLoading(true)
     setError(null)
     try {
@@ -686,6 +801,12 @@ function App({ darkMode, onToggleDarkMode }) {
       setPassedAIPositions(new Set())
       setBiddingTotalTime(null)
       setError(null)
+      // 发牌人是人类时，直接显示叫牌控制面板
+      const dealerIsHuman = (positionRoles && positionRoles[dealer] === 'human') ||
+        (humanPosition && (Array.isArray(humanPosition) ? humanPosition.includes(dealer) : humanPosition === dealer))
+      if (dealerIsHuman) {
+        setShowBiddingControls(true)
+      }
       // 重置回退历史并保存初始快照
       const initialSnapshot = {
         biddingSequence: [],
@@ -701,10 +822,11 @@ function App({ darkMode, onToggleDarkMode }) {
   const resetBidding = () => {
     clearBiddingDraft()
     initBiddingState(dealer)
-    setIsNewDeal(false)
     setBiddingHistory([])
     setHistoryIndex(-1)
     setLoadedPlayRecord(null)
+    setCurrentRecordId(null)
+    setShowBiddingControls(false)
   }
 
   // 清除所有手牌（重新开始一局）
@@ -878,9 +1000,19 @@ function App({ darkMode, onToggleDarkMode }) {
       // 找到当前叫牌者的搭档
       const partner = partnerships[currentBidder]
       
-      // 在叫牌序列中找搭档最近一次pass的位置
+      // 找到第一个实质性叫牌的位置
+      let firstRealBidIndex = -1
+      for (let i = 0; i < newSequence.length; i++) {
+        if (newSequence[i].bid !== 'pass') {
+          firstRealBidIndex = i
+          break
+        }
+      }
+      
+      // 在叫牌序列中找搭档最近一次pass的位置（必须在第一个实质性叫牌之后）
       let partnerPassIndex = -1
       for (let i = newSequence.length - 2; i >= 0; i--) {
+        if (i < firstRealBidIndex) continue  // 跳过第一个实质性叫牌之前的pass
         if (newSequence[i].position === partner && newSequence[i].bid === 'pass') {
           partnerPassIndex = i
           break
@@ -952,7 +1084,7 @@ function App({ darkMode, onToggleDarkMode }) {
     }
     
     setCurrentBiddingPosition(currentBidder)
-    setAiLoading(true)
+    setAiThinking(true)
     try {
       // 用于显示的字符串
       const biddingStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-') + (biddingSequence.length > 0 ? '-' : '')
@@ -993,7 +1125,7 @@ function App({ darkMode, onToggleDarkMode }) {
       // 出错时默认pass
       addBid('pass')
     } finally {
-      setAiLoading(false)
+      setAiThinking(false)
       setCurrentBiddingPosition(null)
     }
   }
@@ -1024,7 +1156,7 @@ function App({ darkMode, onToggleDarkMode }) {
 
   // 当currentBidder变化时，检查是否需要调用AI叫牌或获取JF约定片段
   useEffect(() => {
-    if (!hands || aiLoading) return
+    if (!hands || aiThinking) return
     
     // 叫牌已结束，不再处理
     if (isBiddingComplete()) return
@@ -1062,7 +1194,7 @@ function App({ darkMode, onToggleDarkMode }) {
         }
       }
     }
-  }, [currentBidder, positionRoles, hands, aiLoading, biddingSequence, biddingStarted, stopBidding, passedAIPositions])
+  }, [currentBidder, positionRoles, hands, aiThinking, biddingSequence, biddingStarted, stopBidding, passedAIPositions])
 
   // 叫牌进度草稿自动保存 —— 每次叫牌序列变化时持久化到 localStorage
   useEffect(() => {
@@ -1183,7 +1315,8 @@ function App({ darkMode, onToggleDarkMode }) {
       const record = {
         id: Date.now().toString(),
         timestamp: new Date().toLocaleString(),
-        type: 'bidding_only',
+        type: 'bidding_complete',
+        sourceRecordId: currentRecordId || undefined,
         board: {
           hands: hands,
           bidding_sequence: biddingSequence,
@@ -1201,6 +1334,10 @@ function App({ darkMode, onToggleDarkMode }) {
         note: ''
       }
       saveBridgeRecord(record)
+      // 如果之前没有记录ID，保存后设置当前记录ID
+      if (!currentRecordId) {
+        setCurrentRecordId(record.id)
+      }
       
       // 获取更多输出格式
       fetchOutputFormats()
@@ -1284,6 +1421,9 @@ function App({ darkMode, onToggleDarkMode }) {
       setShowPlayPanel(true)
       setIsPlayPaused(true)
       setPlayLoading(false)
+      // 加载已保存的打牌进度，标记为已启动和已开始
+      setPlayInitiated(true)
+      setPlayStarted(true)
       return
     }
 
@@ -1372,7 +1512,7 @@ function App({ darkMode, onToggleDarkMode }) {
 
   // AI出牌
   const handleAIPlay = async () => {
-    setPlayAiLoading(true)
+    setAiThinking(true)
     setError(null)
     
     try {
@@ -1404,7 +1544,7 @@ function App({ darkMode, onToggleDarkMode }) {
       console.error('AI出牌失败:', err)
       setError('AI出牌失败: ' + (err.response?.data?.detail || err.message))
     } finally {
-      setPlayAiLoading(false)
+      setAiThinking(false)
     }
   }
 
@@ -1507,6 +1647,7 @@ function App({ darkMode, onToggleDarkMode }) {
     setLastCompletedTrick(null)
     setPlayCenterView('play')
     setLoadedPlayRecord(null)
+    setCurrentRecordId(null) // 重新打牌创建新记录
     prevTricksCountRef.current = 0
 
     // 构建包含叫牌含义的叫牌历史字符串
@@ -1573,7 +1714,7 @@ function App({ darkMode, onToggleDarkMode }) {
 
   // AI自动出牌
   useEffect(() => {
-    if (!showPlayPanel || !playState || playAiLoading || playLoading || isPlayPaused || !playInitiated) return
+    if (!showPlayPanel || !playState || aiThinking || playLoading || isPlayPaused || !playInitiated) return
 
     const { phase } = playState
     const isHuman = isCurrentPlayerHuman()
@@ -1586,17 +1727,17 @@ function App({ darkMode, onToggleDarkMode }) {
 
       return () => clearTimeout(timer)
     }
-  }, [playState?.is_human_turn, playState?.phase, showPlayPanel, playAiLoading, playLoading, isPlayPaused, playInitiated, positionRoles])
+  }, [playState?.is_human_turn, playState?.phase, showPlayPanel, aiThinking, playLoading, isPlayPaused, playInitiated, positionRoles])
 
   // 轮到人类出牌时自动暂停（每墩首张除外，由继续按钮控制）
   useEffect(() => {
-    if (!showPlayPanel || !playState || playAiLoading || playLoading || !playInitiated) return
+    if (!showPlayPanel || !playState || aiThinking || playLoading || !playInitiated) return
     const isHuman = isCurrentPlayerHuman()
     const isStartOfTrick = (playState.current_trick?.cards?.length || 0) === 0
     if (isHuman && playState.phase !== 'complete' && !isPlayPaused && !isStartOfTrick) {
       setIsPlayPaused(true)
     }
-  }, [playState?.is_human_turn, playState?.phase, showPlayPanel, playInitiated, playAiLoading, playLoading, isPlayPaused, positionRoles])
+  }, [playState?.is_human_turn, playState?.phase, showPlayPanel, playInitiated, aiThinking, playLoading, isPlayPaused, positionRoles])
 
   // 检测一墩完成，自动暂停；检测打牌完成，自动保存记录
   useEffect(() => {
@@ -1630,7 +1771,8 @@ function App({ darkMode, onToggleDarkMode }) {
     const record = {
       id: Date.now().toString(),
       timestamp: new Date().toLocaleString(),
-      type: 'complete',
+      type: 'play_complete',
+      sourceRecordId: currentRecordId || undefined,
       board: {
         hands: hands,
         bidding_sequence: biddingSequence,
@@ -1653,7 +1795,11 @@ function App({ darkMode, onToggleDarkMode }) {
       note: ''
     }
     saveBridgeRecord(record)
-  }, [playState, hands, biddingSequence, dealer, gameMode, humanPosition, positionRoles, aiBiddingHistory, dealSystem, aiPlayHistory])
+    // 如果之前没有记录ID，保存后设置当前记录ID
+    if (!currentRecordId) {
+      setCurrentRecordId(record.id)
+    }
+  }, [playState, hands, biddingSequence, dealer, gameMode, humanPosition, positionRoles, aiBiddingHistory, dealSystem, aiPlayHistory, currentRecordId])
 
   // 获取队友位置
   const getPartnerPosition = (pos) => {
@@ -1689,18 +1835,6 @@ function App({ darkMode, onToggleDarkMode }) {
       let updatedRoles = { ...prev, [position]: role }
       if (syncPosition) {
         updatedRoles = { ...updatedRoles, [syncPosition]: role }
-      }
-      // 更新 humanPosition 以保持兼容性
-      const humanPositions = Object.entries(updatedRoles)
-        .filter(([, r]) => r === 'human')
-        .map(([pos]) => pos)
-      if (humanPositions.length === 0) {
-        setHumanPosition(null)
-      } else if (humanPositions.length === 1) {
-        setHumanPosition(humanPositions[0])
-      } else {
-        // 多个人类位置时，使用数组
-        setHumanPosition(humanPositions)
       }
       return updatedRoles
     })
@@ -1865,24 +1999,14 @@ function App({ darkMode, onToggleDarkMode }) {
           loading={loading}
           handleDeal={handleDeal}
           dealMode={dealMode}
-          hands={hands}
-          biddingStarted={biddingStarted}
-          isBiddingComplete={isBiddingComplete}
-          stopBidding={stopBidding}
-          toggleStopBidding={toggleStopBidding}
-          isNewDeal={isNewDeal}
-          startBidding={startBidding}
           biddingRecords={bridgeRecords}
           setHistoryDialogOpen={setHistoryDialogOpen}
           checkApiStatus={checkApiStatus}
           apiStatus={apiStatus}
           handleReloadJF={handleReloadJF}
-          showUndo={showUndo}
-          canUndo={canUndo}
-          onUndo={undoBidding}
-          showPlayPanel={showPlayPanel}
           darkMode={darkMode}
           onToggleDarkMode={onToggleDarkMode}
+          aiThinking={aiThinking}
         />
       </Box>
 
@@ -1895,24 +2019,14 @@ function App({ darkMode, onToggleDarkMode }) {
           loading={loading}
           handleDeal={handleDeal}
           dealMode={dealMode}
-          hands={hands}
-          biddingStarted={biddingStarted}
-          isBiddingComplete={isBiddingComplete}
-          stopBidding={stopBidding}
-          toggleStopBidding={toggleStopBidding}
-          isNewDeal={isNewDeal}
-          startBidding={startBidding}
           biddingRecords={bridgeRecords}
           setHistoryDialogOpen={setHistoryDialogOpen}
           checkApiStatus={checkApiStatus}
           apiStatus={apiStatus}
           handleReloadJF={handleReloadJF}
-          showUndo={showUndo}
-          canUndo={canUndo}
-          onUndo={undoBidding}
-          showPlayPanel={showPlayPanel}
           darkMode={darkMode}
           onToggleDarkMode={onToggleDarkMode}
+          aiThinking={aiThinking}
         />
       </Box>
 
@@ -2009,7 +2123,7 @@ function App({ darkMode, onToggleDarkMode }) {
               lastCompletedTrick={lastCompletedTrick}
               isPlayPaused={isPlayPaused}
               playInitiated={playInitiated}
-              aiLoading={playAiLoading}
+              aiLoading={aiThinking}
               showPlayedCards={showPlayedCards}
               setShowPlayedCards={setShowPlayedCards}
               playCenterView={playCenterView}
@@ -2033,7 +2147,7 @@ function App({ darkMode, onToggleDarkMode }) {
                   }
                 }}
                 loading={playLoading}
-                aiLoading={playAiLoading}
+                aiLoading={aiThinking}
                 isPaused={isPlayPaused}
                 onResume={handleResumePlay}
                 onResetPlay={handleResetPlay}
@@ -2046,6 +2160,8 @@ function App({ darkMode, onToggleDarkMode }) {
                 onUndoPlay={handleUndoPlay}
                 isHistoryRecord={!!loadedPlayRecord}
                 positionRoles={positionRoles}
+                onSave={handleSaveProgress}
+                canSave={playCanSave}
               />
             ) : (
               (humanPosition !== null || showAIBiddingOutput) && (
@@ -2076,6 +2192,17 @@ function App({ darkMode, onToggleDarkMode }) {
                   isBiddingCompleteFn={isBiddingComplete}
                   onStartPlay={handleStartPlay}
                   playLoading={playLoading}
+                  biddingStarted={biddingStarted}
+                  isNewDeal={isNewDeal}
+                  onStartBidding={startBidding}
+                  onResetBidding={resetBidding}
+                  onToggleStopBidding={toggleStopBidding}
+                  showUndo={showUndo}
+                  canUndo={canUndo}
+                  onUndo={undoBidding}
+                  onSave={handleSaveProgress}
+                  canSave={canSaveProgress}
+                  aiThinking={aiThinking}
                 />
               )
             )}
@@ -2146,7 +2273,7 @@ function App({ darkMode, onToggleDarkMode }) {
               lastCompletedTrick={lastCompletedTrick}
               isPlayPaused={isPlayPaused}
               playInitiated={playInitiated}
-              aiLoading={playAiLoading}
+              aiLoading={aiThinking}
               showPlayedCards={showPlayedCards}
               setShowPlayedCards={setShowPlayedCards}
               playCenterView={playCenterView}
@@ -2170,7 +2297,7 @@ function App({ darkMode, onToggleDarkMode }) {
                   }
                 }}
                 loading={playLoading}
-                aiLoading={playAiLoading}
+                aiLoading={aiThinking}
                 isPaused={isPlayPaused}
                 onResume={handleResumePlay}
                 onResetPlay={handleResetPlay}
@@ -2184,6 +2311,8 @@ function App({ darkMode, onToggleDarkMode }) {
                 onUndoPlay={handleUndoPlay}
                 isHistoryRecord={!!loadedPlayRecord}
                 positionRoles={positionRoles}
+                onSave={handleSaveProgress}
+                canSave={playCanSave}
               />
             ) : (
               (humanPosition !== null || showAIBiddingOutput) && (
@@ -2214,6 +2343,17 @@ function App({ darkMode, onToggleDarkMode }) {
                   isBiddingCompleteFn={isBiddingComplete}
                   onStartPlay={handleStartPlay}
                   playLoading={playLoading}
+                  biddingStarted={biddingStarted}
+                  isNewDeal={isNewDeal}
+                  onStartBidding={startBidding}
+                  onResetBidding={resetBidding}
+                  onToggleStopBidding={toggleStopBidding}
+                  showUndo={showUndo}
+                  canUndo={canUndo}
+                  onUndo={undoBidding}
+                  onSave={handleSaveProgress}
+                  canSave={canSaveProgress}
+                  aiThinking={aiThinking}
                 />
               )
             )}
@@ -2285,7 +2425,7 @@ function App({ darkMode, onToggleDarkMode }) {
                             {record.timestamp}
                           </Typography>
                           <Typography variant="body2" color="text.secondary">
-                            {record.type === 'complete' ? '叫牌+打牌' : record.type === 'play_in_progress' ? '打牌中' : '仅叫牌'} | 发牌人: {(record.board?.dealer || record.dealer)}家
+                            {record.play?.state || record.play?.tricks ? (record.type === 'play_in_progress' ? '打牌进行中' : '打牌完成') : record.type === 'bidding_in_progress' ? '叫牌进行中' : '仅叫牌完成'} | 发牌人: {(record.board?.dealer || record.dealer)}家
                           </Typography>
                         </Box>
                         <Box sx={{ mt: 1 }}>
