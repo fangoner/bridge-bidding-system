@@ -1,7 +1,7 @@
 {
   "version": "2.0",
-  "total_cases": 32,
-  "last_updated": "2026-04-05T16:30:00",
+  "total_cases": 33,
+  "last_updated": "2026-05-01T19:30:00",
   "tag_system": "error-focused",
   "cases": [
     {
@@ -177,12 +177,18 @@
       "date": "2026-04-05",
       "tags": ["sequence-error", "slam", "1D-opening", "cue-bid", "stopper-showing"],
       "brief": "止张探查策略错误：3D后不应直接跳叫4H扣叫，应先叫3H/3S表示止张，让同伴决定NT或低花进局/满贯。"
+    },
+    {
+      "id": "case-033",
+      "date": "2026-05-01",
+      "tags": ["underbid", "game", "1C-opening", "competitive", "rebid"],
+      "brief": "北家14点AKQJT7，逼局进程中LLM选2H(6-10止叫)示弱。应选2D人工逼局保持进程开放。"
     }
   ],
   "tag_statistics": {
     "error_types": {
       "overbid": 3,
-      "underbid": 3,
+      "underbid": 4,
       "convention-error": 5,
       "rule-violation": 1,
       "calculation-error": 4,
@@ -191,11 +197,12 @@
       "unclear": 9
     },
     "contract_levels": {
-      "game": 3,
+      "game": 4,
       "slam": 8,
       "partscore": 0
     },
     "opening_types": {
+      "1C-opening": 1,
       "1D-opening": 6,
       "1H-opening": 2,
       "1S-opening": 6,
@@ -205,8 +212,8 @@
     "bidding_phases": {
       "opening": 1,
       "response": 6,
-      "rebid": 3,
-      "competitive": 4,
+      "rebid": 4,
+      "competitive": 5,
       "balancing": 1
     },
     "conventions": {

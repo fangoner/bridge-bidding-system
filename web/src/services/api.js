@@ -82,30 +82,6 @@ export const setFallbackModel = async (fallbackModel) => {
   }
 };
 
-// 获取AI提供商配置
-export const getAIProvider = async () => {
-  try {
-    const response = await api.get('/api/ai-provider');
-    return response.data;
-  } catch (error) {
-    console.error('获取AI提供商配置失败:', error);
-    throw error;
-  }
-};
-
-// 设置AI提供商
-export const setAIProvider = async (aiProvider) => {
-  try {
-    const response = await api.post('/api/ai-provider', {
-      ai_provider: aiProvider
-    });
-    return response.data;
-  } catch (error) {
-    console.error('设置AI提供商失败:', error);
-    throw error;
-  }
-};
-
 // AI叫牌
 export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H/2S：自然阻击', bidHistory = '', useFallback = false, fallbackModel = null, aiProvider = null) => {
   try {

@@ -8,14 +8,18 @@ import {
   Alert,
   Divider,
   CircularProgress,
+  useTheme,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 
-const getBidColor = (bid) => {
+const getBidColor = (bid, isDark) => {
   if (!bid) return {};
   const suit = bid.slice(-1);
-  const level = bid.slice(0, -1);
   
+  if (isDark) {
+    return { color: '#e2e8f0', bgColor: '#1e293b', borderColor: '#475569' };
+  }
+
   if (suit === 'H' || suit === 'D') {
     return { color: '#dc2626', bgColor: '#fef2f2', borderColor: '#fca5a5' };
   }
@@ -113,6 +117,9 @@ function BiddingControls({
 }) {
   if (!hands) return null;
 
+  const theme = useTheme()
+  const isDark = theme.palette.mode === 'dark'
+
   const bidLevels = [
     ['1C', '1D', '1H', '1S', '1NT'],
     ['2C', '2D', '2H', '2S', '2NT'],
@@ -161,7 +168,7 @@ function BiddingControls({
         border: '1px solid',
         borderColor: 'divider',
         borderRadius: 3,
-        background: 'linear-gradient(180deg, #ffffff 0%, #fafafa 100%)',
+        background: isDark ? 'linear-gradient(180deg, #1e293b 0%, #1a1f2e 100%)' : 'linear-gradient(180deg, #ffffff 0%, #fafafa 100%)',
         boxSizing: 'border-box'
       }}>
         {!checkBiddingComplete() ? (
@@ -202,7 +209,7 @@ function BiddingControls({
             }}>
               {isVerticalLayout ? (
                 allBidsCompact.flat().map((bid, index) => {
-                  const bidColor = getBidColor(bid);
+                  const bidColor = getBidColor(bid, isDark);
                   return bid === null ? (
                     <Box key={index} />
                   ) : (
@@ -221,7 +228,7 @@ function BiddingControls({
                   {bidLevels.map((level, levelIndex) => (
                     <Box key={levelIndex} sx={{ display: 'flex', gap: 0.8 }}>
                       {level.map((bid) => {
-                        const bidColor = getBidColor(bid);
+                        const bidColor = getBidColor(bid, isDark);
                         return (
                           <BidButton
                             key={bid}
@@ -237,7 +244,7 @@ function BiddingControls({
                   ))}
                   <Box sx={{ display: 'flex', gap: 0.8, mt: 1.5 }}>
                     {specialBids.map((bid) => {
-                      const bidColor = getBidColor(bid);
+                      const bidColor = getBidColor(bid, isDark);
                       return (
                         <BidButton
                           key={bid}
@@ -292,13 +299,13 @@ function BiddingControls({
                 mt: 2, 
                 p: 2, 
                 borderRadius: 2, 
-                background: 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
-                border: '1px solid #6ee7b7',
+                background: isDark ? 'linear-gradient(135deg, #064e3b 0%, #065f46 100%)' : 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
+                border: isDark ? '1px solid #059669' : '1px solid #6ee7b7',
               }}>
-                <Typography variant="h6" sx={{ color: '#059669', fontWeight: 600, mb: 1 }}>
+                <Typography variant="h6" sx={{ color: isDark ? '#6ee7b7' : '#059669', fontWeight: 600, mb: 1 }}>
                   最终定约: {finalContract.level}{finalContract.suit}{finalContract.isRedouble ? 'XX' : finalContract.isDouble ? 'X' : ''}
                 </Typography>
-                <Typography variant="body2" sx={{ color: '#047857' }}>
+                <Typography variant="body2" sx={{ color: isDark ? '#a7f3d0' : '#047857' }}>
                   定约方: {finalContract.partnership} | 庄家: {finalContract.declarer}家
                 </Typography>
               </Box>
@@ -307,10 +314,10 @@ function BiddingControls({
                 mt: 2, 
                 p: 2, 
                 borderRadius: 2, 
-                background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
-                border: '1px solid #7dd3fc',
+                background: isDark ? 'linear-gradient(135deg, #0c4a6e 0%, #075985 100%)' : 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
+                border: isDark ? '1px solid #0284c7' : '1px solid #7dd3fc',
               }}>
-                <Typography variant="body1" sx={{ color: '#0369a1' }}>
+                <Typography variant="body1" sx={{ color: isDark ? '#7dd3fc' : '#0369a1' }}>
                   叫牌结束，无最终定约（全部pass）
                 </Typography>
               </Box>
@@ -333,7 +340,7 @@ function BiddingControls({
           border: '1px solid',
           borderColor: 'divider',
           borderRadius: 3,
-          background: 'linear-gradient(180deg, #ffffff 0%, #fafafa 100%)',
+          background: isDark ? 'linear-gradient(180deg, #1e293b 0%, #1a1f2e 100%)' : 'linear-gradient(180deg, #ffffff 0%, #fafafa 100%)',
         }}>
           <Typography variant="h6" gutterBottom sx={{ flexShrink: 0, fontWeight: 600 }}>
             JF约定片段
@@ -346,16 +353,16 @@ function BiddingControls({
               </Box>
             ) : bidSuggestion ? (
               <Box>
-                <Typography variant="subtitle2" gutterBottom sx={{ color: '#64748b', fontWeight: 500 }}>
-                  检索关键字: <strong style={{ color: '#6366f1' }}>{bidSuggestion.keyword}</strong>
+                <Typography variant="subtitle2" gutterBottom sx={{ color: isDark ? '#94a3b8' : '#64748b', fontWeight: 500 }}>
+                  检索关键字: <strong style={{ color: isDark ? '#818cf8' : '#6366f1' }}>{bidSuggestion.keyword}</strong>
                 </Typography>
                 {bidSuggestion.content ? (
                   <Box sx={{ 
                     mt: 1, 
                     p: 1.5, 
-                    background: 'linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%)', 
+                    background: isDark ? 'linear-gradient(135deg, #1a1f2e 0%, #1e293b 100%)' : 'linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%)', 
                     borderRadius: 2, 
-                    border: '1px solid #e2e8f0', 
+                    border: isDark ? '1px solid #334155' : '1px solid #e2e8f0', 
                     overflow: 'auto', 
                     maxWidth: '100%' 
                   }}>

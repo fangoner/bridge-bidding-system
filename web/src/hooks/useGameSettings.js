@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { getFallbackModel, setFallbackModel, getAIProvider, setAIProvider } from '../services/api'
+import { getFallbackModel, setFallbackModel } from '../services/api'
 
 const COLOR_SCHEME_KEY = 'bridge_color_scheme'
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
@@ -42,15 +42,6 @@ function useGameSettings(colorSchemes, defaultScheme) {
       return 'deepseek-v4-flash'
     }
   })
-  
-  const [aiProvider, setAIProviderState] = useState(() => {
-    try {
-      const saved = localStorage.getItem('ai_provider')
-      return saved || 'deepseek'
-    } catch {
-      return 'deepseek'
-    }
-  })
 
   const [playModel, setPlayModelState] = useState(() => {
     try {
@@ -75,14 +66,6 @@ function useGameSettings(colorSchemes, defaultScheme) {
     }
   }, [fallbackModel])
 
-  const syncAIProvider = useCallback(async () => {
-    try {
-      await setAIProvider(aiProvider)
-    } catch (err) {
-      console.error('同步AI提供商失败:', err)
-    }
-  }, [aiProvider])
-
   const handleFallbackModelChange = useCallback(async (event) => {
     const newModel = event.target.value
     setFallbackModelState(newModel)
@@ -94,18 +77,7 @@ function useGameSettings(colorSchemes, defaultScheme) {
     }
   }, [])
 
-  const handleAIProviderChange = useCallback(async (event) => {
-    const newProvider = event.target.value
-    setAIProviderState(newProvider)
-    localStorage.setItem('ai_provider', newProvider)
-    try {
-      await setAIProvider(newProvider)
-    } catch (err) {
-      console.error('设置AI提供商失败:', err)
-    }
-  }, [])
-
-  const handlePlayModelChange = useCallback((event) => {
+  const handlePlayModelChange = useCallback(async (event) => {
     const newModel = event.target.value
     setPlayModelState(newModel)
     localStorage.setItem(PLAY_MODEL_KEY, newModel)
@@ -171,14 +143,10 @@ function useGameSettings(colorSchemes, defaultScheme) {
     currentColorScheme,
     fallbackModel,
     setFallbackModelState,
-    aiProvider,
-    setAIProviderState,
     playModel,
     handleColorSchemeChange,
     syncFallbackModel,
-    syncAIProvider,
     handleFallbackModelChange,
-    handleAIProviderChange,
     handlePlayModelChange,
     getPartnerPosition,
     handlePositionRoleChange,

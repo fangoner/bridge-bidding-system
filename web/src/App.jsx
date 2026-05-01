@@ -35,7 +35,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import HistoryIcon from '@mui/icons-material/History'
-import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, doubleDummyAnalysis, getFallbackModel, setFallbackModel, getAIProvider, setAIProvider, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles, undoPlay } from './services/api'
+import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, doubleDummyAnalysis, getFallbackModel, setFallbackModel, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles, undoPlay } from './services/api'
 import HandDisplay from './components/HandDisplay'
 import ControlButtons from './components/ControlButtons'
 import BiddingDetailPanel from './components/BiddingDetailPanel'
@@ -198,14 +198,6 @@ function App({ darkMode, onToggleDarkMode }) {
       return 'deepseek-v4-flash'
     }
   })
-  const [aiProvider, setAIProviderState] = useState(() => {
-    try {
-      const saved = localStorage.getItem('ai_provider')
-      return saved || 'deepseek'
-    } catch {
-      return 'deepseek'
-    }
-  })
 
   const PLAY_MODEL_KEY = 'bridge_play_model'
   const [playModel, setPlayModelState] = useState(() => {
@@ -274,7 +266,6 @@ function App({ darkMode, onToggleDarkMode }) {
     checkApiStatus()
     loadBridgeRecords()
     syncFallbackModel()
-    syncAIProvider()
   }, [])
 
   // 打开历史记录对话框时清除上次的选中状态
@@ -293,15 +284,6 @@ function App({ darkMode, onToggleDarkMode }) {
     }
   }
 
-  // 同步AI提供商到后端
-  const syncAIProvider = async () => {
-    try {
-      await setAIProvider(aiProvider)
-    } catch (err) {
-      console.error('同步AI提供商失败:', err)
-    }
-  }
-
   // 处理备用模型变更
   const handleFallbackModelChange = async (event) => {
     const newModel = event.target.value
@@ -311,18 +293,6 @@ function App({ darkMode, onToggleDarkMode }) {
       await setFallbackModel(newModel)
     } catch (err) {
       console.error('设置备用模型失败:', err)
-    }
-  }
-
-  // 处理AI提供商变更
-  const handleAIProviderChange = async (event) => {
-    const newProvider = event.target.value
-    setAIProviderState(newProvider)
-    localStorage.setItem('ai_provider', newProvider)
-    try {
-      await setAIProvider(newProvider)
-    } catch (err) {
-      console.error('设置AI提供商失败:', err)
     }
   }
 
@@ -1100,7 +1070,7 @@ function App({ darkMode, onToggleDarkMode }) {
       console.log(`AI叫牌: ${currentBidder}家, 手牌:`, currentHand, '叫牌序列:', biddingStr, '叫牌历史:', bidHistory)
       
       // 传递数组，后端处理格式
-      const result = await aiBid(currentHand, biddingSequence, currentBidder, dealSystem, bidHistory, useFallback, fallbackModel, aiProvider)
+      const result = await aiBid(currentHand, biddingSequence, currentBidder, dealSystem, bidHistory, useFallback, fallbackModel, 'deepseek')
       
       // 更新useFallback状态
       if (result.use_fallback !== undefined) {
@@ -1414,14 +1384,69 @@ function App({ darkMode, onToggleDarkMode }) {
 
   // 开始打牌
   const handleStartPlay = async () => {
-    // 如果有从历史记录预加载的打牌数据，直接切换显示
+    // 如果有从历史记录预加载的打牌数据，先初始化后端状态
     if (loadedPlayRecord) {
-      setPlayState(loadedPlayRecord.playState)
+      const savedState = loadedPlayRecord.playState
+      if (savedState?.contract) {
+        setPlayLoading(true)
+        setError(null)
+        try {
+          const contract = savedState.contract
+          let biddingStr = null
+          if (biddingSequence.length > 0) {
+            const seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
+            const meaningLines = aiBiddingHistory
+              .filter(r => r.result?.meaning)
+              .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
+              .join('\n')
+            biddingStr = meaningLines
+              ? `${seqStr}\n\n叫牌含义:\n${meaningLines}`
+              : seqStr
+          }
+          const initResult = await playInit(
+            hands,
+            `${contract.level}${contract.suit}`,
+            contract.declarer,
+            positionRoles,
+            contract.doubled || contract.isDouble || false,
+            contract.redoubled || contract.isRedouble || false,
+            biddingStr
+          )
+          if (initResult.success) {
+            // 重放已完成的出牌，保持后端状态与历史记录一致
+            const allPlayedCards = []
+            if (savedState.tricks) {
+              for (const trick of savedState.tricks) {
+                for (const [pos, card] of trick.cards || []) {
+                  allPlayedCards.push({ position: pos, card })
+                }
+              }
+            }
+            if (savedState.current_trick?.cards) {
+              for (const [pos, card] of savedState.current_trick.cards) {
+                allPlayedCards.push({ position: pos, card })
+              }
+            }
+            for (const { position, card } of allPlayedCards) {
+              try {
+                await playCard(position, card)
+              } catch (e) {
+                console.warn('重放出牌失败（可忽略）:', position, card, e)
+              }
+            }
+          } else {
+            console.error('后端初始化打牌失败，但尝试继续加载记录:', initResult.error)
+          }
+        } catch (err) {
+          console.error('后端初始化打牌失败，但尝试继续加载记录:', err)
+        } finally {
+          setPlayLoading(false)
+        }
+      }
+      setPlayState(savedState)
       setAiPlayHistory(loadedPlayRecord.aiPlayHistory)
       setShowPlayPanel(true)
       setIsPlayPaused(true)
-      setPlayLoading(false)
-      // 加载已保存的打牌进度，标记为已启动和已开始
       setPlayInitiated(true)
       setPlayStarted(true)
       return
@@ -1978,20 +2003,11 @@ function App({ darkMode, onToggleDarkMode }) {
       )}
       <Divider sx={{ mb: 2, borderColor: 'rgba(0, 0, 0, 0.3)', borderBottomWidth: 2 }} />
 
-      {/* 标题 */}
-      <Typography variant="h4" component="h1" align="center" sx={{ fontSize: { xs: '1.25rem', md: '1.75rem' }, mb: { xs: 2, md: 0 }, display: { xs: 'block', md: 'none' } }}>
-        桥牌练习系统
-      </Typography>
-
-      {/* 标题 - 桌面版 */}
+      {/* 标题 + 控制按钮 - 桌面版 */}
       <Box sx={{ mb: 2, display: { xs: 'none', md: 'flex' }, flexWrap: 'wrap', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
-        <Typography variant="h4" component="h1" sx={{ fontSize: '1.75rem', mr: 3, whiteSpace: 'nowrap' }}>
+        <Typography variant="h4" component="h1" sx={{ fontSize: '1.75rem', whiteSpace: 'nowrap' }}>
           桥牌练习系统
         </Typography>
-      </Box>
-
-      {/* 控制按钮 - 桌面版 */}
-      <Box sx={{ mb: 2, display: { xs: 'none', md: 'flex' }, flexWrap: 'wrap', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
         <ControlButtons
           size="large"
           showSettings={showSettings}
@@ -2010,8 +2026,11 @@ function App({ darkMode, onToggleDarkMode }) {
         />
       </Box>
 
-      {/* 控制按钮 - 手机版 */}
+      {/* 标题 + 控制按钮 - 手机版 */}
       <Box sx={{ mb: 2, display: { xs: 'flex', md: 'none' }, flexWrap: 'wrap', justifyContent: 'center', gap: 1, alignItems: 'center' }}>
+        <Typography variant="h4" component="h1" sx={{ fontSize: '1.25rem', whiteSpace: 'nowrap' }}>
+          桥牌练习系统
+        </Typography>
         <ControlButtons
           size="small"
           showSettings={showSettings}
@@ -2037,8 +2056,6 @@ function App({ darkMode, onToggleDarkMode }) {
         showSettings={showSettings}
         gameMode={gameMode}
         setGameMode={setGameMode}
-        aiProvider={aiProvider}
-        handleAIProviderChange={handleAIProviderChange}
         fallbackModel={fallbackModel}
         handleFallbackModelChange={handleFallbackModelChange}
         playModel={playModel}

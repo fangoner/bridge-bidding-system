@@ -593,7 +593,36 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 
 ## 版本历史
 
-### v1.37 (当前版本)
+### v1.38 (当前版本)
+- **逼局进程强制规则（提示词修复）**
+  - 备用提示词"叫品筛选过程"C段新增强制规则：逼局进程中禁止选择不逼叫的示弱叫品（简单重叫自己花色、简单加叫队友最低花色、pass）
+  - 必须选择逼叫性叫品：跳叫新花 > 第四花色逼局 > 扣叫 > 2NT(逼叫) > 其他强制逼局约定叫品
+  - 案例记录：case-033（北家14点AKQJT7，1C-X-1H-P-2C后应选2D人工逼局）
+  - 修改文件: `llm/prompts.py`, `bidding-cases/2026-05-01/case-033.json`, `bidding-cases/cases-index.json`
+- **叫牌细节面板布局重构**
+  - 记录下拉框移至按钮行左端，与"开始/暂停/撤销/保存/切换到打牌"同行
+  - "切换到打牌"从内容区独立行合并到按钮行右端
+  - "简单"checkbox右对齐到标题栏，简单模式下记录下拉框置灰禁用
+  - 内容区滚动条从外层移至内层内容容器，按钮行固定不滚动
+  - 修改文件: `web/src/components/BiddingDetailPanel.jsx`
+- **AI提供商选择器移除**
+  - SettingsPanel、App.jsx、useGameSettings、api.js全面移除DeepSeek/Doubao切换
+  - 修改文件: `web/src/components/SettingsPanel.jsx`, `web/src/App.jsx`, `web/src/hooks/useGameSettings.js`, `web/src/services/api.js`
+- **叫牌控制面板暗色背景适配**
+  - `getBidColor` 增加 `isDark` 参数，暗色下所有按钮统一黑灰背景(`#1e293b`)白色文字(`#e2e8f0`)
+  - 主面板、JF面板、定约结果卡片背景暗色适配
+  - 修改文件: `web/src/components/BiddingControls.jsx`
+- **系统标题与按钮栏合并**
+  - 桌面版和手机版"桥牌练习系统"标题与ControlButtons合并到同一行
+  - 修改文件: `web/src/App.jsx`
+- **加载历史记录出牌失败修复**
+  - 从历史记录加载打牌时，先调 `playInit` 初始化后端，再重放已有出牌使后端状态与记录一致
+  - 修改文件: `web/src/App.jsx`
+- **打牌详情面板输入模式滚动条修复**
+  - 输入模式外层容器设 `overflow: 'hidden'`，仅保留提示词框滚动条
+  - 修改文件: `web/src/components/PlayDetailPanel.jsx`
+
+### v1.37
 - **叫牌操作按钮迁移至BiddingDetailPanel**
   - 开始叫牌/重新叫牌、暂停/继续、撤销、保存按钮从顶部ControlButtons移至BiddingDetailPanel按钮行
   - 按钮右对齐，与打牌面板布局一致

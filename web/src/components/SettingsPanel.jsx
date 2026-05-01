@@ -4,8 +4,6 @@ function SettingsPanel({
   showSettings,
   gameMode,
   setGameMode,
-  aiProvider,
-  handleAIProviderChange,
   fallbackModel,
   handleFallbackModelChange,
   playModel,
@@ -37,23 +35,13 @@ function SettingsPanel({
               </Select>
             </FormControl>
 
-            <FormControl sx={{ minWidth: 120 }} size="small">
-              <InputLabel>AI提供商</InputLabel>
-              <Select value={aiProvider} label="AI提供商" onChange={handleAIProviderChange}>
-                <MenuItem value="deepseek">DeepSeek</MenuItem>
-                <MenuItem value="doubao">Doubao(豆包)</MenuItem>
+            <FormControl sx={{ minWidth: 140 }} size="small">
+              <InputLabel>备用模型</InputLabel>
+              <Select value={fallbackModel} label="备用模型" onChange={handleFallbackModelChange}>
+                <MenuItem value="deepseek-v4-flash">V4-Flash(快)</MenuItem>
+                <MenuItem value="deepseek-v4-pro">V4-Pro(准)</MenuItem>
               </Select>
             </FormControl>
-
-            {aiProvider === 'deepseek' && (
-              <FormControl sx={{ minWidth: 140 }} size="small">
-                <InputLabel>备用模型</InputLabel>
-                <Select value={fallbackModel} label="备用模型" onChange={handleFallbackModelChange}>
-                  <MenuItem value="deepseek-v4-flash">V4-Flash(快)</MenuItem>
-                  <MenuItem value="deepseek-v4-pro">V4-Pro(准)</MenuItem>
-                </Select>
-              </FormControl>
-            )}
 
             <FormControl sx={{ minWidth: 180 }} size="small">
               <InputLabel>阻击叫牌体系</InputLabel>

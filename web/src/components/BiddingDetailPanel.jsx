@@ -1,4 +1,4 @@
-import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, FormControl, InputLabel, Select, MenuItem, CircularProgress, Alert, Button, Divider, useTheme } from '@mui/material'
+import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, FormControl, InputLabel, Select, MenuItem, CircularProgress, Alert, Button, useTheme } from '@mui/material'
 import BiddingControls from './BiddingControls'
 
 function BiddingDetailPanel({
@@ -59,6 +59,88 @@ function BiddingDetailPanel({
   )
   const canShowControls = humanPosition !== null && !isBiddingComplete
   const effectiveShowControls = isHumanTurn && !isBiddingComplete && showBiddingControls
+
+  const renderButtons = () => (
+    <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', mb: 0.5, flexShrink: 0, flexWrap: 'wrap' }}>
+      <Box sx={{ minWidth: isMobile ? 200 : 120 }}>
+        <FormControl size="small" sx={{ minWidth: isMobile ? 200 : 120, '& .MuiInputBase-input': { fontSize: '0.875rem' }, '& .MuiInputLabel-root': { fontSize: '0.875rem' } }} disabled={simpleDisplayMode || aiBiddingHistory.length === 0}>
+          <InputLabel>{isMobile ? '选择叫牌记录' : '记录'}</InputLabel>
+          <Select
+            value={selectedBiddingIndex}
+            label={isMobile ? '选择叫牌记录' : '记录'}
+            onChange={(e) => setSelectedBiddingIndex(e.target.value)}
+            sx={{ fontSize: '0.875rem' }}
+          >
+            <MenuItem value={-1}>最新 ({aiBiddingHistory[aiBiddingHistory.length - 1]?.position}家 {aiBiddingHistory[aiBiddingHistory.length - 1]?.result.bid})</MenuItem>
+            {aiBiddingHistory.slice().reverse().slice(1).map((record, idx) => (
+              <MenuItem key={idx} value={aiBiddingHistory.length - 2 - idx}>
+                {record.position}家 {record.result.bid}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Box>
+      <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', ml: 'auto', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        {(!biddingStarted || isBiddingCompleteFn()) && (
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={isNewDeal ? onStartBidding : onResetBidding}
+            disabled={!hands || aiThinking}
+            sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+          >
+            {isNewDeal ? '开始' : '重新叫牌'}
+          </Button>
+        )}
+        {biddingStarted && !isBiddingCompleteFn() && (
+          <Button
+            variant={stopBidding ? "contained" : "outlined"}
+            color={stopBidding ? "success" : "warning"}
+            size="small"
+            onClick={onToggleStopBidding}
+            disabled={stopBidding && aiThinking}
+            sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+          >
+            {stopBidding ? '继续' : '暂停'}
+          </Button>
+        )}
+        {showUndo && (
+          <Button
+            variant="outlined"
+            color="secondary"
+            size="small"
+            onClick={onUndo}
+            disabled={!canUndo}
+            sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+          >
+            撤销
+          </Button>
+        )}
+        <Button
+          variant="outlined"
+          color="info"
+          size="small"
+          onClick={onSave}
+          disabled={!canSave}
+          sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+        >
+          保存
+        </Button>
+        {isBiddingCompleteFn && isBiddingCompleteFn() && onStartPlay && (
+          <Button
+            variant="contained"
+            color="primary"
+            size="small"
+            onClick={onStartPlay}
+            disabled={playLoading}
+            sx={{ fontSize: '0.75rem', textTransform: 'none' }}
+          >
+            {playLoading ? <CircularProgress size={16} /> : '切换到打牌'}
+          </Button>
+        )}
+      </Box>
+    </Box>
+  )
 
   const renderBiddingDetails = () => {
     if (aiBiddingHistory.length === 0) {
@@ -346,85 +428,17 @@ function BiddingDetailPanel({
             </ToggleButton>
           </ToggleButtonGroup>
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <FormControlLabel
-            control={<Checkbox checked={simpleDisplayMode} onChange={(e) => setSimpleDisplayMode(e.target.checked)} size="small" />}
-            label="简单"
-            sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, height: 24 }}
-          />
-          <Box sx={{ minWidth: isMobile ? 200 : 120, opacity: aiBiddingHistory.length > 0 && !simpleDisplayMode ? 1 : 0, pointerEvents: aiBiddingHistory.length > 0 && !simpleDisplayMode ? 'auto' : 'none' }}>
-            <FormControl size="small" sx={{ minWidth: isMobile ? 200 : 120, '& .MuiInputBase-input': { fontSize: '0.875rem' }, '& .MuiInputLabel-root': { fontSize: '0.875rem' } }}>
-              <InputLabel>{isMobile ? '选择叫牌记录' : '记录'}</InputLabel>
-              <Select
-                value={selectedBiddingIndex}
-                label={isMobile ? '选择叫牌记录' : '记录'}
-                onChange={(e) => setSelectedBiddingIndex(e.target.value)}
-                sx={{ fontSize: '0.875rem' }}
-              >
-                <MenuItem value={-1}>最新 ({aiBiddingHistory[aiBiddingHistory.length - 1]?.position}家 {aiBiddingHistory[aiBiddingHistory.length - 1]?.result.bid})</MenuItem>
-                {aiBiddingHistory.slice().reverse().slice(1).map((record, idx) => (
-                  <MenuItem key={idx} value={aiBiddingHistory.length - 2 - idx}>
-                    {record.position}家 {record.result.bid}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Box>
-        </Box>
-      </Box>
-
-      {/* 叫牌按钮区域 */}
-      <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', mb: 0.5, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-        {(!biddingStarted || isBiddingCompleteFn()) && (
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={isNewDeal ? onStartBidding : onResetBidding}
-            disabled={!hands || aiThinking}
-            sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-          >
-            {isNewDeal ? '开始' : '重新叫牌'}
-          </Button>
-        )}
-        {biddingStarted && !isBiddingCompleteFn() && (
-          <Button
-            variant={stopBidding ? "contained" : "outlined"}
-            color={stopBidding ? "success" : "warning"}
-            size="small"
-            onClick={onToggleStopBidding}
-            disabled={stopBidding && aiThinking}
-            sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-          >
-            {stopBidding ? '继续' : '暂停'}
-          </Button>
-        )}
-        {showUndo && (
-          <Button
-            variant="outlined"
-            color="secondary"
-            size="small"
-            onClick={onUndo}
-            disabled={!canUndo}
-            sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-          >
-            撤销
-          </Button>
-        )}
-        <Button
-          variant="outlined"
-          color="info"
-          size="small"
-          onClick={onSave}
-          disabled={!canSave}
-          sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-        >
-          保存
-        </Button>
+        <FormControlLabel
+          control={<Checkbox checked={simpleDisplayMode} onChange={(e) => setSimpleDisplayMode(e.target.checked)} size="small" />}
+          label="简单"
+          sx={{ ml: 'auto', '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, height: 24 }}
+        />
       </Box>
 
       {effectiveShowControls ? (
         /* 叫牌控制 + JF片段 */
-        <Box sx={{ flex: 1, overflow: 'auto', p: 1, background: bgPanel, borderRadius: 2, border: borderLine, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <Box sx={{ flex: 1, overflow: 'hidden', p: 1, background: bgPanel, borderRadius: 2, border: borderLine, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+          {renderButtons()}
           <Box sx={{ flex: '0 0 auto' }}>
             <BiddingControls
               hands={hands}
@@ -449,24 +463,12 @@ function BiddingDetailPanel({
         </Box>
       ) : (
         /* 叫牌细节 */
-        <Box sx={{ flex: 1, overflow: 'auto', p: 1, background: bgPanel, borderRadius: 2, border: borderLine, minHeight: 0 }}>
-          {renderBiddingDetails()}
-          {renderOutputFormats()}
-          {isBiddingCompleteFn && isBiddingCompleteFn() && onStartPlay && (
-            <>
-              <Divider sx={{ my: 2 }} />
-              <Button
-                variant="contained"
-                color="primary"
-                fullWidth
-                onClick={onStartPlay}
-                disabled={playLoading}
-                sx={{ mt: 1 }}
-              >
-                {playLoading ? <CircularProgress size={24} /> : '切换到打牌'}
-              </Button>
-            </>
-          )}
+        <Box sx={{ flex: 1, overflow: 'hidden', p: 1, background: bgPanel, borderRadius: 2, border: borderLine, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          {renderButtons()}
+          <Box sx={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+            {renderBiddingDetails()}
+            {renderOutputFormats()}
+          </Box>
         </Box>
       )}
     </Paper>
