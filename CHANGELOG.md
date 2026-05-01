@@ -249,6 +249,25 @@ AI提供商选择器（DeepSeek/Doubao切换）已不再需要。
 
 ## 2026-05-01
 
+### DeepSeek V4 非思考模式显式禁用修复
+
+**背景**:
+用户关闭"深度思考"开关后，叫牌和打牌速度完全没有提高。根因是 DeepSeek V4 的 thinking 模式默认为 `enabled`——之前的代码在 `thinking=False` 时没有传 `thinking` 参数，API 默认进入思考模式，产生大量 `reasoning_tokens`，响应时间与深度思考模式完全相同。一晚上多次修改（JSON mode 开关、timeout 调整、thread pool 超时处理）都没找到根因。
+
+**改进**:
+- `chat_json()` 和 `chat()` 方法在非思考模式下显式传入 `extra_body={"thinking": {"type": "disabled"}}`
+- 日志中 `reasoning_tokens=0` 确认思考模式已正确关闭
+
+**效果**:
+- 叫牌（Flash 非思考）：14-19s（之前思考模式需 60-90s）
+- 打牌（Flash 非思考）：6-9s（之前思考模式需 30-78s）
+- Flash 非思考 vs Flash 思考：速度提升约 3-5 倍
+
+**修改文件**:
+- `llm/deepseek_client.py` — `chat()` 和 `chat_json()` 方法增加 `thinking: disabled` 逻辑
+
+---
+
 ### 打牌流程全面重构
 
 **背景**:

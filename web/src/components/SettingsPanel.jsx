@@ -1,4 +1,4 @@
-import { Box, Typography, Paper, FormControl, InputLabel, Select, MenuItem, Button, Divider } from '@mui/material'
+import { Box, Typography, Paper, FormControl, InputLabel, Select, MenuItem, Button, Divider, Switch, FormControlLabel } from '@mui/material'
 
 function SettingsPanel({
   showSettings,
@@ -6,8 +6,12 @@ function SettingsPanel({
   setGameMode,
   fallbackModel,
   handleFallbackModelChange,
+  biddingReasoning,
+  handleBiddingReasoningChange,
   playModel,
   handlePlayModelChange,
+  playReasoning,
+  handlePlayReasoningChange,
   dealSystem,
   setDealSystem,
   dealMode,
@@ -36,12 +40,23 @@ function SettingsPanel({
             </FormControl>
 
             <FormControl sx={{ minWidth: 140 }} size="small">
-              <InputLabel>备用模型</InputLabel>
-              <Select value={fallbackModel} label="备用模型" onChange={handleFallbackModelChange}>
-                <MenuItem value="deepseek-v4-flash">V4-Flash(快)</MenuItem>
-                <MenuItem value="deepseek-v4-pro">V4-Pro(准)</MenuItem>
+              <InputLabel>模型</InputLabel>
+              <Select value={fallbackModel} label="模型" onChange={handleFallbackModelChange}>
+                <MenuItem value="deepseek-v4-flash">V4-Flash</MenuItem>
+                <MenuItem value="deepseek-v4-pro">V4-Pro</MenuItem>
               </Select>
             </FormControl>
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={biddingReasoning}
+                  onChange={handleBiddingReasoningChange}
+                />
+              }
+              label="深度思考"
+              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem', whiteSpace: 'nowrap' } }}
+            />
 
             <FormControl sx={{ minWidth: 180 }} size="small">
               <InputLabel>阻击叫牌体系</InputLabel>
@@ -60,13 +75,24 @@ function SettingsPanel({
             打牌设置
           </Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
-            <FormControl sx={{ minWidth: 160 }} size="small">
-              <InputLabel>打牌模型</InputLabel>
-              <Select value={playModel} label="打牌模型" onChange={handlePlayModelChange}>
-                <MenuItem value="deepseek-v4-flash">V4-Flash(快)</MenuItem>
-                <MenuItem value="deepseek-v4-pro">V4-Pro(准)</MenuItem>
+            <FormControl sx={{ minWidth: 140 }} size="small">
+              <InputLabel>模型</InputLabel>
+              <Select value={playModel} label="模型" onChange={handlePlayModelChange}>
+                <MenuItem value="deepseek-v4-flash">V4-Flash</MenuItem>
+                <MenuItem value="deepseek-v4-pro">V4-Pro</MenuItem>
               </Select>
             </FormControl>
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={playReasoning}
+                  onChange={handlePlayReasoningChange}
+                />
+              }
+              label="深度思考"
+              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem', whiteSpace: 'nowrap' } }}
+            />
           </Box>
         </Box>
 

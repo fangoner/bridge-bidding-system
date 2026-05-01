@@ -4,6 +4,8 @@ import { getFallbackModel, setFallbackModel } from '../services/api'
 const COLOR_SCHEME_KEY = 'bridge_color_scheme'
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
 const PLAY_MODEL_KEY = 'bridge_play_model'
+const BIDDING_REASONING_KEY = 'bridge_bidding_reasoning'
+const PLAY_REASONING_KEY = 'bridge_play_reasoning'
 
 function useGameSettings(colorSchemes, defaultScheme) {
   const [gameMode, setGameMode] = useState('four')
@@ -33,7 +35,7 @@ function useGameSettings(colorSchemes, defaultScheme) {
     }
   })
   const currentColorScheme = colorSchemes[colorSchemeKey]
-  
+
   const [fallbackModel, setFallbackModelState] = useState(() => {
     try {
       const saved = localStorage.getItem(FALLBACK_MODEL_KEY)
@@ -49,6 +51,22 @@ function useGameSettings(colorSchemes, defaultScheme) {
       return saved || 'deepseek-v4-flash'
     } catch {
       return 'deepseek-v4-flash'
+    }
+  })
+
+  const [biddingReasoning, setBiddingReasoningState] = useState(() => {
+    try {
+      return localStorage.getItem(BIDDING_REASONING_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
+
+  const [playReasoning, setPlayReasoningState] = useState(() => {
+    try {
+      return localStorage.getItem(PLAY_REASONING_KEY) === 'true'
+    } catch {
+      return false
     }
   })
 
@@ -81,6 +99,18 @@ function useGameSettings(colorSchemes, defaultScheme) {
     const newModel = event.target.value
     setPlayModelState(newModel)
     localStorage.setItem(PLAY_MODEL_KEY, newModel)
+  }, [])
+
+  const handleBiddingReasoningChange = useCallback(async (event) => {
+    const on = event.target.checked
+    setBiddingReasoningState(on)
+    localStorage.setItem(BIDDING_REASONING_KEY, on)
+  }, [])
+
+  const handlePlayReasoningChange = useCallback(async (event) => {
+    const on = event.target.checked
+    setPlayReasoningState(on)
+    localStorage.setItem(PLAY_REASONING_KEY, on)
   }, [])
 
   const getPartnerPosition = useCallback((position) => {
@@ -142,12 +172,15 @@ function useGameSettings(colorSchemes, defaultScheme) {
     setColorSchemeKey,
     currentColorScheme,
     fallbackModel,
-    setFallbackModelState,
     playModel,
+    biddingReasoning,
+    playReasoning,
     handleColorSchemeChange,
     syncFallbackModel,
     handleFallbackModelChange,
     handlePlayModelChange,
+    handleBiddingReasoningChange,
+    handlePlayReasoningChange,
     getPartnerPosition,
     handlePositionRoleChange,
   }

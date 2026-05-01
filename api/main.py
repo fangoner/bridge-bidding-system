@@ -100,6 +100,7 @@ class BidRequest(BaseModel):
     use_fallback: bool = False
     fallback_model: Optional[str] = None
     ai_provider: Optional[str] = None
+    use_reasoning: bool = False
 
 
 class FallbackModelRequest(BaseModel):
@@ -245,6 +246,8 @@ async def human_bid(request: HumanBidRequest):
         if bid.upper() == "P":
             bid = "pass"
         meaning = result.get("叫品含义", "")
+        if isinstance(meaning, dict):
+            meaning = json.dumps(meaning, ensure_ascii=False)
         
         return HumanBidResponse(
             bid=bid,
@@ -397,12 +400,17 @@ async def bid(request: BidRequest):
             position=request.position,
             bidding_sequence=bidding_str,
             deal_system=request.deal_system,
-            verbose=True
+            verbose=True,
+            use_reasoning=request.use_reasoning,
         )
         
         bid = result.get("选定叫品") or "pass"
         meaning = result.get("叫品含义") or result.get("叫品含义及后续建议") or ""
+        if isinstance(meaning, dict):
+            meaning = json.dumps(meaning, ensure_ascii=False)
         selection_process = result.get("叫品筛选过程") or ""
+        if isinstance(selection_process, dict):
+            selection_process = json.dumps(selection_process, ensure_ascii=False)
         
         if original_model:
             current_llm_client.model = original_model
@@ -1165,7 +1173,7 @@ async def undo_play():
 
 
 class PlayAIRequest(BaseModel):
-    use_reasoning: bool = True
+    use_reasoning: bool = False
     play_model: Optional[str] = None
 
 

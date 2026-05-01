@@ -594,6 +594,11 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 ## 版本历史
 
 ### v1.38 (当前版本)
+- **DeepSeek V4 非思考模式显式禁用修复**
+  - 根因：DeepSeek V4 thinking 默认为 `enabled`，非思考模式下不传参数等价于开启思考
+  - `chat()` 和 `chat_json()` 增加 `extra_body={"thinking": {"type": "disabled"}}` 显式关闭
+  - 效果：叫牌 14-19s（原 60-90s），打牌 6-9s（原 30-78s），提速 3-5 倍
+  - 修改文件: `llm/deepseek_client.py`
 - **逼局进程强制规则（提示词修复）**
   - 备用提示词"叫品筛选过程"C段新增强制规则：逼局进程中禁止选择不逼叫的示弱叫品（简单重叫自己花色、简单加叫队友最低花色、pass）
   - 必须选择逼叫性叫品：跳叫新花 > 第四花色逼局 > 扣叫 > 2NT(逼叫) > 其他强制逼局约定叫品

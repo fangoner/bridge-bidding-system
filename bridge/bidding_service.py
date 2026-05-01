@@ -67,11 +67,13 @@ class BiddingService:
         position: str,
         bidding_sequence: str,
         deal_system: str,
-        verbose: bool = False
+        verbose: bool = False,
+        use_reasoning: bool = False,
     ) -> Dict:
         if not self.llm_client.is_configured():
             return {"error": "API Key未配置", "选定叫品": "pass", "叫品含义": "API Key未配置，默认pass"}
         
+        self._use_reasoning = use_reasoning
         player_name = position
         partner_name = get_partner_position(position)
         
@@ -185,7 +187,7 @@ class BiddingService:
         )
         
         try:
-            result = self.llm_client.chat_bidding(prompt, temperature=MAIN_PROMPT_TEMPERATURE)
+            result = self.llm_client.chat_bidding(prompt, temperature=MAIN_PROMPT_TEMPERATURE, thinking=self._use_reasoning)
             result["JF约定"] = jf_keyword
             result["阻击叫体系"] = deal_system
             
@@ -276,7 +278,7 @@ class BiddingService:
         )
         
         try:
-            result = self.llm_client.chat_bidding_fallback(prompt, temperature=FALLBACK_PROMPT_TEMPERATURE)
+            result = self.llm_client.chat_bidding_fallback(prompt, temperature=FALLBACK_PROMPT_TEMPERATURE, thinking=self._use_reasoning)
             result["叫品筛选过程"] = "[备用提示词] " + result.get("叫品筛选过程", "")
             result["JF约定"] = actual_jf_keyword
             result["阻击叫体系"] = deal_system
@@ -296,7 +298,8 @@ class BiddingService:
         position: str,
         bidding_sequence: str,
         deal_system: str,
-        verbose: bool = False
+        verbose: bool = False,
+        use_reasoning: bool = False,
     ) -> Dict:
         bid = user_input.strip().upper()
         if bid == "P":
@@ -353,7 +356,7 @@ class BiddingService:
         )
         
         try:
-            result = self.llm_client.chat_human_bid(prompt, temperature=0)
+            result = self.llm_client.chat_human_bid(prompt, temperature=0, thinking=use_reasoning)
             result["JF约定"] = jf_keyword
             if "完整叫牌序列" not in result:
                 result["完整叫牌序列"] = f"{bidding_sequence}({player_name}){bid}-"

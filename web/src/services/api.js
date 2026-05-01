@@ -83,7 +83,7 @@ export const setFallbackModel = async (fallbackModel) => {
 };
 
 // AI叫牌
-export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H/2S：自然阻击', bidHistory = '', useFallback = false, fallbackModel = null, aiProvider = null) => {
+export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H/2S：自然阻击', bidHistory = '', useFallback = false, fallbackModel = null, aiProvider = null, useReasoning = false) => {
   try {
     const requestData = {
       hand,
@@ -91,7 +91,8 @@ export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H
       position,
       deal_system: dealSystem,
       bid_history: bidHistory,
-      use_fallback: useFallback
+      use_fallback: useFallback,
+      use_reasoning: useReasoning,
     };
     
     if (fallbackModel) {
@@ -273,10 +274,10 @@ export const undoPlay = async () => {
 };
 
 // AI出牌
-export const aiPlay = async (playModel = null) => {
+export const aiPlay = async (playModel = null, useReasoning = false) => {
   try {
     const requestData = {
-      use_reasoning: playModel === 'deepseek-v4-pro',
+      use_reasoning: useReasoning,
     };
     
     if (playModel) {
@@ -284,7 +285,7 @@ export const aiPlay = async (playModel = null) => {
     }
     
     // Reasoner模型需要更长超时（5分钟），Chat模型2分钟
-    const timeout = playModel === 'deepseek-v4-pro' ? 300000 : 120000;
+    const timeout = useReasoning ? 300000 : 120000;
     const response = await api.post('/api/play/ai-play', requestData, { timeout });
     return response.data;
   } catch (error) {

@@ -302,6 +302,35 @@ function App({ darkMode, onToggleDarkMode }) {
     localStorage.setItem(PLAY_MODEL_KEY, newModel)
   }
 
+  const BIDDING_REASONING_KEY = 'bridge_bidding_reasoning'
+  const PLAY_REASONING_KEY = 'bridge_play_reasoning'
+  const [biddingReasoning, setBiddingReasoningState] = useState(() => {
+    try {
+      return localStorage.getItem(BIDDING_REASONING_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
+  const [playReasoning, setPlayReasoningState] = useState(() => {
+    try {
+      return localStorage.getItem(PLAY_REASONING_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
+
+  const handleBiddingReasoningChange = async (event) => {
+    const on = event.target.checked
+    setBiddingReasoningState(on)
+    localStorage.setItem(BIDDING_REASONING_KEY, on)
+  }
+
+  const handlePlayReasoningChange = (event) => {
+    const on = event.target.checked
+    setPlayReasoningState(on)
+    localStorage.setItem(PLAY_REASONING_KEY, on)
+  }
+
   const checkApiStatus = async () => {
     try {
       const status = await healthCheck()
@@ -1070,7 +1099,7 @@ function App({ darkMode, onToggleDarkMode }) {
       console.log(`AI叫牌: ${currentBidder}家, 手牌:`, currentHand, '叫牌序列:', biddingStr, '叫牌历史:', bidHistory)
       
       // 传递数组，后端处理格式
-      const result = await aiBid(currentHand, biddingSequence, currentBidder, dealSystem, bidHistory, useFallback, fallbackModel, 'deepseek')
+      const result = await aiBid(currentHand, biddingSequence, currentBidder, dealSystem, bidHistory, useFallback, fallbackModel, 'deepseek', biddingReasoning)
       
       // 更新useFallback状态
       if (result.use_fallback !== undefined) {
@@ -1541,7 +1570,7 @@ function App({ darkMode, onToggleDarkMode }) {
     setError(null)
     
     try {
-      const result = await aiPlay(playModel)
+      const result = await aiPlay(playModel, playReasoning)
       console.log('[AI Play] playModel:', playModel, 'used_model:', result.used_model)
       
       if (result.success) {
@@ -2058,8 +2087,12 @@ function App({ darkMode, onToggleDarkMode }) {
         setGameMode={setGameMode}
         fallbackModel={fallbackModel}
         handleFallbackModelChange={handleFallbackModelChange}
+        biddingReasoning={biddingReasoning}
+        handleBiddingReasoningChange={handleBiddingReasoningChange}
         playModel={playModel}
         handlePlayModelChange={handlePlayModelChange}
+        playReasoning={playReasoning}
+        handlePlayReasoningChange={handlePlayReasoningChange}
         dealSystem={dealSystem}
         setDealSystem={setDealSystem}
         dealMode={dealMode}

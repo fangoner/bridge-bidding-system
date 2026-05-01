@@ -102,7 +102,7 @@ class PlayService:
     def get_result(self) -> Optional[dict]:
         return self.engine.get_result()
     
-    async def get_ai_play(self, use_reasoning: bool = True) -> Dict[str, Any]:
+    async def get_ai_play(self, use_reasoning: bool = False) -> Dict[str, Any]:
         state = self.engine.get_state()
         if not state:
             return {"error": "游戏未初始化"}
@@ -198,8 +198,7 @@ class PlayService:
         
         print(f"[Play] Prompt {len(prompt)} chars, model={self.llm_client.model}")
         try:
-            # 在线程池中执行同步 LLM 调用，避免阻塞事件循环
-            result = await asyncio.to_thread(self.llm_client.chat_play, prompt)
+            result = await asyncio.to_thread(self.llm_client.chat_play, prompt, thinking=use_reasoning)
             
             # 提取推荐出牌：兼容dict嵌套对象（DeepSeek偶发格式偏差）
             recommended = result.get("推荐出牌") or result.get("recommended_card") or result.get("recommended_play")
