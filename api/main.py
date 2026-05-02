@@ -38,7 +38,7 @@ from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BI
 from llm.deepseek_client import DeepSeekClient
 from llm.doubao_client import DoubaoVisionClient, DoubaoSeedClient
 from utils.screenshot import BridgeScreenshotCapture, trigger_screenshot_shortcut, read_clipboard_image
-from config import JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM, AI_PROVIDER_DEEPSEEK, AI_PROVIDER_DOUBAO, DEFAULT_AI_PROVIDER
+from config import JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM, AI_PROVIDER_DEEPSEEK, AI_PROVIDER_DOUBAO, DEFAULT_AI_PROVIDER, DEFAULT_PLAY_ENGINE
 
 try:
     from endplay_integration import analyze_all_contracts_endplay
@@ -1027,6 +1027,7 @@ class PlayInitRequest(BaseModel):
     doubled: bool = False
     redoubled: bool = False
     bidding_sequence: Optional[str] = None
+    bid_history: Optional[str] = None  # 叫牌含义历史，用于MCTS约束采样
 
 
 class PlayInitResponse(BaseModel):
@@ -1051,7 +1052,8 @@ async def play_init(request: PlayInitRequest):
             player_roles=request.player_roles,
             doubled=request.doubled,
             redoubled=request.redoubled,
-            bidding_sequence=request.bidding_sequence or "未提供"
+            bidding_sequence=request.bidding_sequence or "未提供",
+            bid_history=request.bid_history or "",
         )
         
         return PlayInitResponse(
@@ -1175,6 +1177,7 @@ async def undo_play():
 class PlayAIRequest(BaseModel):
     use_reasoning: bool = False
     play_model: Optional[str] = None
+    play_engine: Optional[str] = None  # "llm" | "mcts", None = config default
 
 
 class PlayAIResponse(BaseModel):
@@ -1185,6 +1188,7 @@ class PlayAIResponse(BaseModel):
     full_output: Optional[dict] = None
     prompt: Optional[str] = None
     used_model: Optional[str] = None
+    used_engine: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -1204,7 +1208,10 @@ async def ai_play(request: PlayAIRequest):
         
         try:
             if not service.is_human_turn():
-                result = await service.get_ai_play(use_reasoning=request.use_reasoning)
+                use_mcts = (request.play_engine or DEFAULT_PLAY_ENGINE) == "mcts"
+                result = await service.get_ai_play(
+                    use_reasoning=request.use_reasoning,
+                    use_mcts=use_mcts)
                 
                 if result.get("card"):
                     card = Card(suit=result["card"]["suit"], rank=result["card"]["rank"])
@@ -1212,6 +1219,7 @@ async def ai_play(request: PlayAIRequest):
                     reason = result.get("reasoning", "")
                     success, message = service.play_card(current_player, card, is_ai=True, reason=reason)
                     
+                    engine = request.play_engine or DEFAULT_PLAY_ENGINE
                     return PlayAIResponse(
                         success=success,
                         card=result["card"],
@@ -1220,11 +1228,14 @@ async def ai_play(request: PlayAIRequest):
                         full_output=result.get("full_output"),
                         prompt=result.get("prompt"),
                         used_model=actual_model,
+                        used_engine=engine,
                     )
                 else:
+                    engine = request.play_engine or DEFAULT_PLAY_ENGINE
                     return PlayAIResponse(
                         success=False,
                         used_model=actual_model,
+                        used_engine=engine,
                         error=result.get("error", "AI无法选择出牌")
                     )
             else:

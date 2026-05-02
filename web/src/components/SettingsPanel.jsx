@@ -12,6 +12,8 @@ function SettingsPanel({
   handlePlayModelChange,
   playReasoning,
   handlePlayReasoningChange,
+  playEngine,
+  handlePlayEngineChange,
   dealSystem,
   setDealSystem,
   dealMode,
@@ -91,6 +93,17 @@ function SettingsPanel({
                 />
               }
               label="深度思考"
+              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem', whiteSpace: 'nowrap' } }}
+            />
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={playEngine === 'mcts'}
+                  onChange={handlePlayEngineChange}
+                />
+              }
+              label="MCTS搜索"
               sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem', whiteSpace: 'nowrap' } }}
             />
           </Box>

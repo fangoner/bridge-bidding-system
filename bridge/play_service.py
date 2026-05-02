@@ -6,10 +6,13 @@ from typing import Optional, Dict, List, Any
 from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER, PARTNERS
 from bridge.play_engine import PlayEngine
 from llm.prompts import PLAY_COMMON_RULES, PLAY_COMMON_SITUATION, PLAY_DECLARER_PROMPT, PLAY_DEFENDER_PROMPT
+from bridge.mcts import MctsSearch, RandomizedRollout
+from bridge.mcts.constraints import BidConstraint, validate_sample
+from config import MCTS_ITERATIONS, MCTS_TIME_LIMIT, MCTS_EXPLORATION_CONSTANT, ROLLOUT_GREEDY_PROB
 
 
 class PlayService:
-    
+
     def __init__(self, llm_client):
         self.llm_client = llm_client
         self.engine = PlayEngine()
@@ -17,6 +20,13 @@ class PlayService:
         self.declarer_plan = ""
         # 防守计划：每个防守者各自维护，key=位置
         self.defender_plans = {}
+        # MCTS搜索器（始终初始化，按需使用）
+        self.mcts = MctsSearch(
+            iterations=MCTS_ITERATIONS,
+            time_limit=MCTS_TIME_LIMIT,
+            exploration=MCTS_EXPLORATION_CONSTANT,
+            rollout=RandomizedRollout(greedy_prob=ROLLOUT_GREEDY_PROB),
+        )
     
     def initialize(
         self,
@@ -26,18 +36,22 @@ class PlayService:
         player_roles: Dict[str, str] = None,
         doubled: bool = False,
         redoubled: bool = False,
-        bidding_sequence: str = "未提供"
+        bidding_sequence: str = "未提供",
+        bid_history: str = "",
     ) -> PlayState:
         from bridge.play_types import Contract
-        
+
         contract = Contract.from_str(contract_str, declarer)
         contract.doubled = doubled
         contract.redoubled = redoubled
-        
+
         # 重置做庄和防守计划
         self.declarer_plan = ""
         self.defender_plans = {}
-        
+        # 缓存叫牌约束（供MCTS采样器使用）
+        self.bid_history = bid_history
+        self.bid_constraints = None  # 延迟提取
+
         return self.engine.initialize(hands, contract, player_roles, bidding_sequence)
     
     def get_state(self) -> Optional[PlayState]:
@@ -102,17 +116,18 @@ class PlayService:
     def get_result(self) -> Optional[dict]:
         return self.engine.get_result()
     
-    async def get_ai_play(self, use_reasoning: bool = False) -> Dict[str, Any]:
+    async def get_ai_play(self, use_reasoning: bool = False,
+                          use_mcts: bool = False) -> Dict[str, Any]:
         state = self.engine.get_state()
         if not state:
             return {"error": "游戏未初始化"}
-        
+
         current_player = state.current_player
         playable_cards = self.engine.get_playable_cards()
-        
+
         if not playable_cards:
             return {"error": "没有可出的牌"}
-        
+
         if len(playable_cards) == 1:
             card = playable_cards[0]
             return {
@@ -121,6 +136,10 @@ class PlayService:
                 "full_output": {"推荐出牌": str(card), "核心逻辑": "唯一选择"},
                 "prompt": ""
             }
+
+        # === MCTS 引擎分支 ===
+        if use_mcts:
+            return await asyncio.to_thread(self._mcts_play, state)
         
         hands_info = self._format_hands_info(state)
         completed_tricks = self._format_completed_tricks(state)
@@ -258,7 +277,99 @@ class PlayService:
                 "error": str(e),
                 "prompt": prompt if 'prompt' in dir() else ""
             }
-    
+
+    BID_CONSTRAINT_PROMPT = """从叫牌历史中提取每名牌手透露的点力范围和花色张数约束。
+
+叫牌历史（格式：(位置)叫品：含义）：
+{bid_history}
+
+对每名牌手（南/西/北/东），根据其叫品含义提取：
+- min_hcp: 最低点力（无约束填null）
+- max_hcp: 最高点力（无约束填null）
+- balanced: 均型=true, 非均型=false, 未知=null
+- spades_min: S最少张数（无约束填null）
+- hearts_min: H最少张数（无约束填null）
+- diamonds_min: D最少张数（无约束填null）
+- clubs_min: C最少张数（无约束填null）
+
+注意：pass/不叫表示无合格叫品，不代表点力或牌型信息。
+
+仅输出JSON，不要Markdown代码块："""
+
+    def _get_bid_constraints(self) -> Dict[str, BidConstraint]:
+        """从叫牌含义历史中提取约束（LLM调用，结果缓存）"""
+        if self.bid_constraints is not None:
+            return self.bid_constraints
+
+        if not self.bid_history or not self.bid_history.strip():
+            self.bid_constraints = {}
+            return self.bid_constraints
+
+        try:
+            prompt = self.BID_CONSTRAINT_PROMPT.format(bid_history=self.bid_history)
+            result = self.llm_client.chat_json(system_prompt=prompt, temperature=0, max_tokens=1024)
+
+            POS_NAME_MAP = {
+                "南": "南", "西": "西", "北": "北", "东": "东",
+                "south": "南", "west": "西", "north": "北", "east": "东",
+                "s": "南", "w": "西", "n": "北", "e": "东",
+            }
+            constraints = {}
+            for pos, data in result.get("constraints", result).items():
+                pos_cn = POS_NAME_MAP.get(pos.lower() if isinstance(pos, str) else pos)
+                if pos_cn is None:
+                    continue
+                c = BidConstraint(
+                    position=pos_cn,
+                    min_hcp=data.get("min_hcp"),
+                    max_hcp=data.get("max_hcp"),
+                    balanced=data.get("balanced"),
+                    suit_min={},
+                )
+                for suit in ("♠", "♥", "♦", "♣"):
+                    key = {"♠": "spades_min", "♥": "hearts_min",
+                           "♦": "diamonds_min", "♣": "clubs_min"}[suit]
+                    val = data.get(key)
+                    if val is not None and isinstance(val, (int, float)):
+                        c.suit_min[suit] = int(val)
+                constraints[pos_cn] = c
+
+            self.bid_constraints = constraints
+            return constraints
+        except Exception as e:
+            print(f"[MCTS] 约束提取失败: {e}，回退到无约束采样")
+            self.bid_constraints = {}
+            return {}
+
+    def _mcts_play(self, state: PlayState) -> Dict[str, Any]:
+        """MCTS搜索打牌（同步方法，由asyncio.to_thread调用）"""
+        # 首次调用时提取叫牌约束
+        constraints = self._get_bid_constraints()
+        if constraints:
+            self.mcts.sampler.set_constraints(constraints)
+
+        try:
+            result = self.mcts.search(state)
+            card = result.get("card")
+            if card is None:
+                playable = self.engine.get_playable_cards()
+                card = self._select_best_card(playable, state)
+            return {
+                "card": card.to_dict() if card else None,
+                "reasoning": result.get("reasoning", ""),
+                "full_output": result.get("full_output", {}),
+                "prompt": "[MCTS] no prompt",
+            }
+        except Exception as e:
+            playable = self.engine.get_playable_cards()
+            card = self._select_best_card(playable, state)
+            return {
+                "card": card.to_dict() if card else None,
+                "reasoning": f"MCTS异常，自动选择: {str(e)}",
+                "error": str(e),
+                "prompt": "[MCTS error]",
+            }
+
     def _format_hands_info(self, state: PlayState) -> str:
         lines = []
         

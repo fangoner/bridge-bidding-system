@@ -230,7 +230,7 @@ export const doubleDummyAnalysis = async (hands) => {
 // ==================== 打牌相关API ====================
 
 // 初始化打牌
-export const playInit = async (hands, contract, declarer, playerRoles = null, doubled = false, redoubled = false, biddingSequence = null) => {
+export const playInit = async (hands, contract, declarer, playerRoles = null, doubled = false, redoubled = false, biddingSequence = null, bidHistory = '') => {
   try {
     const response = await api.post('/api/play/init', {
       hands,
@@ -240,6 +240,7 @@ export const playInit = async (hands, contract, declarer, playerRoles = null, do
       doubled,
       redoubled,
       bidding_sequence: biddingSequence,
+      bid_history: bidHistory,
     });
     return response.data;
   } catch (error) {
@@ -274,14 +275,17 @@ export const undoPlay = async () => {
 };
 
 // AI出牌
-export const aiPlay = async (playModel = null, useReasoning = false) => {
+export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null) => {
   try {
     const requestData = {
       use_reasoning: useReasoning,
     };
-    
+
     if (playModel) {
       requestData.play_model = playModel;
+    }
+    if (playEngine) {
+      requestData.play_engine = playEngine;
     }
     
     // Reasoner模型需要更长超时（5分钟），Chat模型2分钟

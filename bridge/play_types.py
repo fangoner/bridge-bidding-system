@@ -237,6 +237,11 @@ class PlayState:
     phase: PlayPhase = PlayPhase.LEAD
     bidding_sequence: str = "未提供"
     
+    def copy_hands(self) -> Dict[str, List[Card]]:
+        """返回手牌的深拷贝"""
+        return {pos: [Card(suit=c.suit, rank=c.rank) for c in cards]
+                for pos, cards in self.hands.items()}
+
     def __post_init__(self):
         if self.contract:
             self.current_trick = Trick(trump=self.contract.suit)

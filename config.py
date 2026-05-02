@@ -43,3 +43,11 @@ FALLBACK_PROMPT_TEMPERATURE = 0.5
 AI_PROVIDER_DEEPSEEK = "deepseek"
 AI_PROVIDER_DOUBAO = "doubao"
 DEFAULT_AI_PROVIDER = AI_PROVIDER_DEEPSEEK
+
+# MCTS play engine settings
+DEFAULT_PLAY_ENGINE = "llm"  # "llm" | "mcts"
+MCTS_ITERATIONS = 5000
+MCTS_TIME_LIMIT = 10.0  # seconds per play decision
+MCTS_EXPLORATION_CONSTANT = 1.414
+MCTS_MIN_ITERATIONS = 500  # floor for adaptive iteration scaling
+ROLLOUT_GREEDY_PROB = 0.80  # probability of heuristic vs random in rollout

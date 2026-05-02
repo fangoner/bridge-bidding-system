@@ -331,6 +331,21 @@ function App({ darkMode, onToggleDarkMode }) {
     localStorage.setItem(PLAY_REASONING_KEY, on)
   }
 
+  const PLAY_ENGINE_KEY = 'bridge_play_engine'
+  const [playEngine, setPlayEngineState] = useState(() => {
+    try {
+      return localStorage.getItem(PLAY_ENGINE_KEY) || 'llm'
+    } catch {
+      return 'llm'
+    }
+  })
+
+  const handlePlayEngineChange = (event) => {
+    const value = event.target.checked ? 'mcts' : 'llm'
+    setPlayEngineState(value)
+    localStorage.setItem(PLAY_ENGINE_KEY, value)
+  }
+
   const checkApiStatus = async () => {
     try {
       const status = await healthCheck()
@@ -1422,9 +1437,10 @@ function App({ darkMode, onToggleDarkMode }) {
         try {
           const contract = savedState.contract
           let biddingStr = null
+          let meaningLines = ''
           if (biddingSequence.length > 0) {
             const seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
-            const meaningLines = aiBiddingHistory
+            meaningLines = aiBiddingHistory
               .filter(r => r.result?.meaning)
               .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
               .join('\n')
@@ -1439,7 +1455,8 @@ function App({ darkMode, onToggleDarkMode }) {
             positionRoles,
             contract.doubled || contract.isDouble || false,
             contract.redoubled || contract.isRedouble || false,
-            biddingStr
+            biddingStr,
+            meaningLines
           )
           if (initResult.success) {
             // 重放已完成的出牌，保持后端状态与历史记录一致
@@ -1497,11 +1514,12 @@ function App({ darkMode, onToggleDarkMode }) {
     
     // 构建包含叫牌含义的叫牌历史字符串
     let biddingStr = null
+    let meaningLines = ''
     if (biddingSequence.length > 0) {
       // 纯叫牌序列
       const seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
       // 含义历史（每条记录含叫品含义）
-      const meaningLines = aiBiddingHistory
+      meaningLines = aiBiddingHistory
         .filter(r => r.result?.meaning)
         .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
         .join('\n')
@@ -1509,7 +1527,7 @@ function App({ darkMode, onToggleDarkMode }) {
         ? `${seqStr}\n\n叫牌含义:\n${meaningLines}`
         : seqStr
     }
-    
+
     try {
       const result = await playInit(
         hands,
@@ -1518,7 +1536,8 @@ function App({ darkMode, onToggleDarkMode }) {
         positionRoles,
         contract.isDouble,
         contract.isRedouble,
-        biddingStr
+        biddingStr,
+        meaningLines
       )
       
       if (result.success) {
@@ -1570,8 +1589,8 @@ function App({ darkMode, onToggleDarkMode }) {
     setError(null)
     
     try {
-      const result = await aiPlay(playModel, playReasoning)
-      console.log('[AI Play] playModel:', playModel, 'used_model:', result.used_model)
+      const result = await aiPlay(playModel, playReasoning, playEngine)
+      console.log('[AI Play] playModel:', playModel, 'used_model:', result.used_model, 'used_engine:', result.used_engine, 'has_mcts_stats:', !!result.full_output?.mcts_stats)
       
       if (result.success) {
         const aiRecord = {
@@ -1582,6 +1601,7 @@ function App({ darkMode, onToggleDarkMode }) {
           full_output: result.full_output,
           prompt: result.prompt,
           used_model: result.used_model,
+          used_engine: result.used_engine,
           timestamp: new Date().toLocaleTimeString(),
         }
         setAiPlayHistory(prev => [...prev, aiRecord])
@@ -1706,9 +1726,10 @@ function App({ darkMode, onToggleDarkMode }) {
 
     // 构建包含叫牌含义的叫牌历史字符串
     let biddingStr = null
+    let meaningLines = ''
     if (biddingSequence.length > 0) {
       const seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
-      const meaningLines = aiBiddingHistory
+      meaningLines = aiBiddingHistory
         .filter(r => r.result?.meaning)
         .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
         .join('\n')
@@ -1725,7 +1746,8 @@ function App({ darkMode, onToggleDarkMode }) {
         positionRoles,
         contract.isDouble,
         contract.isRedouble,
-        biddingStr
+        biddingStr,
+        meaningLines
       )
 
       if (result.success) {
@@ -2093,6 +2115,8 @@ function App({ darkMode, onToggleDarkMode }) {
         handlePlayModelChange={handlePlayModelChange}
         playReasoning={playReasoning}
         handlePlayReasoningChange={handlePlayReasoningChange}
+        playEngine={playEngine}
+        handlePlayEngineChange={handlePlayEngineChange}
         dealSystem={dealSystem}
         setDealSystem={setDealSystem}
         dealMode={dealMode}

@@ -124,7 +124,11 @@ function PlayDetailPanel({
           <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#1976d2', fontSize: '0.85rem' }}>
             {record.position}家 - {record.card?.suit}{record.card?.rank}
           </Typography>
-          {record.used_model && (
+          {record.used_engine === 'mcts' ? (
+            <Typography variant="caption" sx={{ color: '#2e7d32', fontSize: '0.7rem', fontWeight: 500 }}>
+              MCTS
+            </Typography>
+          ) : record.used_model && (
             <Typography variant="caption" sx={{ color: colorMuted, fontSize: '0.7rem' }}>
               {record.used_model === 'deepseek-v4-pro' ? 'V4-Pro' : 'V4-Flash'}
             </Typography>
@@ -151,34 +155,74 @@ function PlayDetailPanel({
         
         {viewMode === 'output' ? (
           // 输出模式：显示AI返回的字段
-          fields.map(({ key, label, color, multiline }) => {
-            const value = getValue(key)
-            if (!value) return null
-            return (
-              <Box key={key} sx={{ mt: 0.5 }}>
-                {multiline ? (
-                  <Box>
-                    <Typography variant="body2" sx={{ fontSize: '0.8rem', color, fontWeight: 500 }}>
-                      {label}:
-                    </Typography>
-                    <Box component="pre" sx={{ 
-                      mt: 0.25, p: 0.5, background: bgCode, borderRadius: 1,
-                      fontSize: '0.75rem', lineHeight: 1.3,
-                      whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                      border: borderCode, maxHeight: '120px', overflow: 'auto',
-                      color,
-                    }}>
-                      {value}
+          <>
+            {fields.map(({ key, label, color, multiline }) => {
+              const value = getValue(key)
+              if (!value) return null
+              return (
+                <Box key={key} sx={{ mt: 0.5 }}>
+                  {multiline ? (
+                    <Box>
+                      <Typography variant="body2" sx={{ fontSize: '0.8rem', color, fontWeight: 500 }}>
+                        {label}:
+                      </Typography>
+                      <Box component="pre" sx={{
+                        mt: 0.25, p: 0.5, background: bgCode, borderRadius: 1,
+                        fontSize: '0.75rem', lineHeight: 1.3,
+                        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                        border: borderCode, maxHeight: '120px', overflow: 'auto',
+                        color,
+                      }}>
+                        {value}
+                      </Box>
                     </Box>
+                  ) : (
+                    <Typography variant="body2" sx={{ fontSize: '0.8rem', color }}>
+                      <strong>{label}:</strong> {value}
+                    </Typography>
+                  )}
+                </Box>
+              )
+            })}
+            {record.used_engine === 'mcts' && (() => {
+              try {
+                const mctsRaw = fullOutput.mcts_stats
+                if (!mctsRaw) { console.log('[MCTS] no mcts_stats in fullOutput'); return null }
+                const mctsData = typeof mctsRaw === 'string' ? JSON.parse(mctsRaw) : mctsRaw
+                const candidates = mctsData.candidates
+                if (!candidates || candidates.length === 0) { console.log('[MCTS] no candidates'); return null }
+                const maxVisits = Math.max(...candidates.map(c => c.visits), 1)
+                const barColors = ['#1976d2', '#42a5f5', '#90caf9', '#bbdefb', '#e3f2fd']
+                console.log('[MCTS] rendering bars:', mctsData.iterations, 'candidates:', candidates.length)
+                return (
+                  <Box key="mcts" sx={{ mt: 0.75 }}>
+                    <Typography variant="caption" sx={{ fontSize: '0.7rem', color: colorMuted, mb: 0.25, display: 'block' }}>
+                      MCTS: {mctsData.iterations}次搜索 · {mctsData.time_sec}s · {mctsData.iters_per_sec}it/s · 剩{mctsData.remaining_cards}张
+                    </Typography>
+                    {candidates.map((c, i) => (
+                      <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.15 }}>
+                        <Typography variant="caption" sx={{ minWidth: 28, fontSize: '0.7rem', fontWeight: 600, color: isDark ? '#e0e0e0' : '#333' }}>
+                          {c.card}
+                        </Typography>
+                        <Box sx={{ flex: 1, height: 12, bgcolor: isDark ? 'rgba(255,255,255,0.06)' : '#eee', borderRadius: 0.5, overflow: 'hidden' }}>
+                          <Box sx={{
+                            width: `${(c.visits / maxVisits) * 100}%`,
+                            height: '100%',
+                            bgcolor: barColors[i] || '#90caf9',
+                            borderRadius: 0.5,
+                            transition: 'width 0.3s',
+                          }} />
+                        </Box>
+                        <Typography variant="caption" sx={{ minWidth: 68, fontSize: '0.65rem', color: colorMuted, textAlign: 'right' }}>
+                          {c.visits}次 · {c.avg_tricks}墩
+                        </Typography>
+                      </Box>
+                    ))}
                   </Box>
-                ) : (
-                  <Typography variant="body2" sx={{ fontSize: '0.8rem', color }}>
-                    <strong>{label}:</strong> {value}
-                  </Typography>
-                )}
-              </Box>
-            )
-          })
+                )
+              } catch (e) { console.error('[MCTS] viz error:', e); return null }
+            })()}
+          </>
         ) : (
           // 输入模式：显示传给AI的完整提示词
           prompt ? (
