@@ -14,4 +14,4 @@ echo   ANTHROPIC_BASE_URL=%ANTHROPIC_BASE_URL%
 echo   ANTHROPIC_MODEL=%ANTHROPIC_MODEL%
 echo.
 
-node D:\Claude-Code\node_modules\@anthropic-ai\claude-code\cli.js %*
+claude %*

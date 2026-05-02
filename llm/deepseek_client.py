@@ -23,37 +23,26 @@ if not _logger.handlers:
 BIDDING_SCHEMA = {
     "type": "object",
     "properties": {
-        "自己pass次数": {"type": "string"},
-        "当前叫牌序列": {"type": "string"},
-        "JF约定": {"type": "string"},
         "叫牌位置": {"type": "string"},
         "手牌分析": {"type": "string"},
         "叫牌历史": {"type": "string"},
         "叫品筛选过程": {"type": "string"},
         "选定叫品": {"type": "string"},
-        "叫品含义": {"type": "string"},
-        "完整叫牌序列": {"type": "string"}
+        "叫品含义": {"type": "string"}
     },
     "required": [
-        "自己pass次数",
-        "当前叫牌序列",
-        "JF约定",
         "叫牌位置",
         "手牌分析",
         "叫牌历史",
         "叫品筛选过程",
         "选定叫品",
-        "叫品含义",
-        "完整叫牌序列"
+        "叫品含义"
     ]
 }
 
 BIDDING_FALLBACK_SCHEMA = {
     "type": "object",
     "properties": {
-        "自己pass次数": {"type": "string"},
-        "当前叫牌序列": {"type": "string"},
-        "JF约定": {"type": "string"},
         "叫牌位置": {"type": "string"},
         "手牌分析": {"type": "string"},
         "叫牌历史": {"type": "string"},
@@ -66,13 +55,9 @@ BIDDING_FALLBACK_SCHEMA = {
         "自己和队友关键张合计": {"type": "string"},
         "叫品筛选过程": {"type": "string"},
         "选定叫品": {"type": "string"},
-        "叫品含义": {"type": "string"},
-        "完整叫牌序列": {"type": "string"}
+        "叫品含义": {"type": "string"}
     },
     "required": [
-        "自己pass次数",
-        "当前叫牌序列",
-        "JF约定",
         "叫牌位置",
         "手牌分析",
         "叫牌历史",
@@ -85,8 +70,7 @@ BIDDING_FALLBACK_SCHEMA = {
         "自己和队友关键张合计",
         "叫品筛选过程",
         "选定叫品",
-        "叫品含义",
-        "完整叫牌序列"
+        "叫品含义"
     ]
 }
 
@@ -264,5 +248,5 @@ class DeepSeekClient:
         return self.chat_json(system_prompt, "", temperature, HUMAN_BID_SCHEMA, model, thinking=thinking)
     
     def chat_play(self, system_prompt: str, temperature: float = 0.7, model: str = None, thinking: bool = False) -> Dict[str, Any]:
-        max_tokens = 8192 if thinking else 2048
+        max_tokens = 8192 if thinking else 1024
         return self.chat_json(system_prompt, "", temperature, PLAY_SCHEMA, model, max_tokens=max_tokens, thinking=thinking)

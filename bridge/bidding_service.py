@@ -60,6 +60,25 @@ class BiddingService:
                 has_non_pass_bid = True
                 break
         return not has_non_pass_bid
+
+    def _inject_computed_fields(self, result: Dict, bidding_sequence: str, player_name: str) -> None:
+        result["当前叫牌序列"] = bidding_sequence if bidding_sequence else "空（开叫位置）"
+        result["自己pass次数"] = str(bidding_sequence.lower().count("pass"))
+        bid = result.get("选定叫品", "pass")
+        bid_normalized = self._normalize_bid(bid)
+        if bid_normalized != bid:
+            result["选定叫品"] = bid_normalized
+            bid = bid_normalized
+        bidding_prefix = bidding_sequence if bidding_sequence else ""
+        result["完整叫牌序列"] = f"{bidding_prefix}({player_name}){bid}-"
+
+    def _normalize_bid(self, bid: str) -> str:
+        b = bid.strip()
+        if b.lower() in ("p", "pass", "pass!"):
+            return "pass"
+        if b.upper() in ("X", "XX"):
+            return b.upper()
+        return b
     
     def ai_bid(
         self,
@@ -229,6 +248,7 @@ class BiddingService:
                     verbose=verbose
                 )
             
+            self._inject_computed_fields(result, bidding_sequence, player_name)
             return result
         except Exception as e:
             if verbose:
@@ -287,7 +307,8 @@ class BiddingService:
             if not bid or bid in ["jf无合格叫品", "无合格叫品", "没有合格叫品"]:
                 result["选定叫品"] = "pass"
                 result["叫品筛选过程"] += " [强制选择pass]"
-            
+
+            self._inject_computed_fields(result, bidding_sequence, player_name)
             return result
         except Exception as e:
             return {"选定叫品": "pass", "叫品含义": f"[备用提示词异常] {e}，强制选择pass", "叫品筛选过程": f"[备用提示词异常] {e}", "JF约定": actual_jf_keyword, "阻击叫体系": deal_system}
