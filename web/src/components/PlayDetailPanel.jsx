@@ -316,7 +316,7 @@ function PlayDetailPanel({
       return (
         <Box sx={{ textAlign: 'center', py: 1 }}>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            未知手牌 — 直接输入牌张
+            {playState?.current_player}家出牌 — 直接输入牌张
           </Typography>
           <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', justifyContent: 'center' }}>
             <TextField

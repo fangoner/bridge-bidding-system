@@ -50,7 +50,11 @@ def _hands_to_pbn(hands: Dict[str, List[Card]]) -> str:
     for pos in ["北", "东", "南", "西"]:
         cards = hands.get(pos, [])
         hand_str = cards_to_hand_str(cards)
-        suits = hand_str.split()
+        suits = []
+        for s in hand_str.split():
+            if s and s != "-":
+                s = s[1:] if s[0] in "♠♥♦♣" else s
+            suits.append(s)
         while len(suits) < 4:
             suits.append("")
         suits = ["" if s == "-" else s for s in suits]
@@ -107,6 +111,12 @@ class DDSearch:
         trick_cards = trick_state["cards"]  # [(pos, Card), ...]
         trick_leader = trick_state.get("leader")
 
+        # 收集所有已出牌（已完成墩 + 当前墩），按出牌顺序
+        all_played = []
+        for trick in state.tricks:
+            all_played.extend(trick.cards)
+        all_played.extend(trick_cards)
+
         while samples_done < adaptive_samples:
             if time.time() - start_time > self.time_limit:
                 break
@@ -115,8 +125,11 @@ class DDSearch:
             samples_done += 1
 
             try:
-                # 1. 当前墩牌补回手牌 → 四家张数相等
-                for pos, card in trick_cards:
+                # 1. 从所有采样手牌中清除已出牌（无论谁出的），再按正确位置加回
+                for _, card in all_played:
+                    for p in sampled:
+                        sampled[p] = [c for c in sampled[p] if not (c.suit == card.suit and c.rank == card.rank)]
+                for pos, card in all_played:
                     sampled[pos].append(card)
 
                 # 2. PBN → Deal
@@ -124,10 +137,10 @@ class DDSearch:
                 deal = Deal(pbn)
                 deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
 
-                # 3. 当前墩牌从手牌移除 → 写入 Deal 当前墩
-                if trick_cards:
-                    deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
-                    for _pos, card in trick_cards:
+                # 3. 按顺序重放所有已出牌
+                if all_played:
+                    deal.first = POSITION_TO_PLAYER.get(all_played[0][0], Player.north)
+                    for _pos, card in all_played:
                         deal.play(_to_ep(card), from_hand=True)
                 else:
                     deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
@@ -190,9 +203,18 @@ class DDSearch:
                         cs = sampled.get(p, [])
                         f.write(f"  sampled[{p}]({len(cs)}): {sorted(str(c) for c in cs)}\n")
                     f.write(f"  PBN: {pbn}\n")
-                    f.write(f"  trick_cards: {[(pos, str(c)) for pos, c in trick_cards]}\n")
+                    f.write(f"  all_played: {[(pos, str(c)) for pos, c in all_played]}\n")
                     f.write(f"  declarer={declarer} dummy={dummy} perspective={perspective} phase={state.phase}\n")
-                pass
+                    import traceback
+                    f.write(traceback.format_exc())
+                print(f"[DD] sample {samples_done} ERROR: {e}")
+
+        # DEBUG success
+        if samples_done == 1 and card_scores:
+            first_key = list(card_scores.keys())[0]
+            print(f"[DD] sample 1 OK: card_scores example {first_key} = {card_scores[first_key][:3]}...")
+        elif samples_done > 0 and not any(card_scores.values()):
+            print(f"[DD] WARNING: {samples_done} samples but all scores empty!")
 
         elapsed = time.time() - start_time
 

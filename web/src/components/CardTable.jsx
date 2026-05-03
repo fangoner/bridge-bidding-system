@@ -167,23 +167,11 @@ function CardTable({
       const originalHand = hands[position]
       if (hasHand(position)) return originalHand
       const psHand = playState.hands?.[position]
-      if (psHand && psHand.length > 0) {
-        const suitNames = { '♠': 'spades', '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs' }
-        const rankOrder = 'AKQJT98765432'
-        const newHand = { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 }
-        const groups = { spades: [], hearts: [], diamonds: [], clubs: [] }
-        for (const c of psHand) {
-          const sn = suitNames[c.suit]
-          if (sn) groups[sn].push(c.rank)
-        }
-        for (const [sn, ranks] of Object.entries(groups)) {
-          ranks.sort((a, b) => rankOrder.indexOf(a) - rankOrder.indexOf(b))
-          newHand[sn] = ranks.join('')
-        }
-        return newHand
-      }
       const manualCards = getManualPlayedCards(position)
-      if (manualCards.length > 0) return drawHandFromPlayedCards(position, manualCards)
+      const allCards = []
+      if (psHand) allCards.push(...psHand)
+      if (manualCards.length > 0) allCards.push(...manualCards)
+      if (allCards.length > 0) return drawHandFromPlayedCards(position, allCards)
       return originalHand
     }
     
@@ -289,9 +277,9 @@ function CardTable({
         return true
       }
       
-      // 庄家手牌：仅当 showDeclarerHand 开启时显示
+      // 庄家手牌：showDeclarerHand开启 或 模拟实战时显示
       if (position === declarerPos) {
-        return showDeclarerHand
+        return showDeclarerHand || isSimulated
       }
       
       const isHumanPosition = playerRoles && playerRoles[position] === 'human'
@@ -580,7 +568,7 @@ function CardTable({
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1 }}>
           {renderCard('西')}
           <Box sx={{ width: 60, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-            {getLastTrickWinner() ? (
+            {(displayTrick?.cards?.length === 4 && getLastTrickWinner()) ? (
               <Typography color="primary" sx={{ fontSize: '0.85rem', fontWeight: 'bold' }}>
                 {getLastTrickWinner()}赢
               </Typography>
