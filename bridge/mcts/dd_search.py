@@ -12,7 +12,7 @@ from typing import Dict, List
 from config import BASE_DIR
 from bridge.play_types import Card, PlayState, PlayPhase
 from bridge.mcts.state_utils import (
-    cards_to_hand_str, get_current_trick_state, POSITION_TO_PLAYER, SUIT_TO_DENOM,
+    cards_to_hand_str, get_current_trick_state, POSITION_TO_PLAYER, PLAYER_TO_POSITION, SUIT_TO_DENOM,
 )
 from bridge.mcts.sampler import DealSampler
 
@@ -31,10 +31,14 @@ except ImportError:
 
 _SUIT_MAP = {}
 _RANK_MAP = {}
+_DENOM_TO_SUIT = {}
+_RANK_TO_CHAR = {}
 
 if ENDPLAY_AVAILABLE:
     _SUIT_MAP = {"♠": Denom.spades, "♥": Denom.hearts, "♦": Denom.diamonds, "♣": Denom.clubs}
     _RANK_MAP = {r: getattr(Rank, "R" + r) for r in ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"]}
+    _DENOM_TO_SUIT = {Denom.spades: "♠", Denom.hearts: "♥", Denom.diamonds: "♦", Denom.clubs: "♣"}
+    _RANK_TO_CHAR = {getattr(Rank, "R" + c): c for c in ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"]}
 
 
 def _to_ep(card: Card) -> EpCard:
@@ -131,24 +135,20 @@ class DDSearch:
                 result = solve_board(deal)
                 score_map = {}
                 for ep_card, side_score in result:
-                    key = (ep_card.suit.abbr, ep_card.rank.abbr)
+                    key = (_DENOM_TO_SUIT.get(ep_card.suit), _RANK_TO_CHAR.get(ep_card.rank))
                     score_map[key] = side_score
 
                 total_played = state.declarer_tricks + state.defender_tricks
                 remaining_tricks = 13 - total_played
 
-                # solve_board 返回 deal.first 所在方的赢墩（而非固定 NS）
-                # 需按 deal.first 是否庄家方来转换
-                if trick_cards:
-                    leader_pos = trick_leader
-                else:
-                    leader_pos = perspective
-                leader_is_declarer = leader_pos in (declarer, dummy)
+                # solve_board 返回 deal.curplayer（当前出牌人）所在方的赢墩
+                curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
+                curplayer_is_declarer = curplayer_pos in (declarer, dummy)
 
                 for card in playable:
                     key = (card.suit, card.rank)
                     target_tricks = score_map.get(key, 0)
-                    if leader_is_declarer:
+                    if curplayer_is_declarer:
                         decl_side_tricks = target_tricks
                     else:
                         decl_side_tricks = remaining_tricks - target_tricks
@@ -162,19 +162,19 @@ class DDSearch:
                     with open(_DEBUG_LOG, "a", encoding="utf-8") as f:
                         f.write(f"\n--- sample {samples_done} OK ---\n")
                         f.write(f"perspective={perspective} is_decl={is_declarer_side} "
-                                f"leader_is_decl={leader_is_declarer} leader={leader_pos} "
+                                f"curplayer={deal.curplayer} curplayer_is_decl={curplayer_is_declarer} "
                                 f"decl_done={state.declarer_tricks} def_done={state.defender_tricks} "
-                                f"remaining={remaining_tricks} curplayer={deal.curplayer} "
+                                f"remaining={remaining_tricks} "
                                 f"trump={deal.trump} first={deal.first}\n")
                         f.write(f"deal hand_lens(N/E/S/W): {hand_lens}  playable={len(playable)}\n")
                         f.write(f"PBN: {pbn}\n")
                         f.write(f"solve_board: {len(scores)} results "
                                 f"min={min(scores)} max={max(scores)} mean={sum(scores)/len(scores):.1f}"
-                                f" (target_side tricks)\n")
+                                f" ({curplayer_pos} side tricks)\n")
                         for card in playable[:5]:
                             k = (card.suit, card.rank)
                             target = score_map.get(k, -999)
-                            dt = target if leader_is_declarer else remaining_tricks - target if target != -999 else -999
+                            dt = target if curplayer_is_declarer else remaining_tricks - target if target != -999 else -999
                             t = card_scores[str(card)][-1]
                             f.write(f"  {card}: target={target} decl_side={dt} -> total={t}\n")
 
@@ -215,12 +215,12 @@ class DDSearch:
             # Rank偏置打破平局：庄家方偏好大牌赢墩，防守方偏好小牌保留实力
             # Ace=0.28, 3=0.06 → 最大差异0.22墩，足以破平但不颠覆明显差距
             rank_bonus = RANK_ORDER.get(card.rank, 0) / 50.0
-            score = (avg + rank_bonus) if is_declarer_side else -(avg - rank_bonus)
+            score = (avg + rank_bonus) if is_declarer_side else -(avg + rank_bonus)
             if score > best_score:
                 best_score = score
                 best_card = card
 
-        child_stats.sort(key=lambda s: s["avg_tricks"], reverse=True)
+        child_stats.sort(key=lambda s: s["avg_tricks"], reverse=is_declarer_side)
 
         top_plays_str = ", ".join(
             f"{s['card']}({s['avg_tricks']}[{s['min_tricks']}-{s['max_tricks']}])"

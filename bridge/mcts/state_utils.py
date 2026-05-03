@@ -15,6 +15,7 @@ SUIT_DISPLAY_ORDER = ["♠", "♥", "♦", "♣"]
 RANK_DESC = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"]
 
 POSITION_TO_PLAYER = {"北": Player.north, "东": Player.east, "南": Player.south, "西": Player.west}
+PLAYER_TO_POSITION = {Player.north: "北", Player.east: "东", Player.south: "南", Player.west: "西"}
 SUIT_TO_DENOM = {"♠": Denom.spades, "♥": Denom.hearts, "♦": Denom.diamonds, "♣": Denom.clubs, "NT": Denom.nt}
 
 
