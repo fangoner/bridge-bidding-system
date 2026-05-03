@@ -1,5 +1,30 @@
 # 开发日志
 
+## 2026-05-03
+
+### DD打牌引擎方向反转Bug修复
+
+**背景**:
+DD引擎（蒙特卡洛+DDS双明手）打牌效果差，柱状图上不同出牌赢墩数完全相同或极端偏差，等于随机出牌。根因是`solve_board`返回值的赢墩方向被误判。
+
+**改进**:
+- `solve_board`返回的是`deal.curplayer`（当前出牌人）所在方的赢墩数，而非`deal.first`（领出者）。修复后用`PLAYER_TO_POSITION`映射`deal.curplayer`来判断方向，第2/4家时不再反转
+- Rank偏置修复：防守方`-(avg+rank_bonus)`替代`-(avg-rank_bonus)`，正确偏好小牌保留实力
+- score_map key加固：显式映射`_DENOM_TO_SUIT/_RANK_TO_CHAR`替代`.abbr`，消除对`use_unicode`全局设置的静默依赖
+- 柱状图防守方`avg_tricks`逆序排列，让最优出牌排最前
+- `state_utils.py`新增`PLAYER_TO_POSITION`反向映射
+
+**修改文件**:
+- `bridge/mcts/dd_search.py` — solve_board方向修复 + rank偏置 + key加固 + 逆序
+- `bridge/mcts/state_utils.py` — 新增PLAYER_TO_POSITION
+
+**测试验证**:
+- `test_solve_board.py`验证`solve_board`返回值方向确认
+- MCTS约束测试9/9全部通过
+- DD/Hybrid模式打牌验证效果良好
+
+---
+
 ## 2026-05-05
 
 ### 逼局进程强制规则（提示词修复）
