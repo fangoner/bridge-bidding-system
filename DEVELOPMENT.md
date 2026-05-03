@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。v1.38新增MCTS打牌引擎，基于IS-MCTS算法实现信息不完全下的最优出牌决策。
+本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。
 
 ## 功能模块
 
@@ -306,141 +306,6 @@ disabled = showPlayPanel && playInitiated
 - `SUIT_COLOR_MAP`: 花色颜色映射（按符号字符）
 - `getSuitColor()`: 辅助函数，统一花色颜色获取逻辑
 
-### 13. MCTS 打牌引擎 (`bridge/mcts/`) - v1.38新增
-
-基于 **IS-MCTS**（Information Set Monte Carlo Tree Search）算法在信息不完全（桥牌）下搜索最优出牌。核心思路：Determinization（采样未知手牌）+ UCT（上限置信区间树搜索）+ 启发式快速模拟。
-
-**架构概述**:
-
-```
-bridge/mcts/
-├── __init__.py          # 公开导出 MctsSearch, DealSampler, HeuristicRollout, RandomizedRollout
-├── search.py            # MctsSearch: IS-MCTS 搜索主循环 (Selection→Expansion→Simulation→Backpropagation)
-├── sampler.py           # DealSampler: 约束感知手牌采样 (Determinization)
-├── constraints.py       # BidConstraint: 叫牌约束提取 + validate_sample 验证函数
-├── rollout.py           # HeuristicRollout / RandomizedRollout: 启发式快速模拟打牌到底
-└── state_utils.py       # 纯函数：手牌克隆、出牌执行、合法牌生成、endplay集成
-```
-
-**核心流程** (`search.py` — `MctsSearch.search()`):
-
-```
-每次MCTS迭代:
-  1. Determinization: DealSampler.sample() 从当前玩家视角采样未知手牌分布
-  2. Selection: 从根节点沿 UCT = exploitation + exploration 公式选择到叶子
-  3. Expansion: 随机扩展一个未尝试的合法出牌
-  4. Simulation: HeuristicRollout/RandomizedRollout 快速模拟到底
-  5. Backpropagation: 将模拟结果（庄家赢墩数）沿路径回传更新节点统计
-```
-
-**关键设计决策**:
-
-| 设计点 | 选择 | 原因 |
-|--------|------|------|
-| 搜索范式 | IS-MCTS (Determinization) | 桥牌信息不完全，无法直接访问真实状态 |
-| 模拟策略 | RandomizedRollout (80%启发式+20%随机) | 平衡模拟质量和多样性，避免估值偏差 |
-| 采样约束 | 叫牌约束偏置加权采样 | 大幅提升采样通过率（10-100x），从 ~200 it/s 恢复至 500-900 it/s |
-| 迭代次数 | 自适应衰减 `MCTS_MIN + (MAX-MIN) * (剩余牌/52)` | 前期精确搜索，后期加速响应 |
-| 引擎切换 | LLM/MCTS 可选，前后端 `play_engine` 参数 | 保留LLM打牌能力，MCTS为默认选项 |
-
-**1. MCTS 搜索器** (`search.py`):
-
-- `MctsNode`: 搜索树节点，包含当前出牌者、墩状态、庄家/防守方赢墩数、访问次数、累计价值
-- `MctsSearch`: 搜索主类
-  - `search(state) → dict`: 执行搜索返回 `{"card": Card, "reasoning": str, "full_output": dict}`
-  - `_select_and_expand()`: UCT选择 + 随机扩展叶子节点
-  - `_uct_select()`: 使用 UCT 公式 `value/visits + C * sqrt(ln(parent_visits)/visits)` 选择最优子节点
-  - `_create_child()`: 出牌 + 判断墩赢家，创建子节点
-  - `_trick_winner()`: 静态方法，判断一墩的赢家（正确支持将吃）
-- 搜索结束后按访问次数选择最优出牌（`max visits`），并输出所有候选的 visits/avg_tricks 统计
-- 自适应迭代上限：`MCTS_MIN_ITERATIONS(500) + (MCTS_ITERATIONS(5000) - 500) * (remaining_cards/52)`
-
-**2. 约束感知采样器** (`sampler.py`):
-
-- `DealSampler`: 从当前玩家视角采样完整手牌分布
-  - `set_constraints()`: 设置叫牌约束（由 `PlayService` 在游戏初始化时从LLM提取并缓存）
-  - `sample()`: 主采样方法，有约束时使用偏置分配，无约束时随机分配
-  - `_sample_once()`: 收集已知牌（自己、明手、已出牌），从剩余池中分配
-  - `_distribute_biased()`: 约束感知偏置分配——有约束位置优先，`_weighted_select()` 加权抽取
-  - `_weighted_select()`: 使用 `random.random()/weight` 评分实现随机偏置采样：
-    - suit_min 花色权重 ×3
-    - 大牌权重 ×(1 + HCP×0.3)
-- **性能关键**：v1.38优化前纯随机采样+拒绝（`MAX_CONSTRAINT_RETRIES=100`），约束紧时通过率极低（~1%）；优化后偏置采样直接将约束融入抽取过程，`MAX_CONSTRAINT_RETRIES` 降至 10，it/s 恢复至 500-900
-
-**3. 叫牌约束** (`constraints.py`):
-
-- `BidConstraint`: 单个牌手的叫牌约束
-  - `min_hcp / max_hcp`: 点力范围
-  - `balanced`: 均型/非均型（可选）
-  - `suit_min`: `{花色: 最少张数}` 映射
-- `validate_sample()`: 验证采样手牌是否满足所有约束（HCP + 花色张数 + 均型判断）
-- `HCP_MAP = {"A": 4, "K": 3, "Q": 2, "J": 1}`: 大牌点映射
-
-**4. 启发式模拟** (`rollout.py`):
-
-- `HeuristicRollout`（基础版）:
-  - 领出：最长套最大牌
-  - 跟牌（能赢）：用恰好能赢的最小牌
-  - 跟牌（不能赢）：跟最小牌
-  - 将吃：用最小将牌
-- `RandomizedRollout`（增强版，默认使用）:
-  - 领出：长套加权随机选花色 → 长四首攻
-  - 跟牌：第二家小 / 第三家大
-  - 将吃/垫牌：同伴赢则垫（垫最短套），敌方赢则将
-  - 全局 20% 概率随机合法出牌 (`greedy_prob=0.80`)
-  - 带随机性的估值更接近真实桥牌分布
-
-**5. 状态工具** (`state_utils.py`):
-- `clone_hands()`: 深拷贝手牌（生成新Card对象）
-- `apply_play_to_state()`: 纯函数出牌执行，返回更新后的所有状态，支持墩完成判定
-- `get_playable_from_hands()`: 从手牌获取合法出牌（跟花色规则）
-- `get_current_trick_state()`: 从PlayState提取当前墩精简状态
-- `cards_to_hand_str() / hand_str_to_cards()`: Card列表与手牌字符串互转
-- `playstate_to_deal()`: 构造 endplay Deal 对象用于双明手分析
-- 花色/位置映射：`SUIT_TO_SYMBOL`, `SYMBOL_TO_SUIT`, `SUIT_TO_DENOM`, `POSITION_TO_PLAYER`
-
-**引擎集成** (`bridge/play_service.py`):
-
-- `PlayService.__init__()`: 始终初始化 `MctsSearch` 实例，配置从 `config.py` 读取
-- `PlayService._extract_bid_constraints()`: 从叫牌含义历史中通过LLM提取叫牌约束（HCP范围、花色张数、均型），**缓存一次**供后续所有MCTS采样使用
-- `PlayService.get_ai_play(use_mcts=False)`:
-  - `use_mcts=True` → `asyncio.to_thread(_mcts_play)`: MCTS同步搜索在线程池执行，避免阻塞异步事件循环
-  - `use_mcts=False` → LLM打牌（原有逻辑）
-- `PlayService._mcts_play(state)`: 同步MCTS搜索
-  1. 设置采样约束 `mcts.sampler.set_constraints(constraints)`
-  2. 执行 `mcts.search(state)`
-  3. 返回结构化结果（card, reasoning, full_output 含 mcts_stats）
-
-**API集成** (`api/main.py`):
-
-- `POST /api/play/ai-play`: 请求体新增 `play_engine` 字段（`"llm"` | `"mcts"`）
-- 未指定时使用 `config.DEFAULT_PLAY_ENGINE` 默认值
-- `PlayCardRequest` 增加 `play_engine: Optional[str]` 字段
-
-**前端集成** (`web/src/components/PlayDetailPanel.jsx`):
-
-- 叫牌记录标签：显示所用引擎标识（LLM / MCTS）
-- MCTS柱状图可视化：Canvas 水平柱状图，展示每个候选出牌的 visits（柱长）和 avg_tricks（颜色深浅）
-- 统计摘要：迭代次数、耗时、it/s、剩余牌张
-- 颜色渐变：高胜率牌张深绿，低胜率牌张浅绿/黄
-
-**配置项** (`config.py`):
-
-| 配置项 | 默认值 | 说明 |
-|--------|--------|------|
-| `DEFAULT_PLAY_ENGINE` | `"llm"` | 默认打牌引擎 ("llm" / "mcts") |
-| `MCTS_ITERATIONS` | `5000` | 最大迭代次数 |
-| `MCTS_TIME_LIMIT` | `10.0` | 单次搜索时间上限（秒） |
-| `MCTS_EXPLORATION_CONSTANT` | `1.414` | UCT探索常数 (√2) |
-| `MCTS_MIN_ITERATIONS` | `500` | 自适应迭代下限 |
-| `ROLLOUT_GREEDY_PROB` | `0.80` | RandomizedRollout 启发式概率 |
-
-**性能基准** (单次出牌决策):
-- 首墩（剩余39张未知牌）：~5000 iters, ~5-8s
-- 中盘（剩余20张）：~3000 iters, ~3-5s
-- 残局（剩余8张）：~1000 iters, ~1-2s
-- 迭代速度：500-900 it/s（约束偏置采样优化后）
-
 ## 文件结构
 
 ```
@@ -467,14 +332,7 @@ Bidding System/
 │   ├── output_format.py    # 输出格式生成
 │   ├── play_types.py       # 打牌数据类型（v1.32新增）
 │   ├── play_engine.py      # 打牌引擎（v1.32新增）
-│   ├── play_service.py     # 打牌服务（v1.32新增）
-│   └── mcts/               # MCTS打牌引擎（v1.38新增）
-│       ├── __init__.py     # 公开导出
-│       ├── search.py       # IS-MCTS搜索主循环
-│       ├── sampler.py      # 约束感知手牌采样
-│       ├── constraints.py  # 叫牌约束提取与验证
-│       ├── rollout.py      # 启发式快速模拟
-│       └── state_utils.py  # 纯函数状态工具
+│   └── play_service.py     # 打牌服务（v1.32新增）
 ├── knowledge/
 │   └── loader.py           # JF约定加载和检索
 ├── llm/
@@ -736,17 +594,6 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 ## 版本历史
 
 ### v1.38 (当前版本)
-- **MCTS 打牌引擎**
-  - 基于 IS-MCTS (Determinization + UCT) 在信息不完全下搜索最优出牌
-  - 7个新文件：`bridge/mcts/` (search, sampler, constraints, rollout, state_utils, __init__)
-  - 约束感知偏置采样：从叫牌含义中提取HCP/花色/均型约束，加权抽取替代纯随机+拒绝，性能提升 2.5-4.5x
-  - RandomizedRollout: 80%启发式（长四首攻/第二家小第三家大/同伴赢则垫敌方赢则将）+ 20%随机
-  - 自适应迭代：`MCTS_MIN(500) + (MAX(5000)-500) * (remaining/52)`，前期精确后期加速
-  - 引擎双轨：LLM/MCTS 通过 `play_engine` 参数切换，MCTS 在 `asyncio.to_thread` 执行避免阻塞
-  - 前端柱状图可视化：Canvas 水平柱状图，展示候选出牌 visits/avg_tricks
-  - 新增配置项：`DEFAULT_PLAY_ENGINE`, `MCTS_ITERATIONS`, `MCTS_TIME_LIMIT`, `MCTS_EXPLORATION_CONSTANT`, `MCTS_MIN_ITERATIONS`
-  - 修复 `Contract.from_str()` 花色代码匹配（S/H/D/C→♠/♥/♦/♣），将牌将吃逻辑修复
-  - 修改文件: `bridge/mcts/*`, `bridge/play_service.py`, `bridge/play_types.py`, `api/main.py`, `config.py`, `web/src/App.jsx`, `web/src/components/PlayDetailPanel.jsx`, `web/src/services/api.js`, `web/src/hooks/useGameSettings.js`
 - **DeepSeek V4 非思考模式显式禁用修复**
   - 根因：DeepSeek V4 thinking 默认为 `enabled`，非思考模式下不传参数等价于开启思考
   - `chat()` 和 `chat_json()` 增加 `extra_body={"thinking": {"type": "disabled"}}` 显式关闭

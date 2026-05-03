@@ -275,7 +275,7 @@ export const undoPlay = async () => {
 };
 
 // AI出牌
-export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null) => {
+export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null) => {
   try {
     const requestData = {
       use_reasoning: useReasoning,
@@ -286,6 +286,9 @@ export const aiPlay = async (playModel = null, useReasoning = false, playEngine 
     }
     if (playEngine) {
       requestData.play_engine = playEngine;
+    }
+    if (ddSampleCount) {
+      requestData.dd_sample_count = ddSampleCount;
     }
     
     // Reasoner模型需要更长超时（5分钟），Chat模型2分钟
