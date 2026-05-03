@@ -1,22 +1,20 @@
 import math
 import random
 import time
-import logging
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER, PARTNERS
+from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER
 from bridge.mcts.state_utils import (
     clone_hands, get_playable_from_hands, apply_play_to_state,
-    get_current_trick_state,
+    get_current_trick_state, trick_winner,
 )
 from bridge.mcts.sampler import DealSampler
 from bridge.mcts.rollout import HeuristicRollout
-from config import MCTS_MIN_ITERATIONS
+from config import MCTS_MIN_ITERATIONS, BASE_DIR
 
-_logger = logging.getLogger("mcts")
-if not _logger.handlers:
-    _logger.setLevel(logging.INFO)
+_DEBUG_LOG = os.path.join(BASE_DIR, "dd_debug.log")
 
 
 @dataclass
@@ -142,12 +140,16 @@ class MctsSearch:
 
         elapsed = time.time() - start_time
         iters_per_sec = iteration / elapsed if elapsed > 0 else 0
-        print(f"[MCTS] {iteration} iters in {elapsed:.1f}s ({iters_per_sec:.0f} it/s) "
-              f"adaptive={adaptive_iterations} remaining={remaining_cards}")
+        mcts_summary = (f"[MCTS] {iteration} iters in {elapsed:.1f}s ({iters_per_sec:.0f} it/s) "
+                        f"adaptive={adaptive_iterations} remaining={remaining_cards}")
+        print(mcts_summary)
+        with open(_DEBUG_LOG, "a", encoding="utf-8") as f:
+            f.write(f"\n{mcts_summary}\n")
 
         # 选择最优出牌
+        is_root_declarer_side = perspective in (declarer, dummy)
         best_card_str = None
-        best_visits = -1
+        best_score = -float("inf")
         child_stats = []
 
         for card_str, child in root.children.items():
@@ -157,8 +159,12 @@ class MctsSearch:
                 "visits": child.visits,
                 "avg_tricks": round(avg_value, 2),
             })
-            if child.visits > best_visits:
-                best_visits = child.visits
+            if is_root_declarer_side:
+                score = child.visits  # 庄家方：选探索最多的出牌
+            else:
+                score = -avg_value  # 防守方：选庄家赢墩最少的出牌
+            if score > best_score:
+                best_score = score
                 best_card_str = card_str
 
         child_stats.sort(key=lambda s: s["visits"], reverse=True)
@@ -182,12 +188,13 @@ class MctsSearch:
             f"Top plays: {top_plays_str}"
         )
 
-        _logger.info(
-            "MCTS: %d iters in %.1fs (%.0f it/s), "
-            "remaining=%d adaptive=%d",
-            iteration, elapsed, iters_per_sec,
-            remaining_cards, adaptive_iterations,
-        )
+        print(reasoning)
+        # Write MCTS result to debug log
+        with open(_DEBUG_LOG, "a", encoding="utf-8") as f:
+            f.write(f"  perspective={perspective} is_decl={is_root_declarer_side} "
+                    f"decl_done={state.declarer_tricks} def_done={state.defender_tricks} "
+                    f"remaining={remaining_cards}\n")
+            f.write(f"  candidates: {child_stats[:5]}\n")
 
         return {
             "card": selected_card,
@@ -257,21 +264,16 @@ class MctsSearch:
                 return child, hands
 
             # 所有合法出牌已扩展 → UCT选择
-            if not legal:
-                return node, hands
-
-            best_card = self._uct_select(node, legal)
+            best_card = self._uct_select(node, legal, declarer, dummy)
             node = node.children[str(best_card)]
 
-            # Apply the play to hands
-            hands, _, new_trick, new_dt, new_dft, _ = apply_play_to_state(
-                hands, node.parent.position if node.parent else node.position,
-                best_card,
-                {"cards": list(node.parent.trick_cards) if node.parent else [],
-                 "leader": node.parent.trick_leader if node.parent else None,
-                 "trump": trump},
-                node.parent.declarer_tricks if node.parent else 0,
-                node.parent.defender_tricks if node.parent else 0,
+            # Apply play to hands (child node already tracks post-play state)
+            prev = node.parent if node.parent else node
+            hands, *_ = apply_play_to_state(
+                hands, prev.position, best_card,
+                {"cards": list(prev.trick_cards),
+                 "leader": prev.trick_leader, "trump": trump},
+                prev.declarer_tricks, prev.defender_tricks,
                 trump, declarer, dummy,
             )
 
@@ -287,17 +289,11 @@ class MctsSearch:
         new_trick_cards = list(parent.trick_cards)
         new_trick_cards.append((parent.position, card))
 
-        trick_state = {
-            "cards": list(parent.trick_cards),
-            "leader": parent.trick_leader,
-            "trump": trump,
-        }
-
         new_dt, new_dft = parent.declarer_tricks, parent.defender_tricks
 
         if len(new_trick_cards) == 4:
             # 墩完成，判断赢家
-            winner = self._trick_winner(new_trick_cards, trump)
+            winner = trick_winner(new_trick_cards, trump)
             if winner in (declarer, dummy):
                 new_dt += 1
             else:
@@ -324,20 +320,28 @@ class MctsSearch:
             parent_card=card,
         )
 
-    def _uct_select(self, node: MctsNode, legal: List[Card]) -> Card:
-        """UCT公式选择最优子节点"""
+    def _uct_select(self, node: MctsNode, legal: List[Card],
+                    declarer: str, dummy: str) -> Card:
+        """UCT公式选择最优子节点。
+
+        庄家方最大化庄家赢墩，防守方最小化庄家赢墩（即最大化防守赢墩）。
+        """
         best_card = None
         best_uct = -float("inf")
         parent_visits = node.visits
+        is_declarer_side = node.position in (declarer, dummy)
 
         for card in legal:
             child = node.children.get(str(card))
             if child is None:
-                # 未访问过的节点优先（但这里不应该出现因为调用前已检查）
                 return card
             if child.visits == 0:
                 return card
-            exploitation = child.value / child.visits
+            avg_declarer = child.value / child.visits
+            if is_declarer_side:
+                exploitation = avg_declarer
+            else:
+                exploitation = 13 - avg_declarer  # 防守方最大化防守赢墩
             exploration = self.exploration * math.sqrt(
                 math.log(parent_visits + 1) / child.visits
             )
@@ -348,22 +352,3 @@ class MctsSearch:
 
         return best_card if best_card else legal[0]
 
-    @staticmethod
-    def _trick_winner(trick_cards: List[Tuple[str, Card]], trump: str) -> str:
-        """判断一墩的赢家"""
-        if not trick_cards:
-            return None
-        lead_suit = trick_cards[0][1].suit
-        winning_pos, winning_card = trick_cards[0]
-        for pos, card in trick_cards[1:]:
-            if trump and trump != "NT":
-                if card.suit == trump:
-                    if winning_card.suit != trump or card.rank_value > winning_card.rank_value:
-                        winning_pos, winning_card = pos, card
-                elif card.suit == lead_suit and winning_card.suit != trump:
-                    if card.rank_value > winning_card.rank_value:
-                        winning_pos, winning_card = pos, card
-            else:
-                if card.suit == lead_suit and card.rank_value > winning_card.rank_value:
-                    winning_pos, winning_card = pos, card
-        return winning_pos

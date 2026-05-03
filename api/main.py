@@ -1177,7 +1177,8 @@ async def undo_play():
 class PlayAIRequest(BaseModel):
     use_reasoning: bool = False
     play_model: Optional[str] = None
-    play_engine: Optional[str] = None  # "llm" | "mcts", None = config default
+    play_engine: Optional[str] = None  # "llm" | "mcts" | "dd", None = config default
+    dd_sample_count: Optional[int] = None  # DD 蒙地卡罗采样数
 
 
 class PlayAIResponse(BaseModel):
@@ -1208,10 +1209,17 @@ async def ai_play(request: PlayAIRequest):
         
         try:
             if not service.is_human_turn():
-                use_mcts = (request.play_engine or DEFAULT_PLAY_ENGINE) == "mcts"
+                engine = request.play_engine or DEFAULT_PLAY_ENGINE
+                use_mcts = engine == "mcts"
+                use_dd = engine == "dd"
+                use_hybrid = engine == "hybrid"
+                dd_samples = request.dd_sample_count if (use_dd or use_hybrid) else None
                 result = await service.get_ai_play(
                     use_reasoning=request.use_reasoning,
-                    use_mcts=use_mcts)
+                    use_mcts=use_mcts,
+                    use_dd=use_dd,
+                    use_hybrid=use_hybrid,
+                    dd_samples=dd_samples)
                 
                 if result.get("card"):
                     card = Card(suit=result["card"]["suit"], rank=result["card"]["rank"])

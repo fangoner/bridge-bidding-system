@@ -6,9 +6,12 @@ from typing import Optional, Dict, List, Any
 from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER, PARTNERS
 from bridge.play_engine import PlayEngine
 from llm.prompts import PLAY_COMMON_RULES, PLAY_COMMON_SITUATION, PLAY_DECLARER_PROMPT, PLAY_DEFENDER_PROMPT
-from bridge.mcts import MctsSearch, RandomizedRollout
+from bridge.mcts import MctsSearch, RandomizedRollout, DDSearch
 from bridge.mcts.constraints import BidConstraint, validate_sample
-from config import MCTS_ITERATIONS, MCTS_TIME_LIMIT, MCTS_EXPLORATION_CONSTANT, ROLLOUT_GREEDY_PROB
+from config import (
+    MCTS_ITERATIONS, MCTS_TIME_LIMIT, MCTS_EXPLORATION_CONSTANT,
+    ROLLOUT_GREEDY_PROB, MCTS_SEARCH_MODE, DD_NUM_SAMPLES, DD_TIME_LIMIT,
+)
 
 
 class PlayService:
@@ -26,6 +29,11 @@ class PlayService:
             time_limit=MCTS_TIME_LIMIT,
             exploration=MCTS_EXPLORATION_CONSTANT,
             rollout=RandomizedRollout(greedy_prob=ROLLOUT_GREEDY_PROB),
+        )
+        # DD搜索器（纯蒙特卡洛 + 双明手评估）
+        self.dd_search = DDSearch(
+            num_samples=DD_NUM_SAMPLES,
+            time_limit=DD_TIME_LIMIT,
         )
     
     def initialize(
@@ -117,7 +125,10 @@ class PlayService:
         return self.engine.get_result()
     
     async def get_ai_play(self, use_reasoning: bool = False,
-                          use_mcts: bool = False) -> Dict[str, Any]:
+                          use_mcts: bool = False,
+                          use_dd: bool = False,
+                          use_hybrid: bool = False,
+                          dd_samples: int = None) -> Dict[str, Any]:
         state = self.engine.get_state()
         if not state:
             return {"error": "游戏未初始化"}
@@ -136,6 +147,14 @@ class PlayService:
                 "full_output": {"推荐出牌": str(card), "核心逻辑": "唯一选择"},
                 "prompt": ""
             }
+
+        # === Hybrid 混合引擎分支（庄家DD + 防守MCTS）===
+        if use_hybrid:
+            return await asyncio.to_thread(self._hybrid_play, state, dd_samples)
+
+        # === DD 引擎分支 ===
+        if use_dd:
+            return await asyncio.to_thread(self._dd_play, state, dd_samples)
 
         # === MCTS 引擎分支 ===
         if use_mcts:
@@ -307,7 +326,9 @@ class PlayService:
 
         try:
             prompt = self.BID_CONSTRAINT_PROMPT.format(bid_history=self.bid_history)
+            print(f"[DD] 调用LLM提取约束, bid_history长度={len(self.bid_history)}, 内容={self.bid_history[:200]}")
             result = self.llm_client.chat_json(system_prompt=prompt, temperature=0, max_tokens=1024)
+            print(f"[DD] LLM约束结果: {result}")
 
             POS_NAME_MAP = {
                 "南": "南", "西": "西", "北": "北", "东": "东",
@@ -334,12 +355,63 @@ class PlayService:
                         c.suit_min[suit] = int(val)
                 constraints[pos_cn] = c
 
+            print(f"[DD] 解析后约束: {constraints}")
+
             self.bid_constraints = constraints
             return constraints
         except Exception as e:
+            import traceback
             print(f"[MCTS] 约束提取失败: {e}，回退到无约束采样")
+            traceback.print_exc()
             self.bid_constraints = {}
             return {}
+
+    def _dd_play(self, state: PlayState, dd_samples: int = None) -> Dict[str, Any]:
+        """DD搜索打牌（纯蒙特卡洛 + 双明手评估，由asyncio.to_thread调用）"""
+        constraints = self._get_bid_constraints()
+        if constraints:
+            print(f"[DD] 约束已应用: {len(constraints)}家, { {p: f'HCP[{c.min_hcp}-{c.max_hcp}] suits={c.suit_min}' for p, c in constraints.items()} }")
+            self.dd_search.sampler.set_constraints(constraints)
+        else:
+            print(f"[DD] 无约束 (bid_history={'空' if not self.bid_history else repr(self.bid_history[:80])})")
+
+        # 允许请求级覆盖采样数
+        if dd_samples is not None:
+            self.dd_search.num_samples = dd_samples
+
+        try:
+            result = self.dd_search.search(state)
+            card = result.get("card")
+            if card is None:
+                playable = self.engine.get_playable_cards()
+                card = self._select_best_card(playable, state)
+            return {
+                "card": card.to_dict() if card else None,
+                "reasoning": result.get("reasoning", ""),
+                "full_output": result.get("full_output", {}),
+                "prompt": "[DD] no prompt",
+            }
+        except Exception as e:
+            playable = self.engine.get_playable_cards()
+            card = self._select_best_card(playable, state)
+            return {
+                "card": card.to_dict() if card else None,
+                "reasoning": f"DD异常，自动选择: {str(e)}",
+                "error": str(e),
+                "prompt": "[DD error]",
+            }
+
+    def _hybrid_play(self, state: PlayState, dd_samples: int = None) -> Dict[str, Any]:
+        """混合模式：庄家方走DD（双明手评估），防守方走MCTS（单明手rollout）。"""
+        perspective = state.current_player
+        declarer = state.contract.declarer
+        dummy = state.dummy
+        is_declarer_side = perspective in (declarer, dummy)
+
+        if is_declarer_side:
+            return self._dd_play(state, dd_samples)
+        else:
+            return self._mcts_play(state)
 
     def _mcts_play(self, state: PlayState) -> Dict[str, Any]:
         """MCTS搜索打牌（同步方法，由asyncio.to_thread调用）"""

@@ -44,10 +44,14 @@ AI_PROVIDER_DEEPSEEK = "deepseek"
 AI_PROVIDER_DOUBAO = "doubao"
 DEFAULT_AI_PROVIDER = AI_PROVIDER_DEEPSEEK
 
-# MCTS play engine settings
-DEFAULT_PLAY_ENGINE = "llm"  # "llm" | "mcts"
+# MCTS / DD play engine settings
+DEFAULT_PLAY_ENGINE = "llm"  # "llm" | "mcts" | "dd" | "hybrid"
+MCTS_SEARCH_MODE = "mcts"  # "mcts" (tree+rollout) | "dd" (pure Monte Carlo + double-dummy)
 MCTS_ITERATIONS = 5000
 MCTS_TIME_LIMIT = 10.0  # seconds per play decision
 MCTS_EXPLORATION_CONSTANT = 1.414
 MCTS_MIN_ITERATIONS = 500  # floor for adaptive iteration scaling
 ROLLOUT_GREEDY_PROB = 0.80  # probability of heuristic vs random in rollout
+DD_NUM_SAMPLES = 100  # max samples per candidate card for DD search
+DD_MIN_SAMPLES = 15   # floor for adaptive sample scaling
+DD_TIME_LIMIT = 60.0  # seconds per DD play decision (solve_board is heavy)

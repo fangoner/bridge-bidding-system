@@ -1,16 +1,16 @@
 import random
 from typing import Dict, List, Set, Optional
 
-from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER, PARTNERS
+from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER
 from bridge.mcts.state_utils import clone_hands, SUIT_DISPLAY_ORDER, RANK_DESC
-from bridge.mcts.constraints import BidConstraint, validate_sample
+from bridge.mcts.constraints import BidConstraint, validate_sample, HCP_MAP
 
 
 # 一副完整的52张牌
 ALL_CARDS = [Card(suit=s, rank=r) for s in SUIT_DISPLAY_ORDER for r in RANK_DESC]
 
-# 约束验证最大重试次数（biased采样后大幅降低）
-MAX_CONSTRAINT_RETRIES = 10
+# 约束采样最大重试次数（_constrained_select 保证约束前提下仍保留重试安全网）
+MAX_CONSTRAINT_RETRIES = 3
 
 
 class DealSampler:
@@ -46,8 +46,12 @@ class DealSampler:
                 result = self._sample_once(state, perspective)
                 if validate_sample(result, self.constraints):
                     return result
-            # 超过重试上限，回退到无约束采样
-            return self._sample_once(state, perspective)
+            # 超过重试上限，回退到真正的无约束采样
+            saved = self.constraints
+            self.constraints = {}
+            result = self._sample_once(state, perspective)
+            self.constraints = saved
+            return result
         return self._sample_once(state, perspective)
 
     def _sample_once(self, state: PlayState, perspective: str) -> Dict[str, List[Card]]:
@@ -71,10 +75,13 @@ class DealSampler:
         own_hand = state.hands.get(perspective, [])
         known_cards.update(own_hand)
 
-        # 明手（庄家方视角始终可见；防守方首攻后可见）
-        if dummy and perspective != dummy:
-            dummy_visible = is_declarer_side or state.phase != PlayPhase.LEAD
-            if dummy_visible:
+        # 庄家方视角：庄家和明手的手牌都已知且会被保留，必须全部加入 known_cards
+        if is_declarer_side and dummy:
+            known_cards.update(state.hands.get(declarer, []))
+            known_cards.update(state.hands.get(dummy, []))
+        elif dummy and perspective != dummy:
+            # 防守方视角：首攻后明手可见
+            if state.phase != PlayPhase.LEAD:
                 known_cards.update(state.hands.get(dummy, []))
 
         # 已出牌张
@@ -142,21 +149,20 @@ class DealSampler:
         pool: List[Card],
         remaining_counts: Dict[str, int],
     ) -> None:
-        """约束感知的牌张分配：对每个未知位置加权随机选牌。
-
-        权重设计：
-        - 基础权重 1.0
-        - 满足 suit_min 的花色 ×3
-        - 大牌 HCP 权重 ×(1 + hcp * 0.3)
-        - 随机扰动 key/weight 保证采样多样性
-        """
-        from bridge.mcts.constraints import HCP_MAP
-
-        # 按约束优先级排序：有约束的位置优先分配
+        """保证约束的牌张分配：有约束的位置先分配，用 _constrained_select 满足HCP和花色下限。"""
+        # 按约束优先级排序：有实质性约束的位置优先分配
         unknown_positions = [p for p in POSITION_ORDER if p not in result]
+
+        def _has_real_constraint(pos: str) -> bool:
+            c = self.constraints.get(pos)
+            if c is None:
+                return False
+            return (c.min_hcp is not None or c.max_hcp is not None or
+                    c.balanced is not None or bool(c.suit_min))
+
         constrained_first = sorted(
             unknown_positions,
-            key=lambda p: 0 if p in self.constraints else 1,
+            key=lambda p: 0 if _has_real_constraint(p) else 1,
         )
 
         remaining = list(pool)
@@ -179,34 +185,104 @@ class DealSampler:
                     for c in result[pos]:
                         remaining.remove(c)
             else:
-                # 有约束：加权随机选
-                result[pos] = self._weighted_select(remaining, count, constraint)
+                # 有约束：保证满足约束的选取
+                result[pos] = self._constrained_select(remaining, count, constraint)
                 for c in result[pos]:
                     remaining.remove(c)
 
     @staticmethod
-    def _weighted_select(
+    def _constrained_select(
         pool: List[Card],
         count: int,
         constraint: "BidConstraint",
     ) -> List[Card]:
-        """从 pool 中加权随机选出 count 张牌，倾向满足约束。"""
-        from bridge.mcts.constraints import HCP_MAP
-
+        """从 pool 中选 count 张牌，保证满足花色下限和HCP约束。"""
         if count >= len(pool):
             return list(pool)
 
-        # key / weight: 高权重 → 低 adjusted → 排序靠前
-        scored = []
-        for c in pool:
-            weight = 1.0
-            for suit, min_len in constraint.suit_min.items():
-                if c.suit == suit:
-                    weight *= 3.0
-            hcp = HCP_MAP.get(c.rank, 0)
-            weight *= (1.0 + hcp * 0.3)
-            adjusted = random.random() / weight
-            scored.append((adjusted, c))
+        selected: List[Card] = []
+        remaining: List[Card] = list(pool)
 
-        scored.sort(key=lambda x: x[0])
-        return [c for _, c in scored[:count]]
+        # Step 1: 满足花色下限（同花色内优先高HCP，避免锁死低HCP牌）
+        for suit, min_len in constraint.suit_min.items():
+            if min_len <= 0:
+                continue
+            suit_cards = [c for c in remaining if c.suit == suit]
+            n_pick = min(min_len, len(suit_cards))
+            if n_pick > 0:
+                suit_cards.sort(key=lambda c: -(HCP_MAP.get(c.rank, 0) + random.random() * 0.5))
+                picked = suit_cards[:n_pick]
+                selected.extend(picked)
+                for c in picked:
+                    remaining.remove(c)
+
+        # Step 2: 补满 count 张（优先高HCP + 随机扰动）
+        need = count - len(selected)
+        if need > 0:
+            scored = [(HCP_MAP.get(c.rank, 0) + random.random() * 2, c) for c in remaining]
+            scored.sort(key=lambda x: -x[0])
+            for _, c in scored[:need]:
+                selected.append(c)
+                remaining.remove(c)
+
+        # Step 3: 满足HCP下限 — 用小牌换大牌，优先同花色替换
+        if constraint.min_hcp is not None:
+            for _ in range(200):
+                current = sum(HCP_MAP.get(c.rank, 0) for c in selected)
+                if current >= constraint.min_hcp:
+                    break
+                low = min(selected, key=lambda c: HCP_MAP.get(c.rank, 0))
+                low_hcp = HCP_MAP.get(low.rank, 0)
+                low_suit = low.suit
+                # 优先选同花色高HCP牌（不妨碍花色下限），再考虑其他花色
+                same_suit = [c for c in remaining if c.suit == low_suit and HCP_MAP.get(c.rank, 0) > low_hcp]
+                other_suit = [c for c in remaining if c.suit != low_suit and HCP_MAP.get(c.rank, 0) > low_hcp]
+                candidates = same_suit + other_suit
+                if not candidates:
+                    break
+                high = max(candidates, key=lambda c: HCP_MAP.get(c.rank, 0))
+                # 检查花色下限
+                selected.remove(low)
+                selected.append(high)
+                suit_ok = True
+                for suit, min_len in constraint.suit_min.items():
+                    if sum(1 for c in selected if c.suit == suit) < min_len:
+                        suit_ok = False
+                        break
+                if suit_ok:
+                    remaining.append(low)
+                    remaining.remove(high)
+                else:
+                    selected.remove(high)
+                    selected.append(low)
+
+        # Step 4: 满足HCP上限 — 用大牌换小牌，优先同花色替换
+        if constraint.max_hcp is not None:
+            for _ in range(200):
+                current = sum(HCP_MAP.get(c.rank, 0) for c in selected)
+                if current <= constraint.max_hcp:
+                    break
+                high = max(selected, key=lambda c: HCP_MAP.get(c.rank, 0))
+                high_hcp = HCP_MAP.get(high.rank, 0)
+                high_suit = high.suit
+                same_suit = [c for c in remaining if c.suit == high_suit and HCP_MAP.get(c.rank, 0) < high_hcp]
+                other_suit = [c for c in remaining if c.suit != high_suit and HCP_MAP.get(c.rank, 0) < high_hcp]
+                candidates = same_suit + other_suit
+                if not candidates:
+                    break
+                low = min(candidates, key=lambda c: HCP_MAP.get(c.rank, 0))
+                selected.remove(high)
+                selected.append(low)
+                suit_ok = True
+                for suit, min_len in constraint.suit_min.items():
+                    if sum(1 for c in selected if c.suit == suit) < min_len:
+                        suit_ok = False
+                        break
+                if suit_ok:
+                    remaining.append(high)
+                    remaining.remove(low)
+                else:
+                    selected.remove(low)
+                    selected.append(high)
+
+        return selected

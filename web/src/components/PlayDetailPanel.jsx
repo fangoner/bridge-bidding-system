@@ -124,9 +124,17 @@ function PlayDetailPanel({
           <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#1976d2', fontSize: '0.85rem' }}>
             {record.position}家 - {record.card?.suit}{record.card?.rank}
           </Typography>
-          {record.used_engine === 'mcts' ? (
+          {(record.used_engine || '') === 'dd' ? (
+            <Typography variant="caption" sx={{ color: '#1565c0', fontSize: '0.7rem', fontWeight: 500 }}>
+              DD
+            </Typography>
+          ) : record.used_engine === 'mcts' ? (
             <Typography variant="caption" sx={{ color: '#2e7d32', fontSize: '0.7rem', fontWeight: 500 }}>
               MCTS
+            </Typography>
+          ) : record.used_engine === 'hybrid' ? (
+            <Typography variant="caption" sx={{ color: '#7b1fa2', fontSize: '0.7rem', fontWeight: 500 }}>
+              Hybrid
             </Typography>
           ) : record.used_model && (
             <Typography variant="caption" sx={{ color: colorMuted, fontSize: '0.7rem' }}>
@@ -156,7 +164,11 @@ function PlayDetailPanel({
         {viewMode === 'output' ? (
           // 输出模式：显示AI返回的字段
           <>
-            {fields.map(({ key, label, color, multiline }) => {
+            {fields.filter(({ key }) => {
+              const isNonLLM = record.used_engine && record.used_engine !== 'llm'
+              if (!isNonLLM) return true
+              return key !== '候选对比' && key !== '核心逻辑'
+            }).map(({ key, label, color, multiline }) => {
               const value = getValue(key)
               if (!value) return null
               return (
@@ -184,20 +196,24 @@ function PlayDetailPanel({
                 </Box>
               )
             })}
-            {record.used_engine === 'mcts' && (() => {
+            {(record.used_engine === 'mcts' || (record.used_engine || '') === 'dd' || record.used_engine === 'hybrid') && (() => {
               try {
                 const mctsRaw = fullOutput.mcts_stats
                 if (!mctsRaw) { console.log('[MCTS] no mcts_stats in fullOutput'); return null }
                 const mctsData = typeof mctsRaw === 'string' ? JSON.parse(mctsRaw) : mctsRaw
                 const candidates = mctsData.candidates
                 if (!candidates || candidates.length === 0) { console.log('[MCTS] no candidates'); return null }
-                const maxVisits = Math.max(...candidates.map(c => c.visits), 1)
+                const isDD = (record.used_engine || '') === 'dd' || candidates[0].samples !== undefined
+
+                // MCTS: bar width = visits比例; DD: bar width = avg_tricks比例
+                const barValues = candidates.map(c => isDD ? (c.avg_tricks || 0) : (c.visits || 0))
+                const maxVal = Math.max(...barValues.map(v => Math.abs(v)), 0.01)
                 const barColors = ['#1976d2', '#42a5f5', '#90caf9', '#bbdefb', '#e3f2fd']
                 console.log('[MCTS] rendering bars:', mctsData.iterations, 'candidates:', candidates.length)
                 return (
                   <Box key="mcts" sx={{ mt: 0.75 }}>
                     <Typography variant="caption" sx={{ fontSize: '0.7rem', color: colorMuted, mb: 0.25, display: 'block' }}>
-                      MCTS: {mctsData.iterations}次搜索 · {mctsData.time_sec}s · {mctsData.iters_per_sec}it/s · 剩{mctsData.remaining_cards}张
+                      {isDD ? 'DDMC' : 'MCTS'}: {mctsData.iterations}次搜索 · {mctsData.time_sec}s · {mctsData.iters_per_sec}it/s · 剩{mctsData.remaining_cards}张
                     </Typography>
                     {candidates.map((c, i) => (
                       <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.15 }}>
@@ -206,7 +222,7 @@ function PlayDetailPanel({
                         </Typography>
                         <Box sx={{ flex: 1, height: 12, bgcolor: isDark ? 'rgba(255,255,255,0.06)' : '#eee', borderRadius: 0.5, overflow: 'hidden' }}>
                           <Box sx={{
-                            width: `${(c.visits / maxVisits) * 100}%`,
+                            width: `${(Math.abs(barValues[i]) / maxVal) * 100}%`,
                             height: '100%',
                             bgcolor: barColors[i] || '#90caf9',
                             borderRadius: 0.5,
@@ -214,7 +230,7 @@ function PlayDetailPanel({
                           }} />
                         </Box>
                         <Typography variant="caption" sx={{ minWidth: 68, fontSize: '0.65rem', color: colorMuted, textAlign: 'right' }}>
-                          {c.visits}次 · {c.avg_tricks}墩
+                          {isDD ? `${c.avg_tricks}墩 [${c.min_tricks}-${c.max_tricks}]` : `${c.visits}次 · ${c.avg_tricks}墩`}
                         </Typography>
                       </Box>
                     ))}
@@ -257,6 +273,9 @@ function PlayDetailPanel({
     }
 
     if (!isPaused) {
+      if (selectedRecord) {
+        return renderAIOutputCard(selectedRecord, true)
+      }
       const latestRecord = aiPlayHistory?.[aiPlayHistory.length - 1]
       return renderAIOutputCard(latestRecord || null)
     }
@@ -430,7 +449,7 @@ function PlayDetailPanel({
               const color = SUIT_COLOR_MAP[card.suit] || '#000'
               const aiRecord = getAIRecordForCard(pos, card)
               const isSelected = selectedRecord === aiRecord
-              const canClick = isPaused && aiRecord
+              const canClick = !!aiRecord
               
               return (
                 <Box 
@@ -567,7 +586,7 @@ function PlayDetailPanel({
                 暂停
               </Button>
             )}
-            {((!isComplete && playStarted && isPaused) || (isComplete && !isHistoryRecord)) && onUndoPlay && (
+            {((!isComplete && playStarted) || (isComplete && !isHistoryRecord)) && onUndoPlay && (
               <Button
                 variant="outlined"
                 color="secondary"

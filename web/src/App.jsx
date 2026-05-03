@@ -340,10 +340,24 @@ function App({ darkMode, onToggleDarkMode }) {
     }
   })
 
-  const handlePlayEngineChange = (event) => {
-    const value = event.target.checked ? 'mcts' : 'llm'
+  const handlePlayEngineChange = (value) => {
     setPlayEngineState(value)
     localStorage.setItem(PLAY_ENGINE_KEY, value)
+  }
+
+  const DD_SAMPLE_COUNT_KEY = 'bridge_dd_sample_count'
+  const [ddSampleCount, setDDSampleCount] = useState(() => {
+    try {
+      return parseInt(localStorage.getItem(DD_SAMPLE_COUNT_KEY)) || 100
+    } catch {
+      return 100
+    }
+  })
+
+  const handleDDSampleCountChange = (value) => {
+    const num = parseInt(value) || 100
+    setDDSampleCount(num)
+    localStorage.setItem(DD_SAMPLE_COUNT_KEY, num)
   }
 
   const checkApiStatus = async () => {
@@ -1589,7 +1603,7 @@ function App({ darkMode, onToggleDarkMode }) {
     setError(null)
     
     try {
-      const result = await aiPlay(playModel, playReasoning, playEngine)
+      const result = await aiPlay(playModel, playReasoning, playEngine, ddSampleCount)
       console.log('[AI Play] playModel:', playModel, 'used_model:', result.used_model, 'used_engine:', result.used_engine, 'has_mcts_stats:', !!result.full_output?.mcts_stats)
       
       if (result.success) {
@@ -1823,11 +1837,10 @@ function App({ darkMode, onToggleDarkMode }) {
     const prevTricksCount = prevTricksCountRef.current
     const phase = playState.phase
 
-    // 如果墩数增加了，说明一墩完成，自动暂停
+    // 一墩完成时不自动暂停（连续自动打牌，手动暂停按钮仍可用）
     if (currentTricksCount > prevTricksCount && playState.tricks && playState.tricks.length > 0) {
       const lastTrick = playState.tricks[playState.tricks.length - 1]
       setLastCompletedTrick(lastTrick)
-      setIsPlayPaused(true)
       setSelectedPlayRecord(null)
     }
 
@@ -2117,6 +2130,8 @@ function App({ darkMode, onToggleDarkMode }) {
         handlePlayReasoningChange={handlePlayReasoningChange}
         playEngine={playEngine}
         handlePlayEngineChange={handlePlayEngineChange}
+        ddSampleCount={ddSampleCount}
+        handleDDSampleCountChange={handleDDSampleCountChange}
         dealSystem={dealSystem}
         setDealSystem={setDealSystem}
         dealMode={dealMode}

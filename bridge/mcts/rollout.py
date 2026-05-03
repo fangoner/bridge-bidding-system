@@ -2,7 +2,7 @@ import random
 from typing import Dict, List, Optional
 
 from bridge.play_types import Card, POSITION_ORDER, PARTNERS
-from bridge.mcts.state_utils import clone_hands, get_playable_from_hands, apply_play_to_state
+from bridge.mcts.state_utils import clone_hands, get_playable_from_hands, apply_play_to_state, trick_winner
 
 
 class HeuristicRollout:
@@ -85,7 +85,7 @@ class HeuristicRollout:
                 return self._follow_suit(playable, trick_cards, trump)
             else:
                 # 将吃或垫牌
-                return self._discard_or_trump(playable, trick_cards, trump)
+                return self._discard_or_trump(playable, trick_cards, trump, position)
 
     def _lead_card(self, playable: List[Card], hand: List[Card]) -> Card:
         """领出：从最长套中选最大牌"""
@@ -121,11 +121,18 @@ class HeuristicRollout:
         # 不能赢，跟最小
         return min(playable, key=lambda c: c.rank_value)
 
-    def _discard_or_trump(self, playable: List[Card], trick_cards: list, trump: str) -> Card:
-        """不能跟领出花色时：将吃或垫牌"""
+    def _discard_or_trump(self, playable: List[Card], trick_cards: list, trump: str,
+                          position: str = "") -> Card:
+        """不能跟领出花色时：将吃或垫牌。同伴赢则垫，敌方赢则将。"""
         if trump and trump != "NT":
             trump_cards = [c for c in playable if c.suit == trump]
             if trump_cards:
+                # 判断当前谁在赢这墩
+                partner = PARTNERS.get(position, "")
+                current_winner = trick_winner(trick_cards, trump)
+                if current_winner in (partner, position):
+                    # 同伴或自己已经在赢，不浪费将牌，垫牌
+                    return min(playable, key=lambda c: (c.suit_order, c.rank_value))
                 # 检查是否已有将吃 需要超将吃
                 best_trump_played = None
                 for _, c in trick_cards:
@@ -140,6 +147,7 @@ class HeuristicRollout:
                 return min(trump_cards, key=lambda c: c.rank_value)
         # 垫牌：垫最小
         return min(playable, key=lambda c: (c.suit_order, c.rank_value))
+
 
 
 class RandomizedRollout:
@@ -283,7 +291,7 @@ class RandomizedRollout:
             trump_cards = [c for c in playable if c.suit == trump]
             if trump_cards:
                 # 判断当前谁在赢这墩
-                current_winner = self._current_trick_winner(trick_cards, trump)
+                current_winner = trick_winner(trick_cards, trump)
                 partner = PARTNERS.get(position, "")
                 is_partner_winning = current_winner in (partner, position)
 
@@ -315,22 +323,3 @@ class RandomizedRollout:
         # 按手牌张数升序（先垫短套），张数相同时垫小牌
         return min(playable, key=lambda c: (suit_counts.get(c.suit, 0), c.rank_value))
 
-    @staticmethod
-    def _current_trick_winner(trick_cards: list, trump: str) -> str:
-        """判断当前墩谁是临时赢家（牌未出完也适用）。"""
-        if not trick_cards:
-            return ""
-        lead_suit = trick_cards[0][1].suit
-        winning_pos, winning_card = trick_cards[0]
-        for pos, card in trick_cards[1:]:
-            if trump and trump != "NT":
-                if card.suit == trump:
-                    if winning_card.suit != trump or card.rank_value > winning_card.rank_value:
-                        winning_pos, winning_card = pos, card
-                elif card.suit == lead_suit and winning_card.suit != trump:
-                    if card.rank_value > winning_card.rank_value:
-                        winning_pos, winning_card = pos, card
-            else:
-                if card.suit == lead_suit and card.rank_value > winning_card.rank_value:
-                    winning_pos, winning_card = pos, card
-        return winning_pos

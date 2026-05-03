@@ -1,5 +1,4 @@
 from typing import Dict, List, Optional
-from copy import deepcopy
 
 from bridge.play_types import Card, PlayState, POSITION_ORDER
 
@@ -49,9 +48,36 @@ def hand_str_to_cards(s: str) -> List[Card]:
 
 
 def clone_hands(hands: Dict[str, List[Card]]) -> Dict[str, List[Card]]:
-    """深拷贝手牌字典，生成新的Card对象"""
-    return {pos: [Card(suit=c.suit, rank=c.rank) for c in cards]
-            for pos, cards in hands.items()}
+    """浅拷贝手牌字典。Card是值对象（__eq__按值），无需重建。"""
+    return {pos: list(cards) for pos, cards in hands.items()}
+
+
+def trick_winner(trick_cards: list, trump: str) -> str:
+    """判断一墩的赢家位置。
+
+    Args:
+        trick_cards: [(position, Card), ...] 至少1张牌
+        trump: 将牌花色，"NT"表示无将
+
+    Returns:
+        赢家位置字符串（"北"/"东"/"南"/"西"）
+    """
+    if not trick_cards:
+        return ""
+    lead_suit = trick_cards[0][1].suit
+    winning_pos, winning_card = trick_cards[0]
+    for pos, card in trick_cards[1:]:
+        if trump and trump != "NT":
+            if card.suit == trump:
+                if winning_card.suit != trump or card.rank_value > winning_card.rank_value:
+                    winning_pos, winning_card = pos, card
+            elif card.suit == lead_suit and winning_card.suit != trump:
+                if card.rank_value > winning_card.rank_value:
+                    winning_pos, winning_card = pos, card
+        else:
+            if card.suit == lead_suit and card.rank_value > winning_card.rank_value:
+                winning_pos, winning_card = pos, card
+    return winning_pos
 
 
 def playstate_to_deal(state: PlayState) -> Optional["Deal"]:
@@ -133,24 +159,7 @@ def apply_play_to_state(
     trick_complete = len(trick_cards) == 4
 
     if trick_complete:
-        # 判断赢家
-        lead_suit = trick_cards[0][1].suit
-        winning_pos, winning_card = None, None
-        for pos, c in trick_cards:
-            if winning_card is None:
-                winning_pos, winning_card = pos, c
-                continue
-            if trump and trump != "NT":
-                if c.suit == trump:
-                    if winning_card.suit != trump or c.rank_value > winning_card.rank_value:
-                        winning_pos, winning_card = pos, c
-                elif c.suit == lead_suit and winning_card.suit != trump:
-                    if c.rank_value > winning_card.rank_value:
-                        winning_pos, winning_card = pos, c
-            else:
-                if c.suit == lead_suit and c.rank_value > winning_card.rank_value:
-                    winning_pos, winning_card = pos, c
-
+        winning_pos = trick_winner(trick_cards, trump)
         if winning_pos in (contract_declarer, dummy):
             declarer_tricks += 1
         else:

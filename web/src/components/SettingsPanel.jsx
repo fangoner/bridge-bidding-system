@@ -1,4 +1,4 @@
-import { Box, Typography, Paper, FormControl, InputLabel, Select, MenuItem, Button, Divider, Switch, FormControlLabel } from '@mui/material'
+import { Box, Typography, Paper, FormControl, InputLabel, Select, MenuItem, Button, Divider, Switch, FormControlLabel, TextField } from '@mui/material'
 
 function SettingsPanel({
   showSettings,
@@ -14,6 +14,8 @@ function SettingsPanel({
   handlePlayReasoningChange,
   playEngine,
   handlePlayEngineChange,
+  ddSampleCount,
+  handleDDSampleCountChange,
   dealSystem,
   setDealSystem,
   dealMode,
@@ -77,7 +79,7 @@ function SettingsPanel({
             打牌设置
           </Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
-            <FormControl sx={{ minWidth: 140 }} size="small">
+            <FormControl sx={{ minWidth: 140 }} size="small" disabled={playEngine !== 'llm'}>
               <InputLabel>模型</InputLabel>
               <Select value={playModel} label="模型" onChange={handlePlayModelChange}>
                 <MenuItem value="deepseek-v4-flash">V4-Flash</MenuItem>
@@ -90,22 +92,37 @@ function SettingsPanel({
                 <Switch
                   checked={playReasoning}
                   onChange={handlePlayReasoningChange}
+                  disabled={playEngine !== 'llm'}
                 />
               }
               label="深度思考"
               sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem', whiteSpace: 'nowrap' } }}
             />
 
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={playEngine === 'mcts'}
-                  onChange={handlePlayEngineChange}
-                />
-              }
-              label="MCTS搜索"
-              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem', whiteSpace: 'nowrap' } }}
-            />
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>打牌引擎</InputLabel>
+              <Select
+                value={playEngine}
+                onChange={(e) => handlePlayEngineChange(e.target.value)}
+                label="打牌引擎"
+              >
+                <MenuItem value="llm">LLM 大模型</MenuItem>
+                <MenuItem value="mcts">MCTS 搜索</MenuItem>
+                <MenuItem value="dd">DD 蒙地卡罗</MenuItem>
+                <MenuItem value="hybrid">Hybrid 混合</MenuItem>
+              </Select>
+            </FormControl>
+            {(playEngine === 'dd' || playEngine === 'hybrid') && (
+              <TextField
+                label="采样数"
+                type="number"
+                size="small"
+                value={ddSampleCount}
+                onChange={(e) => handleDDSampleCountChange(e.target.value)}
+                InputProps={{ inputProps: { min: 1, max: 10000 } }}
+                sx={{ minWidth: 80, maxWidth: 120 }}
+              />
+            )}
           </Box>
         </Box>
 
