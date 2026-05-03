@@ -282,13 +282,21 @@ class PlayState:
     def play_card(self, position: str, card: Card, is_ai: bool = False, reason: str = None, risk: str = None) -> bool:
         if position != self.current_player:
             return False
-        
-        playable = self.get_playable_cards(position)
-        if card not in playable:
-            return False
-        
+
+        hand = self.hands.get(position)
+        is_hand_unknown = not hand
+
+        if is_hand_unknown:
+            is_human = self.player_roles.get(position) == PlayerRole.HUMAN.value
+            if not is_human:
+                return False
+        else:
+            playable = self.get_playable_cards(position)
+            if card not in playable:
+                return False
+            hand.remove(card)
+
         self.current_trick.add_card(position, card, is_ai, reason, risk)
-        self.hands[position].remove(card)
         
         if self.current_trick.is_complete():
             winner = self.current_trick.winner()
@@ -378,11 +386,21 @@ class PlayState:
         rank_order = {"A": 0, "K": 1, "Q": 2, "J": 3, "T": 4, "9": 5, "8": 6, "7": 7, "6": 8, "5": 9, "4": 10, "3": 11, "2": 12}
         self.hands[position].sort(key=lambda c: (suit_order.get(c.suit, 0), rank_order.get(c.rank, 0)))
     
+    def set_hand(self, position: str, hand: Dict[str, str]) -> bool:
+        """更新一家的手牌（如首攻后输入明手整手牌）"""
+        cards = parse_hand_to_cards(hand)
+        if not cards:
+            return False
+        self.hands[position] = cards
+        self._sort_hand(position)
+        return True
+    
     def to_dict(self) -> dict:
         return {
             "contract": self.contract.to_dict() if self.contract else None,
             "hands": {pos: [c.to_dict() for c in cards] for pos, cards in self.hands.items()},
             "dummy": self.dummy,
+            "bidding_sequence": self.bidding_sequence,
             "player_roles": self.player_roles,
             "tricks": [t.to_dict() for t in self.tricks],
             "current_trick": self.current_trick.to_dict(),

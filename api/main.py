@@ -1181,6 +1181,37 @@ class PlayAIRequest(BaseModel):
     dd_sample_count: Optional[int] = None  # DD 蒙地卡罗采样数
 
 
+class SetHandRequest(BaseModel):
+    position: str
+    hand: dict
+
+
+class SetHandResponse(BaseModel):
+    success: bool
+    state: Optional[dict] = None
+    message: Optional[str] = None
+    error: Optional[str] = None
+
+
+@app.post("/api/play/set-hand", response_model=SetHandResponse)
+async def set_play_hand(request: SetHandRequest):
+    """设置一家的手牌（如首攻后输入明手整手牌）"""
+    try:
+        service = get_play_service()
+        success, message = service.set_hand(request.position, request.hand)
+        return SetHandResponse(
+            success=success,
+            state=service.get_state_dict(),
+            message=message,
+            error=None if success else message,
+        )
+    except Exception as e:
+        return SetHandResponse(
+            success=False,
+            error=str(e),
+        )
+
+
 class PlayAIResponse(BaseModel):
     success: bool
     card: Optional[dict] = None

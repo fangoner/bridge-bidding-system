@@ -68,6 +68,9 @@ class PlayService:
     def get_state_dict(self) -> Optional[dict]:
         return self.engine.get_state_dict()
     
+    def set_hand(self, position: str, hand: Dict[str, str]) -> tuple:
+        return self.engine.set_hand(position, hand)
+    
     def play_card(self, position: str, card: Card, is_ai: bool = False, reason: str = None, risk: str = None) -> tuple:
         return self.engine.play_card(position, card, is_ai, reason, risk)
     

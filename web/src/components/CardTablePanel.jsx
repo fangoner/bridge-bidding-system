@@ -40,6 +40,7 @@ function CardTablePanel({
   height = '680px',
   playState,
   showPlayPanel,
+  isSimulated,
   declarer,
   lastCompletedTrick,
   isPlayPaused,
@@ -51,6 +52,7 @@ function CardTablePanel({
   setPlayCenterView,
   aiBiddingHistory,
   onPlayCardClick,
+  onSetPlayHand,
 }) {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
@@ -144,26 +146,28 @@ function CardTablePanel({
             <FormControlLabel
               control={
                 <Checkbox
-                  checked={showAIHands}
+                  checked={isSimulated ? false : showAIHands}
                   onChange={(e) => setShowAIHands(e.target.checked)}
                   size="small"
+                  disabled={isSimulated}
                 />
               }
               label="AI手牌"
-              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
+              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem', mr: 0, height: 24 } }}
             />
           ) : null}
           {showPlayPanel && (
             <FormControlLabel
               control={
                 <Checkbox
-                  checked={showDeclarerHand}
+                  checked={isSimulated ? false : showDeclarerHand}
                   onChange={(e) => setShowDeclarerHand(e.target.checked)}
                   size="small"
+                  disabled={isSimulated}
                 />
               }
               label="庄家手牌"
-              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
+              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem', mr: 0, height: 24 } }}
             />
           )}
           {showPlayPanel && (
@@ -222,6 +226,7 @@ function CardTablePanel({
           declarer={declarer}
           playState={playState}
           showPlayPanel={showPlayPanel}
+          isSimulated={isSimulated}
           lastCompletedTrick={lastCompletedTrick}
           isPlayPaused={isPlayPaused}
           playInitiated={playInitiated}
@@ -230,6 +235,7 @@ function CardTablePanel({
           playCenterView={playCenterView}
           aiBiddingHistory={aiBiddingHistory}
           onPlayCardClick={onPlayCardClick}
+          onSetPlayHand={onSetPlayHand}
         />
       </Box>
     </Paper>

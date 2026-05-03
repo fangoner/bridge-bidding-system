@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Box, Typography, Paper, Chip, Divider, CircularProgress, Button, Card as MuiCard, ToggleButtonGroup, ToggleButton, useTheme } from '@mui/material'
+import { Box, Typography, Paper, Chip, Divider, CircularProgress, Button, Card as MuiCard, ToggleButtonGroup, ToggleButton, TextField, useTheme } from '@mui/material'
 import { SUIT_COLOR_MAP } from '../constants/suits'
 
 function PlayDetailPanel({
@@ -9,6 +9,7 @@ function PlayDetailPanel({
   selectedCard,
   onCardSelect,
   onConfirmPlay,
+  onManualPlay,
   loading,
   aiLoading,
   isPaused,
@@ -28,7 +29,8 @@ function PlayDetailPanel({
   canSave,
 }) {
   const [selectedRecord, setSelectedRecord] = useState(null)
-  const [viewMode, setViewMode] = useState('output')  // 'output' or 'input'
+  const [viewMode, setViewMode] = useState('output')
+  const [manualCardInput, setManualCardInput] = useState('')
   const prevIsPausedRef = useRef(isPaused)
   
   useEffect(() => {
@@ -313,7 +315,35 @@ function PlayDetailPanel({
     if (currentHand.length === 0) {
       return (
         <Box sx={{ textAlign: 'center', py: 1 }}>
-          <Typography color="text.secondary" variant="body2">无手牌数据</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            未知手牌 — 直接输入牌张
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', justifyContent: 'center' }}>
+            <TextField
+              size="small"
+              placeholder="如 ♠A 或 S A"
+              value={manualCardInput}
+              onChange={(e) => setManualCardInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && manualCardInput.trim()) {
+                  onManualPlay?.(playState?.current_player, manualCardInput.trim())
+                  setManualCardInput('')
+                }
+              }}
+              sx={{ width: 140, '& input': { fontSize: '0.85rem', textAlign: 'center' } }}
+            />
+            <Button
+              variant="contained"
+              size="small"
+              disabled={!manualCardInput.trim()}
+              onClick={() => {
+                onManualPlay?.(playState?.current_player, manualCardInput.trim())
+                setManualCardInput('')
+              }}
+            >
+              出牌
+            </Button>
+          </Box>
         </Box>
       )
     }

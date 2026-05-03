@@ -325,4 +325,18 @@ export const getPlayState = async () => {
   }
 };
 
+// 设置打牌阶段的手牌（如首攻后输入明手）
+export const setPlayHand = async (position, hand) => {
+  try {
+    const response = await api.post('/api/play/set-hand', {
+      position,
+      hand,
+    });
+    return response.data;
+  } catch (error) {
+    console.error('设置手牌失败:', error);
+    throw error;
+  }
+};
+
 export default api;

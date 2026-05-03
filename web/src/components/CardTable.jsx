@@ -45,6 +45,8 @@ function CardTable({
   playCenterView = 'play',
   aiBiddingHistory = [],
   onPlayCardClick,
+  onSetPlayHand,
+  isSimulated = false,
 }) {
   const [handInputs, setHandInputs] = useState({
     '南': '',
@@ -127,12 +129,62 @@ function CardTable({
   }
 
   // 打牌阶段的手牌：隐藏模式下用剩余手牌，显示模式下用原始手牌+已出标记
+  const getManualPlayedCards = (position) => {
+    if (!showPlayPanel || !playState) return []
+    const cards = []
+    for (const trick of (playState.tricks || [])) {
+      for (const [pos, card] of (trick.cards || [])) {
+        if (pos === position) cards.push({ suit: card.suit, rank: card.rank })
+      }
+    }
+    for (const [pos, card] of (playState.current_trick?.cards || [])) {
+      if (pos === position) cards.push({ suit: card.suit, rank: card.rank })
+    }
+    return cards
+  }
+
+  const drawHandFromPlayedCards = (position, manualCards) => {
+    const suitNames = { '♠': 'spades', '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs' }
+    const newHand = { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 }
+    const groups = { spades: [], hearts: [], diamonds: [], clubs: [] }
+    for (const c of manualCards) {
+      const sn = suitNames[c.suit]
+      if (sn) groups[sn].push(c.rank)
+    }
+    const rankOrder = 'AKQJT98765432'
+    for (const [suitName, ranks] of Object.entries(groups)) {
+      ranks.sort((a, b) => rankOrder.indexOf(a) - rankOrder.indexOf(b))
+      newHand[suitName] = ranks.join('')
+    }
+    return newHand
+  }
+
+  // 打牌阶段的手牌：隐藏模式下用剩余手牌，显示模式下用原始手牌+已出标记
   const getPlayHand = (position) => {
     if (!showPlayPanel || !playState) return hands[position]
     
     if (showPlayedCards) {
-      // 显示模式：用原始手牌，已出的牌由 HandDisplay 标记
-      return hands[position]
+      const originalHand = hands[position]
+      if (hasHand(position)) return originalHand
+      const psHand = playState.hands?.[position]
+      if (psHand && psHand.length > 0) {
+        const suitNames = { '♠': 'spades', '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs' }
+        const rankOrder = 'AKQJT98765432'
+        const newHand = { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 }
+        const groups = { spades: [], hearts: [], diamonds: [], clubs: [] }
+        for (const c of psHand) {
+          const sn = suitNames[c.suit]
+          if (sn) groups[sn].push(c.rank)
+        }
+        for (const [sn, ranks] of Object.entries(groups)) {
+          ranks.sort((a, b) => rankOrder.indexOf(a) - rankOrder.indexOf(b))
+          newHand[sn] = ranks.join('')
+        }
+        return newHand
+      }
+      const manualCards = getManualPlayedCards(position)
+      if (manualCards.length > 0) return drawHandFromPlayedCards(position, manualCards)
+      return originalHand
     }
     
     // 隐藏模式（默认）：用后端返回的剩余手牌，转为 HandDisplay 格式
@@ -217,6 +269,16 @@ function CardTable({
     setHandInputs(prev => ({ ...prev, [position]: '' }))
   }
 
+  const handleDummyHandSubmit = (position) => {
+    const result = parseHandInput(handInputs[position])
+    if (!result.valid) {
+      setInputErrors(prev => ({ ...prev, [position]: result.error }))
+      return
+    }
+    onSetPlayHand?.(position, result.hand)
+    setHandInputs(prev => ({ ...prev, [position]: '' }))
+  }
+
   const shouldShowHandContent = (position) => {
     if (showPlayPanel && playState) {
       const dummy = playState.dummy
@@ -234,6 +296,10 @@ function CardTable({
       
       const isHumanPosition = playerRoles && playerRoles[position] === 'human'
       if (isHumanPosition) {
+        return true
+      }
+
+      if (humanPosition === position) {
         return true
       }
       
@@ -542,6 +608,12 @@ function CardTable({
     const hasHandData = hasHand(position)
     const showInput = isAI && !hasHandData && !biddingStarted
     const isHuman = positionRoles && positionRoles[position] === 'human'
+    const showDummyInput = showPlayPanel && playState
+      && position === playState.dummy
+      && playState.phase !== 'lead'
+      && (!playState.hands?.[position] || playState.hands[position].length === 0)
+    const handKnownInPlay = showPlayPanel && playState?.hands?.[position]?.length > 0
+    const manualPlayedCount = showPlayPanel ? getManualPlayedCards(position).length : 0
     
     // 打牌阶段：根据模式选择手牌数据和已出牌标记
     const displayHand = getPlayHand(position)
@@ -665,7 +737,48 @@ function CardTable({
                 确认
               </Button>
             </Box>
-          ) : isHuman && !hasHandData ? (
+          ) : showDummyInput ? (
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+              {!handInputs[position] && (
+                <Box sx={{
+                  position: 'absolute',
+                  top: '8px',
+                  left: '8px',
+                  pointerEvents: 'none',
+                  fontSize: '0.75rem',
+                  zIndex: 1,
+                }}>
+                  <span style={{ color: '#000' }}>♠</span>{' '}
+                  <span style={{ color: '#d32f2f' }}>♥</span>{' '}
+                  <span style={{ color: '#f57c00' }}>♦</span>{' '}
+                  <span style={{ color: '#000' }}>♣</span>
+                </Box>
+              )}
+              <TextField
+                size="small"
+                value={handInputs[position]}
+                onChange={(e) => handleHandInputChange(position, e.target.value)}
+                error={!!inputErrors[position]}
+                helperText={inputErrors[position] || `输入明手${position}家完整手牌`}
+                fullWidth
+                multiline
+                maxRows={2}
+                sx={{ 
+                  '& .MuiInputBase-input': { fontSize: '0.75rem', padding: '4px' },
+                  '& .MuiFormHelperText-root': { fontSize: '0.6rem', margin: '2px 0 0 0' }
+                }}
+              />
+              <Button 
+                size="small" 
+                variant="contained" 
+                sx={{ mt: 0.5, fontSize: '0.7rem', py: 0.3 }}
+                onClick={() => handleDummyHandSubmit(position)}
+                disabled={!handInputs[position].trim()}
+              >
+                确认
+              </Button>
+            </Box>
+          ) : isHuman && !hasHandData && !handKnownInPlay && manualPlayedCount === 0 ? (
             <Box sx={{ 
               flex: 1,
               display: 'flex', 
@@ -684,7 +797,7 @@ function CardTable({
                 isHuman={isHuman}
                 isDealer={dealer === position}
                 isPartner={humanPosition && getPartnerPosition(humanPosition) === position}
-                showContent={shouldShowHandContent(position)}
+                showContent={shouldShowHandContent(position) || handKnownInPlay}
                 hideTitle={true}
                 playedCards={playedCardsSet}
               />

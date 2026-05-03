@@ -43,7 +43,13 @@ class PlayEngine:
         
         if position != self.state.current_player:
             return False, f"当前不是{position}出牌"
-        
+
+        is_human = self.state.player_roles.get(position) == PlayerRole.HUMAN.value
+        is_hand_unknown = not self.state.hands.get(position)
+
+        if is_human and is_hand_unknown:
+            return True, "可以出牌"
+
         playable = self.state.get_playable_cards(position)
         if card not in playable:
             return False, f"不能出这张牌，必须跟{self.state.current_trick.get_lead_suit()}" if self.state.current_trick.get_lead_suit() else "不能出这张牌"
@@ -123,6 +129,14 @@ class PlayEngine:
         if not self.state:
             return None
         return self.state.to_dict()
+    
+    def set_hand(self, position: str, hand: Dict[str, str]) -> Tuple[bool, str]:
+        if not self.state:
+            return False, "游戏未初始化"
+        success = self.state.set_hand(position, hand)
+        if not success:
+            return False, "设置手牌失败"
+        return True, "设置成功"
     
     def undo_last_card(self) -> Tuple[bool, str]:
         """撤销最近一次出牌"""

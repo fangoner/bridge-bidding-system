@@ -35,7 +35,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import HistoryIcon from '@mui/icons-material/History'
-import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, doubleDummyAnalysis, getFallbackModel, setFallbackModel, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles, undoPlay } from './services/api'
+import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, doubleDummyAnalysis, getFallbackModel, setFallbackModel, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles, undoPlay, setPlayHand } from './services/api'
 import HandDisplay from './components/HandDisplay'
 import ControlButtons from './components/ControlButtons'
 import BiddingDetailPanel from './components/BiddingDetailPanel'
@@ -249,6 +249,10 @@ function App({ darkMode, onToggleDarkMode }) {
   const [playState, setPlayState] = useState(null) // 打牌状态
   const [playLoading, setPlayLoading] = useState(false) // 打牌加载中
   const [showPlayPanel, setShowPlayPanel] = useState(false) // 显示打牌面板
+  const isSimulatedPlay = showPlayPanel && hands && ['北','东','南','西'].some(p => {
+    const h = hands[p]
+    return !h || (!h.spades && !h.hearts && !h.diamonds && !h.clubs)
+  })
   const [showPlayedCards, setShowPlayedCards] = useState(false) // 打牌时显示已出的牌
   const [playCenterView, setPlayCenterView] = useState('play') // 打牌阶段中心区域视图: 'play'/'bidding'/'result'
   const [isPlayPaused, setIsPlayPaused] = useState(false) // 打牌暂停状态
@@ -1597,6 +1601,48 @@ function App({ darkMode, onToggleDarkMode }) {
     }
   }
 
+  // 人类手动输入牌张（无手牌数据时）
+  const handleManualPlay = (position, cardStr) => {
+    cardStr = cardStr.trim()
+    // 解析格式: "♠A" / "S A" / "♠10" / "SA"
+    let suit, rank
+    const m2 = cardStr.match(/^(\S)([2-9TJQKA]|10)$/i)
+    if (m2) {
+      suit = m2[1]
+      rank = m2[2].toUpperCase() === '10' ? 'T' : m2[2].toUpperCase()
+    } else {
+      const parts = cardStr.split(/\s+/)
+      if (parts.length === 2) {
+        suit = parts[0]
+        rank = parts[1].toUpperCase() === '10' ? 'T' : parts[1].toUpperCase()
+      }
+    }
+    if (!suit || !rank) {
+      setError('无法解析牌张，请输入如 ♠A 或 S A')
+      return
+    }
+    // 花色标准化
+    const suitMap = { 'S': '♠', 'H': '♥', 'D': '♦', 'C': '♣' }
+    suit = suitMap[suit.toUpperCase()] || suit
+    handlePlayCard(position, { suit, rank })
+  }
+
+  const handleSetPlayHand = async (position, hand) => {
+    setPlayLoading(true)
+    try {
+      const result = await setPlayHand(position, hand)
+      if (result.success && result.state) {
+        setPlayState(result.state)
+      } else {
+        setError(result.error || '设置手牌失败')
+      }
+    } catch (err) {
+      setError('设置手牌失败: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setPlayLoading(false)
+    }
+  }
+
   // AI出牌
   const handleAIPlay = async () => {
     setAiThinking(true)
@@ -1801,6 +1847,13 @@ function App({ darkMode, onToggleDarkMode }) {
     }
     return positionRoles[cp] === 'human'
   }
+
+  // 模拟实战模式：显示已出默认开启
+  useEffect(() => {
+    if (isSimulatedPlay) {
+      setShowPlayedCards(true)
+    }
+  }, [isSimulatedPlay])
 
   // AI自动出牌
   useEffect(() => {
@@ -2208,6 +2261,7 @@ function App({ darkMode, onToggleDarkMode }) {
               startBidding={startBidding}
               playState={playState}
               showPlayPanel={showPlayPanel}
+              isSimulated={isSimulatedPlay}
               declarer={isBiddingComplete() ? getFinalContract()?.declarer : null}
               lastCompletedTrick={lastCompletedTrick}
               isPlayPaused={isPlayPaused}
@@ -2219,6 +2273,7 @@ function App({ darkMode, onToggleDarkMode }) {
               setPlayCenterView={setPlayCenterView}
               aiBiddingHistory={aiBiddingHistory}
               onPlayCardClick={handlePlayCardClick}
+              onSetPlayHand={handleSetPlayHand}
             />
 
             {/* 右侧面板：叫牌细节或打牌面板 */}
@@ -2229,6 +2284,7 @@ function App({ darkMode, onToggleDarkMode }) {
                 aiPlayHistory={aiPlayHistory}
                 selectedCard={selectedPlayCard}
                 onCardSelect={setSelectedPlayCard}
+                onManualPlay={handleManualPlay}
                 onConfirmPlay={() => {
                   if (selectedPlayCard && playState?.current_player) {
                     handlePlayCard(playState.current_player, selectedPlayCard)
@@ -2358,6 +2414,7 @@ function App({ darkMode, onToggleDarkMode }) {
               startBidding={startBidding}
               playState={playState}
               showPlayPanel={showPlayPanel}
+              isSimulated={isSimulatedPlay}
               declarer={isBiddingComplete() ? getFinalContract()?.declarer : null}
               lastCompletedTrick={lastCompletedTrick}
               isPlayPaused={isPlayPaused}
@@ -2369,6 +2426,7 @@ function App({ darkMode, onToggleDarkMode }) {
               setPlayCenterView={setPlayCenterView}
               aiBiddingHistory={aiBiddingHistory}
               onPlayCardClick={handlePlayCardClick}
+              onSetPlayHand={handleSetPlayHand}
             />
 
             {/* 叫牌细节面板或打牌面板 */}
@@ -2379,6 +2437,7 @@ function App({ darkMode, onToggleDarkMode }) {
                 aiPlayHistory={aiPlayHistory}
                 selectedCard={selectedPlayCard}
                 onCardSelect={setSelectedPlayCard}
+                onManualPlay={handleManualPlay}
                 onConfirmPlay={() => {
                   if (selectedPlayCard && playState?.current_player) {
                     handlePlayCard(playState.current_player, selectedPlayCard)
