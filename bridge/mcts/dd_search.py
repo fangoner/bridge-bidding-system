@@ -125,22 +125,24 @@ class DDSearch:
             samples_done += 1
 
             try:
-                # 1. 从所有采样手牌中清除已出牌（无论谁出的），再按正确位置加回
+                # 1. 安全网：从所有采样手牌中清除已出牌（正常情况下不应出现）
                 for _, card in all_played:
                     for p in sampled:
                         sampled[p] = [c for c in sampled[p] if not (c.suit == card.suit and c.rank == card.rank)]
-                for pos, card in all_played:
+
+                # 2. 只加回当前墩的牌（已完成墩的牌不保留），使每个位置均为 13-已完成墩出牌 张
+                for pos, card in trick_cards:
                     sampled[pos].append(card)
 
-                # 2. PBN → Deal
+                # 3. PBN → Deal（含当前墩出牌在手，不含已完成墩出牌）
                 pbn = _hands_to_pbn(sampled)
                 deal = Deal(pbn)
                 deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
 
-                # 3. 按顺序重放所有已出牌
-                if all_played:
-                    deal.first = POSITION_TO_PLAYER.get(all_played[0][0], Player.north)
-                    for _pos, card in all_played:
+                # 4. 只重放当前墩（避免重放已完成墩时 curplayer 墩间轮转不一致）
+                if trick_cards:
+                    deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
+                    for _pos, card in trick_cards:
                         deal.play(_to_ep(card), from_hand=True)
                 else:
                     deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
