@@ -378,10 +378,10 @@ function PlayDetailPanel({
           border: isDark ? '2px solid rgba(255, 193, 7, 0.4)' : '2px solid #ffc107',
         }}>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
-            {currentHand.map((card, idx) => {
-              const isPlayable = playableCards.some(
-                c => c.suit === card.suit && c.rank === card.rank
-              )
+            {(() => {
+              const playableSet = new Set(playableCards.map(c => c.suit + c.rank))
+              return currentHand.map((card, idx) => {
+              const isPlayable = playableSet.has(card.suit + card.rank)
               const isSelected = selectedCard?.suit === card.suit && 
                                  selectedCard?.rank === card.rank
               
@@ -415,7 +415,7 @@ function PlayDetailPanel({
                   </Typography>
                 </MuiCard>
               )
-            })}
+            })})()}
           </Box>
         </Paper>
       </Box>

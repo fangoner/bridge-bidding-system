@@ -87,13 +87,12 @@ function useBridgeRecords() {
   }
 
   const saveRecord = useCallback((record) => {
+    let resultRecords
     setRecords(prev => {
       try {
         let newRecords
-        
-        // 如果有 sourceRecordId，优先查找并覆盖该记录
         if (record.sourceRecordId) {
-          const existingIndex = prev.findIndex(r => 
+          const existingIndex = prev.findIndex(r =>
             r.id === record.sourceRecordId || r.sourceRecordId === record.sourceRecordId
           )
           if (existingIndex >= 0) {
@@ -103,61 +102,105 @@ function useBridgeRecords() {
             newRecords = [record, ...prev]
           }
         } else {
-          // 没有sourceRecordId时，始终创建新记录
           newRecords = [record, ...prev]
         }
-        
         newRecords = newRecords.slice(0, 100)
-        localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(newRecords))
+        resultRecords = newRecords
         return newRecords
       } catch (err) {
         console.error('保存记录失败:', err)
+        resultRecords = prev
         return prev
       }
     })
+    if (resultRecords) {
+      try {
+        localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(resultRecords))
+      } catch (err) {
+        if (err.name === 'QuotaExceededError' && resultRecords.length > 10) {
+          console.warn('localStorage quota 超限，自动清理旧记录')
+          const trimmed = resultRecords.slice(0, resultRecords.length - 10)
+          try {
+            localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(trimmed))
+            setRecords(trimmed)
+          } catch (e2) {
+            console.error('清理后仍无法保存:', e2)
+          }
+        } else {
+          console.error('持久化记录失败:', err)
+        }
+      }
+    }
   }, [])
 
   const deleteRecord = useCallback((id) => {
+    let resultRecords
     setRecords(prev => {
       try {
         const newRecords = prev.filter(r => r.id !== id)
-        localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(newRecords))
+        resultRecords = newRecords
         return newRecords
       } catch (err) {
         console.error('删除记录失败:', err)
+        resultRecords = prev
         return prev
       }
     })
+    if (resultRecords) {
+      try {
+        localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(resultRecords))
+      } catch (err) {
+        console.error('持久化记录失败:', err)
+      }
+    }
   }, [])
 
   const deleteRecords = useCallback((ids) => {
+    let resultRecords
     setRecords(prev => {
       try {
         const idsSet = new Set(ids)
         const newRecords = prev.filter(r => !idsSet.has(r.id))
-        localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(newRecords))
+        resultRecords = newRecords
         return newRecords
       } catch (err) {
         console.error('批量删除记录失败:', err)
+        resultRecords = prev
         return prev
       }
     })
     setSelectedRecordIds(new Set())
+    if (resultRecords) {
+      try {
+        localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(resultRecords))
+      } catch (err) {
+        console.error('持久化记录失败:', err)
+      }
+    }
   }, [])
 
   const updateRecordNote = useCallback((id, note) => {
+    let resultRecords
     setRecords(prev => {
       try {
         const newRecords = prev.map(r =>
           r.id === id ? { ...r, note } : r
         )
-        localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(newRecords))
+        resultRecords = newRecords
         return newRecords
       } catch (err) {
         console.error('更新注释失败:', err)
+        resultRecords = prev
         return prev
       }
     })
+    if (resultRecords) {
+      try {
+        localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(resultRecords))
+      } catch (err) {
+        console.error('持久化记录失败:', err)
+      }
+    }
   }, [])
 
   const toggleSelectAll = useCallback(() => {

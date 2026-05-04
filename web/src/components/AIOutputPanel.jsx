@@ -169,7 +169,7 @@ function AIOutputPanel({
                   {record.timestamp} - {record.position}家
                 </Typography>
                 <Typography variant="body2" sx={{ mt: 1 }}>
-                  <strong>手牌:</strong> {record.hand.display}
+                  <strong>手牌:</strong> {record.hand?.display || '未知'}
                 </Typography>
                 <Typography variant="body2" sx={{ mt: 1 }}>
                   <strong>叫牌序列:</strong> {record.biddingSequence || '空（开叫位置）'}

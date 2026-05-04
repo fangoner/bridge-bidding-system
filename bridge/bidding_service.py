@@ -10,10 +10,17 @@ class BiddingService:
         self.jf_retriever = jf_retriever
         self.use_fallback = False
         self.bid_meanings = ""
-    
+        self._slam_cache = None
+
     def reset(self):
         self.use_fallback = False
         self.bid_meanings = ""
+        self._slam_cache = None
+
+    def _get_slam_result(self, bidding_sequence, partner_name):
+        if self._slam_cache is None:
+            self._slam_cache = self.jf_retriever.retrieve_with_preprocess("成局与满贯", bidding_sequence, partner_name)
+        return self._slam_cache
     
     def set_bid_meanings(self, bid_meanings: str):
         self.bid_meanings = bid_meanings
@@ -122,7 +129,7 @@ class BiddingService:
         if not jf_content:
             if verbose:
                 print(f"[ai_bid] PATH: fallback - no jf_content, using 成局与满贯")
-            slam_result = self.jf_retriever.retrieve_with_preprocess("成局与满贯", bidding_sequence, partner_name)
+            slam_result = self._get_slam_result(bidding_sequence, partner_name)
             return self._fallback_bid(
                 slam_result.get("original_content", ""),
                 "",
@@ -159,7 +166,7 @@ class BiddingService:
         if not has_subsequent:
             if verbose:
                 print(f"[ai_bid] PATH: fallback - no subsequent bids, using 成局与满贯")
-            slam_result = self.jf_retriever.retrieve_with_preprocess("成局与满贯", bidding_sequence, partner_name)
+            slam_result = self._get_slam_result(bidding_sequence, partner_name)
             return self._fallback_bid(
                 slam_result.get("original_content", ""),
                 "",
@@ -277,7 +284,7 @@ class BiddingService:
         actual_jf_keyword = jf_keyword
         
         if from_main_prompt:
-            slam_result = self.jf_retriever.retrieve_with_preprocess("成局与满贯", bidding_sequence, partner_name)
+            slam_result = self._get_slam_result(bidding_sequence, partner_name)
             actual_jf_content = slam_result.get("original_content", "")
             actual_subsequent_bids = ""
             actual_jf_keyword = "成局与满贯"

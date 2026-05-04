@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   Container,
   Typography,
@@ -43,6 +43,7 @@ import CardTablePanel from './components/CardTablePanel'
 import SettingsPanel from './components/SettingsPanel'
 import PlayPanel from './components/PlayPanel'
 import PlayDetailPanel from './components/PlayDetailPanel'
+import HistoryDialog from './components/HistoryDialog'
 import { colorSchemes, defaultScheme } from './theme/colorSchemes'
 import useBiddingState from './hooks/useBiddingState'
 import useBridgeRecords from './hooks/useBridgeRecords'
@@ -58,6 +59,7 @@ function App({ darkMode, onToggleDarkMode }) {
   
   const isLoadingRecordRef = useRef(false) // 用于标记是否正在加载历史记录（不触发保存）
   const draftRestoredRef = useRef(false) // 防止重复恢复草稿
+  const draftSaveTimerRef = useRef(null) // debounce 叫牌草稿自动保存
   const [showDraftBanner, setShowDraftBanner] = useState(false) // 显示草稿恢复提示
   const [hands, setHands] = useState({
     '南': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
@@ -220,18 +222,11 @@ function App({ darkMode, onToggleDarkMode }) {
   const {
     records: bridgeRecords, setRecords: setBridgeRecords,
     historyDialogOpen, setHistoryDialogOpen,
-    editNoteDialogOpen, setEditNoteDialogOpen,
-    editingRecordId, setEditingRecordId,
-    editingNote, setEditingNote,
-    selectedRecordIds, setSelectedRecordIds,
     loadRecords: loadBridgeRecords,
     saveRecord: saveBridgeRecord,
     deleteRecord: deleteBridgeRecord,
     deleteRecords: deleteBridgeRecords,
     updateRecordNote,
-    toggleSelectAll,
-    toggleRecordSelection,
-    exportRecords,
     importRecords,
   } = useBridgeRecords()
   const [customDealOpen, setCustomDealOpen] = useState(false) // 自定义牌局对话框
@@ -264,6 +259,10 @@ function App({ darkMode, onToggleDarkMode }) {
   const [playInitiated, setPlayInitiated] = useState(false) // 打牌是否已启动（点击"开始"后或重新打牌AI首攻）
   const [loadedPlayRecord, setLoadedPlayRecord] = useState(null) // 从历史记录预加载的打牌数据
   const prevTricksCountRef = useRef(0) // 用于检测一墩完成
+  const playStateRef = useRef(playState)
+  const aiPlayHistoryRef = useRef(aiPlayHistory)
+  useEffect(() => { playStateRef.current = playState }, [playState])
+  useEffect(() => { aiPlayHistoryRef.current = aiPlayHistory }, [aiPlayHistory])
 
   // 检查API状态
   useEffect(() => {
@@ -271,13 +270,6 @@ function App({ darkMode, onToggleDarkMode }) {
     loadBridgeRecords()
     syncFallbackModel()
   }, [])
-
-  // 打开历史记录对话框时清除上次的选中状态
-  useEffect(() => {
-    if (historyDialogOpen) {
-      setSelectedRecordIds(new Set())
-    }
-  }, [historyDialogOpen])
 
   // 同步备用模型到后端
   const syncFallbackModel = async () => {
@@ -388,6 +380,29 @@ function App({ darkMode, onToggleDarkMode }) {
   }
 
 
+
+  // Strip redundant playState fields already in board before storing
+  const stripPlayState = (ps) => {
+    if (!ps) return null
+    const { contract: _c, bidding_sequence: _b, player_roles: _p, dummy: _d, is_human_turn: _h, ...rest } = ps
+    return rest
+  }
+
+  // 存盘时裁剪：去掉 prompt（巨大文本不显示），保留 reasoning/follow_up/full_output
+  const trimPlayHistory = (h) => {
+    if (!h) return []
+    return h.map(({ prompt, ...rest }) => rest)
+  }
+  // 裁剪叫牌历史：去掉 hand/biddingSequence（board已存），保留完整 result（含 LLM 输出）
+  const trimBiddingHistory = (h) => {
+    if (!h) return []
+    return h.map(({ hand: _h, biddingSequence: _bs, ...rest }) => ({
+      ...rest,
+      hand: _h,
+    }))
+  }
+
+
   // 加载历史记录到牌桌
   const loadRecordToTable = (record) => {
     isLoadingRecordRef.current = true
@@ -426,8 +441,24 @@ function App({ darkMode, onToggleDarkMode }) {
     // 预加载打牌数据（记录含打牌数据时保存到 loadedPlayRecord，切换到打牌时直接使用）
     if (record.play && record.play.state) {
       // 保存中有完整打牌状态对象（进行中或已完成）
+      const ps = record.play.state
+      const reconstructedState = ps.contract ? ps : (ps ? {
+        ...ps,
+        contract: board.contract ? {
+          level: board.contract.level,
+          suit: board.contract.suit,
+          declarer: board.contract.declarer,
+          doubled: board.contract.isDouble || false,
+          redoubled: board.contract.isRedouble || false,
+          tricks_needed: (board.contract.level || 0) + 6,
+        } : null,
+        dummy: board.contract ? ({ 'North': 'South', 'South': 'North', 'East': 'West', 'West': 'East' }[board.contract.declarer]) : null,
+        player_roles: board.player_roles || {},
+        bidding_sequence: board.bidding_sequence || '',
+        hands: ps.hands || {},
+      } : null)
       setLoadedPlayRecord({
-        playState: record.play.state,
+        playState: reconstructedState,
         aiPlayHistory: record.play.ai_play_history || [],
       })
       setShowPlayPanel(false)
@@ -553,12 +584,14 @@ function App({ darkMode, onToggleDarkMode }) {
   // 打牌模式下是否可以保存
   const playCanSave = showPlayPanel && playState && playState.phase !== 'complete' && isPlayPaused && !aiThinking && !playLoading
 
-  // 手动保存进度
+  // 手动保存进度（使用ref避免playState/aiPlayHistory变化导致回调重建）
   const handleSaveProgress = useCallback(() => {
     if (!hands || !biddingSequence || biddingSequence.length === 0) return
+    const ps = playStateRef.current
+    const aph = aiPlayHistoryRef.current
 
     // 打牌进行中：保存打牌状态
-    if (showPlayPanel && playState && playState.phase !== 'complete') {
+    if (showPlayPanel && ps && ps.phase !== 'complete') {
       const record = {
         id: Date.now().toString(),
         timestamp: new Date().toLocaleString(),
@@ -567,12 +600,12 @@ function App({ darkMode, onToggleDarkMode }) {
         board: {
           hands: hands,
           bidding_sequence: biddingSequence,
-          contract: playState.contract ? {
-            level: playState.contract.level,
-            suit: playState.contract.suit,
-            declarer: playState.contract.declarer,
-            isDouble: playState.contract.is_double,
-            isRedouble: playState.contract.is_redouble,
+          contract: ps.contract ? {
+            level: ps.contract.level,
+            suit: ps.contract.suit,
+            declarer: ps.contract.declarer,
+            isDouble: ps.contract.is_double,
+            isRedouble: ps.contract.is_redouble,
           } : null,
           dealer: dealer,
           game_mode: gameMode,
@@ -580,12 +613,12 @@ function App({ darkMode, onToggleDarkMode }) {
           player_roles: positionRoles,
         },
         bidding: {
-          ai_bidding_history: aiBiddingHistory,
+          ai_bidding_history: trimBiddingHistory(aiBiddingHistory),
           deal_system: dealSystem,
         },
         play: {
-          state: playState,
-          ai_play_history: aiPlayHistory,
+          state: stripPlayState(ps),
+          ai_play_history: trimPlayHistory(aph),
         },
         note: ''
       }
@@ -612,18 +645,17 @@ function App({ darkMode, onToggleDarkMode }) {
         player_roles: positionRoles,
       },
       bidding: {
-        ai_bidding_history: aiBiddingHistory,
+        ai_bidding_history: trimBiddingHistory(aiBiddingHistory),
         deal_system: dealSystem,
       },
       play: null,
       note: ''
     }
     saveBridgeRecord(record)
-    // 如果之前没有记录ID，保存后设置当前记录ID
     if (!currentRecordId) {
       setCurrentRecordId(record.id)
     }
-  }, [hands, biddingSequence, dealer, gameMode, humanPosition, positionRoles, aiBiddingHistory, dealSystem, currentRecordId, showPlayPanel, playState, aiPlayHistory])
+  }, [hands, biddingSequence, dealer, gameMode, humanPosition, positionRoles, aiBiddingHistory, dealSystem, currentRecordId, showPlayPanel])
 
   // 同步 humanPosition 到 positionRoles
   useEffect(() => {
@@ -862,7 +894,7 @@ function App({ darkMode, onToggleDarkMode }) {
   }
 
   // 清除所有手牌（重新开始一局）
-  const clearAllHands = () => {
+  const clearAllHands = useCallback(() => {
     clearBiddingDraft()
     setHands({
       '南': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
@@ -885,7 +917,24 @@ function App({ darkMode, onToggleDarkMode }) {
     setPlayStarted(false)
     setPlayInitiated(false)
     setLoadedPlayRecord(null)
-  }
+  }, [])
+
+  const handleDealerChange = useCallback((pos) => {
+    setDealer(pos)
+    setCurrentBidder(pos)
+    setBiddingStarted(false)
+    setStopBidding(false)
+    setIsNewDeal(true)
+    setBiddingSequence([])
+    setAiBiddingHistory([])
+    setPassedAIPositions(new Set())
+    setShowPlayPanel(false)
+    setPlayState(null)
+    setAiPlayHistory([])
+    setSelectedPlayCard(null)
+    setIsPlayPaused(false)
+    setLoadedPlayRecord(null)
+  }, [])
 
   // 切换停止/继续叫牌
   const toggleStopBidding = () => {
@@ -1230,33 +1279,48 @@ function App({ darkMode, onToggleDarkMode }) {
 
   // 叫牌进度草稿自动保存 —— 每次叫牌序列变化时持久化到 localStorage
   useEffect(() => {
-    // 只在叫牌进行中保存（空序列或已完成都不保存）
+    // 只在叫牌进行中保存，debounce 500ms
     if (!biddingSequence || biddingSequence.length === 0) return
     if (isBiddingComplete()) return
 
-    const draft = {
-      hands,
-      dealer,
-      gameMode,
-      humanPosition,
-      positionRoles,
-      dealSystem,
-      dealMode,
-      biddingSequence,
-      currentBidder,
-      aiBiddingHistory,
-      biddingHistory,
-      historyIndex,
-      biddingStarted,
-      stopBidding,
-      passedAIPositions: Array.from(passedAIPositions),
-      biddingStartTime,
-      timestamp: Date.now(),
+    if (draftSaveTimerRef.current) {
+      clearTimeout(draftSaveTimerRef.current)
     }
-    try {
-      localStorage.setItem(BIDDING_DRAFT_KEY, JSON.stringify(draft))
-    } catch (e) {
-      console.warn('保存叫牌草稿失败:', e)
+    draftSaveTimerRef.current = setTimeout(() => {
+      const slimHistory = aiBiddingHistory.map(r => ({
+        ...r,
+        result: { bid: r.result.bid, meaning: r.result.meaning },
+      }))
+      const draft = {
+        hands,
+        dealer,
+        gameMode,
+        humanPosition,
+        positionRoles,
+        dealSystem,
+        dealMode,
+        biddingSequence,
+        currentBidder,
+        aiBiddingHistory: slimHistory,
+        biddingHistory,
+        historyIndex,
+        biddingStarted,
+        stopBidding,
+        passedAIPositions: Array.from(passedAIPositions),
+        biddingStartTime,
+        timestamp: Date.now(),
+      }
+      try {
+        localStorage.setItem(BIDDING_DRAFT_KEY, JSON.stringify(draft))
+      } catch (e) {
+        console.warn('保存叫牌草稿失败:', e)
+      }
+    }, 500)
+
+    return () => {
+      if (draftSaveTimerRef.current) {
+        clearTimeout(draftSaveTimerRef.current)
+      }
     }
   }, [biddingSequence, currentBidder, aiBiddingHistory, biddingHistory, historyIndex, biddingStarted, stopBidding, passedAIPositions])
 
@@ -1333,6 +1397,8 @@ function App({ darkMode, onToggleDarkMode }) {
     }
   }
 
+  const finalContract = useMemo(() => getFinalContract(), [biddingSequence])
+
   // 叫牌结束时自动保存记录
   useEffect(() => {
     if (isBiddingComplete() && biddingSequence.length > 0 && hands && !isLoadingRecordRef.current) {
@@ -1359,7 +1425,7 @@ function App({ darkMode, onToggleDarkMode }) {
           player_roles: positionRoles,
         },
         bidding: {
-          ai_bidding_history: aiBiddingHistory,
+          ai_bidding_history: trimBiddingHistory(aiBiddingHistory),
           deal_system: dealSystem,
         },
         play: null,
@@ -1862,6 +1928,12 @@ function App({ darkMode, onToggleDarkMode }) {
     const { phase } = playState
     const isHuman = isCurrentPlayerHuman()
 
+
+    // AI hand guard: wait for input when AI has no cards
+    if (!isHuman) {
+      const currentHand = playState.hands?.[playState.current_player]
+      if (!currentHand || currentHand.length === 0) return
+    }
     // 如果不是人类回合且游戏未结束，自动AI出牌
     if (!isHuman && phase !== 'complete') {
       const timer = setTimeout(() => {
@@ -1925,12 +1997,12 @@ function App({ darkMode, onToggleDarkMode }) {
         player_roles: positionRoles,
       },
       bidding: {
-        ai_bidding_history: aiBiddingHistory,
+        ai_bidding_history: trimBiddingHistory(aiBiddingHistory),
         deal_system: dealSystem,
       },
       play: {
         tricks: playState.tricks,
-        ai_play_history: aiPlayHistory,
+        ai_play_history: trimPlayHistory(aiPlayHistory),
         declarer_tricks: playState.declarer_tricks,
         defender_tricks: playState.defender_tricks,
       },
@@ -2121,7 +2193,7 @@ function App({ darkMode, onToggleDarkMode }) {
       <Divider sx={{ mb: 2, borderColor: 'rgba(0, 0, 0, 0.3)', borderBottomWidth: 2 }} />
 
       {/* 标题 + 控制按钮 - 桌面版 */}
-      <Box sx={{ mb: 2, display: { xs: 'none', md: 'flex' }, flexWrap: 'wrap', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
+      {!isMobile && <Box sx={{ mb: 2, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
         <Typography variant="h4" component="h1" sx={{ fontSize: '1.75rem', whiteSpace: 'nowrap' }}>
           桥牌练习系统
         </Typography>
@@ -2141,10 +2213,10 @@ function App({ darkMode, onToggleDarkMode }) {
           onToggleDarkMode={onToggleDarkMode}
           aiThinking={aiThinking}
         />
-      </Box>
+      </Box>}
 
       {/* 标题 + 控制按钮 - 手机版 */}
-      <Box sx={{ mb: 2, display: { xs: 'flex', md: 'none' }, flexWrap: 'wrap', justifyContent: 'center', gap: 1, alignItems: 'center' }}>
+      {isMobile && <Box sx={{ mb: 2, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 1, alignItems: 'center' }}>
         <Typography variant="h4" component="h1" sx={{ fontSize: '1.25rem', whiteSpace: 'nowrap' }}>
           桥牌练习系统
         </Typography>
@@ -2164,7 +2236,7 @@ function App({ darkMode, onToggleDarkMode }) {
           onToggleDarkMode={onToggleDarkMode}
           aiThinking={aiThinking}
         />
-      </Box>
+      </Box>}
 
       <Divider sx={{ my: 3, borderColor: 'rgba(0, 0, 0, 0.3)', borderBottomWidth: 2 }} />
 
@@ -2203,8 +2275,8 @@ function App({ darkMode, onToggleDarkMode }) {
       )}
 
       {/* 桌面版布局 */}
-      {hands && (
-        <Box sx={{ display: { xs: 'none', md: 'block' } }}>
+      {hands && !isMobile && (
+        <Box>
           {/* 牌桌和右侧面板并排 */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2, justifyContent: 'center' }}>
             <CardTablePanel
@@ -2237,23 +2309,7 @@ function App({ darkMode, onToggleDarkMode }) {
               biddingTotalTime={biddingTotalTime}
               positionRoles={positionRoles}
               handlePositionRoleChange={handlePositionRoleChange}
-              onDealerChange={(pos) => { 
-                setDealer(pos); 
-                setCurrentBidder(pos);
-                setBiddingStarted(false);
-                setStopBidding(false);
-                setIsNewDeal(true);
-                setBiddingSequence([]);
-                setAiBiddingHistory([]);
-                setPassedAIPositions(new Set());
-                // 重置打牌相关状态
-                setShowPlayPanel(false);
-                setPlayState(null);
-                setAiPlayHistory([]);
-                setSelectedPlayCard(null);
-                setIsPlayPaused(false);
-                setLoadedPlayRecord(null);
-              }}
+              onDealerChange={handleDealerChange}
               onClearAllHands={clearAllHands}
               setHands={setHands}
               biddingStarted={biddingStarted}
@@ -2262,7 +2318,7 @@ function App({ darkMode, onToggleDarkMode }) {
               playState={playState}
               showPlayPanel={showPlayPanel}
               isSimulated={isSimulatedPlay}
-              declarer={isBiddingComplete() ? getFinalContract()?.declarer : null}
+              declarer={finalContract?.declarer}
               lastCompletedTrick={lastCompletedTrick}
               isPlayPaused={isPlayPaused}
               playInitiated={playInitiated}
@@ -2356,8 +2412,8 @@ function App({ darkMode, onToggleDarkMode }) {
       )}
 
       {/* 手机端布局 */}
-      {hands && (
-        <Box sx={{ display: { xs: 'block', md: 'none' } }}>
+      {hands && isMobile && (
+        <Box>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {/* 当前牌局面板 */}
             <CardTablePanel
@@ -2390,23 +2446,7 @@ function App({ darkMode, onToggleDarkMode }) {
               biddingTotalTime={biddingTotalTime}
               positionRoles={positionRoles}
               handlePositionRoleChange={handlePositionRoleChange}
-              onDealerChange={(pos) => { 
-                setDealer(pos); 
-                setCurrentBidder(pos);
-                setBiddingStarted(false);
-                setStopBidding(false);
-                setIsNewDeal(true);
-                setBiddingSequence([]);
-                setAiBiddingHistory([]);
-                setPassedAIPositions(new Set());
-                // 重置打牌相关状态
-                setShowPlayPanel(false);
-                setPlayState(null);
-                setAiPlayHistory([]);
-                setSelectedPlayCard(null);
-                setIsPlayPaused(false);
-                setLoadedPlayRecord(null);
-              }}
+              onDealerChange={handleDealerChange}
               onClearAllHands={clearAllHands}
               setHands={setHands}
               biddingStarted={biddingStarted}
@@ -2415,7 +2455,7 @@ function App({ darkMode, onToggleDarkMode }) {
               playState={playState}
               showPlayPanel={showPlayPanel}
               isSimulated={isSimulatedPlay}
-              declarer={isBiddingComplete() ? getFinalContract()?.declarer : null}
+              declarer={finalContract?.declarer}
               lastCompletedTrick={lastCompletedTrick}
               isPlayPaused={isPlayPaused}
               playInitiated={playInitiated}
@@ -2529,162 +2569,35 @@ function App({ darkMode, onToggleDarkMode }) {
       )}
 
       {/* 历史记录对话框 */}
-      <Dialog open={historyDialogOpen} onClose={() => { setHistoryDialogOpen(false); setSelectedRecordIds(new Set()) }} maxWidth="md" fullWidth>
-        <DialogTitle>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            牌局历史记录
-            {bridgeRecords.length > 0 && (
-              <Button size="small" onClick={toggleSelectAll}>
-                {selectedRecordIds.size === bridgeRecords.length ? '取消全选' : '全选'}
-              </Button>
-            )}
-          </Box>
-        </DialogTitle>
-        <DialogContent dividers>
-          {bridgeRecords.length === 0 ? (
-            <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 4 }}>
-              暂无历史记录
-            </Typography>
-          ) : (
-            <List>
-              {bridgeRecords.map((record, index) => (
-                <Box key={record.id}>
-                  {index > 0 && <Divider />}
-                  <ListItem
-                    alignItems="flex-start"
-                    sx={{
-                      flexDirection: 'column',
-                      bgcolor: selectedRecordIds.has(record.id) ? 'action.selected' : 'inherit',
-                      borderRadius: 1
-                    }}
-                    onClick={() => toggleRecordSelection(record.id)}
-                  >
-                    <Box sx={{ display: 'flex', alignItems: 'flex-start', width: '100%' }}>
-                      <Checkbox
-                        checked={selectedRecordIds.has(record.id)}
-                        size="small"
-                        sx={{ mt: 0.5 }}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={() => toggleRecordSelection(record.id)}
-                      />
-                      <Box sx={{ flex: 1 }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                          <Typography variant="subtitle2">
-                            {record.timestamp}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            {record.play?.state || record.play?.tricks ? (record.type === 'play_in_progress' ? '打牌进行中' : '打牌完成') : record.type === 'bidding_in_progress' ? '叫牌进行中' : '仅叫牌完成'} | 发牌人: {(record.board?.dealer || record.dealer)}家
-                          </Typography>
-                        </Box>
-                        <Box sx={{ mt: 1 }}>
-                          <Typography variant="body2">
-                            <strong>定约:</strong> {record.board?.contract ? `${record.board.contract.level}${record.board.contract.suit} (${record.board.contract.partnership} - ${record.board.contract.declarer}家)` : (record.finalContract ? `${record.finalContract.level}${record.finalContract.suit} (${record.finalContract.partnership} - ${record.finalContract.declarer}家)` : '全部Pass')}
-                          </Typography>
-                          <Typography variant="body2" sx={{ mt: 0.5 }}>
-                            <strong>叫牌序列:</strong> {(record.board?.bidding_sequence || record.biddingSequence || []).map(b => `(${b.position})${b.bid}`).join('-') || '-'}
-                          </Typography>
-                          {record.play && (
-                            <Typography variant="body2" sx={{ mt: 0.5, color: 'primary.main' }}>
-                              <strong>打牌结果:</strong> {record.play.declarer_tricks >= (record.board?.contract?.level || 0) + 6 ? '完成' : `宕${(record.board?.contract?.level || 0) + 6 - record.play.declarer_tricks}`} ({record.play.declarer_tricks}:{record.play.defender_tricks})
-                            </Typography>
-                          )}
-                          {record.note && (
-                            <Typography variant="body2" sx={{ mt: 0.5, color: '#666' }}>
-                              <strong>注释:</strong> {record.note}
-                            </Typography>
-                          )}
-                        </Box>
-                      </Box>
-                    </Box>
-                  </ListItem>
-                </Box>
-              ))}
-            </List>
-          )}
-        </DialogContent>
-        <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
-          <Button
-            size="small"
-            disabled={selectedRecordIds.size !== 1}
-            onClick={() => {
-              const record = bridgeRecords.find(r => selectedRecordIds.has(r.id))
-              if (record) loadRecordToTable(record)
-            }}
-          >
-            加载
-          </Button>
-          <Button
-            size="small"
-            disabled={selectedRecordIds.size !== 1}
-            onClick={() => {
-              const record = bridgeRecords.find(r => selectedRecordIds.has(r.id))
-              if (record) {
-                setEditingRecordId(record.id)
-                setEditingNote(record.note || '')
-                setEditNoteDialogOpen(true)
-              }
-            }}
-          >
-            编辑注释
-          </Button>
-          <Button
-            size="small"
-            color="error"
-            disabled={selectedRecordIds.size === 0}
-            onClick={() => {
-              const selectedRecords = bridgeRecords.filter(r => selectedRecordIds.has(r.id))
-              const hasNotes = selectedRecords.some(r => r.note && r.note.trim() !== '')
-              if (hasNotes) {
-                const noteCount = selectedRecords.filter(r => r.note && r.note.trim() !== '').length
-                if (!window.confirm(`选中的记录中有 ${noteCount} 条包含注释，确定要删除吗？`)) {
-                  return
-                }
-              }
-              deleteBridgeRecords(Array.from(selectedRecordIds))
-            }}
-          >
-            删除{selectedRecordIds.size > 0 && ` (${selectedRecordIds.size})`}
-          </Button>
-          <Box sx={{ flex: 1 }} />
-          <Button component="label" size="small">
-            导入
-            <input type="file" accept=".json" hidden onChange={importRecords} />
-          </Button>
-          <Button onClick={() => { const result = exportRecords(); if (!result.success) setError(result.error) }} disabled={bridgeRecords.length === 0} size="small">
-            导出{selectedRecordIds.size > 0 && ` (${selectedRecordIds.size})`}
-          </Button>
-          <Button onClick={() => {
-            setHistoryDialogOpen(false)
-            setSelectedRecordIds(new Set())
-          }}>关闭</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* 编辑注释对话框 */}
-      <Dialog open={editNoteDialogOpen} onClose={() => setEditNoteDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>编辑注释</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="注释内容"
-            fullWidth
-            multiline
-            rows={4}
-            value={editingNote}
-            onChange={(e) => setEditingNote(e.target.value)}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setEditNoteDialogOpen(false)}>取消</Button>
-          <Button onClick={() => {
-            updateRecordNote(editingRecordId, editingNote)
-            setEditNoteDialogOpen(false)
-          }} variant="contained">
-            保存
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <HistoryDialog
+        open={historyDialogOpen}
+        onClose={() => setHistoryDialogOpen(false)}
+        records={bridgeRecords}
+        onLoad={loadRecordToTable}
+        onDelete={(ids) => deleteBridgeRecords(ids)}
+        onExport={(records) => {
+          try {
+            if (records.length === 0) { setError('没有可导出的记录'); return }
+            const exportData = { version: '2.0', exportDate: new Date().toISOString(), records }
+            const dataStr = JSON.stringify(exportData, null, 2)
+            const blob = new Blob([dataStr], { type: 'application/json' })
+            const url = URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = url
+            link.download = `bridge_records_${new Date().toISOString().slice(0, 10)}.json`
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+            URL.revokeObjectURL(url)
+          } catch (err) {
+            console.error('导出记录失败:', err)
+            setError('导出记录失败')
+          }
+        }}
+        onImport={importRecords}
+        onUpdateNote={updateRecordNote}
+        onError={setError}
+      />
 
       {/* 自定义牌局对话框 */}
       <Dialog open={customDealOpen} onClose={() => setCustomDealOpen(false)} maxWidth="md" fullWidth>

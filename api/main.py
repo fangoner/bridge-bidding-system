@@ -30,7 +30,7 @@ from bridge.bidding import (
     get_position_name,
     get_next_position,
 )
-from bridge.output_format import generate_all_outputs
+from bridge.output_format import generate_all_outputs, generate_compact_output, generate_deep_finesse_output
 from bridge.deep_finesse import analyze_with_deep_finesse, parse_df_deal, df_format_to_hand
 from bridge.bidding_service import BiddingService
 from knowledge.loader import JFLoader, JFRetriever
@@ -490,14 +490,9 @@ async def get_output_formats(request: OutputFormatsRequest):
         # 叫牌序列格式已经是 (南)1S-(西)pass 格式，无需转换
         bidding_str = request.bidding_sequence
         
-        # 生成输出格式
-        _, compact, deep_finesse = generate_all_outputs(
-            hands=hands,
-            bidding_str=bidding_str,
-            dealer=dealer_pos,
-            mode=request.game_mode,
-            human_position=human_pos
-        )
+        # 只生成需要的格式，跳过 graphic output
+        compact = generate_compact_output(hands)
+        deep_finesse = generate_deep_finesse_output(hands, bidding_str, dealer_pos)
         
         return OutputFormatsResponse(
             compact=compact,
@@ -541,7 +536,9 @@ async def analyze_contract(request: AnalyzeContractRequest):
             "东": df_format_to_hand(df_deal['east']) if df_deal['east'] else ""
         }
         
-        result = analyze_with_deep_finesse(
+        import asyncio
+        result = await asyncio.to_thread(
+            analyze_with_deep_finesse,
             hands=hands_dict,
             contract=df_deal['contract'],
             declarer=df_deal['declarer'],

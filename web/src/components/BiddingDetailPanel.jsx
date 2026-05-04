@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, FormControl, InputLabel, Select, MenuItem, CircularProgress, Alert, Button, useTheme } from '@mui/material'
 import BiddingControls from './BiddingControls'
 
@@ -52,13 +53,21 @@ function BiddingDetailPanel({
   const borderPanel = isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #e0e0e0'
   const borderLine = isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd'
   const colorMuted = isDark ? '#94a3b8' : '#666'
-  const isHumanTurn = humanPosition !== null && (
-    Array.isArray(humanPosition) 
-      ? humanPosition.includes(currentBidder) 
+  const isHumanTurn = useMemo(() => humanPosition !== null && (
+    Array.isArray(humanPosition)
+      ? humanPosition.includes(currentBidder)
       : humanPosition === currentBidder
-  )
+  ), [humanPosition, currentBidder])
   const canShowControls = humanPosition !== null && !isBiddingComplete
   const effectiveShowControls = isHumanTurn && !isBiddingComplete && showBiddingControls
+
+  const historySelectOptions = useMemo(() => {
+    if (aiBiddingHistory.length === 0) return []
+    return aiBiddingHistory.slice().reverse().slice(1).map((record, idx) => ({
+      value: aiBiddingHistory.length - 2 - idx,
+      label: `${record.position}家 ${record.result.bid}`,
+    }))
+  }, [aiBiddingHistory])
 
   const renderButtons = () => (
     <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', mb: 0.5, flexShrink: 0, flexWrap: 'wrap' }}>
@@ -72,9 +81,9 @@ function BiddingDetailPanel({
             sx={{ fontSize: '0.875rem' }}
           >
             <MenuItem value={-1}>最新 ({aiBiddingHistory[aiBiddingHistory.length - 1]?.position}家 {aiBiddingHistory[aiBiddingHistory.length - 1]?.result.bid})</MenuItem>
-            {aiBiddingHistory.slice().reverse().slice(1).map((record, idx) => (
-              <MenuItem key={idx} value={aiBiddingHistory.length - 2 - idx}>
-                {record.position}家 {record.result.bid}
+            {historySelectOptions.map((opt) => (
+              <MenuItem key={opt.value} value={opt.value}>
+                {opt.label}
               </MenuItem>
             ))}
           </Select>
@@ -175,7 +184,7 @@ function BiddingDetailPanel({
           {record.timestamp} - {record.position}家
         </Typography>
         <Typography variant="body2" sx={{ mt: 1 }}>
-          <strong>手牌:</strong> {record.hand.display}
+          <strong>手牌:</strong> {record.hand?.display || '未知'}
         </Typography>
         <Typography variant="body2" sx={{ mt: 1 }}>
           <strong>叫牌序列:</strong> {record.biddingSequence || '空（开叫位置）'}

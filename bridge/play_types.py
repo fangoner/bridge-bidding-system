@@ -341,8 +341,10 @@ class PlayState:
                 self.current_trick.leader = None
             
             # 将牌放回手牌（保持花色顺序）
-            self.hands[position].append(card)
-            self._sort_hand(position)
+            hand = self.hands.get(position)
+            if hand:
+                hand.append(card)
+                self._sort_hand(position)
             
             # 恢复 current_player
             self.current_player = position

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Box, Button, CircularProgress, TextField, ToggleButton, ToggleButtonGroup, Typography, IconButton, Tooltip, useTheme, useMediaQuery } from '@mui/material';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
 import HandDisplay from './HandDisplay';
@@ -112,35 +112,33 @@ function CardTable({
   }
 
   // 计算打牌阶段已出的牌（用于显示模式）
-  const getPlayedCardsSet = () => {
+  // 缓存：一次遍历所有墩，避免每个 position 重复遍历
+  const playedCardCache = useMemo(() => {
     if (!showPlayPanel || !playState) return null
-    const played = new Set()
-    // 从已完成的墩中收集
+    const playedCardsSet = new Set()
+    const playedByPosition = { '北': [], '东': [], '南': [], '西': [] }
     for (const trick of (playState.tricks || [])) {
       for (const [pos, card] of (trick.cards || [])) {
-        played.add(card.suit + card.rank)
+        const key = card.suit + card.rank
+        playedCardsSet.add(key)
+        playedByPosition[pos].push({ suit: card.suit, rank: card.rank })
       }
     }
-    // 从当前墩中收集
     for (const [pos, card] of (playState.current_trick?.cards || [])) {
-      played.add(card.suit + card.rank)
+      const key = card.suit + card.rank
+      playedCardsSet.add(key)
+      playedByPosition[pos].push({ suit: card.suit, rank: card.rank })
     }
-    return played
+    return { playedCardsSet, playedByPosition }
+  }, [showPlayPanel, playState?.tricks, playState?.current_trick?.cards])
+
+  const getPlayedCardsSet = () => {
+    return playedCardCache?.playedCardsSet ?? null
   }
 
   // 打牌阶段的手牌：隐藏模式下用剩余手牌，显示模式下用原始手牌+已出标记
   const getManualPlayedCards = (position) => {
-    if (!showPlayPanel || !playState) return []
-    const cards = []
-    for (const trick of (playState.tricks || [])) {
-      for (const [pos, card] of (trick.cards || [])) {
-        if (pos === position) cards.push({ suit: card.suit, rank: card.rank })
-      }
-    }
-    for (const [pos, card] of (playState.current_trick?.cards || [])) {
-      if (pos === position) cards.push({ suit: card.suit, rank: card.rank })
-    }
-    return cards
+    return playedCardCache?.playedByPosition[position] ?? []
   }
 
   const drawHandFromPlayedCards = (position, manualCards) => {
@@ -257,7 +255,7 @@ function CardTable({
     setHandInputs(prev => ({ ...prev, [position]: '' }))
   }
 
-  const handleDummyHandSubmit = (position) => {
+  const handleAIHandSubmit = (position) => {
     const result = parseHandInput(handInputs[position])
     if (!result.valid) {
       setInputErrors(prev => ({ ...prev, [position]: result.error }))
@@ -596,12 +594,12 @@ function CardTable({
     const hasHandData = hasHand(position)
     const showInput = isAI && !hasHandData && !biddingStarted
     const isHuman = positionRoles && positionRoles[position] === 'human'
-    const showDummyInput = showPlayPanel && playState
-      && position === playState.dummy
-      && playState.phase !== 'lead'
-      && (!playState.hands?.[position] || playState.hands[position].length === 0)
-    const handKnownInPlay = showPlayPanel && playState?.hands?.[position]?.length > 0
     const manualPlayedCount = showPlayPanel ? getManualPlayedCards(position).length : 0
+    const showAIHandInput = showPlayPanel && playState
+      && isAI
+      && (!playState.hands?.[position] || playState.hands[position].length === 0)
+      && manualPlayedCount === 0
+    const handKnownInPlay = showPlayPanel && playState?.hands?.[position]?.length > 0
     
     // 打牌阶段：根据模式选择手牌数据和已出牌标记
     const displayHand = getPlayHand(position)
@@ -725,7 +723,7 @@ function CardTable({
                 确认
               </Button>
             </Box>
-          ) : showDummyInput ? (
+          ) : showAIHandInput ? (
             <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
               {!handInputs[position] && (
                 <Box sx={{
@@ -747,7 +745,7 @@ function CardTable({
                 value={handInputs[position]}
                 onChange={(e) => handleHandInputChange(position, e.target.value)}
                 error={!!inputErrors[position]}
-                helperText={inputErrors[position] || `输入明手${position}家完整手牌`}
+                helperText={inputErrors[position] || `输入${position}家完整手牌`}
                 fullWidth
                 multiline
                 maxRows={2}
@@ -760,7 +758,7 @@ function CardTable({
                 size="small" 
                 variant="contained" 
                 sx={{ mt: 0.5, fontSize: '0.7rem', py: 0.3 }}
-                onClick={() => handleDummyHandSubmit(position)}
+                onClick={() => handleAIHandSubmit(position)}
                 disabled={!handInputs[position].trim()}
               >
                 确认
