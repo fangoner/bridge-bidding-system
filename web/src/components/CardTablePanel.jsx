@@ -1,21 +1,18 @@
 import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, useTheme } from '@mui/material'
 import CardTable from './CardTable'
 import BiddingTable from './BiddingTable'
+import { hasAnyHuman, getHumanPositions } from '../utils/position'
 
 function CardTablePanel({
   isMobile,
   hands,
   currentBidder,
-  humanPosition,
   dealer,
   gameMode,
   showPartnerHand,
   setShowPartnerHand,
-  showAIHands,
-  setShowAIHands,
-  showDeclarerHand,
-  setShowDeclarerHand,
   showOpponentHands,
+  setShowOpponentHands,
   getPartnerPosition,
   biddingSequence,
   isBiddingComplete,
@@ -40,7 +37,6 @@ function CardTablePanel({
   height = '680px',
   playState,
   showPlayPanel,
-  isSimulated,
   declarer,
   lastCompletedTrick,
   isPlayPaused,
@@ -127,58 +123,61 @@ function CardTablePanel({
             </ToggleButtonGroup>
           )}
           
-          {gameMode === 'pair' && humanPosition && (
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={showPartnerHand}
-                  onChange={(e) => setShowPartnerHand(e.target.checked)}
-                  size="small"
-                />
-              }
-              label="队友手牌"
-              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, ml: 0.5, mr: 0, height: 24 }}
-            />
-          )}
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          {(gameMode === 'four' && humanPosition) || showPlayPanel ? (
+          {!showPlayPanel && hasAnyHuman(positionRoles) && getHumanPositions(positionRoles).length < 3 && (
+            <>
+              <Typography variant="body2" sx={{ fontSize: '0.75rem', fontWeight: 700, mr: 0 }}>
+                {gameMode === 'pair' ? '双人练习' : '四人练习'}
+              </Typography>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={showPartnerHand}
+                    onChange={(e) => setShowPartnerHand(e.target.checked)}
+                    size="small"
+                  />
+                }
+                label="队友手牌"
+                sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={showOpponentHands}
+                    onChange={(e) => setShowOpponentHands(e.target.checked)}
+                    size="small"
+                  />
+                }
+                label="对方手牌"
+                sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
+              />
+            </>
+          )}
+          {showPlayPanel && hasAnyHuman(positionRoles) && declarer && positionRoles[declarer] === 'ai' && (
+            <>
+              <FormControlLabel
+                control={<Checkbox checked={showPartnerHand} onChange={(e) => setShowPartnerHand(e.target.checked)} size="small" />}
+                label="队友手牌"
+                sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
+              />
+              <FormControlLabel
+                control={<Checkbox checked={showOpponentHands} onChange={(e) => setShowOpponentHands(e.target.checked)} size="small" />}
+                label="对方手牌"
+                sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
+              />
+            </>
+          )}
+          {showPlayPanel && hasAnyHuman(positionRoles) && declarer && positionRoles[declarer] === 'human' && (
             <FormControlLabel
-              control={
-                <Checkbox
-                  checked={isSimulated ? false : showAIHands}
-                  onChange={(e) => setShowAIHands(e.target.checked)}
-                  size="small"
-                  disabled={isSimulated}
-                />
-              }
-              label="AI手牌"
-              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem', mr: 0, height: 24 } }}
-            />
-          ) : null}
-          {showPlayPanel && (
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={isSimulated ? false : showDeclarerHand}
-                  onChange={(e) => setShowDeclarerHand(e.target.checked)}
-                  size="small"
-                  disabled={isSimulated}
-                />
-              }
-              label="庄家手牌"
-              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem', mr: 0, height: 24 } }}
+              control={<Checkbox checked={showOpponentHands} onChange={(e) => setShowOpponentHands(e.target.checked)} size="small" />}
+              label="对方手牌"
+              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
             />
           )}
           {showPlayPanel && (
             <FormControlLabel
-              control={
-                <Checkbox
-                  checked={showPlayedCards}
-                  onChange={(e) => setShowPlayedCards(e.target.checked)}
-                  size="small"
-                />
-              }
+              control={<Checkbox checked={showPlayedCards} onChange={(e) => setShowPlayedCards(e.target.checked)} size="small" />}
               label="显示已出"
               sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
             />
@@ -196,12 +195,9 @@ function CardTablePanel({
         <CardTable
           hands={hands}
           currentBidder={currentBidder}
-          humanPosition={humanPosition}
           dealer={dealer}
           gameMode={gameMode}
           showPartnerHand={showPartnerHand}
-          showAIHands={showAIHands}
-          showDeclarerHand={showDeclarerHand}
           showOpponentHands={showOpponentHands}
           getPartnerPosition={getPartnerPosition}
           renderBiddingTable={() => <BiddingTable biddingSequence={biddingSequence} dealer={dealer} />}
@@ -226,7 +222,6 @@ function CardTablePanel({
           declarer={declarer}
           playState={playState}
           showPlayPanel={showPlayPanel}
-          isSimulated={isSimulated}
           lastCompletedTrick={lastCompletedTrick}
           isPlayPaused={isPlayPaused}
           playInitiated={playInitiated}

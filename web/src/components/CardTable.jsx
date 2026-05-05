@@ -1,18 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import { Box, Button, CircularProgress, TextField, ToggleButton, ToggleButtonGroup, Typography, IconButton, Tooltip, useTheme, useMediaQuery } from '@mui/material';
-import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
+import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import HandDisplay from './HandDisplay';
 import DoubleDummyTable from './DoubleDummyTable';
+import { isHumanPosition, hasAnyHuman, getHumanPositions } from '../utils/position';
 
 function CardTable({
   hands,
   currentBidder,
-  humanPosition,
   dealer,
   gameMode,
   showPartnerHand,
-  showAIHands,
-  showDeclarerHand,
   showOpponentHands,
   getPartnerPosition,
   renderBiddingTable,
@@ -46,7 +45,6 @@ function CardTable({
   aiBiddingHistory = [],
   onPlayCardClick,
   onSetPlayHand,
-  isSimulated = false,
 }) {
   const [handInputs, setHandInputs] = useState({
     '南': '',
@@ -270,45 +268,47 @@ function CardTable({
       const dummy = playState.dummy
       const declarerPos = playState.contract?.declarer
       const playerRoles = playState.player_roles || positionRoles
-      
-      if (position === dummy) {
-        return true
-      }
-      
-      // 庄家手牌：showDeclarerHand开启 或 模拟实战时显示
-      if (position === declarerPos) {
-        return showDeclarerHand || isSimulated
-      }
-      
-      const isHumanPosition = playerRoles && playerRoles[position] === 'human'
-      if (isHumanPosition) {
-        return true
-      }
 
-      if (humanPosition === position) {
-        return true
+      const role = (playerRoles && playerRoles[position]) || (positionRoles && positionRoles[position])
+
+      // 人类自己的手牌始终可见
+      if (role === 'human') return true
+
+      // 全AI旁观：显示所有手牌（包括明手，不等首攻）
+      if (!hasAnyHuman(positionRoles)) return true
+
+      // 有人类参与：明手首攻后才显示
+      if (position === dummy) return playState.phase !== 'lead'
+
+      // 有人类参与：AI手牌默认不显示，由checkbox控制
+      const declRole = (playerRoles && playerRoles[declarerPos]) || (positionRoles && positionRoles[declarerPos])
+      if (declRole === 'ai') {
+        // 庄家是AI（人类是防守方）：AI庄家→对方，AI防守队友→队友
+        if (position === declarerPos) return showOpponentHands
+        return showPartnerHand
+      } else {
+        // 庄家是人类（AI都是防守方）→ 对方
+        return showOpponentHands
       }
-      
-      return showAIHands
     }
-    
-    if (!humanPosition) {
-      return true;
-    }
-    if (position === humanPosition) {
-      return true;
-    }
-    if (gameMode === 'four') {
-      return showAIHands;
-    }
+
+    // 叫牌阶段
     if (gameMode === 'pair') {
-      const partnerPosition = getPartnerPosition(humanPosition);
-      if (position === partnerPosition) {
-        return showPartnerHand;
-      }
-      return showOpponentHands;
+      const partnerPos = getPartnerPosition(dealer)
+      if (position === dealer) return true
+      if (position === partnerPos) return showPartnerHand
+      return showOpponentHands
     }
-    return true;
+    // 四人模式
+    if (!hasAnyHuman(positionRoles)) return true             // 全AI旁观：显示所有手牌
+    if (isHumanPosition(positionRoles, position)) return true // 人类：有牌显示/无牌"未知"
+    // 3H+1AI 模拟实战或4H：AI位置始终显示
+    if (getHumanPositions(positionRoles).length >= 3) return true
+    // 1H+3AI 练习模式：对面为队友，两侧为对方
+    const humanPos = getHumanPositions(positionRoles)[0]
+    const partnerPos = getPartnerPosition(humanPos)
+    if (position === partnerPos) return showPartnerHand
+    return showOpponentHands
   };
 
   const SUIT_COLORS = {
@@ -592,7 +592,7 @@ function CardTable({
     const isCurrentlyBidding = currentBiddingPosition === position;
     const isAI = isAIPosition(position)
     const hasHandData = hasHand(position)
-    const showInput = isAI && !hasHandData && !biddingStarted
+    const showInput = isAI && !hasHandData && (!biddingStarted || (stopBidding && !showPlayPanel))
     const isHuman = positionRoles && positionRoles[position] === 'human'
     const manualPlayedCount = showPlayPanel ? getManualPlayedCards(position).length : 0
     const showAIHandInput = showPlayPanel && playState
@@ -782,8 +782,8 @@ function CardTable({
                 isActive={currentBidder === position}
                 isHuman={isHuman}
                 isDealer={dealer === position}
-                isPartner={humanPosition && getPartnerPosition(humanPosition) === position}
-                showContent={shouldShowHandContent(position) || handKnownInPlay}
+                isPartner={hasAnyHuman(positionRoles) && isHumanPosition(positionRoles, getPartnerPosition(position))}
+                showContent={shouldShowHandContent(position)}
                 hideTitle={true}
                 playedCards={playedCardsSet}
               />
@@ -810,14 +810,14 @@ function CardTable({
       position: 'relative',
       overflow: 'hidden',
     }}>
-      {onClearAllHands && !showPlayPanel && (!biddingStarted || (checkBiddingComplete && checkBiddingComplete())) && (
+      {onClearAllHands && gameMode !== 'pair' && !showPlayPanel && (!biddingStarted || (checkBiddingComplete && checkBiddingComplete())) && (
         <Box sx={{
           position: 'absolute',
           top: 8,
           left: 8,
           zIndex: 10,
         }}>
-          <Tooltip title="清除所有手牌">
+          <Tooltip title="模拟实战">
             <IconButton
               size="small"
               onClick={onClearAllHands}
@@ -827,7 +827,7 @@ function CardTable({
                 '&:hover': { bgcolor: isDark ? 'rgba(30, 41, 59, 1)' : 'rgba(255, 255, 255, 1)' }
               }}
             >
-              <DeleteSweepIcon />
+              <PlayArrowIcon />
             </IconButton>
           </Tooltip>
         </Box>

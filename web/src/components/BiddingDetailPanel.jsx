@@ -1,10 +1,11 @@
 import { useMemo } from 'react'
 import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, FormControl, InputLabel, Select, MenuItem, CircularProgress, Alert, Button, useTheme } from '@mui/material'
 import BiddingControls from './BiddingControls'
+import { isHumanPosition, hasAnyHuman } from '../utils/position'
 
 function BiddingDetailPanel({
   isMobile,
-  humanPosition,
+  positionRoles,
   currentBidder,
   isBiddingComplete,
   showBiddingControls,
@@ -32,7 +33,6 @@ function BiddingDetailPanel({
   playLoading,
   // 叫牌按钮相关
   biddingStarted,
-  isNewDeal,
   onStartBidding,
   onResetBidding,
   onToggleStopBidding,
@@ -53,12 +53,8 @@ function BiddingDetailPanel({
   const borderPanel = isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #e0e0e0'
   const borderLine = isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd'
   const colorMuted = isDark ? '#94a3b8' : '#666'
-  const isHumanTurn = useMemo(() => humanPosition !== null && (
-    Array.isArray(humanPosition)
-      ? humanPosition.includes(currentBidder)
-      : humanPosition === currentBidder
-  ), [humanPosition, currentBidder])
-  const canShowControls = humanPosition !== null && !isBiddingComplete
+  const isHumanTurn = useMemo(() => isHumanPosition(positionRoles, currentBidder), [positionRoles, currentBidder])
+  const canShowControls = hasAnyHuman(positionRoles) && !isBiddingComplete
   const effectiveShowControls = isHumanTurn && !isBiddingComplete && showBiddingControls
 
   const historySelectOptions = useMemo(() => {
@@ -94,11 +90,11 @@ function BiddingDetailPanel({
           <Button
             variant="outlined"
             size="small"
-            onClick={isNewDeal ? onStartBidding : onResetBidding}
+            onClick={!biddingStarted ? onStartBidding : onResetBidding}
             disabled={!hands || aiThinking}
             sx={{ fontSize: '0.75rem', textTransform: 'none' }}
           >
-            {isNewDeal ? '开始' : '重新叫牌'}
+            {!biddingStarted ? '开始' : '重新叫牌'}
           </Button>
         )}
         {biddingStarted && !isBiddingCompleteFn() && (
@@ -135,7 +131,7 @@ function BiddingDetailPanel({
         >
           保存
         </Button>
-        {isBiddingCompleteFn && isBiddingCompleteFn() && onStartPlay && (
+        {gameMode !== 'pair' && isBiddingCompleteFn && isBiddingCompleteFn() && onStartPlay && (
           <Button
             variant="contained"
             color="primary"
@@ -452,7 +448,7 @@ function BiddingDetailPanel({
             <BiddingControls
               hands={hands}
               currentBidder={currentBidder}
-              humanPosition={humanPosition}
+              positionRoles={positionRoles}
               gameMode={gameMode}
               checkBiddingComplete={isBiddingCompleteFn}
               addBid={addBid}

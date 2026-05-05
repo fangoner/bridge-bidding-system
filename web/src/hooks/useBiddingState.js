@@ -10,7 +10,6 @@ function useBiddingState() {
   const [simpleDisplayMode, setSimpleDisplayMode] = useState(false)
   const [showBiddingControls, setShowBiddingControls] = useState(false)
   const [biddingStarted, setBiddingStarted] = useState(false)
-  const [isNewDeal, setIsNewDeal] = useState(true)
   const [stopBidding, setStopBidding] = useState(false)
   const [passedAIPositions, setPassedAIPositions] = useState(new Set())
   const [biddingStartTime, setBiddingStartTime] = useState(null)
@@ -48,7 +47,6 @@ function useBiddingState() {
     setCurrentBidder(newDealer)
     setBiddingStarted(false)
     setStopBidding(false)
-    setIsNewDeal(true)
     setBiddingSequence([])
     setAiBiddingHistory([])
     setPassedAIPositions(new Set())
@@ -66,7 +64,6 @@ function useBiddingState() {
 
   const markBiddingStarted = useCallback(() => {
     setBiddingStarted(true)
-    setIsNewDeal(false)
     setBiddingStartTime(Date.now())
   }, [])
 
@@ -89,8 +86,6 @@ function useBiddingState() {
     setShowBiddingControls,
     biddingStarted,
     setBiddingStarted,
-    isNewDeal,
-    setIsNewDeal,
     stopBidding,
     setStopBidding,
     passedAIPositions,

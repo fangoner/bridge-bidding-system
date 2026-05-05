@@ -11,6 +11,7 @@ import {
   useTheme,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
+import { isHumanPosition, hasAnyHuman } from '../utils/position';
 
 const getBidColor = (bid, isDark) => {
   if (!bid) return {};
@@ -100,7 +101,7 @@ const CompactBidButton = styled(Button, {
 function BiddingControls({
   hands,
   currentBidder,
-  humanPosition,
+  positionRoles,
   gameMode,
   checkBiddingComplete,
   addBid,
@@ -138,9 +139,7 @@ function BiddingControls({
     ['7C', '7D', '7H', '7S', '7NT', null, 'X', 'XX', 'pass', null, null],
   ];
 
-  const isHumanTurn = Array.isArray(humanPosition) 
-    ? humanPosition.includes(currentBidder) 
-    : humanPosition === currentBidder;
+  const isHumanTurn = isHumanPosition(positionRoles, currentBidder)
   const finalContract = getFinalContract();
 
   return (
@@ -154,7 +153,7 @@ function BiddingControls({
       justifyContent: 'flex-start',
       height: isVerticalLayout ? 'auto' : 'auto',
     }}>
-      {humanPosition !== null && (
+      {hasAnyHuman(positionRoles) && (
       <Paper elevation={0} sx={{
         p: isVerticalLayout ? 1.5 : 2,
         width: isVerticalLayout ? '100%' : { xs: '100%', md: '280px' },
@@ -217,7 +216,7 @@ function BiddingControls({
                       key={bid + index}
                       bidColor={bidColor}
                       onClick={() => addBid(bid)}
-                      disabled={!isHumanTurn && humanPosition !== null}
+                      disabled={!isHumanTurn && hasAnyHuman(positionRoles)}
                     >
                       {bid}
                     </CompactBidButton>
@@ -234,7 +233,7 @@ function BiddingControls({
                             key={bid}
                             bidColor={bidColor}
                             onClick={() => addBid(bid)}
-                            disabled={!isHumanTurn && humanPosition !== null}
+                            disabled={!isHumanTurn && hasAnyHuman(positionRoles)}
                           >
                             {bid}
                           </BidButton>
@@ -250,7 +249,7 @@ function BiddingControls({
                           key={bid}
                           bidColor={bidColor}
                           onClick={() => addBid(bid)}
-                          disabled={!isHumanTurn && humanPosition !== null}
+                          disabled={!isHumanTurn && hasAnyHuman(positionRoles)}
                           sx={{ width: bid === 'pass' ? '60px' : '44px' }}
                         >
                           {bid}
@@ -262,7 +261,7 @@ function BiddingControls({
               )}
             </Box>
 
-            {humanPosition !== null && isHumanTurn && (
+            {hasAnyHuman(positionRoles) && isHumanTurn && (
               <Box sx={{ mt: isVerticalLayout ? 1 : 2 }}>
                 <TextField
                   size="small"
@@ -283,7 +282,7 @@ function BiddingControls({
               </Box>
             )}
 
-            {humanPosition !== null && !isHumanTurn && stopBidding && (
+            {hasAnyHuman(positionRoles) && !isHumanTurn && stopBidding && (
               <Alert severity="info" sx={{ mt: isVerticalLayout ? 1 : 2, py: isVerticalLayout ? 0.5 : undefined, borderRadius: 2 }}>
                 叫牌已暂停
               </Alert>
@@ -327,7 +326,7 @@ function BiddingControls({
       </Paper>
       )}
 
-      {!hideJFPanel && humanPosition !== null && !checkBiddingComplete() && (
+      {!hideJFPanel && hasAnyHuman(positionRoles) && !checkBiddingComplete() && (
         <Paper elevation={0} sx={{
           p: 2,
           flex: isVerticalLayout ? '1 1 auto' : '1 1 auto',

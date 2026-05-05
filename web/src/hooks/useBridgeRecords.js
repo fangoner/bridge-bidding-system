@@ -54,8 +54,7 @@ function useBridgeRecords() {
               contract: derivedContract,
               dealer: r.dealer || null,
               game_mode: r.gameMode || null,
-              human_position: r.humanPosition || null,
-              player_roles: r.playerRoles || {},
+              position_roles: r.playerRoles || {},
             },
             bidding: {
               ai_bidding_history: r.aiBiddingHistory || [],

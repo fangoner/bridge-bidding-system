@@ -60,6 +60,68 @@ DD引擎（蒙特卡洛+DDS双明手）打牌效果差，柱状图上不同出�
 
 ---
 
+### 系统模式统一：positionRoles 重构
+
+**背景**:
+`humanPosition` 和 `positionRoles` 双向同步造成状态冗余，练习/模拟模式判断散落在各组件中，checkbox 逻辑不一致。
+
+**改进**:
+
+**A. 状态统一**
+- 删除 `humanPosition` 状态，全系统统一用 `positionRoles`（`{'南':'ai'|'human', ...}`）
+- 删除 `isNewDeal` 状态，按钮文字改用 `!biddingStarted && biddingSequence.length === 0` 判断
+- 新建 `web/src/utils/position.js`：`isHumanPosition`、`hasAnyHuman`、`getHumanPositions`、`getPartnerPosition`
+- 旧记录兼容：加载时自动将 `human_position` 迁移为 `position_roles`
+- 发牌时自动设置所有位置为 AI（旁观模式）
+
+**B. 四人叫牌位置约束**
+- 合法状态：4AI（全旁观）、1H+3AI（单人练习）、3H+1AI（模拟实战）、4H（全手动）
+- 2H+2AI 自动修正：点 AI→人类 切换人类位置，点人类→AI 切换 AI 位置
+- 1H+3AI 练习模式：显示"队友手牌"+"对方手牌" checkbox
+- 3H+1AI 模拟实战模式：AI 手牌始终显示，不显示 checkbox（其他三家无手牌）
+- 4H 全手动模式：所有位置显示"未知"，手动输入叫品
+
+**C. 双人叫牌方向**
+- 删除 SettingsPanel 中的练习方向选择器
+- 方向由发牌人位置自动推断：南/北→NS，东/西→EW
+- `addBid` 中对手方自动 pass 改用 `practiceDirection`
+
+**D. Checkbox 清理**
+- 删除 `showAIHands` checkbox
+- 统一为"队友手牌"+"对方手牌"两个 checkbox
+- 叫牌阶段：全 AI 旁观或 3H+1AI 模拟实战时隐藏
+- 打牌阶段："庄家手牌"（庄家是 AI 时显示）+"显示已出"（始终显示）
+
+**E. 清除手牌 → 模拟实战**
+- 按钮 tooltip 从"清除所有手牌"改为"模拟实战"，图标从 DeleteSweep 改为 PlayArrow
+- 清除手牌后自动设置 positionRoles 为 `{南:'ai', 北:'human', 东:'human', 西:'human'}`，重置 checkbox
+
+**F. 手牌可见性统一**
+- `CardTable.shouldShowHandContent(position)` 统一处理所有手牌显示逻辑
+- 叫牌阶段：全AI 显示所有手牌；人类练习基于 checkbox；模拟实战 AI 始终显示
+- 打牌阶段：明手始终可见；庄家受 checkbox 控制；人类位置始终可见自己的手牌
+- AI 无手牌位置显示输入框，Human 无手牌位置显示"未知"
+
+**G. 双人模式无打牌**
+- 双人模式隐藏"切换到打牌"按钮（`gameMode !== 'pair'`）
+- pair 模式下不显示打牌相关控件
+
+**H. 保存完整性**
+- 所有保存路径保留 `practice_direction` 和 `position_roles`
+- 修复 `saveCompletePlayRecord` 依赖数组缺少 `practiceDirection` 的 bug
+- 修复 `bidding_complete` 自动保存缺少 `practice_direction` 字段的 bug
+
+**修改文件**:
+- `web/src/App.jsx` — 状态统一、位置约束、模拟实战、保存完整性
+- `web/src/utils/position.js` — 新建位置工具函数
+- `web/src/components/CardTablePanel.jsx` — checkbox 统一、模拟实战隐藏
+- `web/src/components/CardTable.jsx` — `shouldShowHandContent` 统一
+- `web/src/components/BiddingDetailPanel.jsx` — 双人模式隐藏打牌按钮
+- `web/src/components/SettingsPanel.jsx` — 移除练习方向选择器
+- `web/src/components/BiddingControls.jsx` — humanPosition→positionRoles
+
+---
+
 ### AI提供商选择器移除
 
 **背景**:

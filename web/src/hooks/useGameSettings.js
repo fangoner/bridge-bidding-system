@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { getFallbackModel, setFallbackModel } from '../services/api'
+import { getPartnerPosition } from '../utils/position'
 
 const COLOR_SCHEME_KEY = 'bridge_color_scheme'
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
@@ -10,7 +11,6 @@ const PLAY_REASONING_KEY = 'bridge_play_reasoning'
 function useGameSettings(colorSchemes, defaultScheme) {
   const [gameMode, setGameMode] = useState('four')
   const [dealer, setDealer] = useState('南')
-  const [humanPosition, setHumanPosition] = useState(null)
   const [positionRoles, setPositionRoles] = useState({
     '南': 'ai',
     '北': 'ai',
@@ -18,7 +18,7 @@ function useGameSettings(colorSchemes, defaultScheme) {
     '西': 'ai'
   })
   const [showPartnerHand, setShowPartnerHand] = useState(false)
-  const [showAIHands, setShowAIHands] = useState(false)
+
   const [showOpponentHands, setShowOpponentHands] = useState(false)
   const [showAIBiddingOutput, setShowAIBiddingOutput] = useState(true)
   const [useFallback, setUseFallback] = useState(false)
@@ -113,34 +113,8 @@ function useGameSettings(colorSchemes, defaultScheme) {
     localStorage.setItem(PLAY_REASONING_KEY, on)
   }, [])
 
-  const getPartnerPosition = useCallback((position) => {
-    const partners = {
-      '南': '北',
-      '北': '南',
-      '东': '西',
-      '西': '东'
-    }
-    return partners[position]
-  }, [])
-
   const handlePositionRoleChange = useCallback((position, role) => {
-    setPositionRoles(prev => {
-      const newRoles = { ...prev, [position]: role }
-      
-      const humanPositions = Object.entries(newRoles)
-        .filter(([_, r]) => r === 'human')
-        .map(([p, _]) => p)
-      
-      if (humanPositions.length === 0) {
-        setHumanPosition(null)
-      } else if (humanPositions.length === 1) {
-        setHumanPosition(humanPositions[0])
-      } else {
-        setHumanPosition(humanPositions)
-      }
-      
-      return newRoles
-    })
+    setPositionRoles(prev => ({ ...prev, [position]: role }))
   }, [])
 
   return {
@@ -148,14 +122,11 @@ function useGameSettings(colorSchemes, defaultScheme) {
     setGameMode,
     dealer,
     setDealer,
-    humanPosition,
-    setHumanPosition,
     positionRoles,
     setPositionRoles,
     showPartnerHand,
     setShowPartnerHand,
-    showAIHands,
-    setShowAIHands,
+
     showOpponentHands,
     setShowOpponentHands,
     showAIBiddingOutput,

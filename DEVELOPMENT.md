@@ -306,6 +306,74 @@ disabled = showPlayPanel && playInitiated
 - `SUIT_COLOR_MAP`: 花色颜色映射（按符号字符）
 - `getSuitColor()`: 辅助函数，统一花色颜色获取逻辑
 
+### 13. 系统模式与位置角色 (`web/src/utils/position.js`) - v1.38新增
+
+**核心概念**:
+全部模式统一为一个维度：**positionRoles** — 每个位置是 AI 还是人类。
+
+```javascript
+// positionRoles 数据结构
+{ '南': 'ai'|'human', '北': 'ai'|'human', '东': 'ai'|'human', '西': 'ai'|'human' }
+```
+
+一个位置是"练习"还是"模拟"，仅取决于该位置**有没有手牌**：
+- 有手牌 → 练习模式（看到手牌，自己做决策）
+- 无手牌 → 模拟实战（看到"未知"，手动输入实战中发生的叫品/出牌，AI 位置自动决策）
+
+**工具函数**:
+- `isHumanPosition(roles, pos)`: 判断某位置是否为人类
+- `hasAnyHuman(roles)`: 判断是否有人类参与
+- `getHumanPositions(roles)`: 获取所有人类位置列表
+- `getPartnerPosition(pos)`: 获取对面位置（南↔北，东↔西）
+
+**四人叫牌合法状态**:
+| 状态 | Human | AI | 说明 |
+|------|-------|----|------|
+| 全 AI 旁观 | 0 | 4 | 发牌默认，自动叫牌+打牌 |
+| 单人练习 | 1 | 3 | 人类参与叫牌/打牌 |
+| 模拟实战 | 3 | 1 | 1个 AI 位置有手牌给建议，3个人类手动输入 |
+| 全手动 | 4 | 0 | 所有位置手动输入 |
+
+2H+2AI 被自动修正（不允许 2-2 分）：
+- 1H+3AI 点另一 AI→人类：切换人类位置（新位置=human，其余=AI）
+- 3H+1AI 点人类→AI：切换 AI 位置（原 AI→human，点击位→AI）
+
+**双人叫牌方向**:
+- 方向由发牌人位置自动推断：南/北→NS，东/西→EW
+- 对手方在 `addBid` 中自动 pass
+- 双人模式无打牌阶段（"切换到打牌"按钮隐藏）
+
+**手牌可见性规则** (`CardTable.shouldShowHandContent`):
+
+叫牌阶段：
+- 全 AI → 显示所有手牌
+- 1H+3AI 练习 → 人类手牌始终可见，AI 手牌受"队友手牌"/"对方手牌"checkbox 控制
+- 3H+1AI 模拟实战 → AI 手牌始终显示，人类无手牌显示"未知"
+- 4H 全手动 → 所有位置显示"未知"
+
+打牌阶段：
+- 明手始终可见
+- 庄家受"庄家手牌"checkbox 控制
+- 人类位置始终可见自己的手牌
+- AI 无手牌位置显示输入框，Human 无手牌位置显示"未知"
+
+**Checkbox 规则**:
+| 阶段 | Checkbox | 显示条件 |
+|------|----------|---------|
+| 叫牌 | 队友手牌 | 1H+3AI 练习模式 |
+| 叫牌 | 对方手牌 | 1H+3AI 练习模式 |
+| 打牌 | 庄家手牌 | 庄家是 AI |
+| 打牌 | 显示已出 | 始终显示 |
+
+**涉及文件**:
+- `web/src/utils/position.js` — 位置工具函数
+- `web/src/App.jsx` — positionRoles 状态管理、位置切换约束、模拟实战按钮
+- `web/src/components/CardTable.jsx` — shouldShowHandContent 统一手牌可见性
+- `web/src/components/CardTablePanel.jsx` — checkbox 统一渲染
+- `web/src/components/BiddingDetailPanel.jsx` — 双人模式隐藏打牌按钮
+- `web/src/components/BiddingControls.jsx` — 使用 positionRoles
+- `web/src/components/SettingsPanel.jsx` — 移除练习方向选择器
+
 ## 文件结构
 
 ```

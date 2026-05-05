@@ -47,6 +47,7 @@ import HistoryDialog from './components/HistoryDialog'
 import { colorSchemes, defaultScheme } from './theme/colorSchemes'
 import useBiddingState from './hooks/useBiddingState'
 import useBridgeRecords from './hooks/useBridgeRecords'
+import { isHumanPosition, hasAnyHuman, getHumanPositions, getPartnerPosition } from './utils/position'
 import './App.css'
 
 const COLOR_SCHEME_KEY = 'bridge_color_scheme'
@@ -84,7 +85,6 @@ function App({ darkMode, onToggleDarkMode }) {
     simpleDisplayMode, setSimpleDisplayMode,
     showBiddingControls, setShowBiddingControls,
     biddingStarted, setBiddingStarted,
-    isNewDeal, setIsNewDeal,
     stopBidding, setStopBidding,
     passedAIPositions, setPassedAIPositions,
     biddingStartTime,
@@ -147,8 +147,8 @@ function App({ darkMode, onToggleDarkMode }) {
       setHands(draft.hands)
       setDealer(draft.dealer)
       setGameMode(draft.gameMode)
-      setHumanPosition(draft.humanPosition)
       setPositionRoles(draft.positionRoles)
+      if (draft.practiceDirection) setPracticeDirection(draft.practiceDirection)
       setDealSystem(draft.dealSystem)
       setDealMode(draft.dealMode)
       setBiddingSequence(draft.biddingSequence)
@@ -176,7 +176,7 @@ function App({ darkMode, onToggleDarkMode }) {
   // 游戏设置
   const [gameMode, setGameMode] = useState('four') // 'four' 或 'pair'
   const [dealer, setDealer] = useState('南') // 发牌人位置
-  const [humanPosition, setHumanPosition] = useState(null) // 人类玩家位置（兼容旧逻辑）
+  const [practiceDirection, setPracticeDirection] = useState('NS') // 双人模式练习方向
   const [positionRoles, setPositionRoles] = useState({
     '南': 'ai',
     '北': 'ai',
@@ -184,8 +184,7 @@ function App({ darkMode, onToggleDarkMode }) {
     '西': 'ai'
   }) // 每个位置的角色：'human' 或 'ai'
   const [showPartnerHand, setShowPartnerHand] = useState(false) // 显示队友手牌
-  const [showAIHands, setShowAIHands] = useState(false) // 显示AI手牌
-  const [showDeclarerHand, setShowDeclarerHand] = useState(false) // 显示庄家手牌
+
   const [showOpponentHands, setShowOpponentHands] = useState(false) // 显示对方手牌
   const [showAIBiddingOutput, setShowAIBiddingOutput] = useState(true) // 显示AI叫牌完整输出
   const [useFallback, setUseFallback] = useState(false) // 是否使用备用提示词
@@ -244,11 +243,7 @@ function App({ darkMode, onToggleDarkMode }) {
   const [playState, setPlayState] = useState(null) // 打牌状态
   const [playLoading, setPlayLoading] = useState(false) // 打牌加载中
   const [showPlayPanel, setShowPlayPanel] = useState(false) // 显示打牌面板
-  const isSimulatedPlay = showPlayPanel && hands && ['北','东','南','西'].some(p => {
-    const h = hands[p]
-    return !h || (!h.spades && !h.hearts && !h.diamonds && !h.clubs)
-  })
-  const [showPlayedCards, setShowPlayedCards] = useState(false) // 打牌时显示已出的牌
+  const [showPlayedCards, setShowPlayedCards] = useState(true) // 打牌时显示已出的牌（默认开启）
   const [playCenterView, setPlayCenterView] = useState('play') // 打牌阶段中心区域视图: 'play'/'bidding'/'result'
   const [isPlayPaused, setIsPlayPaused] = useState(false) // 打牌暂停状态
   const [lastCompletedTrick, setLastCompletedTrick] = useState(null) // 暂停时保存的上一墩
@@ -418,10 +413,14 @@ function App({ darkMode, onToggleDarkMode }) {
     if (board.game_mode || record.gameMode) {
       setGameMode(board.game_mode || record.gameMode)
     }
-    if (board.human_position || record.humanPosition) {
+    if (board.practice_direction) {
+      setPracticeDirection(board.practice_direction)
+    }
+    if (board.position_roles) {
+      setPositionRoles(board.position_roles)
+    } else if (board.human_position || record.humanPosition) {
+      // 兼容旧格式：从 human_position 转换
       const hp = board.human_position || record.humanPosition
-      setHumanPosition(hp)
-      // 同步恢复 positionRoles
       const positions = ['北', '南', '东', '西']
       const humans = Array.isArray(hp) ? hp : [hp]
       const newRoles = Object.fromEntries(positions.map(p => [p, humans.includes(p) ? 'human' : 'ai']))
@@ -435,7 +434,6 @@ function App({ darkMode, onToggleDarkMode }) {
     setStopBidding(true) // 加载历史记录后允许切换发牌人
     setHistoryDialogOpen(false)
     setOutputFormats(null) // 重置输出格式
-    setIsNewDeal(false) // 标记为历史记录加载，显示"重新叫牌"
     setShowDoubleDummy(false) // 切换到显示叫牌过程
     setDoubleDummyResult(null) // 清除双明手结果
     // 预加载打牌数据（记录含打牌数据时保存到 loadedPlayRecord，切换到打牌时直接使用）
@@ -539,7 +537,7 @@ function App({ darkMode, onToggleDarkMode }) {
     try {
       const biddingStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
       console.log('[DEBUG] 加载历史记录获取输出格式, biddingStr:', biddingStr, 'dealer:', dealer)
-      const result = await getOutputFormats(hands, biddingStr, dealer, gameMode, humanPosition)
+      const result = await getOutputFormats(hands, biddingStr, dealer, gameMode, positionRoles)
       console.log('[DEBUG] 输出格式结果:', result)
       setOutputFormats(result)
     } catch (err) {
@@ -579,10 +577,10 @@ function App({ darkMode, onToggleDarkMode }) {
   const canUndo = !aiThinking && !currentBiddingPosition
 
   // 判断是否可以保存进度（叫牌模式）
-  const canSaveProgress = biddingStarted && !isBiddingComplete() && !showPlayPanel && hands && stopBidding && !aiThinking
+  const canSaveProgress = hands && !showPlayPanel && biddingStarted && !isBiddingComplete() && stopBidding
 
   // 打牌模式下是否可以保存
-  const playCanSave = showPlayPanel && playState && playState.phase !== 'complete' && isPlayPaused && !aiThinking && !playLoading
+  const playCanSave = showPlayPanel && playState && playState.phase !== 'complete' && isPlayPaused
 
   // 手动保存进度（使用ref避免playState/aiPlayHistory变化导致回调重建）
   const handleSaveProgress = useCallback(() => {
@@ -609,7 +607,8 @@ function App({ darkMode, onToggleDarkMode }) {
           } : null,
           dealer: dealer,
           game_mode: gameMode,
-          human_position: humanPosition,
+          practice_direction: practiceDirection,
+          position_roles: positionRoles,
           player_roles: positionRoles,
         },
         bidding: {
@@ -641,8 +640,8 @@ function App({ darkMode, onToggleDarkMode }) {
         contract: null,
         dealer: dealer,
         game_mode: gameMode,
-        human_position: humanPosition,
-        player_roles: positionRoles,
+        practice_direction: practiceDirection,
+        position_roles: positionRoles,
       },
       bidding: {
         ai_bidding_history: trimBiddingHistory(aiBiddingHistory),
@@ -655,21 +654,7 @@ function App({ darkMode, onToggleDarkMode }) {
     if (!currentRecordId) {
       setCurrentRecordId(record.id)
     }
-  }, [hands, biddingSequence, dealer, gameMode, humanPosition, positionRoles, aiBiddingHistory, dealSystem, currentRecordId, showPlayPanel])
-
-  // 同步 humanPosition 到 positionRoles
-  useEffect(() => {
-    const humans = Object.entries(positionRoles)
-      .filter(([, r]) => r === 'human')
-      .map(([p]) => p)
-    if (humans.length === 0) {
-      setHumanPosition(null)
-    } else if (humans.length === 1) {
-      setHumanPosition(humans[0])
-    } else {
-      setHumanPosition(humans)
-    }
-  }, [positionRoles])
+  }, [hands, biddingSequence, dealer, gameMode, practiceDirection, positionRoles, aiBiddingHistory, dealSystem, currentRecordId, showPlayPanel])
 
   // 发牌
   const handleDeal = async (mode = 'free') => {
@@ -685,12 +670,12 @@ function App({ darkMode, onToggleDarkMode }) {
       setAiBiddingHistory([]) // 重置AI叫牌历史记录
       setCurrentBidder(dealer) // 从发牌人开始叫牌
       setBiddingStarted(false) // 重置叫牌开始状态
-      setIsNewDeal(true) // 标记为新发牌
       setStopBidding(false) // 重置停止叫牌状态
       setPassedAIPositions(new Set()) // 重置已pass的AI位置
       setUseFallback(false) // 重置备用提示词状态
       setShowDoubleDummy(false) // 重置双明手显示状态
       setDoubleDummyResult(null) // 重置双明手结果
+      setPositionRoles({ '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai' }) // 默认全AI旁观
       // 重置回退历史
       setBiddingHistory([])
       setHistoryIndex(-1)
@@ -723,12 +708,12 @@ function App({ darkMode, onToggleDarkMode }) {
         setAiBiddingHistory([])
         setCurrentBidder(dealer)
         setBiddingStarted(false)
-        setIsNewDeal(true)
         setStopBidding(false)
         setPassedAIPositions(new Set())
         setUseFallback(false)
         setShowDoubleDummy(false)
         setDoubleDummyResult(null)
+        setPositionRoles({ '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai' }) // 默认全AI旁观
         setBiddingHistory([])
         setHistoryIndex(-1)
         // 重置打牌相关状态
@@ -763,12 +748,12 @@ function App({ darkMode, onToggleDarkMode }) {
         setAiBiddingHistory([])
         setCurrentBidder(dealer)
         setBiddingStarted(false)
-        setIsNewDeal(true)
         setStopBidding(false)
         setPassedAIPositions(new Set())
         setUseFallback(false)
         setShowDoubleDummy(false)
         setDoubleDummyResult(null)
+        setPositionRoles({ '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai' }) // 默认全AI旁观
         setBiddingHistory([])
         setHistoryIndex(-1)
         // 重置打牌相关状态
@@ -814,12 +799,12 @@ function App({ darkMode, onToggleDarkMode }) {
         setAiBiddingHistory([])
         setCurrentBidder(dealer)
         setBiddingStarted(false)
-        setIsNewDeal(true)
-        setStopBidding(false)
+            setStopBidding(false)
         setPassedAIPositions(new Set())
         setUseFallback(false)
         setShowDoubleDummy(false)
         setDoubleDummyResult(null)
+        setPositionRoles({ '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai' }) // 默认全AI旁观
         setBiddingHistory([])
         setHistoryIndex(-1)
         setError(null)
@@ -866,8 +851,7 @@ function App({ darkMode, onToggleDarkMode }) {
       setBiddingTotalTime(null)
       setError(null)
       // 发牌人是人类时，直接显示叫牌控制面板
-      const dealerIsHuman = (positionRoles && positionRoles[dealer] === 'human') ||
-        (humanPosition && (Array.isArray(humanPosition) ? humanPosition.includes(dealer) : humanPosition === dealer))
+      const dealerIsHuman = isHumanPosition(positionRoles, dealer)
       if (dealerIsHuman) {
         setShowBiddingControls(true)
       }
@@ -917,14 +901,25 @@ function App({ darkMode, onToggleDarkMode }) {
     setPlayStarted(false)
     setPlayInitiated(false)
     setLoadedPlayRecord(null)
+    setPositionRoles({ '南': 'ai', '北': 'human', '东': 'human', '西': 'human' })
+    setShowPartnerHand(false)
+    setShowOpponentHands(false)
   }, [])
 
   const handleDealerChange = useCallback((pos) => {
     setDealer(pos)
+    // 双人模式：发牌人切换到对方阵营时自动更新练习方向，重置手牌可见性
+    if (gameMode === 'pair') {
+      const newDirection = ['南', '北'].includes(pos) ? 'NS' : 'EW'
+      if (newDirection !== practiceDirection) {
+        setPracticeDirection(newDirection)
+      }
+      setShowPartnerHand(false)
+      setShowOpponentHands(false)
+    }
     setCurrentBidder(pos)
     setBiddingStarted(false)
     setStopBidding(false)
-    setIsNewDeal(true)
     setBiddingSequence([])
     setAiBiddingHistory([])
     setPassedAIPositions(new Set())
@@ -934,7 +929,20 @@ function App({ darkMode, onToggleDarkMode }) {
     setSelectedPlayCard(null)
     setIsPlayPaused(false)
     setLoadedPlayRecord(null)
-  }, [])
+  }, [gameMode, practiceDirection])
+
+  // 双人模式：练习方向改变时，同步发牌人（发牌人必须在练习方阵营内）
+  useEffect(() => {
+    if (gameMode === 'pair' && !biddingStarted) {
+      const nsDealers = ['南', '北']
+      const ewDealers = ['东', '西']
+      const pairDealers = practiceDirection === 'NS' ? nsDealers : ewDealers
+      if (!pairDealers.includes(dealer)) {
+        setDealer(pairDealers[0])
+        setCurrentBidder(pairDealers[0])
+      }
+    }
+  }, [practiceDirection, gameMode, dealer, biddingStarted])
 
   // 切换停止/继续叫牌
   const toggleStopBidding = () => {
@@ -1014,9 +1022,8 @@ function App({ darkMode, onToggleDarkMode }) {
 
     // 根据游戏模式判断是否需要为对方阵营添加自动pass
     if (gameMode === 'pair') {
-      // 双人模式：南北 vs 东西
-      // 判断下一个叫牌者是否属于对方阵营
-      const humanPair = ['南', '北'].includes(humanPosition) ? ['南', '北'] : ['东', '西']
+      // 双人模式：南北 vs 东西，对方自动pass
+      const humanPair = practiceDirection === 'NS' ? ['南', '北'] : ['东', '西']
       const isHumanTeam = humanPair.includes(currentBidder)
       const isNextHumanTeam = humanPair.includes(nextBidder)
       
@@ -1295,7 +1302,7 @@ function App({ darkMode, onToggleDarkMode }) {
         hands,
         dealer,
         gameMode,
-        humanPosition,
+        practiceDirection,
         positionRoles,
         dealSystem,
         dealMode,
@@ -1421,8 +1428,8 @@ function App({ darkMode, onToggleDarkMode }) {
           contract: finalContract,
           dealer: dealer,
           game_mode: gameMode,
-          human_position: humanPosition,
-          player_roles: positionRoles,
+          practice_direction: practiceDirection,
+          position_roles: positionRoles,
         },
         bidding: {
           ai_bidding_history: trimBiddingHistory(aiBiddingHistory),
@@ -1594,8 +1601,9 @@ function App({ darkMode, onToggleDarkMode }) {
     setIsPlayPaused(false) // 重置暂停状态
     setPlayStarted(false) // 初始化为未开始，第一张牌打出后才变为暂停按钮
     setPlayInitiated(false) // 初始化为未启动，等用户点击"开始"才启动
+    setShowPlayedCards(true) // 打牌默认显示已出牌
     prevTricksCountRef.current = 0 // 重置墩数计数器
-    
+
     // 构建包含叫牌含义的叫牌历史字符串
     let biddingStr = null
     let meaningLines = ''
@@ -1612,12 +1620,31 @@ function App({ darkMode, onToggleDarkMode }) {
         : seqStr
     }
 
+    // 自动同步庄家/明手搭档角色
+    const contractDummy = getPartnerPosition(contract.declarer)
+    let playRoles = { ...positionRoles }
+    const humanCount = getHumanPositions(positionRoles).length
+    if (humanCount === 1) {
+      const humanPos = getHumanPositions(positionRoles)[0]
+      if (humanPos === contract.declarer || humanPos === contractDummy) {
+        playRoles[getPartnerPosition(humanPos)] = 'human'
+      }
+    } else if (humanCount === 3) {
+      const aiPos = Object.keys(positionRoles).find(p => positionRoles[p] === 'ai')
+      if (aiPos && (aiPos === contract.declarer || aiPos === contractDummy)) {
+        playRoles[getPartnerPosition(aiPos)] = 'ai'
+      }
+    }
+    if (JSON.stringify(playRoles) !== JSON.stringify(positionRoles)) {
+      setPositionRoles(playRoles)
+    }
+
     try {
       const result = await playInit(
         hands,
         `${contract.level}${contract.suit}`,
         contract.declarer,
-        positionRoles,
+        playRoles,
         contract.isDouble,
         contract.isRedouble,
         biddingStr,
@@ -1914,13 +1941,6 @@ function App({ darkMode, onToggleDarkMode }) {
     return positionRoles[cp] === 'human'
   }
 
-  // 模拟实战模式：显示已出默认开启
-  useEffect(() => {
-    if (isSimulatedPlay) {
-      setShowPlayedCards(true)
-    }
-  }, [isSimulatedPlay])
-
   // AI自动出牌
   useEffect(() => {
     if (!showPlayPanel || !playState || aiThinking || playLoading || isPlayPaused || !playInitiated) return
@@ -1993,8 +2013,8 @@ function App({ darkMode, onToggleDarkMode }) {
         contract: finalContract,
         dealer: dealer,
         game_mode: gameMode,
-        human_position: humanPosition,
-        player_roles: positionRoles,
+        practice_direction: practiceDirection,
+        position_roles: positionRoles,
       },
       bidding: {
         ai_bidding_history: trimBiddingHistory(aiBiddingHistory),
@@ -2013,45 +2033,81 @@ function App({ darkMode, onToggleDarkMode }) {
     if (!currentRecordId) {
       setCurrentRecordId(record.id)
     }
-  }, [playState, hands, biddingSequence, dealer, gameMode, humanPosition, positionRoles, aiBiddingHistory, dealSystem, aiPlayHistory, currentRecordId])
-
-  // 获取队友位置
-  const getPartnerPosition = (pos) => {
-    const partners = {
-      '南': '北',
-      '北': '南',
-      '东': '西',
-      '西': '东'
-    }
-    return partners[pos]
-  }
+  }, [playState, hands, biddingSequence, dealer, gameMode, practiceDirection, positionRoles, aiBiddingHistory, dealSystem, aiPlayHistory, currentRecordId])
 
   // 处理位置角色变化
   const handlePositionRoleChange = async (position, role) => {
-    // 打牌阶段：庄家和明手角色双向同步（庄家替明手打牌）
     const dummy = playState?.dummy
     const declarer = playState?.contract?.declarer
-    let syncPosition = null
-    let newRoles = { ...positionRoles, [position]: role }
+    let newRoles
 
-    if (showPlayPanel && playState && dummy) {
-      if (position === dummy && declarer) {
-        syncPosition = declarer
-      } else if (position === declarer && dummy) {
-        syncPosition = dummy
+    if (showPlayPanel && playState && dummy && declarer) {
+      // 打牌阶段：庄家/明手必须同角色，防守方同侧保持合理
+      let updated = { ...positionRoles, [position]: role }
+
+      if (role === 'human') {
+        if (position === declarer || position === dummy) {
+          // 人类切换到庄家方：庄家+明手=human，原防守人类→AI
+          updated[declarer] = 'human'
+          updated[dummy] = 'human'
+          for (const pos of ['南','北','东','西']) {
+            if (pos !== declarer && pos !== dummy && updated[pos] === 'human') {
+              updated[pos] = 'ai'
+            }
+          }
+        } else {
+          // 人类切换到防守方：原庄家方人类→AI，另一防守人类→AI（只保留1个防守人类）
+          if (positionRoles[declarer] === 'human') {
+            updated[declarer] = 'ai'
+            updated[dummy] = 'ai'
+          }
+          for (const pos of ['南','北','东','西']) {
+            if (pos !== position && pos !== declarer && pos !== dummy && updated[pos] === 'human') {
+              updated[pos] = 'ai'
+            }
+          }
+        }
+      } else {
+        // role === 'ai': 把某位置改为AI
+        if (position === declarer || position === dummy) {
+          // 庄家方→AI：庄家+明手都变AI，让一防守方变human
+          updated[declarer] = 'ai'
+          updated[dummy] = 'ai'
+          for (const pos of ['南','北','东','西']) {
+            if (pos !== declarer && pos !== dummy) {
+              updated[pos] = 'human'
+              break
+            }
+          }
+        }
+        // 防守方→AI：不做额外调整（可能变成4AI）
       }
-      if (syncPosition) {
-        newRoles = { ...newRoles, [syncPosition]: role }
+
+      newRoles = updated
+    } else if (gameMode !== 'pair') {
+      // 四人叫牌阶段：只允许0/1/3个人类（4AI / 1H+3AI / 3H+1AI）
+      let updated = { ...positionRoles, [position]: role }
+      const humanCount = Object.values(updated).filter(r => r === 'human').length
+      if (humanCount === 2) {
+        if (role === 'human') {
+          // 1H→切换人类位置：新位置=human，其余=AI
+          updated = { '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai', [position]: 'human' }
+        } else {
+          // 3H+1AI → 切换AI位置：原AI变human，新位置变AI
+          const oldAiPos = Object.keys(positionRoles).find(p => positionRoles[p] === 'ai')
+          if (oldAiPos && oldAiPos !== position) {
+            updated[oldAiPos] = 'human'
+          }
+        }
       }
+      newRoles = updated
+      setShowPartnerHand(false)
+      setShowOpponentHands(false)
+    } else {
+      newRoles = { ...positionRoles, [position]: role }
     }
 
-    setPositionRoles(prev => {
-      let updatedRoles = { ...prev, [position]: role }
-      if (syncPosition) {
-        updatedRoles = { ...updatedRoles, [syncPosition]: role }
-      }
-      return updatedRoles
-    })
+    setPositionRoles(newRoles)
 
     // 每墩开头：当前玩家从人类切为AI时自动暂停，显示继续按钮
     if (showPlayPanel && playState && !isPlayPaused && playState.phase !== 'complete') {
@@ -2283,16 +2339,13 @@ function App({ darkMode, onToggleDarkMode }) {
               isMobile={false}
               hands={hands}
               currentBidder={currentBidder}
-              humanPosition={humanPosition}
               dealer={dealer}
               gameMode={gameMode}
               showPartnerHand={showPartnerHand}
               setShowPartnerHand={setShowPartnerHand}
-              showAIHands={showAIHands}
-              setShowAIHands={setShowAIHands}
-              showDeclarerHand={showDeclarerHand}
-              setShowDeclarerHand={setShowDeclarerHand}
+
               showOpponentHands={showOpponentHands}
+              setShowOpponentHands={setShowOpponentHands}
               getPartnerPosition={getPartnerPosition}
               biddingSequence={biddingSequence}
               isBiddingComplete={isBiddingComplete}
@@ -2317,7 +2370,6 @@ function App({ darkMode, onToggleDarkMode }) {
               startBidding={startBidding}
               playState={playState}
               showPlayPanel={showPlayPanel}
-              isSimulated={isSimulatedPlay}
               declarer={finalContract?.declarer}
               lastCompletedTrick={lastCompletedTrick}
               isPlayPaused={isPlayPaused}
@@ -2365,10 +2417,10 @@ function App({ darkMode, onToggleDarkMode }) {
                 canSave={playCanSave}
               />
             ) : (
-              (humanPosition !== null || showAIBiddingOutput) && (
+              (hasAnyHuman(positionRoles) || showAIBiddingOutput) && (
                 <BiddingDetailPanel
                   isMobile={false}
-                  humanPosition={humanPosition}
+                  positionRoles={positionRoles}
                   currentBidder={currentBidder}
                   isBiddingComplete={isBiddingComplete()}
                   showBiddingControls={showBiddingControls}
@@ -2394,7 +2446,6 @@ function App({ darkMode, onToggleDarkMode }) {
                   onStartPlay={handleStartPlay}
                   playLoading={playLoading}
                   biddingStarted={biddingStarted}
-                  isNewDeal={isNewDeal}
                   onStartBidding={startBidding}
                   onResetBidding={resetBidding}
                   onToggleStopBidding={toggleStopBidding}
@@ -2420,16 +2471,13 @@ function App({ darkMode, onToggleDarkMode }) {
               isMobile={true}
               hands={hands}
               currentBidder={currentBidder}
-              humanPosition={humanPosition}
               dealer={dealer}
               gameMode={gameMode}
               showPartnerHand={showPartnerHand}
               setShowPartnerHand={setShowPartnerHand}
-              showAIHands={showAIHands}
-              setShowAIHands={setShowAIHands}
-              showDeclarerHand={showDeclarerHand}
-              setShowDeclarerHand={setShowDeclarerHand}
+
               showOpponentHands={showOpponentHands}
+              setShowOpponentHands={setShowOpponentHands}
               getPartnerPosition={getPartnerPosition}
               biddingSequence={biddingSequence}
               isBiddingComplete={isBiddingComplete}
@@ -2454,7 +2502,6 @@ function App({ darkMode, onToggleDarkMode }) {
               startBidding={startBidding}
               playState={playState}
               showPlayPanel={showPlayPanel}
-              isSimulated={isSimulatedPlay}
               declarer={finalContract?.declarer}
               lastCompletedTrick={lastCompletedTrick}
               isPlayPaused={isPlayPaused}
@@ -2503,10 +2550,10 @@ function App({ darkMode, onToggleDarkMode }) {
                 canSave={playCanSave}
               />
             ) : (
-              (humanPosition !== null || showAIBiddingOutput) && (
+              (hasAnyHuman(positionRoles) || showAIBiddingOutput) && (
                 <BiddingDetailPanel
                   isMobile={true}
-                  humanPosition={humanPosition}
+                  positionRoles={positionRoles}
                   currentBidder={currentBidder}
                   isBiddingComplete={isBiddingComplete()}
                   showBiddingControls={showBiddingControls}
@@ -2532,7 +2579,6 @@ function App({ darkMode, onToggleDarkMode }) {
                   onStartPlay={handleStartPlay}
                   playLoading={playLoading}
                   biddingStarted={biddingStarted}
-                  isNewDeal={isNewDeal}
                   onStartBidding={startBidding}
                   onResetBidding={resetBidding}
                   onToggleStopBidding={toggleStopBidding}
