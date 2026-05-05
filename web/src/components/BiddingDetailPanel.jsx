@@ -42,6 +42,7 @@ function BiddingDetailPanel({
   onSave,
   canSave,
   aiThinking,
+  readonlyMode = false,
 }) {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
@@ -55,7 +56,7 @@ function BiddingDetailPanel({
   const colorMuted = isDark ? '#94a3b8' : '#666'
   const isHumanTurn = useMemo(() => isHumanPosition(positionRoles, currentBidder), [positionRoles, currentBidder])
   const canShowControls = hasAnyHuman(positionRoles) && !isBiddingComplete
-  const effectiveShowControls = isHumanTurn && !isBiddingComplete && showBiddingControls
+  const effectiveShowControls = !readonlyMode && isHumanTurn && !isBiddingComplete && showBiddingControls
 
   const historySelectOptions = useMemo(() => {
     if (aiBiddingHistory.length === 0) return []
@@ -91,7 +92,7 @@ function BiddingDetailPanel({
             variant="outlined"
             size="small"
             onClick={!biddingStarted ? onStartBidding : onResetBidding}
-            disabled={!hands || aiThinking}
+            disabled={!hands || aiThinking || readonlyMode}
             sx={{ fontSize: '0.75rem', textTransform: 'none' }}
           >
             {!biddingStarted ? '开始' : '重新叫牌'}
@@ -103,7 +104,7 @@ function BiddingDetailPanel({
             color={stopBidding ? "success" : "warning"}
             size="small"
             onClick={onToggleStopBidding}
-            disabled={stopBidding && aiThinking}
+            disabled={(stopBidding && aiThinking) || readonlyMode}
             sx={{ fontSize: '0.75rem', textTransform: 'none' }}
           >
             {stopBidding ? '继续' : '暂停'}
@@ -115,7 +116,7 @@ function BiddingDetailPanel({
             color="secondary"
             size="small"
             onClick={onUndo}
-            disabled={!canUndo}
+            disabled={!canUndo || readonlyMode}
             sx={{ fontSize: '0.75rem', textTransform: 'none' }}
           >
             撤销
@@ -126,12 +127,12 @@ function BiddingDetailPanel({
           color="info"
           size="small"
           onClick={onSave}
-          disabled={!canSave}
+          disabled={!canSave || readonlyMode}
           sx={{ fontSize: '0.75rem', textTransform: 'none' }}
         >
           保存
         </Button>
-        {gameMode !== 'pair' && isBiddingCompleteFn && isBiddingCompleteFn() && onStartPlay && (
+        {gameMode !== 'pair' && onStartPlay && (
           <Button
             variant="contained"
             color="primary"
@@ -423,7 +424,7 @@ function BiddingDetailPanel({
             }}
             size="small"
             sx={{ height: 24 }}
-            disabled={!canShowControls}
+            disabled={!canShowControls || readonlyMode}
           >
             <ToggleButton value="controls" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 40 }}>
               控制

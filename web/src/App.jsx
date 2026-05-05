@@ -254,6 +254,12 @@ function App({ darkMode, onToggleDarkMode }) {
   const [playInitiated, setPlayInitiated] = useState(false) // 打牌是否已启动（点击"开始"后或重新打牌AI首攻）
   const [loadedPlayRecord, setLoadedPlayRecord] = useState(null) // 从历史记录预加载的打牌数据
   const prevTricksCountRef = useRef(0) // 用于检测一墩完成
+  // 直接打牌：无叫牌定约时弹出输入框
+  const [contractDialogOpen, setContractDialogOpen] = useState(false)
+  const [contractDialogForm, setContractDialogForm] = useState({ contractStr: '', declarer: '南' })
+  const [directPlayContractInfo, setDirectPlayContractInfo] = useState(null)
+  const [readonlyMode, setReadonlyMode] = useState(false) // 加载不完整记录时只读
+  const [mode, setMode] = useState(null) // null=初始选择, 'practice'=发牌练习, 'simulated'=模拟实战
   const playStateRef = useRef(playState)
   const aiPlayHistoryRef = useRef(aiPlayHistory)
   useEffect(() => { playStateRef.current = playState }, [playState])
@@ -512,6 +518,21 @@ function App({ darkMode, onToggleDarkMode }) {
       setIsPlayPaused(false)
     }
 
+    // 判断手牌齐全：四家各13张 → 恢复4AI可操作；不齐全 → 只读
+    const loadedHands = board.hands || record.hands
+    const allComplete = loadedHands && ['南','北','东','西'].every(pos => {
+      const h = loadedHands[pos]
+      if (!h) return false
+      const total = (h.spades?.length || 0) + (h.hearts?.length || 0) + (h.diamonds?.length || 0) + (h.clubs?.length || 0)
+      return total === 13
+    })
+    if (allComplete) {
+      setPositionRoles({ '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai' })
+      setReadonlyMode(false)
+    } else {
+      setReadonlyMode(true)
+    }
+
     // 加载历史记录后获取更多输出格式
     if ((board.hands || record.hands) && (board.bidding_sequence || record.biddingSequence) && (board.bidding_sequence || record.biddingSequence).length > 0) {
       // 延迟调用，确保状态已更新
@@ -680,6 +701,7 @@ function App({ darkMode, onToggleDarkMode }) {
       setBiddingHistory([])
       setHistoryIndex(-1)
       // 重置打牌相关状态
+      setDirectPlayContractInfo(null); setReadonlyMode(false)
       setShowPlayPanel(false)
       setPlayState(null)
       setAiPlayHistory([])
@@ -717,6 +739,7 @@ function App({ darkMode, onToggleDarkMode }) {
         setBiddingHistory([])
         setHistoryIndex(-1)
         // 重置打牌相关状态
+        setReadonlyMode(false)
         setShowPlayPanel(false)
         setPlayState(null)
         setAiPlayHistory([])
@@ -757,6 +780,7 @@ function App({ darkMode, onToggleDarkMode }) {
         setBiddingHistory([])
         setHistoryIndex(-1)
         // 重置打牌相关状态
+        setReadonlyMode(false)
         setShowPlayPanel(false)
         setPlayState(null)
         setAiPlayHistory([])
@@ -809,6 +833,7 @@ function App({ darkMode, onToggleDarkMode }) {
         setHistoryIndex(-1)
         setError(null)
         // 重置打牌相关状态
+        setReadonlyMode(false)
         setShowPlayPanel(false)
         setPlayState(null)
         setAiPlayHistory([])
@@ -893,6 +918,7 @@ function App({ darkMode, onToggleDarkMode }) {
     setBiddingHistory([])
     setHistoryIndex(-1)
     // 重置打牌相关状态
+    setReadonlyMode(false)
     setShowPlayPanel(false)
     setPlayState(null)
     setAiPlayHistory([])
@@ -905,6 +931,23 @@ function App({ darkMode, onToggleDarkMode }) {
     setShowPartnerHand(false)
     setShowOpponentHands(false)
   }, [])
+
+  const enterPracticeMode = useCallback(() => {
+    setMode('practice')
+    setPositionRoles({ '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai' })
+  }, [])
+
+  const enterSimulatedMode = useCallback(() => {
+    setMode('simulated')
+    clearAllHands()
+    setPositionRoles({ '南': 'ai', '北': 'human', '东': 'human', '西': 'human' })
+  }, [clearAllHands])
+
+  const exitMode = useCallback(() => {
+    setMode(null)
+    clearAllHands()
+    setReadonlyMode(false)
+  }, [clearAllHands])
 
   const handleDealerChange = useCallback((pos) => {
     setDealer(pos)
@@ -1590,28 +1633,30 @@ function App({ darkMode, onToggleDarkMode }) {
     }
 
     const contract = getFinalContract()
-    
+
     if (!contract) {
-      setError('无法确定定约')
+      setContractDialogOpen(true)
       return
     }
-    
+
+    await doPlayInit(contract, biddingSequence, aiBiddingHistory)
+  }
+
+  // 抽取公共打牌初始化逻辑（handleStartPlay / handleResetPlay / 直接打牌 共用）
+  const doPlayInit = async (contract, biddingSeq, aiHistory) => {
     setPlayLoading(true)
     setError(null)
-    setIsPlayPaused(false) // 重置暂停状态
-    setPlayStarted(false) // 初始化为未开始，第一张牌打出后才变为暂停按钮
-    setPlayInitiated(false) // 初始化为未启动，等用户点击"开始"才启动
-    setShowPlayedCards(true) // 打牌默认显示已出牌
-    prevTricksCountRef.current = 0 // 重置墩数计数器
+    setIsPlayPaused(false)
+    setPlayStarted(false)
+    setPlayInitiated(false)
+    setShowPlayedCards(true)
+    prevTricksCountRef.current = 0
 
-    // 构建包含叫牌含义的叫牌历史字符串
     let biddingStr = null
     let meaningLines = ''
-    if (biddingSequence.length > 0) {
-      // 纯叫牌序列
-      const seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
-      // 含义历史（每条记录含叫品含义）
-      meaningLines = aiBiddingHistory
+    if (biddingSeq.length > 0) {
+      const seqStr = biddingSeq.map(b => `(${b.position})${b.bid}`).join('-')
+      meaningLines = aiHistory
         .filter(r => r.result?.meaning)
         .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
         .join('\n')
@@ -1620,20 +1665,11 @@ function App({ darkMode, onToggleDarkMode }) {
         : seqStr
     }
 
-    // 自动同步庄家/明手搭档角色
     const contractDummy = getPartnerPosition(contract.declarer)
     let playRoles = { ...positionRoles }
-    const humanCount = getHumanPositions(positionRoles).length
-    if (humanCount === 1) {
-      const humanPos = getHumanPositions(positionRoles)[0]
-      if (humanPos === contract.declarer || humanPos === contractDummy) {
-        playRoles[getPartnerPosition(humanPos)] = 'human'
-      }
-    } else if (humanCount === 3) {
-      const aiPos = Object.keys(positionRoles).find(p => positionRoles[p] === 'ai')
-      if (aiPos && (aiPos === contract.declarer || aiPos === contractDummy)) {
-        playRoles[getPartnerPosition(aiPos)] = 'ai'
-      }
+    // 庄家和明手角色必须一致，以庄家角色为准
+    if (playRoles[contractDummy] !== playRoles[contract.declarer]) {
+      playRoles[contractDummy] = playRoles[contract.declarer]
     }
     if (JSON.stringify(playRoles) !== JSON.stringify(positionRoles)) {
       setPositionRoles(playRoles)
@@ -1645,12 +1681,12 @@ function App({ darkMode, onToggleDarkMode }) {
         `${contract.level}${contract.suit}`,
         contract.declarer,
         playRoles,
-        contract.isDouble,
-        contract.isRedouble,
+        contract.isDouble || false,
+        contract.isRedouble || false,
         biddingStr,
         meaningLines
       )
-      
+
       if (result.success) {
         setPlayState(result.state)
         setShowPlayPanel(true)
@@ -1663,6 +1699,28 @@ function App({ darkMode, onToggleDarkMode }) {
     } finally {
       setPlayLoading(false)
     }
+  }
+
+  // 直接打牌：对话框确认，解析定约并调用 doPlayInit
+  const handleContractDialogConfirm = async () => {
+    const { contractStr, declarer } = contractDialogForm
+    const match = contractStr.trim().match(/^(\d)([SHDC]|NT)$/i)
+    if (!match) {
+      setError('无效定约格式，请输入如 4S 或 3NT')
+      return
+    }
+    const contract = {
+      level: parseInt(match[1]),
+      suit: match[2].toUpperCase(),
+      declarer,
+      isDouble: false,
+      isRedouble: false,
+      partnership: ['南', '北'].includes(declarer) ? '南北' : '东西',
+      bid: contractStr.trim(),
+    }
+    setDirectPlayContractInfo(contract)
+    setContractDialogOpen(false)
+    await doPlayInit(contract, [], [])
   }
 
   // 出牌
@@ -1857,64 +1915,21 @@ function App({ darkMode, onToggleDarkMode }) {
 
   // 重新打牌（保持当前牌局和叫牌，重置打牌状态并重新初始化）
   const handleResetPlay = async () => {
-    const contract = getFinalContract()
+    let contract = getFinalContract()
+    if (!contract) contract = directPlayContractInfo
     if (!contract) {
       setError('无法确定定约')
       return
     }
 
-    setPlayLoading(true)
-    setError(null)
     setAiPlayHistory([])
     setSelectedPlayCard(null)
     setSelectedPlayRecord(null)
-    setIsPlayPaused(false)
-    setPlayStarted(false)
-    setPlayInitiated(false)
     setLastCompletedTrick(null)
     setPlayCenterView('play')
     setLoadedPlayRecord(null)
-    setCurrentRecordId(null) // 重新打牌创建新记录
-    prevTricksCountRef.current = 0
-
-    // 构建包含叫牌含义的叫牌历史字符串
-    let biddingStr = null
-    let meaningLines = ''
-    if (biddingSequence.length > 0) {
-      const seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
-      meaningLines = aiBiddingHistory
-        .filter(r => r.result?.meaning)
-        .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
-        .join('\n')
-      biddingStr = meaningLines
-        ? `${seqStr}\n\n叫牌含义:\n${meaningLines}`
-        : seqStr
-    }
-
-    try {
-      const result = await playInit(
-        hands,
-        `${contract.level}${contract.suit}`,
-        contract.declarer,
-        positionRoles,
-        contract.isDouble,
-        contract.isRedouble,
-        biddingStr,
-        meaningLines
-      )
-
-      if (result.success) {
-        setPlayState(result.state)
-        setShowPlayPanel(true)
-      } else {
-        setError(result.error || '重新初始化打牌失败')
-      }
-    } catch (err) {
-      console.error('重新初始化打牌失败:', err)
-      setError('重新初始化打牌失败: ' + (err.response?.data?.detail || err.message))
-    } finally {
-      setPlayLoading(false)
-    }
+    setCurrentRecordId(null)
+    await doPlayInit(contract, biddingSequence, aiBiddingHistory)
   }
 
   // 桌面点击已出牌，切换到对应的打牌细节
@@ -2001,7 +2016,7 @@ function App({ darkMode, onToggleDarkMode }) {
   const saveCompletePlayRecord = useCallback(() => {
     if (!playState || playState.phase !== 'complete') return
 
-    const finalContract = getFinalContract()
+    const finalContract = getFinalContract() || directPlayContractInfo
     const record = {
       id: Date.now().toString(),
       timestamp: new Date().toLocaleString(),
@@ -2033,7 +2048,7 @@ function App({ darkMode, onToggleDarkMode }) {
     if (!currentRecordId) {
       setCurrentRecordId(record.id)
     }
-  }, [playState, hands, biddingSequence, dealer, gameMode, practiceDirection, positionRoles, aiBiddingHistory, dealSystem, aiPlayHistory, currentRecordId])
+  }, [playState, hands, biddingSequence, dealer, gameMode, practiceDirection, positionRoles, directPlayContractInfo, aiBiddingHistory, dealSystem, aiPlayHistory, currentRecordId])
 
   // 处理位置角色变化
   const handlePositionRoleChange = async (position, role) => {
@@ -2225,6 +2240,88 @@ function App({ darkMode, onToggleDarkMode }) {
     )
   }
 
+  if (mode === null) {
+    return (
+      <Box sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '100vh',
+        gap: 4,
+        px: 2,
+        bgcolor: darkMode ? 'rgba(15, 23, 42, 0.95)' : '#f0f4f8',
+      }}>
+        <Typography variant="h3" sx={{ fontWeight: 700 }}>
+          桥牌练习系统
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <Button
+            variant="contained"
+            size="large"
+            onClick={enterPracticeMode}
+            sx={{
+              width: 220, height: 120, fontSize: '1.25rem', fontWeight: 600,
+              borderRadius: 3, textTransform: 'none',
+            }}
+          >
+            发牌练习
+          </Button>
+          <Button
+            variant="outlined"
+            size="large"
+            onClick={enterSimulatedMode}
+            sx={{
+              width: 220, height: 120, fontSize: '1.25rem', fontWeight: 600,
+              borderRadius: 3, textTransform: 'none',
+            }}
+          >
+            模拟实战
+          </Button>
+        </Box>
+        <Box sx={{
+          display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'center',
+          maxWidth: 600, mt: 2,
+        }}>
+          <Box sx={{
+            flex: '1 1 260px', minWidth: 240,
+            p: 2.5, borderRadius: 2,
+            bgcolor: darkMode ? 'rgba(255,255,255,0.05)' : 'white',
+            border: darkMode ? '1px solid rgba(255,255,255,0.1)' : '1px solid #e0e0e0',
+          }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1, color: 'primary.main' }}>
+              发牌练习
+            </Typography>
+            <Typography variant="body2" color="text.secondary" component="div">
+              <ul style={{ margin: 0, paddingLeft: '1.2rem', lineHeight: 1.8 }}>
+                <li>随机发四家牌，配置 AI / 人类角色</li>
+                <li>支持 4AI 旁观、1H+3AI 练习、双人对抗</li>
+                <li>完整叫牌 → 打牌流程，加载历史记录复盘</li>
+              </ul>
+            </Typography>
+          </Box>
+          <Box sx={{
+            flex: '1 1 260px', minWidth: 240,
+            p: 2.5, borderRadius: 2,
+            bgcolor: darkMode ? 'rgba(255,255,255,0.05)' : 'white',
+            border: darkMode ? '1px solid rgba(255,255,255,0.1)' : '1px solid #e0e0e0',
+          }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1, color: 'warning.main' }}>
+              模拟实战
+            </Typography>
+            <Typography variant="body2" color="text.secondary" component="div">
+              <ul style={{ margin: 0, paddingLeft: '1.2rem', lineHeight: 1.8 }}>
+                <li>指定一个 AI 位置并输入其手牌</li>
+                <li>另三家人类出牌，模拟真实牌桌实战</li>
+                <li>可从叫牌开始，也可直接输入定约打牌</li>
+              </ul>
+            </Typography>
+          </Box>
+        </Box>
+      </Box>
+    )
+  }
+
   return (
     <Box sx={{ display: 'block', width: '100%', py: { xs: 2, md: 4 }, px: { xs: 1, md: 3 } }}>
       {/* 草稿恢复提示横幅 */}
@@ -2250,11 +2347,18 @@ function App({ darkMode, onToggleDarkMode }) {
 
       {/* 标题 + 控制按钮 - 桌面版 */}
       {!isMobile && <Box sx={{ mb: 2, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 2, alignItems: 'center' }}>
+        <Button variant="text" size="small" onClick={exitMode} sx={{ fontSize: '0.75rem', textTransform: 'none' }}>
+          ← 返回
+        </Button>
         <Typography variant="h4" component="h1" sx={{ fontSize: '1.75rem', whiteSpace: 'nowrap' }}>
           桥牌练习系统
+          <Typography component="span" sx={{ fontSize: '1rem', color: 'text.secondary', ml: 1 }}>
+            {mode === 'practice' ? '— 发牌练习' : '— 模拟实战'}
+          </Typography>
         </Typography>
         <ControlButtons
           size="large"
+          mode={mode}
           showSettings={showSettings}
           setShowSettings={setShowSettings}
           loading={loading}
@@ -2273,11 +2377,15 @@ function App({ darkMode, onToggleDarkMode }) {
 
       {/* 标题 + 控制按钮 - 手机版 */}
       {isMobile && <Box sx={{ mb: 2, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 1, alignItems: 'center' }}>
+        <Button variant="text" size="small" onClick={exitMode} sx={{ fontSize: '0.7rem', textTransform: 'none' }}>
+          ← 返回
+        </Button>
         <Typography variant="h4" component="h1" sx={{ fontSize: '1.25rem', whiteSpace: 'nowrap' }}>
           桥牌练习系统
         </Typography>
         <ControlButtons
           size="small"
+          mode={mode}
           showSettings={showSettings}
           setShowSettings={setShowSettings}
           loading={loading}
@@ -2363,14 +2471,14 @@ function App({ darkMode, onToggleDarkMode }) {
               positionRoles={positionRoles}
               handlePositionRoleChange={handlePositionRoleChange}
               onDealerChange={handleDealerChange}
-              onClearAllHands={clearAllHands}
+              onClearAllHands={mode === 'simulated' ? clearAllHands : undefined}
               setHands={setHands}
               biddingStarted={biddingStarted}
               stopBidding={stopBidding}
               startBidding={startBidding}
               playState={playState}
               showPlayPanel={showPlayPanel}
-              declarer={finalContract?.declarer}
+              declarer={finalContract?.declarer || directPlayContractInfo?.declarer}
               lastCompletedTrick={lastCompletedTrick}
               isPlayPaused={isPlayPaused}
               playInitiated={playInitiated}
@@ -2382,6 +2490,7 @@ function App({ darkMode, onToggleDarkMode }) {
               aiBiddingHistory={aiBiddingHistory}
               onPlayCardClick={handlePlayCardClick}
               onSetPlayHand={handleSetPlayHand}
+              readonlyMode={readonlyMode}
             />
 
             {/* 右侧面板：叫牌细节或打牌面板 */}
@@ -2455,6 +2564,7 @@ function App({ darkMode, onToggleDarkMode }) {
                   onSave={handleSaveProgress}
                   canSave={canSaveProgress}
                   aiThinking={aiThinking}
+                  readonlyMode={readonlyMode}
                 />
               )
             )}
@@ -2495,14 +2605,14 @@ function App({ darkMode, onToggleDarkMode }) {
               positionRoles={positionRoles}
               handlePositionRoleChange={handlePositionRoleChange}
               onDealerChange={handleDealerChange}
-              onClearAllHands={clearAllHands}
+              onClearAllHands={mode === 'simulated' ? clearAllHands : undefined}
               setHands={setHands}
               biddingStarted={biddingStarted}
               stopBidding={stopBidding}
               startBidding={startBidding}
               playState={playState}
               showPlayPanel={showPlayPanel}
-              declarer={finalContract?.declarer}
+              declarer={finalContract?.declarer || directPlayContractInfo?.declarer}
               lastCompletedTrick={lastCompletedTrick}
               isPlayPaused={isPlayPaused}
               playInitiated={playInitiated}
@@ -2514,6 +2624,7 @@ function App({ darkMode, onToggleDarkMode }) {
               aiBiddingHistory={aiBiddingHistory}
               onPlayCardClick={handlePlayCardClick}
               onSetPlayHand={handleSetPlayHand}
+              readonlyMode={readonlyMode}
             />
 
             {/* 叫牌细节面板或打牌面板 */}
@@ -2588,6 +2699,7 @@ function App({ darkMode, onToggleDarkMode }) {
                   onSave={handleSaveProgress}
                   canSave={canSaveProgress}
                   aiThinking={aiThinking}
+                  readonlyMode={readonlyMode}
                 />
               )
             )}
@@ -2733,6 +2845,41 @@ function App({ darkMode, onToggleDarkMode }) {
           }} variant="contained" disabled={!imageFile || loading}>
             {loading ? <CircularProgress size={20} /> : '确定'}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 直接打牌：无叫牌定约时弹出输入框 */}
+      <Dialog open={contractDialogOpen} onClose={() => setContractDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>指定定约</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+            <Alert severity="info">未检测到叫牌定约，请手动指定后进入打牌。</Alert>
+            <TextField
+              label="定约"
+              placeholder="例如 4S 或 3NT"
+              value={contractDialogForm.contractStr}
+              onChange={(e) => setContractDialogForm({ ...contractDialogForm, contractStr: e.target.value })}
+              size="small"
+              fullWidth
+              onKeyDown={(e) => { if (e.key === 'Enter') handleContractDialogConfirm() }}
+            />
+            <FormControl size="small" fullWidth>
+              <InputLabel>庄家</InputLabel>
+              <Select
+                value={contractDialogForm.declarer}
+                label="庄家"
+                onChange={(e) => setContractDialogForm({ ...contractDialogForm, declarer: e.target.value })}
+              >
+                {['南', '北', '东', '西'].map(pos => (
+                  <MenuItem key={pos} value={pos}>{pos}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setContractDialogOpen(false)}>取消</Button>
+          <Button onClick={handleContractDialogConfirm} variant="contained">开始打牌</Button>
         </DialogActions>
       </Dialog>
     </Box>

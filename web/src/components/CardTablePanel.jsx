@@ -49,6 +49,7 @@ function CardTablePanel({
   aiBiddingHistory,
   onPlayCardClick,
   onSetPlayHand,
+  readonlyMode,
 }) {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
@@ -154,26 +155,32 @@ function CardTablePanel({
               />
             </>
           )}
-          {showPlayPanel && hasAnyHuman(positionRoles) && declarer && positionRoles[declarer] === 'ai' && (
+          {/* 打牌checkbox：仅四家全有手牌时显示（正常发牌练习模式），模拟实战不显示 */}
+          {showPlayPanel && hasAnyHuman(positionRoles) && ['南','北','东','西'].every(p => {
+            const h = hands?.[p]; return h && (h.spades || h.hearts || h.diamonds || h.clubs)
+          }) && (
             <>
-              <FormControlLabel
-                control={<Checkbox checked={showPartnerHand} onChange={(e) => setShowPartnerHand(e.target.checked)} size="small" />}
-                label="队友手牌"
-                sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
-              />
-              <FormControlLabel
-                control={<Checkbox checked={showOpponentHands} onChange={(e) => setShowOpponentHands(e.target.checked)} size="small" />}
-                label="对方手牌"
-                sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
-              />
+              {positionRoles[declarer] === 'ai' ? (
+                <>
+                  <FormControlLabel
+                    control={<Checkbox checked={showPartnerHand} onChange={(e) => setShowPartnerHand(e.target.checked)} size="small" />}
+                    label="队友手牌"
+                    sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
+                  />
+                  <FormControlLabel
+                    control={<Checkbox checked={showOpponentHands} onChange={(e) => setShowOpponentHands(e.target.checked)} size="small" />}
+                    label="对方手牌"
+                    sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
+                  />
+                </>
+              ) : (
+                <FormControlLabel
+                  control={<Checkbox checked={showOpponentHands} onChange={(e) => setShowOpponentHands(e.target.checked)} size="small" />}
+                  label="对方手牌"
+                  sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
+                />
+              )}
             </>
-          )}
-          {showPlayPanel && hasAnyHuman(positionRoles) && declarer && positionRoles[declarer] === 'human' && (
-            <FormControlLabel
-              control={<Checkbox checked={showOpponentHands} onChange={(e) => setShowOpponentHands(e.target.checked)} size="small" />}
-              label="对方手牌"
-              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
-            />
           )}
           {showPlayPanel && (
             <FormControlLabel
@@ -231,6 +238,7 @@ function CardTablePanel({
           aiBiddingHistory={aiBiddingHistory}
           onPlayCardClick={onPlayCardClick}
           onSetPlayHand={onSetPlayHand}
+          readonlyMode={readonlyMode}
         />
       </Box>
     </Paper>

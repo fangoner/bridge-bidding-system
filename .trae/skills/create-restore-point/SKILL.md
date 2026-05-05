@@ -68,13 +68,20 @@ When invoked, this skill creates a backup of the current codebase state.
    
    **脚本和打包:**
    - `build.bat`, `build_release.bat`
-   - `start_web.bat`, `start_backend.bat`, `start_terminal.bat`
+   - `start_web.bat`, `start_backend.bat`, `start_api.bat`, `start_terminal.bat`
    - `update_release.bat`, `update_release.ps1`
    - `fix-terminal.ps1`, `claude-deepseek.bat`
    - `installer.iss`, `build.spec`
+   - `test_solve_board.py`
    
    **案例数据:**
    - `bidding-cases/` directory (叫牌案例库，包含 case-XXX.json 和 cases-index.json)
+
+   **Dify 文档:**
+   - `Dify桥牌叫牌工具独立应用.md`
+
+   **运行期数据:**
+   - `bidding_history.json` (本地叫牌历史记录)
 
 4. **验证备份完整性**:
    - 逐项检查上述列表中的每一项是否存在于备份目录中

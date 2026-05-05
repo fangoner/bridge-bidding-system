@@ -45,6 +45,7 @@ function CardTable({
   aiBiddingHistory = [],
   onPlayCardClick,
   onSetPlayHand,
+  readonlyMode = false,
 }) {
   const [handInputs, setHandInputs] = useState({
     '南': '',
@@ -280,7 +281,11 @@ function CardTable({
       // 有人类参与：明手首攻后才显示
       if (position === dummy) return playState.phase !== 'lead'
 
-      // 有人类参与：AI手牌默认不显示，由checkbox控制
+      // 有人类参与：不全4家手牌时（模拟实战/部分输入），AI有手牌就显示
+      const totalWithHands = ['南','北','东','西'].filter(p => hasHand(p)).length
+      if (role !== 'human' && totalWithHands < 4 && hasHand(position)) return true
+
+      // 全4家手牌（正常发牌）：AI手牌默认不显示，由checkbox控制
       const declRole = (playerRoles && playerRoles[declarerPos]) || (positionRoles && positionRoles[declarerPos])
       if (declRole === 'ai') {
         // 庄家是AI（人类是防守方）：AI庄家→对方，AI防守队友→队友
@@ -592,13 +597,14 @@ function CardTable({
     const isCurrentlyBidding = currentBiddingPosition === position;
     const isAI = isAIPosition(position)
     const hasHandData = hasHand(position)
-    const showInput = isAI && !hasHandData && (!biddingStarted || (stopBidding && !showPlayPanel))
+    const showInput = !readonlyMode && isAI && !hasHandData && (!biddingStarted || (stopBidding && !showPlayPanel))
     const isHuman = positionRoles && positionRoles[position] === 'human'
     const manualPlayedCount = showPlayPanel ? getManualPlayedCards(position).length : 0
-    const showAIHandInput = showPlayPanel && playState
-      && isAI
+    const showPlayHandInput = !readonlyMode && showPlayPanel && playState
       && (!playState.hands?.[position] || playState.hands[position].length === 0)
       && manualPlayedCount === 0
+      && !(position === playState.dummy && playState.phase === 'lead') // 明手首攻前隐藏输入框
+      && (isAI || position === playState.dummy) // AI无手牌 或 明手(无论人类/AI)无手牌
     const handKnownInPlay = showPlayPanel && playState?.hands?.[position]?.length > 0
     
     // 打牌阶段：根据模式选择手牌数据和已出牌标记
@@ -644,11 +650,11 @@ function CardTable({
                 fontWeight: declarer === position ? 700 : 600, 
                 fontSize: '0.85rem',
                 color: declarer === position ? '#d32f2f' : 'inherit',
-                cursor: onDealerChange && (!biddingStarted || stopBidding) && !showPlayPanel ? 'pointer' : 'default',
+                cursor: onDealerChange && (!biddingStarted || stopBidding) && !showPlayPanel && !readonlyMode ? 'pointer' : 'default',
                 transition: 'color 0.2s',
-                '&:hover': onDealerChange && (!biddingStarted || stopBidding) && !showPlayPanel ? { color: 'primary.main' } : {}
+                '&:hover': onDealerChange && (!biddingStarted || stopBidding) && !showPlayPanel && !readonlyMode ? { color: 'primary.main' } : {}
               }}
-              onClick={() => onDealerChange && (!biddingStarted || stopBidding) && !showPlayPanel && onDealerChange(position)}
+              onClick={() => onDealerChange && (!biddingStarted || stopBidding) && !showPlayPanel && !readonlyMode && onDealerChange(position)}
             >
               {position}家
               {dealer === position && ' *'}
@@ -658,7 +664,11 @@ function CardTable({
               <ToggleButtonGroup
                 value={positionRoles[position]}
                 exclusive
-                disabled={showPlayPanel && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading)}
+                disabled={
+                  (showPlayPanel && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading))
+                  || readonlyMode
+                  || ((biddingStarted || showPlayPanel) && !hasHand(position))
+                }
                 onChange={(e, newRole) => {
                   if (newRole !== null) {
                     onPositionRoleChange(position, newRole)
@@ -682,7 +692,12 @@ function CardTable({
             )}
           </Box>
           
-          {showInput ? (
+          {/* 明手首攻前无手牌 → 显示未知 */}
+          {showPlayPanel && playState && position === playState.dummy && playState.phase === 'lead' && !hasHand(position) ? (
+            <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Typography variant="body2" sx={{ color: '#94a3b8', fontSize: '0.8rem' }}>[未知]</Typography>
+            </Box>
+          ) : showInput ? (
             <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
               {!handInputs[position] && (
                 <Box sx={{
@@ -723,7 +738,7 @@ function CardTable({
                 确认
               </Button>
             </Box>
-          ) : showAIHandInput ? (
+          ) : showPlayHandInput ? (
             <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
               {!handInputs[position] && (
                 <Box sx={{
@@ -810,25 +825,33 @@ function CardTable({
       position: 'relative',
       overflow: 'hidden',
     }}>
-      {onClearAllHands && gameMode !== 'pair' && !showPlayPanel && (!biddingStarted || (checkBiddingComplete && checkBiddingComplete())) && (
+      {/* 模拟实战按钮：叫牌阶段未开始/已完成时可点击；3H+1AI任何阶段显示（打牌时仅作状态指示） */}
+      {!readonlyMode && onClearAllHands && gameMode !== 'pair' && (
+        getHumanPositions(positionRoles).length >= 3 ||
+        (!showPlayPanel && (!biddingStarted || (checkBiddingComplete && checkBiddingComplete())))
+      ) && (
         <Box sx={{
           position: 'absolute',
           top: 8,
           left: 8,
           zIndex: 10,
         }}>
-          <Tooltip title="模拟实战">
-            <IconButton
-              size="small"
-              onClick={onClearAllHands}
-              sx={{
-                bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : 'rgba(255, 255, 255, 0.9)',
-                color: isDark ? '#e2e8f0' : undefined,
-                '&:hover': { bgcolor: isDark ? 'rgba(30, 41, 59, 1)' : 'rgba(255, 255, 255, 1)' }
-              }}
-            >
-              <PlayArrowIcon />
-            </IconButton>
+          <Tooltip title={showPlayPanel ? '模拟实战模式' : '模拟实战'}>
+            <span>
+              <IconButton
+                size="small"
+                onClick={onClearAllHands}
+                disabled={!!showPlayPanel}
+                sx={{
+                  bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : 'rgba(255, 255, 255, 0.9)',
+                  color: isDark ? '#e2e8f0' : undefined,
+                  '&:hover': { bgcolor: isDark ? 'rgba(30, 41, 59, 1)' : 'rgba(255, 255, 255, 1)' },
+                  opacity: showPlayPanel ? 0.5 : 1,
+                }}
+              >
+                <PlayArrowIcon />
+              </IconButton>
+            </span>
           </Tooltip>
         </Box>
       )}
