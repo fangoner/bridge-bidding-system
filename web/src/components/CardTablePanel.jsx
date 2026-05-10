@@ -50,6 +50,7 @@ function CardTablePanel({
   onPlayCardClick,
   onSetPlayHand,
   readonlyMode,
+  mode,
 }) {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
@@ -239,6 +240,7 @@ function CardTablePanel({
           onPlayCardClick={onPlayCardClick}
           onSetPlayHand={onSetPlayHand}
           readonlyMode={readonlyMode}
+          mode={mode}
         />
       </Box>
     </Paper>

@@ -2057,48 +2057,54 @@ function App({ darkMode, onToggleDarkMode }) {
     let newRoles
 
     if (showPlayPanel && playState && dummy && declarer) {
-      // 打牌阶段：庄家/明手必须同角色，防守方同侧保持合理
-      let updated = { ...positionRoles, [position]: role }
+      // 打牌阶段角色切换
+      if (mode === 'simulated') {
+        // 模拟实战：无联动，仅切换指定位置角色
+        newRoles = { ...positionRoles, [position]: role }
+      } else {
+        // 发牌练习：庄家/明手必须同角色，防守方同侧保持合理
+        let updated = { ...positionRoles, [position]: role }
 
-      if (role === 'human') {
-        if (position === declarer || position === dummy) {
-          // 人类切换到庄家方：庄家+明手=human，原防守人类→AI
-          updated[declarer] = 'human'
-          updated[dummy] = 'human'
-          for (const pos of ['南','北','东','西']) {
-            if (pos !== declarer && pos !== dummy && updated[pos] === 'human') {
-              updated[pos] = 'ai'
+        if (role === 'human') {
+          if (position === declarer || position === dummy) {
+            // 人类切换到庄家方：庄家+明手=human，原防守人类→AI
+            updated[declarer] = 'human'
+            updated[dummy] = 'human'
+            for (const pos of ['南','北','东','西']) {
+              if (pos !== declarer && pos !== dummy && updated[pos] === 'human') {
+                updated[pos] = 'ai'
+              }
+            }
+          } else {
+            // 人类切换到防守方：原庄家方人类→AI，另一防守人类→AI（只保留1个防守人类）
+            if (positionRoles[declarer] === 'human') {
+              updated[declarer] = 'ai'
+              updated[dummy] = 'ai'
+            }
+            for (const pos of ['南','北','东','西']) {
+              if (pos !== position && pos !== declarer && pos !== dummy && updated[pos] === 'human') {
+                updated[pos] = 'ai'
+              }
             }
           }
         } else {
-          // 人类切换到防守方：原庄家方人类→AI，另一防守人类→AI（只保留1个防守人类）
-          if (positionRoles[declarer] === 'human') {
+          // role === 'ai': 把某位置改为AI
+          if (position === declarer || position === dummy) {
+            // 庄家方→AI：庄家+明手都变AI，让一防守方变human
             updated[declarer] = 'ai'
             updated[dummy] = 'ai'
-          }
-          for (const pos of ['南','北','东','西']) {
-            if (pos !== position && pos !== declarer && pos !== dummy && updated[pos] === 'human') {
-              updated[pos] = 'ai'
+            for (const pos of ['南','北','东','西']) {
+              if (pos !== declarer && pos !== dummy) {
+                updated[pos] = 'human'
+                break
+              }
             }
           }
+          // 防守方→AI：不做额外调整（可能变成4AI）
         }
-      } else {
-        // role === 'ai': 把某位置改为AI
-        if (position === declarer || position === dummy) {
-          // 庄家方→AI：庄家+明手都变AI，让一防守方变human
-          updated[declarer] = 'ai'
-          updated[dummy] = 'ai'
-          for (const pos of ['南','北','东','西']) {
-            if (pos !== declarer && pos !== dummy) {
-              updated[pos] = 'human'
-              break
-            }
-          }
-        }
-        // 防守方→AI：不做额外调整（可能变成4AI）
-      }
 
-      newRoles = updated
+        newRoles = updated
+      }
     } else if (gameMode !== 'pair') {
       // 四人叫牌阶段：只允许0/1/3个人类（4AI / 1H+3AI / 3H+1AI）
       let updated = { ...positionRoles, [position]: role }
@@ -2491,6 +2497,7 @@ function App({ darkMode, onToggleDarkMode }) {
               onPlayCardClick={handlePlayCardClick}
               onSetPlayHand={handleSetPlayHand}
               readonlyMode={readonlyMode}
+              mode={mode}
             />
 
             {/* 右侧面板：叫牌细节或打牌面板 */}
@@ -2625,6 +2632,7 @@ function App({ darkMode, onToggleDarkMode }) {
               onPlayCardClick={handlePlayCardClick}
               onSetPlayHand={handleSetPlayHand}
               readonlyMode={readonlyMode}
+              mode={mode}
             />
 
             {/* 叫牌细节面板或打牌面板 */}

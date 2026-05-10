@@ -46,6 +46,7 @@ function CardTable({
   onPlayCardClick,
   onSetPlayHand,
   readonlyMode = false,
+  mode,
 }) {
   const [handInputs, setHandInputs] = useState({
     '南': '',
@@ -668,6 +669,7 @@ function CardTable({
                   (showPlayPanel && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading))
                   || readonlyMode
                   || ((biddingStarted || showPlayPanel) && !hasHand(position))
+                  || (mode === 'simulated' && showPlayPanel && playState && (!playState.hands?.[position] || playState.hands[position].length === 0))
                 }
                 onChange={(e, newRole) => {
                   if (newRole !== null) {
