@@ -138,9 +138,20 @@ function PlayDetailPanel({
             <Typography variant="caption" sx={{ color: '#7b1fa2', fontSize: '0.7rem', fontWeight: 500 }}>
               Hybrid
             </Typography>
+          ) : record.used_engine === 'tiered' ? (
+            <Typography variant="caption" sx={{ color: '#e65100', fontSize: '0.7rem', fontWeight: 500 }}>
+              Tiered
+            </Typography>
           ) : record.used_model && (
             <Typography variant="caption" sx={{ color: colorMuted, fontSize: '0.7rem' }}>
               {record.used_model === 'deepseek-v4-pro' ? 'V4-Pro' : 'V4-Flash'}
+            </Typography>
+          )}
+          {record.elapsed_ms != null && (
+            <Typography variant="caption" sx={{ color: colorMuted, fontSize: '0.65rem', ml: 1 }}>
+              {record.elapsed_ms >= 1000
+                ? `${(record.elapsed_ms / 1000).toFixed(1)}s`
+                : `${record.elapsed_ms}ms`}
             </Typography>
           )}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -198,7 +209,7 @@ function PlayDetailPanel({
                 </Box>
               )
             })}
-            {(record.used_engine === 'mcts' || (record.used_engine || '') === 'dd' || record.used_engine === 'hybrid') && (() => {
+            {(record.used_engine === 'mcts' || (record.used_engine || '') === 'dd' || record.used_engine === 'hybrid' || record.used_engine === 'tiered') && (() => {
               try {
                 const mctsRaw = fullOutput.mcts_stats
                 if (!mctsRaw) { console.log('[MCTS] no mcts_stats in fullOutput'); return null }

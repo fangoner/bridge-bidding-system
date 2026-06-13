@@ -5,16 +5,19 @@ deal.play(from_hand=True) 写入当前墩，
 solve_board 求解并取期望值选最优出牌。
 """
 
+import itertools
+import math
 import os
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from config import BASE_DIR
-from bridge.play_types import Card, PlayState, PlayPhase
+from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER, PARTNERS
 from bridge.mcts.state_utils import (
     cards_to_hand_str, get_current_trick_state, POSITION_TO_PLAYER, PLAYER_TO_POSITION, SUIT_TO_DENOM,
 )
-from bridge.mcts.sampler import DealSampler
+from bridge.mcts.sampler import DealSampler, ALL_CARDS
+from bridge.mcts.constraints import validate_sample
 
 _DEBUG_LOG = os.path.join(BASE_DIR, "dd_debug.log")
 
@@ -65,13 +68,16 @@ def _hands_to_pbn(hands: Dict[str, List[Card]]) -> str:
 class DDSearch:
 
     def __init__(self, sampler: DealSampler = None, num_samples: int = 100,
-                 min_samples: int = 15, time_limit: float = 5.0):
+                 min_samples: int = 15, time_limit: float = 5.0,
+                 endgame_card_threshold: int = 10, max_enumerations: int = 5000):
         if not ENDPLAY_AVAILABLE:
             raise RuntimeError("endplay library not available (pip install endplay)")
         self.sampler = sampler or DealSampler()
         self.num_samples = num_samples
         self.min_samples = min_samples
         self.time_limit = time_limit
+        self.endgame_card_threshold = endgame_card_threshold
+        self.max_enumerations = max_enumerations
 
     def search(self, state: PlayState) -> dict:
         perspective = state.current_player
@@ -97,6 +103,13 @@ class DDSearch:
         known_cards = sum(len(state.hands.get(p, [])) for p in known_positions)
         played_cards = sum(len(t.cards) for t in state.tricks) + len(state.current_trick.cards)
         remaining_cards = 52 - known_cards - played_cards
+
+        # 残局：尝试精确枚举所有分布
+        if remaining_cards <= self.endgame_card_threshold:
+            enum_result = self._enumerate_endgame(state, perspective, playable,
+                                                   declarer, dummy, trump, is_declarer_side)
+            if enum_result is not None:
+                return enum_result
 
         ratio = max(0, remaining_cards / 52)
         adaptive_samples = int(self.min_samples + (self.num_samples - self.min_samples) * ratio)
@@ -271,6 +284,238 @@ class DDSearch:
                     "iters_per_sec": round(samples_done / elapsed, 1) if elapsed > 0 else 0,
                     "adaptive_cap": self.num_samples,
                     "remaining_cards": remaining_cards,
+                    "candidates": child_stats,
+                },
+            },
+        }
+
+    def _enumerate_endgame(self, state: PlayState, perspective: str,
+                           playable: List[Card], declarer: str, dummy: str,
+                           trump: str, is_declarer_side: bool) -> Optional[dict]:
+        """残局精确枚举：枚举所有可能的未知牌分布，对每个做双明手求解。
+
+        返回同 search() 的 dict 格式，若枚举不可行则返回 None（回退采样）。
+        """
+        start_time = time.time()
+
+        # ── 1. 识别已知/未知位置和未知牌池 ──
+        known_positions = {perspective}
+        if dummy and state.phase != PlayPhase.LEAD:
+            known_positions.add(dummy)
+        if dummy and perspective in (declarer, dummy):
+            known_positions.add(declarer)
+
+        unknown_positions = [p for p in POSITION_ORDER if p not in known_positions]
+
+        # 收集已知牌
+        known_card_set = set()
+        for pos in known_positions:
+            known_card_set.update(state.hands.get(pos, []))
+        for trick in state.tricks:
+            for _, card in trick.cards:
+                known_card_set.add(card)
+        for _, card in state.current_trick.cards:
+            known_card_set.add(card)
+
+        # 未知牌池（排序确保确定性）
+        pool = sorted(
+            [c for c in ALL_CARDS if c not in known_card_set],
+            key=lambda c: (c.suit, ["A","K","Q","J","T","9","8","7","6","5","4","3","2"].index(c.rank))
+        )
+
+        # 每个未知位置还需出多少张牌
+        remaining_counts = {}
+        for pos in unknown_positions:
+            remaining_counts[pos] = 13 - self.sampler._count_played(state, pos)
+
+        total_needed = sum(remaining_counts.values())
+        if total_needed != len(pool):
+            # 一致性检查失败
+            return None
+
+        # ── 2. 估算枚举总数 ──
+        counts = [remaining_counts[p] for p in unknown_positions]
+        est = 1
+        rem = len(pool)
+        for c in counts[:-1]:  # 最后一个位置拿剩余全部
+            est *= math.comb(rem, c)
+            rem -= c
+        if est > self.max_enumerations:
+            print(f"[DD] Enumeration count {est} > max {self.max_enumerations}, "
+                  f"falling back to sampling")
+            return None
+
+        # ── 3. 预计算共享状态 ──
+        trick_state = get_current_trick_state(state)
+        trick_cards = trick_state["cards"]
+        trick_leader = trick_state.get("leader")
+
+        all_played = []
+        for trick in state.tricks:
+            all_played.extend(trick.cards)
+        all_played.extend(trick_cards)
+
+        total_played_tricks = state.declarer_tricks + state.defender_tricks
+        remaining_tricks = 13 - total_played_tricks
+
+        card_scores = {str(c): [] for c in playable}
+        constraints = self.sampler.constraints
+
+        n_pool = len(pool)
+        indices = list(range(n_pool))
+        n1 = remaining_counts[unknown_positions[0]]
+        enum_count = 0
+        valid_count = 0
+
+        # ── 4. 枚举所有分布 ──
+        for combo1_idx in itertools.combinations(indices, n1):
+            if time.time() - start_time > self.time_limit:
+                break
+
+            cards1 = [pool[i] for i in combo1_idx]
+            combo1_set = set(combo1_idx)
+            remaining_idx = [i for i in indices if i not in combo1_set]
+
+            # 构建分布迭代器
+            if len(unknown_positions) == 2:
+                cards2 = [pool[i] for i in remaining_idx]
+                distributions = [{unknown_positions[0]: cards1,
+                                  unknown_positions[1]: cards2}]
+            elif len(unknown_positions) == 3:
+                n2 = remaining_counts[unknown_positions[1]]
+                distributions = []
+                for combo2_idx in itertools.combinations(remaining_idx, n2):
+                    combo2_set = set(combo2_idx)
+                    cards2 = [pool[i] for i in combo2_idx]
+                    cards3 = [pool[i] for i in remaining_idx if i not in combo2_set]
+                    distributions.append({unknown_positions[0]: cards1,
+                                          unknown_positions[1]: cards2,
+                                          unknown_positions[2]: cards3})
+            else:
+                # 1或4个未知位置（极端情况），回退
+                return None
+
+            for dist in distributions:
+                enum_count += 1
+                if time.time() - start_time > self.time_limit:
+                    break
+
+                # 构建完整四家手牌
+                hands = {}
+                for pos in known_positions:
+                    hands[pos] = list(state.hands.get(pos, []))
+                for pos, cards in dist.items():
+                    hands[pos] = list(cards)
+
+                # 约束验证
+                if constraints:
+                    if not validate_sample(hands, constraints):
+                        continue
+                valid_count += 1
+
+                try:
+                    # 安全网清除已出牌
+                    for _, card in all_played:
+                        for p in hands:
+                            hands[p] = [c for c in hands[p]
+                                        if not (c.suit == card.suit and c.rank == card.rank)]
+                    # 加回当前墩牌
+                    for pos, card in trick_cards:
+                        hands[pos].append(card)
+
+                    # PBN → Deal → solve_board
+                    pbn = _hands_to_pbn(hands)
+                    deal = Deal(pbn)
+                    deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
+
+                    if trick_cards:
+                        deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
+                        for _pos, card in trick_cards:
+                            deal.play(_to_ep(card), from_hand=True)
+                    else:
+                        deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
+
+                    result = solve_board(deal)
+                    score_map = {}
+                    for ep_card, side_score in result:
+                        key = (_DENOM_TO_SUIT.get(ep_card.suit),
+                               _RANK_TO_CHAR.get(ep_card.rank))
+                        score_map[key] = side_score
+
+                    curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
+                    curplayer_is_declarer = curplayer_pos in (declarer, dummy)
+
+                    for card in playable:
+                        key = (card.suit, card.rank)
+                        target_tricks = score_map.get(key, 0)
+                        if curplayer_is_declarer:
+                            decl_side_tricks = target_tricks
+                        else:
+                            decl_side_tricks = remaining_tricks - target_tricks
+                        total = state.declarer_tricks + decl_side_tricks
+                        card_scores[str(card)].append(total)
+
+                except Exception:
+                    continue  # 跳过无效分布
+
+            if time.time() - start_time > self.time_limit:
+                break
+
+        # ── 5. 汇总结果 ──
+        elapsed = time.time() - start_time
+
+        if not any(card_scores.values()):
+            return None  # 无有效分布，回退采样
+
+        best_card = None
+        best_score = -float("inf")
+        child_stats = []
+
+        for card in playable:
+            scores = card_scores[str(card)]
+            avg = sum(scores) / len(scores) if scores else 0.0
+            mn = min(scores) if scores else 0
+            mx = max(scores) if scores else 0
+            child_stats.append({
+                "card": str(card),
+                "samples": len(scores),
+                "avg_tricks": round(avg, 2),
+                "min_tricks": mn,
+                "max_tricks": mx,
+            })
+            rank_bonus = RANK_ORDER.get(card.rank, 0) / 50.0
+            score = (avg + rank_bonus) if is_declarer_side else -(avg + rank_bonus)
+            if score > best_score:
+                best_score = score
+                best_card = card
+
+        child_stats.sort(key=lambda s: s["avg_tricks"], reverse=is_declarer_side)
+
+        top_plays_str = ", ".join(
+            f"{s['card']}({s['avg_tricks']}[{s['min_tricks']}-{s['max_tricks']}])"
+            for s in child_stats[:5]
+        )
+        reasoning = (
+            f"DD-endgame: {enum_count} enumerations ({valid_count} valid) "
+            f"in {elapsed:.1f}s. Top plays: {top_plays_str}"
+        )
+
+        return {
+            "card": best_card,
+            "reasoning": reasoning,
+            "full_output": {
+                "推荐出牌": str(best_card),
+                "核心逻辑": reasoning,
+                "候选对比": str(child_stats),
+                "局面评估": (
+                    f"DD-endgame enumerated {enum_count} distributions "
+                    f"({valid_count} valid) in {elapsed:.1f}s"
+                ),
+                "mcts_stats": {
+                    "iterations": enum_count,
+                    "valid_distributions": valid_count,
+                    "time_sec": round(elapsed, 2),
+                    "remaining_cards": len(pool),
                     "candidates": child_stats,
                 },
             },

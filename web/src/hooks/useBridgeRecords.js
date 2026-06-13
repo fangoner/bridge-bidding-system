@@ -86,7 +86,7 @@ function useBridgeRecords() {
   }
 
   const saveRecord = useCallback((record) => {
-    let resultRecords
+    console.log('[saveRecord] 开始保存, type:', record.type, 'sourceRecordId:', record.sourceRecordId, 'id:', record.id)
     setRecords(prev => {
       try {
         let newRecords
@@ -94,6 +94,7 @@ function useBridgeRecords() {
           const existingIndex = prev.findIndex(r =>
             r.id === record.sourceRecordId || r.sourceRecordId === record.sourceRecordId
           )
+          console.log('[saveRecord] 查找sourceRecordId, existingIndex:', existingIndex, 'prev count:', prev.length)
           if (existingIndex >= 0) {
             newRecords = [...prev]
             newRecords[existingIndex] = { ...record, id: prev[existingIndex].id }
@@ -104,32 +105,32 @@ function useBridgeRecords() {
           newRecords = [record, ...prev]
         }
         newRecords = newRecords.slice(0, 100)
-        resultRecords = newRecords
+
+        // 在 updater 内直接写 localStorage（避免 React 18 并发模式下 resultRecords 未赋值）
+        try {
+          localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(newRecords))
+          console.log('[saveRecord] 持久化成功, count:', newRecords.length)
+        } catch (err) {
+          if (err.name === 'QuotaExceededError' && newRecords.length > 10) {
+            console.warn('[saveRecord] localStorage quota 超限，自动清理旧记录')
+            const trimmed = newRecords.slice(0, newRecords.length - 10)
+            try {
+              localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(trimmed))
+              return trimmed
+            } catch (e2) {
+              console.error('[saveRecord] 清理后仍无法保存:', e2)
+            }
+          } else {
+            console.error('[saveRecord] 持久化记录失败:', err)
+          }
+        }
+
         return newRecords
       } catch (err) {
-        console.error('保存记录失败:', err)
-        resultRecords = prev
+        console.error('[saveRecord] 保存记录失败:', err)
         return prev
       }
     })
-    if (resultRecords) {
-      try {
-        localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(resultRecords))
-      } catch (err) {
-        if (err.name === 'QuotaExceededError' && resultRecords.length > 10) {
-          console.warn('localStorage quota 超限，自动清理旧记录')
-          const trimmed = resultRecords.slice(0, resultRecords.length - 10)
-          try {
-            localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(trimmed))
-            setRecords(trimmed)
-          } catch (e2) {
-            console.error('清理后仍无法保存:', e2)
-          }
-        } else {
-          console.error('持久化记录失败:', err)
-        }
-      }
-    }
   }, [])
 
   const deleteRecord = useCallback((id) => {

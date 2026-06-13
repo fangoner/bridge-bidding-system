@@ -79,7 +79,7 @@ function SettingsPanel({
             打牌设置
           </Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
-            <FormControl sx={{ minWidth: 140 }} size="small" disabled={playEngine !== 'llm'}>
+            <FormControl sx={{ minWidth: 140 }} size="small" disabled={playEngine !== 'llm' && playEngine !== 'tiered'}>
               <InputLabel>模型</InputLabel>
               <Select value={playModel} label="模型" onChange={handlePlayModelChange}>
                 <MenuItem value="deepseek-v4-flash">V4-Flash</MenuItem>
@@ -92,7 +92,7 @@ function SettingsPanel({
                 <Switch
                   checked={playReasoning}
                   onChange={handlePlayReasoningChange}
-                  disabled={playEngine !== 'llm'}
+                  disabled={playEngine !== 'llm' && playEngine !== 'tiered'}
                 />
               }
               label="深度思考"
@@ -110,9 +110,10 @@ function SettingsPanel({
                 <MenuItem value="mcts">MCTS 搜索</MenuItem>
                 <MenuItem value="dd">DD 蒙地卡罗</MenuItem>
                 <MenuItem value="hybrid">Hybrid 混合</MenuItem>
+                <MenuItem value="tiered">Tiered 分层</MenuItem>
               </Select>
             </FormControl>
-            {(playEngine === 'dd' || playEngine === 'hybrid') && (
+            {(playEngine === 'dd' || playEngine === 'hybrid' || playEngine === 'tiered') && (
               <TextField
                 label="采样数"
                 type="number"

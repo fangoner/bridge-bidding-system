@@ -1,5 +1,65 @@
 # 开发日志
 
+## 2026-06-14
+
+### 分层打牌引擎 (Tiered Play Engine)
+
+**背景**:
+现有四种打牌引擎(LLM/MCTS/DD/Hybrid)互斥，用户选一个从头用到尾。但不同引擎在不同阶段各有所长：首攻需要LLM战略推理，中盘MCTS快速免费，关键决策需LLM深度思考，残局DD枚举精确。
+
+**改进**:
+- 新增第5种引擎模式 `"tiered"`，自动根据局面阶段选择最优引擎
+- **首攻** (LEAD) → LLM深度思考：防守方花色选择、将牌策略
+- **明手亮开** (DUMMY_REVEAL) → LLM深度思考：庄家全局做庄规划
+- **第一墩收尾** (len(tricks)==0) → LLM深度思考：第三家防守判断 + 庄家首次执行
+- **中盘** → MCTS快速搜索 + 关键决策检测
+- **关键时刻** → 自动升级LLM（MCTS候选分差≤阈值 或 定约岌岌可危）
+- **残局** (≤4张/人) → DD精确枚举所有分布 + solve_board
+- 庄家/防守方不对称阈值：庄家0.5墩（MCTS可靠，少升级），防守0.8墩（噪声大，多升级）
+- 升级时显示MCTS分析结果和升级原因
+
+### DD引擎残局精确枚举
+
+**改进**:
+- `DDSearch._enumerate_endgame()`: 剩余未知牌≤10张时枚举所有分布替代随机采样
+- 每组分布调用solve_board求精确期望值，消除采样方差
+- 枚举数估算超限时自动回退采样
+- 构造器新增 `endgame_card_threshold` / `max_enumerations` 参数
+
+**配置**:
+- 分层引擎: `TIERED_CRITICAL_SPREAD_DECLARER`=0.5, `TIERED_CRITICAL_SPREAD_DEFENDER`=0.8, `TIERED_ENDGAME_CARDS`=4
+- DD枚举: `DD_ENDGAME_CARD_THRESHOLD`=10, `DD_ENDGAME_MAX_ENUMERATIONS`=5000
+
+### Bug修复
+
+- **记录持久化丢失**: `useBridgeRecords.saveRecord` 中 localStorage 写入在React updater外部，并发模式下变量未赋值即跳过。移入updater内部修复
+- **出牌错误信息丢失**: 后端 `success=false` 时未填 `error` 字段，前端仅检查 `result.error`。修复后透传具体原因（如"必须跟♠"）
+- **模拟实战角色切换禁用**: 打牌面板内手牌未知时角色切换被禁（条件4），删除该限制；`showInput`条件缺少 `!showPlayPanel` 导致叫牌输入框拦截打牌手牌输入
+- **打牌手牌输入需两次提交**: `handleSetPlayHand` 未同步前端 `hands` 状态，导致 `showInput` 抢占渲染
+
+### 前端改进
+
+- 分层引擎支持模型/深度思考设置
+- AI出牌显示耗时（ms/s），覆盖所有引擎
+- Tiered橙色徽章 + tiered_phase显示
+- 打牌详情面板支持tiered引擎MCTS柱状图
+
+**修改文件**:
+- `bridge/play_service.py` — LLM路径提取为`_llm_play()`，新增`_tiered_play()`、`_is_critical_decision()`
+- `bridge/mcts/dd_search.py` — 新增`_enumerate_endgame()`枚举方法
+- `config.py` — 分层引擎 + DD枚举配置
+- `api/main.py` — tiered路由 + 耗时统计 + 出牌错误透传
+- `web/src/components/SettingsPanel.jsx` — Tiered菜单项
+- `web/src/components/PlayDetailPanel.jsx` — Tiered徽章 + 耗时显示
+- `web/src/components/CardTable.jsx` — 角色切换/手牌输入修复
+- `web/src/hooks/useBridgeRecords.js` — localStorage持久化修复
+- `web/src/App.jsx` — 耗时记录 + 出牌错误提示 + 手牌同步
+
+**测试**:
+- `test_tiered_engine.py` — 阶段判定 + DD枚举 + 关键决策检测验证通过
+
+---
+
 ## 2026-05-03
 
 ### DD打牌引擎方向反转Bug修复

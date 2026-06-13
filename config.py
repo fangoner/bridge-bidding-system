@@ -55,3 +55,12 @@ ROLLOUT_GREEDY_PROB = 0.80  # probability of heuristic vs random in rollout
 DD_NUM_SAMPLES = 100  # max samples per candidate card for DD search
 DD_MIN_SAMPLES = 15   # floor for adaptive sample scaling
 DD_TIME_LIMIT = 60.0  # seconds per DD play decision (solve_board is heavy)
+
+# DD 残局精确枚举
+DD_ENDGAME_CARD_THRESHOLD = 10   # 剩余未知牌≤此值时触发枚举所有分布
+DD_ENDGAME_MAX_ENUMERATIONS = 5000  # 枚举总数超过此值时回退采样
+
+# 分层引擎 (tiered) 参数
+TIERED_CRITICAL_SPREAD_DECLARER = 0.5  # 庄家方：分差≤此值→MCTS不确定→升级LLM
+TIERED_CRITICAL_SPREAD_DEFENDER = 0.8  # 防守方：分差≤此值→MCTS不确定→升级LLM（噪声大，阈值更宽）
+TIERED_ENDGAME_CARDS = 4               # 每手剩余牌数≤此值进入残局阶段

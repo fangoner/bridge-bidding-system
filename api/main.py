@@ -7,6 +7,7 @@
 import sys
 import os
 import re
+import time
 import traceback
 import tempfile
 from pathlib import Path
@@ -1124,7 +1125,8 @@ async def play_card(request: PlayCardRequest):
             defender_tricks=state.defender_tricks if state else 0,
             is_complete=is_complete,
             result=result,
-            message=message
+            message=message,
+            error=None if success else message
         )
     except Exception as e:
         print(f"[ERROR] 出牌失败: {str(e)}")
@@ -1174,7 +1176,7 @@ async def undo_play():
 class PlayAIRequest(BaseModel):
     use_reasoning: bool = False
     play_model: Optional[str] = None
-    play_engine: Optional[str] = None  # "llm" | "mcts" | "dd", None = config default
+    play_engine: Optional[str] = None  # "llm" | "mcts" | "dd" | "hybrid" | "tiered"
     dd_sample_count: Optional[int] = None  # DD 蒙地卡罗采样数
 
 
@@ -1218,6 +1220,7 @@ class PlayAIResponse(BaseModel):
     prompt: Optional[str] = None
     used_model: Optional[str] = None
     used_engine: Optional[str] = None
+    elapsed_ms: Optional[int] = None
     error: Optional[str] = None
 
 
@@ -1241,14 +1244,19 @@ async def ai_play(request: PlayAIRequest):
                 use_mcts = engine == "mcts"
                 use_dd = engine == "dd"
                 use_hybrid = engine == "hybrid"
-                dd_samples = request.dd_sample_count if (use_dd or use_hybrid) else None
+                use_tiered = engine == "tiered"
+                dd_samples = (request.dd_sample_count
+                              if (use_dd or use_hybrid or use_tiered) else None)
+                t0 = time.time()
                 result = await service.get_ai_play(
                     use_reasoning=request.use_reasoning,
                     use_mcts=use_mcts,
                     use_dd=use_dd,
                     use_hybrid=use_hybrid,
+                    use_tiered=use_tiered,
                     dd_samples=dd_samples)
-                
+                elapsed_ms = int((time.time() - t0) * 1000)
+
                 if result.get("card"):
                     card = Card(suit=result["card"]["suit"], rank=result["card"]["rank"])
                     current_player = service.get_current_player()
@@ -1265,6 +1273,7 @@ async def ai_play(request: PlayAIRequest):
                         prompt=result.get("prompt"),
                         used_model=actual_model,
                         used_engine=engine,
+                        elapsed_ms=elapsed_ms,
                     )
                 else:
                     engine = request.play_engine or DEFAULT_PLAY_ENGINE
@@ -1272,6 +1281,7 @@ async def ai_play(request: PlayAIRequest):
                         success=False,
                         used_model=actual_model,
                         used_engine=engine,
+                        elapsed_ms=elapsed_ms,
                         error=result.get("error", "AI无法选择出牌")
                     )
             else:

@@ -598,7 +598,7 @@ function CardTable({
     const isCurrentlyBidding = currentBiddingPosition === position;
     const isAI = isAIPosition(position)
     const hasHandData = hasHand(position)
-    const showInput = !readonlyMode && isAI && !hasHandData && (!biddingStarted || (stopBidding && !showPlayPanel))
+    const showInput = !readonlyMode && !showPlayPanel && isAI && !hasHandData && (!biddingStarted || stopBidding)
     const isHuman = positionRoles && positionRoles[position] === 'human'
     const manualPlayedCount = showPlayPanel ? getManualPlayedCards(position).length : 0
     const showPlayHandInput = !readonlyMode && showPlayPanel && playState
@@ -668,8 +668,7 @@ function CardTable({
                 disabled={
                   (showPlayPanel && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading))
                   || readonlyMode
-                  || ((biddingStarted || showPlayPanel) && !hasHand(position))
-                  || (mode === 'simulated' && showPlayPanel && playState && (!playState.hands?.[position] || playState.hands[position].length === 0))
+                  || (!showPlayPanel && biddingStarted && !hasHand(position))
                 }
                 onChange={(e, newRole) => {
                   if (newRole !== null) {

@@ -1452,6 +1452,7 @@ function App({ darkMode, onToggleDarkMode }) {
   // 叫牌结束时自动保存记录
   useEffect(() => {
     if (isBiddingComplete() && biddingSequence.length > 0 && hands && !isLoadingRecordRef.current) {
+      console.log('[自动保存] 叫牌完成，准备保存记录');
       clearBiddingDraft() // 叫牌完成，清除草稿
       // 计算总时间
       if (biddingStartTime) {
@@ -1482,6 +1483,7 @@ function App({ darkMode, onToggleDarkMode }) {
         note: ''
       }
       saveBridgeRecord(record)
+      console.log('[自动保存] 叫牌记录已调用保存, id:', record.id)
       // 如果之前没有记录ID，保存后设置当前记录ID
       if (!currentRecordId) {
         setCurrentRecordId(record.id)
@@ -1742,7 +1744,7 @@ function App({ darkMode, onToggleDarkMode }) {
           console.log('打牌结束:', result.result)
         }
       } else {
-        setError(result.error || '出牌失败')
+        setError(result.error || result.message || '出牌失败')
       }
     } catch (err) {
       console.error('出牌失败:', err)
@@ -1784,6 +1786,8 @@ function App({ darkMode, onToggleDarkMode }) {
       const result = await setPlayHand(position, hand)
       if (result.success && result.state) {
         setPlayState(result.state)
+        // 同步更新前端 hands 状态，避免 showInput 拦截手牌显示
+        setHands(prev => ({ ...prev, [position]: hand }))
       } else {
         setError(result.error || '设置手牌失败')
       }
@@ -1801,8 +1805,8 @@ function App({ darkMode, onToggleDarkMode }) {
     
     try {
       const result = await aiPlay(playModel, playReasoning, playEngine, ddSampleCount)
-      console.log('[AI Play] playModel:', playModel, 'used_model:', result.used_model, 'used_engine:', result.used_engine, 'has_mcts_stats:', !!result.full_output?.mcts_stats)
-      
+      console.log('[AI Play] engine:', result.used_engine, 'elapsed:', result.elapsed_ms + 'ms', 'model:', result.used_model)
+
       if (result.success) {
         const aiRecord = {
           position: playState?.current_player,
@@ -1813,6 +1817,7 @@ function App({ darkMode, onToggleDarkMode }) {
           prompt: result.prompt,
           used_model: result.used_model,
           used_engine: result.used_engine,
+          elapsed_ms: result.elapsed_ms,
           timestamp: new Date().toLocaleTimeString(),
         }
         setAiPlayHistory(prev => [...prev, aiRecord])
@@ -2006,6 +2011,7 @@ function App({ darkMode, onToggleDarkMode }) {
 
     // 打牌完成，自动保存完整记录
     if (phase === 'complete' && prevTricksCount < 13) {
+      console.log('[自动保存] 打牌完成 phase=complete, 准备保存完整记录');
       saveCompletePlayRecord()
     }
 
@@ -2044,6 +2050,7 @@ function App({ darkMode, onToggleDarkMode }) {
       note: ''
     }
     saveBridgeRecord(record)
+    console.log('[自动保存] 打牌记录已调用保存, id:', record.id)
     // 如果之前没有记录ID，保存后设置当前记录ID
     if (!currentRecordId) {
       setCurrentRecordId(record.id)
