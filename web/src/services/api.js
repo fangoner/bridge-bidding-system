@@ -128,14 +128,15 @@ export const humanBid = async (biddingSequence, position, userInput, dealSystem 
 };
 
 // 获取输出格式（紧凑格式和Deep Finesse格式）
-export const getOutputFormats = async (hands, biddingSequence, dealer, gameMode = '四人叫牌', positionRoles = null) => {
+export const getOutputFormats = async (hands, biddingSequence, dealer, gameMode = '四人叫牌', positionRoles = null, openingLead = null) => {
   try {
     const response = await api.post('/api/output-formats', {
       hands,
       bidding_sequence: biddingSequence,
       dealer,
       game_mode: gameMode,
-      position_roles: positionRoles
+      position_roles: positionRoles,
+      opening_lead: openingLead,
     });
     return response.data;
   } catch (error) {
@@ -179,17 +180,6 @@ export const imageDeal = async (imageFile) => {
     return response.data;
   } catch (error) {
     console.error('图片识别牌局失败:', error);
-    throw error;
-  }
-};
-
-// 从Edge浏览器截屏读取牌局
-export const screenshotDeal = async () => {
-  try {
-    const response = await api.post('/api/screenshot-deal');
-    return response.data;
-  } catch (error) {
-    console.error('截屏识别牌局失败:', error);
     throw error;
   }
 };

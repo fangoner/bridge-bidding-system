@@ -57,7 +57,7 @@ DD_MIN_SAMPLES = 15   # floor for adaptive sample scaling
 DD_TIME_LIMIT = 60.0  # seconds per DD play decision (solve_board is heavy)
 
 # DD 残局精确枚举
-DD_ENDGAME_CARD_THRESHOLD = 10   # 剩余未知牌≤此值时触发枚举所有分布
+DD_ENDGAME_CARD_THRESHOLD = 4    # 每手剩余牌数≤此值时触发枚举所有分布
 DD_ENDGAME_MAX_ENUMERATIONS = 5000  # 枚举总数超过此值时回退采样
 
 # 分层引擎 (tiered) 参数

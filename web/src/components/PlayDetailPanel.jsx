@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Box, Typography, Paper, Chip, Divider, CircularProgress, Button, Card as MuiCard, ToggleButtonGroup, ToggleButton, TextField, useTheme } from '@mui/material'
-import { SUIT_COLOR_MAP } from '../constants/suits'
+import { getSuitColor } from '../constants/suits'
+import { PANEL_LAYOUT } from '../styles/constants'
 
 function PlayDetailPanel({
   isMobile,
@@ -27,6 +28,7 @@ function PlayDetailPanel({
   positionRoles,
   onSave,
   canSave,
+  imageOpeningLead,
 }) {
   const [selectedRecord, setSelectedRecord] = useState(null)
   const [viewMode, setViewMode] = useState('output')
@@ -104,6 +106,17 @@ function PlayDetailPanel({
     const fullOutput = record.full_output || {}
     const prompt = record.prompt || ''
 
+    // Tiered 阶段标签
+    const TIERED_PHASE_LABELS = {
+      opening_lead: '首攻',
+      dummy_reveal: '明手亮开',
+      first_trick: '第一墩',
+      midgame: '中盘MCTS',
+      critical: '关键LLM',
+      endgame: '残局DD',
+    }
+    const tieredPhaseLabel = TIERED_PHASE_LABELS[fullOutput.tiered_phase] || ''
+
     // 输出模式的字段定义（v1.38 精简：局面评估+候选对比+核心逻辑）
     const fields = [
       { key: '候选对比', label: '抉择过程', color: 'text.primary', multiline: true },
@@ -124,7 +137,10 @@ function PlayDetailPanel({
       <Box sx={{ p: 1.5, background: bgWhite, borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', overflow: viewMode === 'input' ? 'hidden' : undefined }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#1976d2', fontSize: '0.85rem' }}>
-            {record.position}家 - {record.card?.suit}{record.card?.rank}
+            {record.position}家 -{' '}
+            <Typography component="span" sx={{ color: getSuitColor(record.card?.suit, isDark), fontWeight: 'bold', fontSize: '0.85rem' }}>
+              {record.card?.suit}{record.card?.rank}
+            </Typography>
           </Typography>
           {(record.used_engine || '') === 'dd' ? (
             <Typography variant="caption" sx={{ color: '#1565c0', fontSize: '0.7rem', fontWeight: 500 }}>
@@ -140,7 +156,7 @@ function PlayDetailPanel({
             </Typography>
           ) : record.used_engine === 'tiered' ? (
             <Typography variant="caption" sx={{ color: '#e65100', fontSize: '0.7rem', fontWeight: 500 }}>
-              Tiered
+              Tiered·{tieredPhaseLabel}
             </Typography>
           ) : record.used_model && (
             <Typography variant="caption" sx={{ color: colorMuted, fontSize: '0.7rem' }}>
@@ -396,8 +412,8 @@ function PlayDetailPanel({
               const isSelected = selectedCard?.suit === card.suit && 
                                  selectedCard?.rank === card.rank
               
-              const color = SUIT_COLOR_MAP[card.suit] || '#000'
-              
+              const color = getSuitColor(card.suit, isDark)
+
               return (
                 <MuiCard
                   key={idx}
@@ -416,7 +432,7 @@ function PlayDetailPanel({
                     transition: 'all 0.15s',
                     opacity: isPlayable ? 1 : 0.5,
                     '&:hover': isPlayable ? {
-                      bgcolor: '#bbdefb',
+                      bgcolor: isDark ? 'rgba(25, 118, 210, 0.35)' : '#bbdefb',
                       transform: 'translateY(-2px)',
                     } : {},
                   }}
@@ -487,13 +503,13 @@ function PlayDetailPanel({
           </Typography>
           <Box sx={{ display: 'flex', gap: 0.25 }}>
             {trick.cards && trick.cards.map(([pos, card], cardIdx) => {
-              const color = SUIT_COLOR_MAP[card.suit] || '#000'
+              const color = getSuitColor(card.suit, isDark)
               const aiRecord = getAIRecordForCard(pos, card)
               const isSelected = selectedRecord === aiRecord
               const canClick = !!aiRecord
               
               return (
-                <Box 
+                <Box
                   key={cardIdx}
                   onClick={() => {
                     if (canClick) {
@@ -501,19 +517,19 @@ function PlayDetailPanel({
                       if (onClearExternalRecord) onClearExternalRecord()
                     }
                   }}
-                  sx={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
                     gap: 0.1,
-                    bgcolor: isSelected ? '#bbdefb' : 'white',
+                    bgcolor: isSelected ? (isDark ? 'rgba(25, 118, 210, 0.3)' : '#bbdefb') : (isDark ? 'rgba(255,255,255,0.08)' : 'white'),
                     px: 0.25,
                     borderRadius: 0.25,
-                    border: isSelected ? '1px solid #1976d2' : '1px solid #ddd',
+                    border: isSelected ? '1px solid #1976d2' : (isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid #ddd'),
                     cursor: canClick ? 'pointer' : 'default',
-                    '&:hover': canClick ? { bgcolor: '#e3f2fd' } : {}
+                    '&:hover': canClick ? { bgcolor: isDark ? 'rgba(255,255,255,0.15)' : '#e3f2fd' } : {}
                   }}
                 >
-                  <Typography variant="caption" sx={{ color: '#666', fontSize: '0.7rem' }}>{pos}:</Typography>
+                  <Typography variant="caption" sx={{ color: isDark ? '#94a3b8' : '#666', fontSize: '0.7rem' }}>{pos}:</Typography>
                   <Typography sx={{ color, fontSize: '0.75rem', fontWeight: 500 }}>{card.suit}{card.rank}</Typography>
                 </Box>
               )
@@ -544,8 +560,11 @@ function PlayDetailPanel({
     <Paper elevation={3} sx={{ 
       p: 1, 
       bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : (isMobile ? '#f5f5f5' : '#e8e8e8'),
-      width: isMobile ? '100%' : '600px',
-      height: '640px',
+      minWidth: isMobile ? undefined : PANEL_LAYOUT.minWidth,
+      maxWidth: isMobile ? undefined : PANEL_LAYOUT.maxWidth,
+      flex: isMobile ? undefined : '1 1 0%',
+      width: isMobile ? '100%' : undefined,
+      height: `${PANEL_LAYOUT.height}px`,
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden'
@@ -568,6 +587,15 @@ function PlayDetailPanel({
           {dummy && (
             <Chip 
               label={`明手: ${dummy}`} 
+              variant="outlined" 
+              size="small"
+              sx={{ fontSize: '0.75rem' }}
+            />
+          )}
+          {imageOpeningLead && !playStarted && (
+            <Chip 
+              label={`首攻: ${imageOpeningLead}`} 
+              color="warning"
               variant="outlined" 
               size="small"
               sx={{ fontSize: '0.75rem' }}

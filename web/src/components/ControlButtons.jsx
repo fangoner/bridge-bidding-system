@@ -35,18 +35,6 @@ function ControlButtons({
         {showSettings ? '隐藏设置' : '设置'}
       </Button>
 
-      {mode !== 'simulated' && (
-        <Button
-          variant="contained"
-          size={buttonSize}
-          onClick={() => handleDeal(dealMode)}
-          disabled={loading || aiThinking}
-          startIcon={loading && <CircularProgress size={progressSize} />}
-        >
-          {loading ? '发牌中...' : '发牌'}
-        </Button>
-      )}
-
       <Badge 
         badgeContent={biddingRecords.length} 
         color="primary"

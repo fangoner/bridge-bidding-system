@@ -8,6 +8,7 @@ import sys
 import os
 import re
 import time
+import hashlib
 import traceback
 import tempfile
 from pathlib import Path
@@ -151,6 +152,7 @@ class OutputFormatsRequest(BaseModel):
     dealer: str
     game_mode: str = "四人叫牌"
     position_roles: Optional[Dict[str, str]] = None
+    opening_lead: Optional[str] = None
 
 
 class OutputFormatsResponse(BaseModel):
@@ -490,10 +492,17 @@ async def get_output_formats(request: OutputFormatsRequest):
         
         # 叫牌序列格式已经是 (南)1S-(西)pass 格式，无需转换
         bidding_str = request.bidding_sequence
-        
+
+        # 解析首攻字符串（格式 "西:S5" 或 "西:♠5"），提取纯卡牌部分给 DF 格式
+        lead_card = None
+        if request.opening_lead:
+            parsed = _parse_opening_lead(request.opening_lead)
+            if parsed:
+                lead_card = parsed["card"]  # 如 "S5"
+
         # 只生成需要的格式，跳过 graphic output
         compact = generate_compact_output(hands)
-        deep_finesse = generate_deep_finesse_output(hands, bidding_str, dealer_pos)
+        deep_finesse = generate_deep_finesse_output(hands, bidding_str, dealer_pos, lead_card)
         
         return OutputFormatsResponse(
             compact=compact,
@@ -570,6 +579,7 @@ class CustomDealResponse(BaseModel):
     dealer: str
     success: bool
     message: Optional[str] = None
+    opening_lead: Optional[str] = None
 
 
 def convert_10_to_T(hand_str: str) -> str:
@@ -577,6 +587,19 @@ def convert_10_to_T(hand_str: str) -> str:
     result = re.sub(r'([♠♥♦♣SsHhDdCc])10', r'\1T', result)
     result = result.replace('10', 'T')
     return result
+
+
+def _extract_dealer_from_bidding(bidding):
+    """从叫牌序列中提取发牌人位置（第一个叫牌的位置）"""
+    if not bidding or bidding == "null":
+        return "南"
+    if isinstance(bidding, list) and len(bidding) > 0:
+        first = bidding[0]
+        if ":" in first:
+            pos = first.split(":", 1)[0].strip()
+            if pos in ["南", "西", "北", "东"]:
+                return pos
+    return "南"
 
 
 def _format_bidding_sequence(bidding):
@@ -593,6 +616,98 @@ def _format_bidding_sequence(bidding):
                 formatted_bids.append(item)
         return "-".join(formatted_bids) + "-"
     return bidding
+
+
+def _parse_contract_string(contract_str):
+    """从视觉识别返回的定约字符串解析为结构化信息
+    支持格式: "4H 由南做庄", "3NT 由北做庄", "4SX 由东做庄" 等
+    """
+    if not contract_str or contract_str == "null":
+        return {}
+    
+    import re
+    result = {}
+    
+    print(f"[DEBUG] _parse_contract_string input: '{contract_str}'")
+    
+    # 解析加倍/再加倍
+    doubled = False
+    redoubled = False
+    contract_part = contract_str
+    if "XX" in contract_part:
+        redoubled = True
+        doubled = True
+        contract_part = contract_part.replace("XX", "")
+    elif "X" in contract_part:
+        doubled = True
+        contract_part = contract_part.replace("X", "")
+    
+    result["doubled"] = doubled
+    result["redoubled"] = redoubled
+    
+    print(f"[DEBUG] contract_part after removing X: '{contract_part}'")
+    
+    # 解析级别和花色 - 支持多种格式
+    # 优先匹配 "级别+花色" 如 3NT, 4H, 2S
+    level_match = re.search(r'(\d)([SHDC]|NT)', contract_part, re.IGNORECASE)
+    if level_match:
+        result["level"] = int(level_match.group(1))
+        result["suit"] = level_match.group(2).upper()
+    else:
+        # 尝试匹配中文格式如 "3无将" 或 "3NT"
+        level_match2 = re.search(r'(\d)', contract_part)
+        suit_match = re.search(r'(NT|无将|[SHDC])', contract_part, re.IGNORECASE)
+        if level_match2 and suit_match:
+            result["level"] = int(level_match2.group(1))
+            suit_str = suit_match.group(1).upper()
+            result["suit"] = "NT" if suit_str in ("NT", "无将") else suit_str
+    
+    print(f"[DEBUG] parsed result: {result}")
+    
+    # 解析庄家
+    declarer_match = re.search(r'由([东西南北])做庄', contract_str)
+    if not declarer_match:
+        # 尝试其他格式如 "庄家:南" 或直接 "南"
+        declarer_match = re.search(r'[庄做]家?[:：]?\s*([东西南北])', contract_str)
+    if declarer_match:
+        result["declarer"] = declarer_match.group(1)
+    
+    return result
+
+
+def _parse_opening_lead(lead_str):
+    """从视觉识别返回的首攻字符串解析为首攻信息
+    支持格式: "西:S5", "东:HQ" 等
+    """
+    if not lead_str or lead_str == "null":
+        return None
+    
+    print(f"[DEBUG] _parse_opening_lead input: '{lead_str}'")
+    
+    import re
+    match = re.match(r'([东西南北]):([SHDC])(\w+)', lead_str, re.IGNORECASE)
+    if match:
+        result = {
+            "position": match.group(1),
+            "card": f"{match.group(2).upper()}{match.group(3)}"
+        }
+        print(f"[DEBUG] _parse_opening_lead result: {result}")
+        return result
+    
+    # 尝试更宽松的匹配：位置可能用中文冒号，花色可能用♠♥♦♣
+    suit_map = {'♠': 'S', '♥': 'H', '♦': 'D', '♣': 'C'}
+    match2 = re.match(r'([东西南北])[:：]\s*([♠♥♦♣SHDCshdc])(\w+)', lead_str)
+    if match2:
+        suit = suit_map.get(match2.group(2), match2.group(2).upper())
+        result = {
+            "position": match2.group(1),
+            "card": f"{suit}{match2.group(3)}"
+        }
+        print(f"[DEBUG] _parse_opening_lead result (loose match): {result}")
+        return result
+    
+    print(f"[DEBUG] _parse_opening_lead: no match found")
+    return None
 
 
 def _parse_vision_hands(result):
@@ -617,7 +732,46 @@ def _parse_vision_hands(result):
         total_cards = len(hand.spades) + len(hand.hearts) + len(hand.diamonds) + len(hand.clubs)
         if total_cards != 13:
             validation_errors.append(f"{get_position_name(pos)}手牌有{total_cards}张，不是13张")
-    
+
+    # 重复牌张校验：同一张牌不能出现在多手
+    all_cards = {}  # "♠A" → [positions]
+    for pos, hand in hands.items():
+        for suit_symbol, suit_attr in [("♠", "spades"), ("♥", "hearts"), ("♦", "diamonds"), ("♣", "clubs")]:
+            for rank in getattr(hand, suit_attr):
+                card_key = f"{suit_symbol}{rank}"
+                if card_key not in all_cards:
+                    all_cards[card_key] = []
+                all_cards[card_key].append(get_position_name(pos))
+    duplicates = [(card, positions) for card, positions in all_cards.items() if len(positions) > 1]
+    if duplicates:
+        dup_desc = "; ".join(f"{card}出现在{','.join(ps)}" for card, ps in duplicates[:5])
+        if len(duplicates) > 5:
+            dup_desc += f"等{len(duplicates)}处重复"
+        validation_errors.append(f"牌张重复: {dup_desc}")
+
+    # 跨手校验：每种花色四手合计必须为13（仅四手齐全时做精确校验）
+    if len(hands) == 4:
+        suit_totals = {"♠": 0, "♥": 0, "♦": 0, "♣": 0}
+        for hand in hands.values():
+            suit_totals["♠"] += len(hand.spades)
+            suit_totals["♥"] += len(hand.hearts)
+            suit_totals["♦"] += len(hand.diamonds)
+            suit_totals["♣"] += len(hand.clubs)
+        for suit, total in suit_totals.items():
+            if total != 13:
+                validation_errors.append(f"花色{suit}四手合计{total}张，应为13张（可能花色错位）")
+    elif len(hands) == 3:
+        # 三手时可检测明显超标
+        suit_totals = {"♠": 0, "♥": 0, "♦": 0, "♣": 0}
+        for hand in hands.values():
+            suit_totals["♠"] += len(hand.spades)
+            suit_totals["♥"] += len(hand.hearts)
+            suit_totals["♦"] += len(hand.diamonds)
+            suit_totals["♣"] += len(hand.clubs)
+        for suit, total in suit_totals.items():
+            if total > 13:
+                validation_errors.append(f"花色{suit}三手已有{total}张，超过13张（可能花色错位）")
+
     return hands, validation_errors
 
 
@@ -650,11 +804,18 @@ async def custom_deal(request: CustomDealRequest):
             
             if len(hands) == 4:
                 hands_dict = _hands_to_response_dict(hands)
+                # 提取首攻信息：DF格式中 OnLead + Lead 组合为 "位置:牌张"
+                opening_lead = None
+                onlead_en_to_cn = {"NORTH": "北", "SOUTH": "南", "EAST": "东", "WEST": "西"}
+                if df_result.get("lead") and df_result.get("onlead"):
+                    lead_pos = onlead_en_to_cn.get(df_result["onlead"].upper(), df_result["onlead"])
+                    opening_lead = f"{lead_pos}:{df_result['lead']}"
                 return CustomDealResponse(
                     hands=hands_dict,
                     dealer="南",
                     success=True,
-                    message="牌局已加载（Deep Finesse格式）"
+                    message="牌局已加载（Deep Finesse格式）",
+                    opening_lead=opening_lead,
                 )
             else:
                 return CustomDealResponse(
@@ -706,6 +867,12 @@ class ImageDealResponse(BaseModel):
     message: Optional[str] = None
     bidding_sequence: Optional[str] = None
     contract: Optional[str] = None
+    contract_level: Optional[int] = None
+    contract_suit: Optional[str] = None
+    contract_declarer: Optional[str] = None
+    contract_doubled: Optional[bool] = None
+    contract_redoubled: Optional[bool] = None
+    opening_lead: Optional[str] = None
     page_type: Optional[str] = None
 
 
@@ -744,37 +911,57 @@ async def image_deal(image: bytes = File(..., description="图片文件")):
             )
         
         hands, validation_errors = _parse_vision_hands(result)
-        
-        if len(hands) == 4 and not validation_errors:
+
+        # 解析叫牌、定约、首攻（手牌不完整时也尽量提取）
+        bidding_str = _format_bidding_sequence(result.get("叫牌序列"))
+        contract_str = result.get("当前定约")
+        contract_info = _parse_contract_string(contract_str)
+        lead_info = _parse_opening_lead(result.get("首攻"))
+        dealer = _extract_dealer_from_bidding(result.get("叫牌序列"))
+
+        # 宽松接受：有3+手牌即可
+        if len(hands) >= 3:
             hands_dict = _hands_to_response_dict(hands)
-            bidding_str = _format_bidding_sequence(result.get("叫牌序列"))
-            
+            warnings = []
+            if validation_errors:
+                warnings.extend(validation_errors)
+            if len(hands) < 4:
+                missing = [p for p in ["南", "西", "北", "东"] if p not in [get_position_name(pos) for pos in hands]]
+                warnings.append(f"缺少{','.join(missing)}的手牌")
+
             return ImageDealResponse(
                 hands=hands_dict,
-                dealer="南",
+                dealer=dealer,
                 success=True,
-                message="牌局已加载",
+                message=("牌局已加载" if not warnings else "识别完成（" + "; ".join(warnings) + "）"),
                 bidding_sequence=bidding_str,
-                contract=result.get("当前定约"),
+                contract=contract_str,
+                contract_level=contract_info.get("level"),
+                contract_suit=contract_info.get("suit"),
+                contract_declarer=contract_info.get("declarer"),
+                contract_doubled=contract_info.get("doubled", False),
+                contract_redoubled=contract_info.get("redoubled", False),
+                opening_lead=f"{lead_info['position']}:{lead_info['card']}" if lead_info else None,
                 page_type=result.get("页面类型", "未知")
             )
+
+        # ≤2手牌才真正失败
+        if validation_errors:
+            error_msg = "; ".join(validation_errors)
+            print(f"[WARN] 手牌验证失败: {error_msg}")
+            return ImageDealResponse(
+                hands={},
+                dealer="南",
+                success=False,
+                message=f"手牌验证失败: {error_msg}"
+            )
         else:
-            if validation_errors:
-                error_msg = "; ".join(validation_errors)
-                print(f"[WARN] 手牌验证失败: {error_msg}")
-                return ImageDealResponse(
-                    hands={},
-                    dealer="南",
-                    success=False,
-                    message=f"手牌验证失败: {error_msg}"
-                )
-            else:
-                return ImageDealResponse(
-                    hands={},
-                    dealer="南",
-                    success=False,
-                    message=f"部分手牌识别成功，共{len(hands)}家"
-                )
+            return ImageDealResponse(
+                hands={},
+                dealer="南",
+                success=False,
+                message=f"仅识别到{len(hands)}家手牌，至少需要3家"
+            )
     except Exception as e:
         print(f"[ERROR] 图片识别失败: {str(e)}")
         traceback.print_exc()
@@ -786,81 +973,6 @@ async def image_deal(image: bytes = File(..., description="图片文件")):
         )
 
 
-class ScreenshotDealResponse(BaseModel):
-    hands: Dict[str, dict]
-    dealer: str
-    success: bool
-    message: Optional[str] = None
-    screenshot_path: Optional[str] = None
-    bidding_sequence: Optional[str] = None
-    contract: Optional[str] = None
-    page_type: Optional[str] = None
-
-
-@app.post("/api/screenshot-deal", response_model=ScreenshotDealResponse)
-async def screenshot_deal():
-    """从Edge浏览器截屏读取牌局接口"""
-    try:
-        result = screenshot_capture.capture_and_analyze("edge")
-        
-        if "error" in result:
-            return ScreenshotDealResponse(
-                hands={},
-                dealer="南",
-                success=False,
-                message=result['error'],
-                screenshot_path=result.get("screenshot_path")
-            )
-        
-        # 截屏识别使用不同的 key 格式（南家手牌 vs 南），需要转换
-        hands = {}
-        screenshot_position_map = {
-            "南": Position.SOUTH,
-            "西": Position.WEST,
-            "北": Position.NORTH,
-            "东": Position.EAST
-        }
-        
-        for pos_name, en_pos in screenshot_position_map.items():
-            hand_str = result.get(f"{pos_name}家手牌")
-            if hand_str and hand_str != "null":
-                hand_str_clean = convert_10_to_T(hand_str)
-                hand_str_clean = hand_str_clean.replace("♠", " ").replace("♥", " ").replace("♦", " ").replace("♣", " ")
-                hands[en_pos] = parse_hand_string(hand_str_clean)
-        
-        if len(hands) == 4:
-            hands_dict = _hands_to_response_dict(hands)
-            bidding_str = _format_bidding_sequence(result.get("叫牌序列"))
-            
-            return ScreenshotDealResponse(
-                hands=hands_dict,
-                dealer="南",
-                success=True,
-                message="牌局已加载",
-                screenshot_path=result.get("screenshot_path"),
-                bidding_sequence=bidding_str,
-                contract=result.get("当前定约"),
-                page_type=result.get("页面类型", "未知")
-            )
-        else:
-            return ScreenshotDealResponse(
-                hands={},
-                dealer="南",
-                success=False,
-                message=f"部分手牌识别成功，共{len(hands)}家",
-                screenshot_path=result.get("screenshot_path")
-            )
-    except Exception as e:
-        print(f"[ERROR] 截屏识别失败: {str(e)}")
-        traceback.print_exc()
-        return ScreenshotDealResponse(
-                hands={},
-                dealer="南",
-                success=False,
-                message=f"截屏识别失败: {str(e)}"
-            )
-
-
 class TriggerScreenshotResponse(BaseModel):
     success: bool
     message: str
@@ -869,7 +981,21 @@ class TriggerScreenshotResponse(BaseModel):
 
 @app.post("/api/trigger-screenshot")
 async def trigger_screenshot():
-    """触发系统截屏快捷键"""
+    """触发系统截屏快捷键，同时记录当前剪贴板内容的哈希"""
+    global _pre_screenshot_hash
+    # 在触发截屏前，读取当前剪贴板内容的哈希，后续轮询只接受不同的内容
+    try:
+        result = read_clipboard_image()
+        if result is not None:
+            image_data, _ = result
+            _pre_screenshot_hash = hashlib.md5(image_data).hexdigest()
+            print(f"[INFO] 触发截屏前，记录剪贴板哈希: {_pre_screenshot_hash[:8]}...")
+        else:
+            _pre_screenshot_hash = None
+            print(f"[INFO] 触发截屏前，剪贴板无图片")
+    except Exception:
+        _pre_screenshot_hash = None
+
     success = trigger_screenshot_shortcut()
     if success:
         return {"success": True, "message": "截屏已触发，请在截屏工具中选择区域后点击识别"}
@@ -877,61 +1003,98 @@ async def trigger_screenshot():
         return {"success": False, "message": "触发截屏失败"}
 
 
+# 记录触发截屏前的剪贴板内容哈希，轮询时只接受不同的内容
+_pre_screenshot_hash: Optional[str] = None
+
 @app.post("/api/read-clipboard")
 async def read_clipboard():
     """从剪贴板读取截图"""
+    global _pre_screenshot_hash
     try:
         result = read_clipboard_image()
         if result is None:
             return {"success": False, "message": "剪贴板中没有图片，请先截屏"}
-        
+
         image_data, fmt = result
-        
+
+        # 计算当前剪贴板内容的哈希值，与触发截屏前的哈希比较
+        current_hash = hashlib.md5(image_data).hexdigest()
+        if current_hash == _pre_screenshot_hash:
+            print(f"[INFO] 剪贴板内容未变化（哈希: {current_hash[:8]}...），等待新截图")
+            return {"success": False, "message": "剪贴板内容未变化，请先截取新截图"}
+
+        print(f"[INFO] 检测到新剪贴板内容（当前: {current_hash[:8]}...，截屏前: {_pre_screenshot_hash[:8] if _pre_screenshot_hash else 'None'}）")
+
         with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{fmt}') as tmp:
             tmp.write(image_data)
             image_path = tmp.name
-        
+
         print(f"[INFO] 截图已保存到: {image_path}")
 
         result = vision_client.read_cards_from_image(image_path)
         print(f"[DEBUG] vision_client返回结果: {result}")
-        
+
         os.unlink(image_path)
-        
+
         if "error" in result:
             return {
                 "success": False,
                 "message": f"识别失败: {result['error']}"
             }
-        
+
         hands, validation_errors = _parse_vision_hands(result)
-        
-        if len(hands) == 4 and not validation_errors:
+
+        # 更新哈希，避免重复处理同一张截图
+        _pre_screenshot_hash = current_hash
+
+        # 解析叫牌、定约、首攻（手牌不完整时也尽量提取）
+        bidding_str = _format_bidding_sequence(result.get("叫牌序列"))
+        contract_str = result.get("当前定约")
+        contract_info = _parse_contract_string(contract_str)
+        lead_info = _parse_opening_lead(result.get("首攻"))
+        dealer = _extract_dealer_from_bidding(result.get("叫牌序列"))
+
+        # 宽松接受：有3+手牌即可，警告放在message中
+        if len(hands) >= 3:
             hands_dict = _hands_to_response_dict(hands)
-            bidding_str = _format_bidding_sequence(result.get("叫牌序列"))
-            
+            warnings = []
+            if validation_errors:
+                warnings.extend(validation_errors)
+            if len(hands) < 4:
+                missing = [p for p in ["南", "西", "北", "东"] if p not in [get_position_name(pos) for pos in hands]]
+                warnings.append(f"缺少{','.join(missing)}的手牌")
+
             return {
                 "success": True,
-                "message": "牌局已加载",
+                "message": ("识别成功" if not warnings else "识别完成（" + "; ".join(warnings) + "）"),
                 "hands": hands_dict,
-                "dealer": "南",
+                "dealer": dealer,
                 "bidding_sequence": bidding_str,
-                "contract": result.get("当前定约"),
+                "contract": contract_str,
+                "contract_level": contract_info.get("level"),
+                "contract_suit": contract_info.get("suit"),
+                "contract_declarer": contract_info.get("declarer"),
+                "contract_doubled": contract_info.get("doubled", False),
+                "contract_redoubled": contract_info.get("redoubled", False),
+                "opening_lead": f"{lead_info['position']}:{lead_info['card']}" if lead_info else None,
                 "page_type": result.get("页面类型", "未知")
             }
+
+        # ≤2手牌才真正失败
+        if validation_errors:
+            error_msg = "; ".join(validation_errors)
+            return {
+                "success": False,
+                "message": f"手牌验证失败: {error_msg}",
+                "bidding_sequence": bidding_str,
+                "contract": contract_str,
+            }
         else:
-            if validation_errors:
-                error_msg = "; ".join(validation_errors)
-                return {
-                    "success": False,
-                    "message": f"手牌验证失败: {error_msg}"
-                }
-            else:
-                return {
-                    "success": False,
-                    "message": f"部分手牌识别成功，共{len(hands)}家"
-                }
-                
+            return {
+                "success": False,
+                "message": f"仅识别到{len(hands)}家手牌，至少需要3家"
+            }
+
     except Exception as e:
         print(f"[ERROR] 读取剪贴板失败: {str(e)}")
         traceback.print_exc()

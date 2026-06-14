@@ -75,7 +75,7 @@ function PlayTable({
       )
     }
 
-    const color = getSuitColor(card.suit)
+    const color = getSuitColor(card.suit, isDark)
 
     const cardElement = (
       <Paper
@@ -213,8 +213,8 @@ function PlayTable({
               
               const canClick = isPlayable
               
-              const color = getSuitColor(card.suit)
-              
+              const color = getSuitColor(card.suit, isDark)
+
               return (
                 <MuiCard
                   key={idx}

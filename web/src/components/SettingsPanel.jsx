@@ -21,9 +21,6 @@ function SettingsPanel({
   dealMode,
   setDealMode,
   loading,
-  setCustomDealOpen,
-  setImageDealOpen,
-  handleScreenshotDeal,
 }) {
   if (!showSettings) return null
 
@@ -143,33 +140,6 @@ function SettingsPanel({
               </Select>
             </FormControl>
 
-            <Button 
-              variant="outlined" 
-              size="small" 
-              onClick={() => setCustomDealOpen(true)} 
-              disabled={loading} 
-              sx={{ fontSize: '0.875rem', textTransform: 'none', borderColor: 'rgba(0, 0, 0, 0.23)', height: '40px', px: 1.5 }}
-            >
-              自定义
-            </Button>
-            <Button 
-              variant="outlined" 
-              size="small" 
-              onClick={() => setImageDealOpen(true)} 
-              disabled={loading} 
-              sx={{ fontSize: '0.875rem', textTransform: 'none', borderColor: 'rgba(0, 0, 0, 0.23)', height: '40px', px: 1.5 }}
-            >
-              图片
-            </Button>
-            <Button 
-              variant="outlined" 
-              size="small" 
-              onClick={handleScreenshotDeal} 
-              disabled={loading} 
-              sx={{ fontSize: '0.875rem', textTransform: 'none', borderColor: 'rgba(0, 0, 0, 0.23)', height: '40px', px: 1.5 }}
-            >
-              截屏
-            </Button>
           </Box>
         </Box>
       </Box>

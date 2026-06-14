@@ -95,23 +95,17 @@ class DDSearch:
         trump = state.contract.suit
         is_declarer_side = perspective in (declarer, dummy)
 
-        known_positions = {perspective}
-        if dummy and state.phase != PlayPhase.LEAD:
-            known_positions.add(dummy)
-        elif dummy and perspective in (declarer, dummy):
-            known_positions.add(dummy)
-        known_cards = sum(len(state.hands.get(p, [])) for p in known_positions)
-        played_cards = sum(len(t.cards) for t in state.tricks) + len(state.current_trick.cards)
-        remaining_cards = 52 - known_cards - played_cards
+        # 残局判定：用剩余墩数（=每手牌数），与模式无关
+        remaining_tricks = 13 - (state.declarer_tricks + state.defender_tricks)
 
         # 残局：尝试精确枚举所有分布
-        if remaining_cards <= self.endgame_card_threshold:
+        if remaining_tricks <= self.endgame_card_threshold:
             enum_result = self._enumerate_endgame(state, perspective, playable,
                                                    declarer, dummy, trump, is_declarer_side)
             if enum_result is not None:
                 return enum_result
 
-        ratio = max(0, remaining_cards / 52)
+        ratio = max(0, remaining_tricks / 13)
         adaptive_samples = int(self.min_samples + (self.num_samples - self.min_samples) * ratio)
         adaptive_samples = max(self.min_samples, min(self.num_samples, adaptive_samples))
 
@@ -283,7 +277,7 @@ class DDSearch:
                     "time_sec": round(elapsed, 2),
                     "iters_per_sec": round(samples_done / elapsed, 1) if elapsed > 0 else 0,
                     "adaptive_cap": self.num_samples,
-                    "remaining_cards": remaining_cards,
+                    "remaining_cards": remaining_tricks * 4,
                     "candidates": child_stats,
                 },
             },

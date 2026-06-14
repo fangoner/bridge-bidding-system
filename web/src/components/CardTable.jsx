@@ -2,7 +2,9 @@ import React, { useState, useMemo } from 'react';
 import { Box, Button, CircularProgress, TextField, ToggleButton, ToggleButtonGroup, Typography, IconButton, Tooltip, useTheme, useMediaQuery } from '@mui/material';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
+import GridOnIcon from '@mui/icons-material/GridOn'
 import HandDisplay from './HandDisplay';
+import { getSuitColor } from '../constants/suits';
 import DoubleDummyTable from './DoubleDummyTable';
 import { isHumanPosition, hasAnyHuman, getHumanPositions } from '../utils/position';
 
@@ -30,6 +32,7 @@ function CardTable({
   onPositionRoleChange,
   onDealerChange,
   onClearAllHands,
+  onSimulatedReset,
   setHands,
   biddingStarted,
   stopBidding,
@@ -64,6 +67,12 @@ function CardTable({
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   const isDark = theme.palette.mode === 'dark'
+  const iconBtnStyle = {
+    bgcolor: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.5)',
+    color: 'white',
+    '&:hover': { bgcolor: isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.7)' },
+    width: 30, height: 30,
+  }
   const textMuted = isDark ? '#94a3b8' : '#666'
   const textPrimary = isDark ? '#e2e8f0' : '#333'
   const handBoxSize = isMobile ? 'calc((100vw - 12px) * 0.42)' : 160
@@ -317,13 +326,6 @@ function CardTable({
     return showOpponentHands
   };
 
-  const SUIT_COLORS = {
-    '♠': '#000',
-    '♥': '#e53935',
-    '♦': '#e53935',
-    '♣': '#000',
-  };
-
   // 打牌阶段的叫牌过程表格（带tooltip显示叫牌含义）
   const renderPlayBiddingTable = () => {
     const positions = ['南', '西', '北', '东']
@@ -528,9 +530,9 @@ function CardTable({
         )
       }
       
-      const color = SUIT_COLORS[card.suit] || '#000'
+      const color = getSuitColor(card.suit, isDark)
       const canClick = onPlayCardClick
-      
+
       return (
         <Box
           onClick={() => canClick && onPlayCardClick(position, card)}
@@ -827,7 +829,7 @@ function CardTable({
       overflow: 'hidden',
     }}>
       {/* 模拟实战按钮：叫牌阶段未开始/已完成时可点击；3H+1AI任何阶段显示（打牌时仅作状态指示） */}
-      {!readonlyMode && onClearAllHands && gameMode !== 'pair' && (
+      {!readonlyMode && onSimulatedReset && gameMode !== 'pair' && (
         getHumanPositions(positionRoles).length >= 3 ||
         (!showPlayPanel && (!biddingStarted || (checkBiddingComplete && checkBiddingComplete())))
       ) && (
@@ -837,11 +839,14 @@ function CardTable({
           left: 8,
           zIndex: 10,
         }}>
-          <Tooltip title={showPlayPanel ? '模拟实战模式' : '模拟实战'}>
+          <Tooltip title={showPlayPanel ? '模拟实战模式' : '模拟实战'} arrow slotProps={{
+            tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
+            arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
+          }}>
             <span>
               <IconButton
                 size="small"
-                onClick={onClearAllHands}
+                onClick={onSimulatedReset}
                 disabled={!!showPlayPanel}
                 sx={{
                   bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : 'rgba(255, 255, 255, 0.9)',
@@ -879,6 +884,35 @@ function CardTable({
             }}>
               ⏱ {Math.floor(biddingTotalTime / 60)}:{(biddingTotalTime % 60).toString().padStart(2, '0')}
             </Box>
+          )}
+          {!readonlyMode && onClearAllHands && !showPlayPanel && (
+            <Tooltip title="清除牌局" arrow slotProps={{
+              tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
+              arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
+            }}>
+              <IconButton
+                size="small"
+                onClick={onClearAllHands}
+                sx={iconBtnStyle}
+              >
+                <DeleteSweepIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          {handleAnalyzeContract && outputFormats && !showPlayPanel && (
+            <Tooltip title="检验定约 (Deep Finesse)" arrow slotProps={{
+              tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
+              arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
+            }}>
+              <IconButton
+                size="small"
+                onClick={handleAnalyzeContract}
+                disabled={analyzeLoading}
+                sx={iconBtnStyle}
+              >
+                {analyzeLoading ? <CircularProgress size={16} sx={{ color: 'white' }} /> : <GridOnIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
           )}
           {outputFormatsLoading && <CircularProgress size={20} sx={{ color: 'white' }} />}
         </Box>

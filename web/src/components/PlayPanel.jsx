@@ -153,8 +153,8 @@ function PlayPanel({
           <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
             {pos}
           </Typography>
-          <Typography sx={{ 
-            color: getSuitColor(card.suit),
+          <Typography sx={{
+            color: getSuitColor(card.suit, isDark),
             fontWeight: 'bold',
             fontSize: '1rem',
           }}>
@@ -295,8 +295,8 @@ function PlayPanel({
               
               const canClick = canSelect && isPlayable
               
-              const color = getSuitColor(card.suit)
-              
+              const color = getSuitColor(card.suit, isDark)
+
               return (
                 <MuiCard
                   key={idx}

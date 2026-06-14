@@ -8,7 +8,7 @@ import base64
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from llm.doubao_client import DoubaoVisionClient
+from llm.doubao_client import DoubaoVisionClient, VISION_PROMPT
 
 
 SCREENSHOT_DIR = Path(__file__).parent.parent / "screenshots"
@@ -300,33 +300,6 @@ def capture_active_window() -> Optional[str]:
         return capture_fullscreen_powershell(screenshot_path)
 
 
-BRIDGE_EXTRACTION_PROMPT = """你的任务是从桥牌游戏图片中提取信息：
-
-1. 四位牌手的手牌
-2. 当前的叫牌序列（如果有显示）
-3. 当前定约（如果有显示）
-
-重要规则：
-- 牌面10必须用T表示，例如：♠KT85 而不是 ♠K1085
-- 叫牌序列必须从庄家（dealer）开始，严格按照叫牌顺序列出
-- 每个叫品必须准确对应其位置（南/西/北/东）
-- 所有叫品都必须记录，包括开头的pass和结尾的pass
-- 最终定约叫品之后通常还有三个pass结束叫牌，也可能有加倍/再加倍，必须全部记录
-- 叫牌顺序是顺时针：南→西→北→东→南→...
-- 仔细观察叫牌区域，确定每个叫品对应的位置，不要混淆相邻位置的叫品
-
-请严格按照以下JSON格式输出：
-{
-  "南家手牌": "花色符号+牌面，如 ♠KT85 ♥AT863 ♦Q42 ♣63，牌面10用T表示",
-  "西家手牌": "...",
-  "北家手牌": "...",
-  "东家手牌": "...",
-  "叫牌序列": ["北:pass", "东:pass", "南:1NT", "西:pass", "北:2D", "东:pass", "南:pass", "西:pass"]，从庄家开始完整记录所有叫品，如果未显示则为null,
-  "当前定约": "如 4H 由南做庄，如果未显示则为null",
-  "页面类型": "BBO/桥友圈/桥牌教程书籍/新睿桥牌/其他"
-}"""
-
-
 class BridgeScreenshotCapture:
     def __init__(self):
         self.vision_client = DoubaoVisionClient()
@@ -366,7 +339,7 @@ class BridgeScreenshotCapture:
                 messages=[
                     {
                         "role": "system",
-                        "content": BRIDGE_EXTRACTION_PROMPT
+                        "content": VISION_PROMPT
                     },
                     {
                         "role": "user",

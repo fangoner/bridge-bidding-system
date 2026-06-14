@@ -341,19 +341,18 @@ class PlayService:
         dummy = state.dummy
         is_declarer_side = perspective in (declarer, dummy)
 
-        remaining_cards = sum(len(state.hands.get(p, [])) for p in POSITION_ORDER)
-        cards_per_hand = remaining_cards / 4
+        cards_in_hand = len(state.hands.get(perspective, []))
 
         # Phase 1: 首攻（四家第一张牌之①，永远是防守方）
         if state.phase == PlayPhase.LEAD:
             result = self._llm_play(state, force_reasoning=True)
-            result["tiered_phase"] = "opening_lead"
+            result.setdefault("full_output", {})["tiered_phase"] = "opening_lead"
             return result
 
         # Phase 2: 明手亮开（四家第一张牌之②）
         if state.phase == PlayPhase.DUMMY_REVEAL:
             result = self._llm_play(state, force_reasoning=True)
-            result["tiered_phase"] = "dummy_reveal"
+            result.setdefault("full_output", {})["tiered_phase"] = "dummy_reveal"
             return result
 
         # Phase 3: 第一墩收尾（四家第一张牌之③④）
@@ -361,13 +360,13 @@ class PlayService:
         # ④庄家：首次亲手执行做庄计划
         if len(state.tricks) == 0:
             result = self._llm_play(state, force_reasoning=True)
-            result["tiered_phase"] = "first_trick"
+            result.setdefault("full_output", {})["tiered_phase"] = "first_trick"
             return result
 
         # Phase 4: 残局 → DD 精确枚举
-        if cards_per_hand <= TIERED_ENDGAME_CARDS:
+        if cards_in_hand <= TIERED_ENDGAME_CARDS:
             result = self._dd_play(state, dd_samples)
-            result["tiered_phase"] = "endgame"
+            result.setdefault("full_output", {})["tiered_phase"] = "endgame"
             return result
 
         # Phase 5: 中盘 → MCTS + 关键决策升级
@@ -383,7 +382,7 @@ class PlayService:
             ) if mcts_candidates else "无候选数据"
 
             llm_result = self._llm_play(state, use_reasoning=use_reasoning)
-            llm_result["tiered_phase"] = "critical"
+            llm_result.setdefault("full_output", {})["tiered_phase"] = "critical"
             llm_result["tiered_mcts_fallback"] = mcts_result
             # 在 LLM reasoning 前插入 MCTS 分析说明
             llm_result["reasoning"] = (
@@ -398,7 +397,7 @@ class PlayService:
             )
             return llm_result
 
-        mcts_result["tiered_phase"] = "midgame"
+        mcts_result.setdefault("full_output", {})["tiered_phase"] = "midgame"
         return mcts_result
 
     def _is_critical_decision(self, mcts_result: dict, state: PlayState,

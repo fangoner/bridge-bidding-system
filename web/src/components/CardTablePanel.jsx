@@ -1,7 +1,8 @@
-import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, useTheme } from '@mui/material'
+import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, Button, useTheme } from '@mui/material'
 import CardTable from './CardTable'
 import BiddingTable from './BiddingTable'
 import { hasAnyHuman, getHumanPositions } from '../utils/position'
+import { PANEL_LAYOUT } from '../styles/constants'
 
 function CardTablePanel({
   isMobile,
@@ -31,6 +32,7 @@ function CardTablePanel({
   handlePositionRoleChange,
   onDealerChange,
   onClearAllHands,
+  onSimulatedReset,
   setHands,
   biddingStarted,
   stopBidding,
@@ -51,6 +53,15 @@ function CardTablePanel({
   onSetPlayHand,
   readonlyMode,
   mode,
+  onImageDeal,
+  onScreenshotDeal,
+  onCustomDeal,
+  onDeal,
+  dealMode,
+  loading,
+  aiThinking,
+  studyMode,
+  setStudyMode,
 }) {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
@@ -60,9 +71,11 @@ function CardTablePanel({
       bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : (isMobile ? '#f5f5f5' : '#e8e8e8'), 
       display: 'flex', 
       flexDirection: 'column', 
-      flex: isMobile ? undefined : '0 0 auto',
-      width: isMobile ? '100%' : '600px',
-      height: isMobile ? 'auto' : '640px',
+      flex: isMobile ? undefined : '1 1 0%',
+      minWidth: isMobile ? undefined : PANEL_LAYOUT.minWidth,
+      maxWidth: isMobile ? undefined : PANEL_LAYOUT.maxWidth,
+      width: isMobile ? '100%' : undefined,
+      height: isMobile ? 'auto' : `${PANEL_LAYOUT.height}px`,
       overflow: 'hidden'
     }}>
       <Box sx={{ 
@@ -190,6 +203,53 @@ function CardTablePanel({
               sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
             />
           )}
+          {showPlayPanel && (
+            <FormControlLabel
+              control={<Checkbox checked={studyMode} onChange={(e) => setStudyMode(e.target.checked)} size="small" />}
+              label="研究模式"
+              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem', color: studyMode ? '#e65100' : undefined, fontWeight: studyMode ? 700 : undefined }, mr: 0, height: 24 }}
+            />
+          )}
+          {!showPlayPanel && (
+          <Box sx={{ display: 'flex', gap: 0.5, ml: 1, borderLeft: '1px solid', borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)', pl: 1 }}>
+            <Button
+              variant="contained"
+              size="small"
+              onClick={() => onDeal(dealMode)}
+              disabled={loading || aiThinking}
+              sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5, py: 0 }}
+            >
+              发牌
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={onCustomDeal}
+              disabled={loading}
+              sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5 }}
+            >
+              手动
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={onImageDeal}
+              disabled={loading}
+              sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5 }}
+            >
+              图片
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={onScreenshotDeal}
+              disabled={loading}
+              sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5 }}
+            >
+              截屏
+            </Button>
+          </Box>
+          )}
         </Box>
       </Box>
       <Box sx={{ 
@@ -224,6 +284,7 @@ function CardTablePanel({
           onPositionRoleChange={handlePositionRoleChange}
           onDealerChange={onDealerChange}
           onClearAllHands={onClearAllHands}
+          onSimulatedReset={onSimulatedReset}
           setHands={setHands}
           biddingStarted={biddingStarted}
           stopBidding={stopBidding}

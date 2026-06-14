@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, FormControl, InputLabel, Select, MenuItem, CircularProgress, Alert, Button, useTheme } from '@mui/material'
 import BiddingControls from './BiddingControls'
 import { isHumanPosition, hasAnyHuman } from '../utils/position'
+import { PANEL_LAYOUT } from '../styles/constants'
 
 function BiddingDetailPanel({
   isMobile,
@@ -87,8 +88,7 @@ function BiddingDetailPanel({
         </FormControl>
       </Box>
       <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', ml: 'auto', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-        {(!biddingStarted || isBiddingCompleteFn()) && (
-          <Button
+        <Button
             variant="outlined"
             size="small"
             onClick={!biddingStarted ? onStartBidding : onResetBidding}
@@ -97,7 +97,6 @@ function BiddingDetailPanel({
           >
             {!biddingStarted ? '开始' : '重新叫牌'}
           </Button>
-        )}
         {biddingStarted && !isBiddingCompleteFn() && (
           <Button
             variant={stopBidding ? "contained" : "outlined"}
@@ -402,10 +401,12 @@ function BiddingDetailPanel({
       bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : (isMobile ? '#f5f5f5' : '#e8e8e8'), 
       display: 'flex', 
       flexDirection: 'column', 
-      flex: isMobile ? undefined : '0 0 auto',
-      width: isMobile ? '100%' : '600px',
-      height: isMobile ? (effectiveShowControls ? 'auto' : '400px') : '640px',
-      minHeight: isMobile && effectiveShowControls ? '800px' : undefined,
+      flex: isMobile ? undefined : '1 1 0%',
+      minWidth: isMobile ? undefined : PANEL_LAYOUT.minWidth,
+      maxWidth: isMobile ? undefined : PANEL_LAYOUT.maxWidth,
+      width: isMobile ? '100%' : undefined,
+      height: isMobile ? '400px' : `${PANEL_LAYOUT.height}px`,
+      minHeight: isMobile ? '400px' : undefined,
       overflow: isMobile ? undefined : 'hidden',
       boxSizing: 'border-box'
     }}>

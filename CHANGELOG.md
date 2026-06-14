@@ -1,5 +1,93 @@
 # 开发日志
 
+## 2026-06-15
+
+### 截屏/图片识别全面优化
+
+**背景**:
+截屏识别存在三大问题：定约和首攻识别率低、部分页面 20 秒超时无响应、seed-2.0-lite 模型延迟 4.3s。
+
+**改进**:
+
+- **视觉提示词重构** (`llm/doubao_client.py`): 四项提取任务分区独立，手牌/叫牌/定约/首攻各有位置提示、格式要求和提取技巧。定约添加 4 个视觉位置线索，首攻明确区分"单独首攻牌"和"多张已打出牌"
+- **模型切回 vision-pro** (`config.py`): `doubao-seed-2.0-lite` → `doubao-1.5-vision-pro`，延迟从 4.3s 降至 0.9s（快 5 倍）
+- **宽松解析** (`api/main.py`): 识别阈值从"4 手各 13 张"降为"≥3 手即接受"，带警告信息返回而不阻塞。截屏后立即返回结果，不再死循环轮询 20s
+- **跨手校验** (`api/main.py`): 新增每种花色四手合计 = 13 检测 + 重复牌张检测，能捕获模型花色错位
+- **哈希防重处理** (`api/main.py`): 处理完截图立即更新哈希，同一张图不再重复发给模型
+
+**配置**:
+- 视觉模型: `DOUBAO_VISION_ENDPOINT` = `ep-20250404163138-bdvng` (doubao-1.5-vision-pro)
+
+### 定约确认对话框 + 首攻输入
+
+**改进**:
+- 进入打牌前**始终弹出**确认对话框，预填识别到的定约/庄家/首攻
+- 新增 X / XX 三按钮切换（— / X / XX）
+- 新增首攻输入框（格式 `西:S5`），留空由 AI 决策
+- `handleBeginPlay` 中首攻字符串 `"S5"` → `{suit, rank}` 格式修复
+
+### 首攻信息贯通全链路
+
+**改进**:
+- **DF 格式输出**: `OutputFormatsRequest` 新增 `opening_lead`，识别到的首攻传入 `generate_deep_finesse_output`，DF 不再从首攻方手牌推算
+- **保存/加载**: 4 处记录构造点新增 `board.opening_lead`，加载时恢复到 `imageOpeningLead`
+- **DF 粘贴导入**: `CustomDealResponse` + `/api/custom-deal` 提取 DF 格式 `Lead:` + `OnLead:` 行组合为首攻
+
+### 前端 UI 重构
+
+**改进**:
+- **Header 组件提取** (`web/src/components/layout/Header.jsx`): 标题栏桌面/移动端自适应，替代 50 行重复 JSX
+- **按钮重分配**: 发牌/手动/图片/截屏按钮从 SettingsPanel 移至 CardTablePanel 内联；ControlButtons 移除发牌按钮
+- **面板弹性宽度** (`web/src/styles/constants.js`): 新增 `PANEL_LAYOUT` 常量(minWidth 400 maxWidth 700 height 640)，面板从固定 600px 改为 flex 弹性
+- **恢复丢失按钮** (`CardTable.jsx`): 清除牌局(DeleteSweep) + 检验定约 DF(GridOn) 按钮重新加入牌桌右上角，统一 IconButton + 暗色 Tooltip
+- **开始页面简介**更新
+
+### 花色颜色系统统一
+
+**改进**:
+- `suits.js` 集中管理：`getSuitColor(suit, isDark)` 亮色/暗色双套映射
+- 暗色模式：♠♣ `#cbd5e1`(浅灰) ♥ `#f87171`(亮红) ♦ `#fb923c`(亮橙)
+- 覆盖组件：CardTable / PlayPanel / PlayTable / PlayDetailPanel / HandDisplay
+- `HandDisplay` 移除独立硬编码颜色（草花误用绿色 → 统一灰色），缺门 `-` 显示为对应花色半透明
+
+### 研究模式
+
+**改进**:
+- 打牌中新增"研究模式"复选框
+- 勾选后：庄家/明手不再强制绑定，任意位置独立切换 AI/人类
+- 取消勾选：所有位置恢复 AI
+- `doPlayInit` 中庄家/明手同步在研究模式下跳过
+
+### 其他修复
+
+- **上一墩残留清除**: 4 个新牌局入口 + `doPlayInit` 均清除 `lastCompletedTrick`
+- **打牌详情暗色模式**: 出牌记录卡片背景/边框/hover、手牌 hover、位置标签全面适配
+- **DF 格式 Lead 导出**: `generate_deep_finesse_output` 传入实际首攻替代推算
+
+**修改文件**:
+- `api/main.py` — 截屏哈希防重 + 宽松解析 + 跨手/重复校验 + 首攻全场贯通
+- `bridge/play_service.py` — tiered_phase 存入 full_output
+- `bridge/mcts/dd_search.py` — 残局阈值改为每手墩数
+- `config.py` — DD_ENDGAME_CARD_THRESHOLD=4
+- `llm/doubao_client.py` — VISION_PROMPT 重构 + vision-pro 端点
+- `utils/screenshot.py` — 统一使用 VISION_PROMPT
+- `web/src/App.jsx` — 定约对话框/首攻/研究模式/清除残留/简介
+- `web/src/components/layout/Header.jsx` — 新增
+- `web/src/components/CardTable.jsx` — 恢复按钮 + 花色颜色 + Tooltip 暗色
+- `web/src/components/CardTablePanel.jsx` — 内联按钮 + 研究模式 checkbox
+- `web/src/components/BiddingDetailPanel.jsx` — 面板弹性宽度 + 按钮始终可见
+- `web/src/components/ControlButtons.jsx` — 移除发牌按钮
+- `web/src/components/SettingsPanel.jsx` — 移除发牌/图片/截屏按钮
+- `web/src/components/PlayDetailPanel.jsx` — tiered 阶段标签 + 全组件暗色适配
+- `web/src/components/PlayPanel.jsx` — 花色颜色主题感知
+- `web/src/components/PlayTable.jsx` — 花色颜色主题感知
+- `web/src/components/HandDisplay.jsx` — 统一花色颜色 + 缺门半透明
+- `web/src/constants/suits.js` — 主题感知双套颜色 + getSuitColor(isDark)
+- `web/src/services/api.js` — getOutputFormats 加 openingLead 参数
+- `web/src/styles/constants.js` — PANEL_LAYOUT 弹性布局常量
+- `web/src/App.css` — 移动端叫牌表格字体增大
+- `AGENTS.md` — 新增
+
 ## 2026-06-14
 
 ### 分层打牌引擎 (Tiered Play Engine)

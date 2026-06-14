@@ -1,3 +1,10 @@
+// 桌面版双栏布局共享面板尺寸
+export const PANEL_LAYOUT = {
+  minWidth: 400,
+  maxWidth: 700,
+  height: 640,
+}
+
 export const panelStyles = {
   cardTable: {
     desktop: {
