@@ -13,7 +13,7 @@ from config import (
     ROLLOUT_GREEDY_PROB, MCTS_SEARCH_MODE, DD_NUM_SAMPLES, DD_MIN_SAMPLES, DD_TIME_LIMIT,
     DD_ENDGAME_CARD_THRESHOLD, DD_ENDGAME_MAX_ENUMERATIONS,
     TIERED_CRITICAL_SPREAD_DECLARER, TIERED_CRITICAL_SPREAD_DEFENDER,
-    TIERED_ENDGAME_CARDS,
+    TIERED_ENDGAME_CARDS, TIERED_MIN_SAMPLES, TIERED_OVERRIDE_THRESHOLD,
 )
 
 
@@ -136,8 +136,8 @@ class PlayService:
     async def get_ai_play(self, use_reasoning: bool = False,
                           use_mcts: bool = False,
                           use_dd: bool = False,
-                          use_hybrid: bool = False,
                           use_tiered: bool = False,
+                          use_perfect: bool = False,
                           dd_samples: int = None) -> Dict[str, Any]:
         state = self.engine.get_state()
         if not state:
@@ -158,13 +158,13 @@ class PlayService:
                 "prompt": ""
             }
 
-        # === Hybrid 混合引擎分支（庄家DD + 防守MCTS）===
-        if use_hybrid:
-            return await asyncio.to_thread(self._hybrid_play, state, dd_samples)
-
         # === Tiered 分层引擎分支 ===
         if use_tiered:
             return await asyncio.to_thread(self._tiered_play, state, dd_samples, use_reasoning)
+
+        # === Perfect DD 引擎分支（全知双明手） ===
+        if use_perfect:
+            return await asyncio.to_thread(self._perfect_play, state)
 
         # === DD 引擎分支 ===
         if use_dd:
@@ -178,7 +178,8 @@ class PlayService:
         return await asyncio.to_thread(self._llm_play, state, use_reasoning)
 
     def _llm_play(self, state: PlayState, use_reasoning: bool = False,
-                  force_reasoning: bool = False) -> Dict[str, Any]:
+                  force_reasoning: bool = False,
+                  extra_prompt: str = "") -> Dict[str, Any]:
         """LLM打牌（从 get_ai_play 提取，供分层引擎复用）"""
         current_player = state.current_player
         playable_cards = self.engine.get_playable_cards()
@@ -261,6 +262,10 @@ class PlayService:
                 previous_plan=previous_plan,
             )
 
+        # 附加额外提示（如DD候选参考）
+        if extra_prompt:
+            prompt += extra_prompt
+
         thinking = use_reasoning or force_reasoning
         model_label = "reasoning" if thinking else "chat"
         print(f"[Play] LLM Prompt {len(prompt)} chars, model={self.llm_client.model} ({model_label})")
@@ -330,12 +335,14 @@ class PlayService:
         """分层引擎：根据局面阶段自动选择最优引擎。
 
         阶段判定（按优先级）：
-        1. 首攻 (LEAD) → LLM
-        2. 明手亮开 (DUMMY_REVEAL) → LLM
-        3. 第一墩收尾 (PLAYING && len(tricks)==0) → LLM
-        4. 残局 (cards/hand <= 4) → DD 枚举
-        5. 中盘 → MCTS + 关键决策升级 LLM
+        1. 首攻 (LEAD) → LLM reasoning（首攻策略性强）
+        2. 明手亮开 (DUMMY_REVEAL) → LLM reasoning
+        3. 残局 (cards/hand <= 6) → DD 精确枚举
+        4. 中盘 → DD采样 + 关键决策升级LLM
+        5. endplay不可用时 → MCTS回退
         """
+        from bridge.mcts.dd_search import ENDPLAY_AVAILABLE
+
         perspective = state.current_player
         declarer = state.contract.declarer
         dummy = state.dummy
@@ -343,84 +350,102 @@ class PlayService:
 
         cards_in_hand = len(state.hands.get(perspective, []))
 
-        # Phase 1: 首攻（四家第一张牌之①，永远是防守方）
+        # Phase 1: 首攻（防守方第一张牌，策略性强，LLM更优）
         if state.phase == PlayPhase.LEAD:
             result = self._llm_play(state, force_reasoning=True)
             result.setdefault("full_output", {})["tiered_phase"] = "opening_lead"
             return result
 
-        # Phase 2: 明手亮开（四家第一张牌之②）
+        # Phase 2: 明手亮开（第二家出牌，需要理解首攻信号）
         if state.phase == PlayPhase.DUMMY_REVEAL:
             result = self._llm_play(state, force_reasoning=True)
             result.setdefault("full_output", {})["tiered_phase"] = "dummy_reveal"
             return result
 
-        # Phase 3: 第一墩收尾（四家第一张牌之③④）
-        # ③第三家防守：同伴首攻可见+明手已亮→高/低/信号/解封
-        # ④庄家：首次亲手执行做庄计划
-        if len(state.tricks) == 0:
-            result = self._llm_play(state, force_reasoning=True)
-            result.setdefault("full_output", {})["tiered_phase"] = "first_trick"
-            return result
-
-        # Phase 4: 残局 → DD 精确枚举
-        if cards_in_hand <= TIERED_ENDGAME_CARDS:
+        # Phase 3: 残局 → DD 精确枚举（阈值放宽到6张）
+        if cards_in_hand <= TIERED_ENDGAME_CARDS and ENDPLAY_AVAILABLE:
             result = self._dd_play(state, dd_samples)
             result.setdefault("full_output", {})["tiered_phase"] = "endgame"
             return result
 
-        # Phase 5: 中盘 → MCTS + 关键决策升级
-        mcts_result = self._mcts_play(state)
-        critical_reason = self._is_critical_decision(mcts_result, state, is_declarer_side)
-        if critical_reason:
-            # 构建 MCTS 不确定性说明，附带到 LLM 结果中
-            mcts_candidates = (mcts_result.get("full_output", {})
-                               .get("mcts_stats", {}).get("candidates", []))
-            mcts_summary = ", ".join(
-                f"{c['card']}({c.get('avg_tricks', 0):.1f})"
-                for c in mcts_candidates[:3]
-            ) if mcts_candidates else "无候选数据"
+        # Phase 4: 中盘 → DD采样 + 关键决策升级LLM
+        if ENDPLAY_AVAILABLE:
+            dd_result = self._dd_play(state, dd_samples)
+            critical_reason = self._is_critical_decision(dd_result, state, is_declarer_side)
+            if critical_reason:
+                # DD不确定，升级到LLM，并注入DD候选信息
+                dd_candidates = (dd_result.get("full_output", {})
+                                 .get("mcts_stats", {}).get("candidates", []))
+                llm_result = self._llm_play_with_dd_hint(
+                    state, use_reasoning=use_reasoning,
+                    dd_candidates=dd_candidates, critical_reason=critical_reason)
+                llm_result.setdefault("full_output", {})["tiered_phase"] = "critical"
+                llm_result["tiered_dd_fallback"] = dd_result
+                # 保留DD统计数据供前端展示
+                llm_result["full_output"]["mcts_stats"] = (
+                    dd_result.get("full_output", {}).get("mcts_stats", {})
+                )
+                return llm_result
 
-            llm_result = self._llm_play(state, use_reasoning=use_reasoning)
-            llm_result.setdefault("full_output", {})["tiered_phase"] = "critical"
-            llm_result["tiered_mcts_fallback"] = mcts_result
-            # 在 LLM reasoning 前插入 MCTS 分析说明
-            llm_result["reasoning"] = (
-                f"[MCTS分析] {critical_reason}\n"
-                f"MCTS候选: {mcts_summary}\n"
-                f"--- 升级 LLM 深度推理 ---\n"
-                f"{llm_result.get('reasoning', '')}"
-            )
-            # 把 MCTS 统计数据挂到 full_output 供前端展示
-            llm_result["full_output"]["mcts_stats"] = (
-                mcts_result.get("full_output", {}).get("mcts_stats", {})
-            )
-            return llm_result
+            dd_result.setdefault("full_output", {})["tiered_phase"] = "midgame"
+            return dd_result
+        else:
+            # endplay不可用，回退MCTS
+            mcts_result = self._mcts_play(state)
+            critical_reason = self._is_critical_decision_mcts(mcts_result, state, is_declarer_side)
+            if critical_reason:
+                mcts_candidates = (mcts_result.get("full_output", {})
+                                   .get("mcts_stats", {}).get("candidates", []))
+                mcts_summary = ", ".join(
+                    f"{c['card']}({c.get('avg_tricks', 0):.1f})"
+                    for c in mcts_candidates[:3]
+                ) if mcts_candidates else "无候选数据"
 
-        mcts_result.setdefault("full_output", {})["tiered_phase"] = "midgame"
-        return mcts_result
+                llm_result = self._llm_play(state, use_reasoning=use_reasoning)
+                llm_result.setdefault("full_output", {})["tiered_phase"] = "critical_mcts"
+                llm_result["tiered_mcts_fallback"] = mcts_result
+                llm_result["reasoning"] = (
+                    f"[MCTS分析] {critical_reason}\n"
+                    f"MCTS候选: {mcts_summary}\n"
+                    f"--- 升级 LLM 深度推理 ---\n"
+                    f"{llm_result.get('reasoning', '')}"
+                )
+                llm_result["full_output"]["mcts_stats"] = (
+                    mcts_result.get("full_output", {}).get("mcts_stats", {})
+                )
+                return llm_result
 
-    def _is_critical_decision(self, mcts_result: dict, state: PlayState,
+            mcts_result.setdefault("full_output", {})["tiered_phase"] = "midgame_mcts"
+            return mcts_result
+
+    def _is_critical_decision(self, dd_result: dict, state: PlayState,
                               is_declarer_side: bool) -> Optional[str]:
-        """检测是否为关键决策点。返回原因字符串，或 None 表示不升级。"""
-        candidates = (mcts_result.get("full_output", {})
+        """检测DD结果是否为关键决策点（需要升级LLM）。"""
+        candidates = (dd_result.get("full_output", {})
                       .get("mcts_stats", {})
                       .get("candidates", []))
 
-        # 信号1: MCTS 候选分差小 → 不确定
-        if len(candidates) >= 2:
-            spread = abs(candidates[0].get("avg_tricks", 0) -
-                         candidates[1].get("avg_tricks", 0))
-            threshold = (TIERED_CRITICAL_SPREAD_DECLARER if is_declarer_side
-                         else TIERED_CRITICAL_SPREAD_DEFENDER)
-            if 0 < spread <= threshold:
-                side = "庄家方" if is_declarer_side else "防守方"
-                return (f"{side}MCTS候选分差仅{spread:.2f}墩≤阈值{threshold}，"
-                        f"最优{candidates[0]['card']}({candidates[0].get('avg_tricks',0):.1f}) "
-                        f"与次优{candidates[1]['card']}({candidates[1].get('avg_tricks',0):.1f})"
-                        f"难以区分，升级LLM深度推理")
+        if not candidates or len(candidates) < 2:
+            return None
 
-        # 信号2 & 3: 定约/击败定约岌岌可危
+        # 检查有效样本量
+        top_samples = candidates[0].get("samples", 0)
+        if top_samples < TIERED_MIN_SAMPLES:
+            return None  # 统计不可靠，不升级
+
+        # 信号1: DD候选分差小 → 不确定
+        spread = abs(candidates[0].get("avg_tricks", 0) -
+                     candidates[1].get("avg_tricks", 0))
+        threshold = (TIERED_CRITICAL_SPREAD_DECLARER if is_declarer_side
+                     else TIERED_CRITICAL_SPREAD_DEFENDER)
+        if 0 < spread <= threshold:
+            side = "庄家方" if is_declarer_side else "防守方"
+            return (f"{side}DD候选分差仅{spread:.2f}墩≤阈值{threshold}，"
+                    f"最优{candidates[0]['card']}({candidates[0].get('avg_tricks',0):.1f}) "
+                    f"与次优{candidates[1]['card']}({candidates[1].get('avg_tricks',0):.1f})"
+                    f"难以区分，升级LLM深度推理")
+
+        # 信号2: 定约/击败定约岌岌可危
         tricks_needed = state.contract.tricks_needed
         remaining_tricks = 13 - len(state.tricks)
 
@@ -437,6 +462,110 @@ class PlayService:
                         f"剩余{remaining_tricks}墩，每墩皆关键，升级LLM深度推理")
 
         return None
+
+    def _is_critical_decision_mcts(self, mcts_result: dict, state: PlayState,
+                                   is_declarer_side: bool) -> Optional[str]:
+        """MCTS回退模式下的关键决策检测（保留原逻辑）。"""
+        candidates = (mcts_result.get("full_output", {})
+                      .get("mcts_stats", {})
+                      .get("candidates", []))
+
+        if len(candidates) >= 2:
+            spread = abs(candidates[0].get("avg_tricks", 0) -
+                         candidates[1].get("avg_tricks", 0))
+            threshold = (TIERED_CRITICAL_SPREAD_DECLARER if is_declarer_side
+                         else TIERED_CRITICAL_SPREAD_DEFENDER)
+            if 0 < spread <= threshold:
+                side = "庄家方" if is_declarer_side else "防守方"
+                return (f"{side}MCTS候选分差仅{spread:.2f}墩≤阈值{threshold}，"
+                        f"最优{candidates[0]['card']}({candidates[0].get('avg_tricks',0):.1f}) "
+                        f"与次优{candidates[1]['card']}({candidates[1].get('avg_tricks',0):.1f})"
+                        f"难以区分，升级LLM深度推理")
+
+        tricks_needed = state.contract.tricks_needed
+        remaining_tricks = 13 - len(state.tricks)
+
+        if is_declarer_side:
+            declarer_needs = tricks_needed - state.declarer_tricks
+            if 0 < declarer_needs <= 1 and remaining_tricks > 0:
+                return (f"庄家还需{declarer_needs}墩完成定约，升级LLM深度推理")
+        else:
+            tricks_to_beat = 14 - tricks_needed
+            defender_needs = tricks_to_beat - state.defender_tricks
+            if 0 < defender_needs <= 1 and remaining_tricks > 0:
+                return (f"防守方还需{defender_needs}墩击败定约，升级LLM深度推理")
+
+        return None
+
+    def _llm_play_with_dd_hint(self, state: PlayState, use_reasoning: bool = False,
+                                dd_candidates: list = None,
+                                critical_reason: str = None) -> Dict[str, Any]:
+        """LLM打牌 + DD候选提示。当DD不确定时，将DD候选注入LLM prompt，
+        并在LLM选择明显偏离DD最优时否决LLM。"""
+        # 构建DD提示文本
+        dd_hint = ""
+        if dd_candidates:
+            cand_str = ", ".join(
+                f"{c['card']}({c.get('avg_tricks', 0):.1f}墩)"
+                for c in dd_candidates[:5]
+            )
+            dd_hint = (
+                f"\n\n## DD双明手分析参考\n"
+                f"DD分析认为以下候选牌的期望墩数接近，难以区分优劣：{cand_str}\n"
+                f"原因：{critical_reason or '候选分差小'}\n"
+                f"请优先从上述DD候选中选择，或说明为何选择其他牌。"
+            )
+
+        result = self._llm_play(state, use_reasoning=use_reasoning,
+                                extra_prompt=dd_hint)
+
+        # 否决检查：如果LLM选的牌与DD最优差距过大，改用DD选择
+        if dd_candidates and result.get("card"):
+            llm_card_str = f"{result['card']['suit']}{result['card']['rank']}"
+            dd_best = dd_candidates[0]
+            dd_best_str = dd_best["card"]
+            dd_best_avg = dd_best.get("avg_tricks", 0)
+
+            # 找LLM选的牌在DD候选中的排名
+            llm_in_dd = None
+            for c in dd_candidates:
+                if c["card"] == llm_card_str:
+                    llm_in_dd = c
+                    break
+
+            if llm_in_dd is None and dd_best_avg > 0:
+                # LLM选了DD候选范围外的牌，检查差距
+                # 用DD最优的期望墩数作为基准，LLM选的牌不在候选中意味着DD认为它更差
+                result["reasoning"] = (
+                    f"[DD否决] LLM选择{llm_card_str}不在DD候选中，"
+                    f"DD最优{dd_best_str}({dd_best_avg:.1f}墩)\n"
+                    f"{result.get('reasoning', '')}"
+                )
+                # 不自动否决，但标记警告
+
+            elif llm_in_dd is not None:
+                llm_avg = llm_in_dd.get("avg_tricks", 0)
+                gap = dd_best_avg - llm_avg
+                if gap > TIERED_OVERRIDE_THRESHOLD:
+                    # LLM选的牌与DD最优差距过大，否决LLM
+                    print(f"[Tiered] 否决LLM选择{llm_card_str}({llm_avg:.1f}墩)，"
+                          f"改用DD最优{dd_best_str}({dd_best_avg:.1f}墩)，差距{gap:.1f}墩")
+                    # 从playable中找到DD最优牌
+                    playable = self.engine.get_playable_cards()
+                    dd_card = None
+                    for c in playable:
+                        if str(c) == dd_best_str:
+                            dd_card = c
+                            break
+                    if dd_card:
+                        result["card"] = dd_card.to_dict()
+                        result["reasoning"] = (
+                            f"[DD否决LLM] LLM选{llm_card_str}({llm_avg:.1f}墩)与DD最优"
+                            f"{dd_best_str}({dd_best_avg:.1f}墩)差距{gap:.1f}墩>{TIERED_OVERRIDE_THRESHOLD}，"
+                            f"采用DD选择\n{result.get('reasoning', '')}"
+                        )
+
+        return result
 
     BID_CONSTRAINT_PROMPT = """从叫牌历史中提取每名牌手透露的点力范围和花色张数约束。
 
@@ -542,17 +671,29 @@ class PlayService:
                 "prompt": "[DD error]",
             }
 
-    def _hybrid_play(self, state: PlayState, dd_samples: int = None) -> Dict[str, Any]:
-        """混合模式：庄家方走DD（双明手评估），防守方走MCTS（单明手rollout）。"""
-        perspective = state.current_player
-        declarer = state.contract.declarer
-        dummy = state.dummy
-        is_declarer_side = perspective in (declarer, dummy)
-
-        if is_declarer_side:
-            return self._dd_play(state, dd_samples)
-        else:
-            return self._mcts_play(state)
+    def _perfect_play(self, state: PlayState) -> Dict[str, Any]:
+        """完美DD打牌（全知双明手，无采样，一次 solve_board 得所有候选精确分）"""
+        try:
+            result = self.dd_search.search_perfect(state)
+            card = result.get("card")
+            if card is None:
+                playable = self.engine.get_playable_cards()
+                card = self._select_best_card(playable, state)
+            return {
+                "card": card.to_dict() if card else None,
+                "reasoning": result.get("reasoning", ""),
+                "full_output": result.get("full_output", {}),
+                "prompt": "[DD·完美] no prompt",
+            }
+        except Exception as e:
+            playable = self.engine.get_playable_cards()
+            card = self._select_best_card(playable, state)
+            return {
+                "card": card.to_dict() if card else None,
+                "reasoning": f"完美DD异常，自动选择: {str(e)}",
+                "error": str(e),
+                "prompt": "[DD·完美 error]",
+            }
 
     def _mcts_play(self, state: PlayState) -> Dict[str, Any]:
         """MCTS搜索打牌（同步方法，由asyncio.to_thread调用）"""

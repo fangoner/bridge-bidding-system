@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。v1.39新增截屏/图片识别导入牌局（Doubao Vision API）、定约/首攻确认对话框、研究模式、花色主题感知系统。
+本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。v1.39新增截屏/图片识别导入牌局（Doubao Vision API）、定约/首攻确认对话框、研究模式、花色主题感知系统。v1.40 Tiered分层引擎重做（DD替代MCTS中盘）、新增Perfect DD全知引擎和人类DD提示功能。
 
 ## 功能模块
 
@@ -170,6 +170,20 @@
   - `POST /api/play/ai-play`: AI出牌
   - `GET /api/play/state`: 获取打牌状态
   - `GET /api/play/playable`: 获取可出牌张
+  - `GET /api/play/dd-hints`: 人类DD提示 — 基于后台完整四家手牌的 solve_board 精确结果
+  - `POST /api/play/update-roles`: 更新玩家角色配置
+- **打牌引擎** (play_service.py 五种引擎):
+  - **LLM** (`"llm"`): DeepSeek API 大模型推理，默认引擎
+  - **MCTS** (`"mcts"`): 确定化 + UCT 树搜索，蒙特卡洛采样未知手牌
+  - **DD** (`"dd"`): 纯蒙特卡洛 + solve_board 双明手评估
+  - **Perfect DD** (`"perfect"`): 全知双明手，一次 solve_board 得所有候选精确分，仅发牌练习模式可用
+  - **Tiered** (`"tiered"`): 分层自动调度 —
+    - 首攻(LEAD) → LLM reasoning, 明手亮开 → LLM reasoning
+    - 残局(<=6张/人) → DD 精确枚举
+    - 中盘 → DD 采样 + 关键决策升级 LLM
+    - endplay 不可用时回退 MCTS
+- **引擎选择**: 前端 SettingsPanel 下拉框选引擎，API play_engine 参数控制
+- **DD 提示**: 眼睛图标一键切换，showDDHints 默认 true + localStorage 持久化，所有引擎模式通用
 - **前端组件**:
   - `PlayPanel.jsx`: 打牌面板（出牌控制、墩数显示、AI分析）
   - `PlayTable.jsx`: 打牌桌面（4家手牌显示、当前墩出牌）

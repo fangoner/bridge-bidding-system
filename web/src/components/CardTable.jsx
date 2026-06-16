@@ -1,6 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { Box, Button, CircularProgress, TextField, ToggleButton, ToggleButtonGroup, Typography, IconButton, Tooltip, useTheme, useMediaQuery } from '@mui/material';
+import { Box, Button, Chip, CircularProgress, TextField, ToggleButton, ToggleButtonGroup, Typography, IconButton, Tooltip, useTheme, useMediaQuery } from '@mui/material';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
+import BorderColorIcon from '@mui/icons-material/BorderColor'
+import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import GridOnIcon from '@mui/icons-material/GridOn'
 import HandDisplay from './HandDisplay';
@@ -45,11 +47,14 @@ function CardTable({
   aiLoading,
   showPlayedCards = false,
   playCenterView = 'play',
+  onEditHands,
+  onEditBidding,
   aiBiddingHistory = [],
   onPlayCardClick,
   onSetPlayHand,
   readonlyMode = false,
   mode,
+  imageOpeningLead,
 }) {
   const [handInputs, setHandInputs] = useState({
     '南': '',
@@ -494,10 +499,10 @@ function CardTable({
     const { current_trick, current_player, phase } = playState
     const isComplete = phase === 'complete'
     
-    // 优先显示当前墩（有牌时），暂停时才回退到上一墩
+    // 优先显示当前墩（有牌时），否则显示上一墩直到新墩第一张牌打出
     const displayTrick = (current_trick?.cards && current_trick.cards.length > 0)
       ? current_trick
-      : (isPlayPaused && lastCompletedTrick) ? lastCompletedTrick : current_trick
+      : lastCompletedTrick ? lastCompletedTrick : current_trick
     
     const getCardAtPosition = (position) => {
       if (!displayTrick?.cards) return null
@@ -506,7 +511,7 @@ function CardTable({
     }
     
     const getLastTrickWinner = () => {
-      if (isPlayPaused && lastCompletedTrick) {
+      if (lastCompletedTrick) {
         return lastCompletedTrick?.winner
       }
       return null
@@ -559,10 +564,10 @@ function CardTable({
     }
     
     return (
-      <Box sx={{ 
-        display: 'flex', 
-        flexDirection: 'column', 
-        alignItems: 'center', 
+      <Box sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
         justifyContent: 'center',
         height: '100%',
         width: '100%',
@@ -899,6 +904,34 @@ function CardTable({
               </IconButton>
             </Tooltip>
           )}
+          {!readonlyMode && onEditHands && !showPlayPanel && (
+            <Tooltip title="修正手牌" arrow slotProps={{
+              tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
+              arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
+            }}>
+              <IconButton
+                size="small"
+                onClick={onEditHands}
+                sx={iconBtnStyle}
+              >
+                <BorderColorIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          {!readonlyMode && onEditBidding && !showPlayPanel && (
+            <Tooltip title="编辑叫牌" arrow slotProps={{
+              tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
+              arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
+            }}>
+              <IconButton
+                size="small"
+                onClick={onEditBidding}
+                sx={iconBtnStyle}
+              >
+                <FormatListBulletedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
           {handleAnalyzeContract && outputFormats && !showPlayPanel && (
             <Tooltip title="检验定约 (Deep Finesse)" arrow slotProps={{
               tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
@@ -915,6 +948,37 @@ function CardTable({
             </Tooltip>
           )}
           {outputFormatsLoading && <CircularProgress size={20} sx={{ color: 'white' }} />}
+        </Box>
+      )}
+
+      {/* 定约/庄家/首攻 — 绿色桌面顶部靠右 */}
+      {showPlayPanel && playState?.contract && (
+        <Box sx={{
+          position: 'absolute',
+          top: 8,
+          right: 8,
+          zIndex: 10,
+          display: 'flex',
+          gap: 0.5,
+        }}>
+          <Chip
+            label={`${playState.contract.level || '?'}${playState.contract.suit || 'NT'}${playState.contract.redoubled ? 'XX' : playState.contract.doubled ? 'X' : ''}`}
+            size="small"
+            sx={{ fontSize: '0.7rem', bgcolor: 'rgba(255,255,255,0.92)', color: '#1565c0', fontWeight: 700 }}
+          />
+          <Chip
+            label={`庄家: ${playState.contract.declarer || '?'}`}
+            variant="outlined"
+            size="small"
+            sx={{ fontSize: '0.7rem', bgcolor: 'rgba(255,255,255,0.88)', color: '#333' }}
+          />
+          {imageOpeningLead && (
+            <Chip
+              label={`首攻: ${imageOpeningLead}`}
+              size="small"
+              sx={{ fontSize: '0.7rem', bgcolor: 'rgba(255,243,205,0.92)', color: '#e65100', fontWeight: 500 }}
+            />
+          )}
         </Box>
       )}
 

@@ -21,6 +21,7 @@ function SettingsPanel({
   dealMode,
   setDealMode,
   loading,
+  mode,
 }) {
   if (!showSettings) return null
 
@@ -106,11 +107,11 @@ function SettingsPanel({
                 <MenuItem value="llm">LLM 大模型</MenuItem>
                 <MenuItem value="mcts">MCTS 搜索</MenuItem>
                 <MenuItem value="dd">DD 蒙地卡罗</MenuItem>
-                <MenuItem value="hybrid">Hybrid 混合</MenuItem>
+                <MenuItem value="perfect" disabled={mode !== 'practice'} title={mode !== 'practice' ? '完美DD需要四家完整手牌，仅发牌练习模式可用' : ''}>完美DD (全知)</MenuItem>
                 <MenuItem value="tiered">Tiered 分层</MenuItem>
               </Select>
             </FormControl>
-            {(playEngine === 'dd' || playEngine === 'hybrid' || playEngine === 'tiered') && (
+            {(playEngine === 'dd' || playEngine === 'tiered') && (
               <TextField
                 label="采样数"
                 type="number"

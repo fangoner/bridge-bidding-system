@@ -329,4 +329,15 @@ export const setPlayHand = async (position, hand) => {
   }
 };
 
+// 获取DD出牌提示（完美双明手分析）
+export const getDDHints = async () => {
+  try {
+    const response = await api.get('/api/play/dd-hints');
+    return response.data;
+  } catch (error) {
+    console.error('获取DD提示失败:', error);
+    throw error;
+  }
+};
+
 export default api;

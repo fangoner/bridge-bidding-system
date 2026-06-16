@@ -45,7 +45,7 @@ AI_PROVIDER_DOUBAO = "doubao"
 DEFAULT_AI_PROVIDER = AI_PROVIDER_DEEPSEEK
 
 # MCTS / DD play engine settings
-DEFAULT_PLAY_ENGINE = "llm"  # "llm" | "mcts" | "dd" | "hybrid"
+DEFAULT_PLAY_ENGINE = "llm"  # "llm" | "mcts" | "dd" | "tiered" | "perfect"
 MCTS_SEARCH_MODE = "mcts"  # "mcts" (tree+rollout) | "dd" (pure Monte Carlo + double-dummy)
 MCTS_ITERATIONS = 5000
 MCTS_TIME_LIMIT = 10.0  # seconds per play decision
@@ -60,7 +60,9 @@ DD_TIME_LIMIT = 60.0  # seconds per DD play decision (solve_board is heavy)
 DD_ENDGAME_CARD_THRESHOLD = 4    # 每手剩余牌数≤此值时触发枚举所有分布
 DD_ENDGAME_MAX_ENUMERATIONS = 5000  # 枚举总数超过此值时回退采样
 
-# 分层引擎 (tiered) 参数
-TIERED_CRITICAL_SPREAD_DECLARER = 0.5  # 庄家方：分差≤此值→MCTS不确定→升级LLM
-TIERED_CRITICAL_SPREAD_DEFENDER = 0.8  # 防守方：分差≤此值→MCTS不确定→升级LLM（噪声大，阈值更宽）
-TIERED_ENDGAME_CARDS = 4               # 每手剩余牌数≤此值进入残局阶段
+# Tiered 分层引擎参数
+TIERED_CRITICAL_SPREAD_DECLARER = 0.2  # 庄家方：DD候选分差≤此值→升级LLM
+TIERED_CRITICAL_SPREAD_DEFENDER = 0.3  # 防守方：DD候选分差≤此值→升级LLM
+TIERED_ENDGAME_CARDS = 6               # 每手剩余牌数≤此值进入残局精确枚举
+TIERED_MIN_SAMPLES = 30                # DD有效样本<此值时不升级（统计不可靠）
+TIERED_OVERRIDE_THRESHOLD = 1.5        # LLM选择与DD最优差>此值墩时否决LLM

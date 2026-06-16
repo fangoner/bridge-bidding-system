@@ -28,18 +28,60 @@ function useBridgeRecords() {
           // 从 biddingSequence 推导定约（最后一条非pass的叫品）
           let derivedContract = r.finalContract || r.contract || null
           if (!derivedContract && r.biddingSequence && r.biddingSequence.length > 0) {
-            const lastBid = [...r.biddingSequence].reverse().find(b => b.bid && b.bid !== 'pass' && b.bid !== 'Pass')
-            if (lastBid) {
+            const nonPassBids = r.biddingSequence.filter(b => b.bid && b.bid !== 'pass' && b.bid !== 'Pass')
+            if (nonPassBids.length > 0) {
+              const lastBid = nonPassBids[nonPassBids.length - 1]
               const bid = lastBid.bid
-              const match = bid.match(/^(\d)([♠♥♦♣NT]|NT)$/)
-              if (match) {
+              let level, suit, contractPosition, isDouble = false, isRedouble = false
+
+              if (bid === 'X') {
+                const targetBids = nonPassBids.slice(0, -1).filter(b => b.bid !== 'X' && b.bid !== 'XX')
+                if (targetBids.length === 0) { /* skip */ }
+                else {
+                  const targetBid = targetBids[targetBids.length - 1]
+                  const match = targetBid.bid.match(/^(\d)([♠♥♦♣SHDC]|NT)$/i)
+                  if (match) {
+                    level = parseInt(match[1])
+                    suit = match[2].toUpperCase() === 'NT' ? 'NT' : match[2].toUpperCase()
+                    contractPosition = targetBid.position
+                    isDouble = true
+                  }
+                }
+              } else if (bid === 'XX') {
+                const doubleBids = nonPassBids.slice(0, -1).filter(b => b.bid === 'X')
+                if (doubleBids.length === 0) { /* skip */ }
+                else {
+                  const doubleBid = doubleBids[doubleBids.length - 1]
+                  const originalBids = nonPassBids.slice(0, nonPassBids.indexOf(doubleBid)).filter(b => b.bid !== 'X' && b.bid !== 'XX')
+                  if (originalBids.length > 0) {
+                    const originalBid = originalBids[originalBids.length - 1]
+                    const match = originalBid.bid.match(/^(\d)([♠♥♦♣SHDC]|NT)$/i)
+                    if (match) {
+                      level = parseInt(match[1])
+                      suit = match[2].toUpperCase() === 'NT' ? 'NT' : match[2].toUpperCase()
+                      contractPosition = lastBid.position  // redoubler is on declaring side
+                      isDouble = true
+                      isRedouble = true
+                    }
+                  }
+                }
+              } else {
+                const match = bid.match(/^(\d)([♠♥♦♣SHDC]|NT)$/i)
+                if (match) {
+                  level = parseInt(match[1])
+                  suit = match[2].toUpperCase() === 'NT' ? 'NT' : match[2].toUpperCase()
+                  contractPosition = lastBid.position
+                }
+              }
+
+              if (level && suit) {
                 derivedContract = {
-                  level: parseInt(match[1]),
-                  suit: match[2] === 'NT' ? 'NT' : match[2],
-                  declarer: lastBid.position,
-                  partnership: (lastBid.position === '南' || lastBid.position === '北') ? '南北' : '东西',
-                  doubled: false,
-                  redoubled: false,
+                  level,
+                  suit,
+                  declarer: contractPosition,
+                  partnership: (contractPosition === '南' || contractPosition === '北') ? '南北' : '东西',
+                  doubled: isDouble,
+                  redoubled: isRedouble,
                 }
               }
             }

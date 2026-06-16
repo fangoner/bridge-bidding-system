@@ -71,6 +71,31 @@ function App({ darkMode, onToggleDarkMode }) {
   const [loading, setLoading] = useState(false)
   const [aiThinking, setAiThinking] = useState(false)
   const [error, setError] = useState(null)
+  const [warning, setWarning] = useState(null)  // 校验警告（非阻断，如手牌缺张、花色错位）
+  const [showEditBiddingDialog, setShowEditBiddingDialog] = useState(false) // 编辑叫牌对话框
+  const [editBiddingText, setEditBiddingText] = useState('')
+
+  // 将当前手牌转换为自定义牌局文本格式（带花色符号，便于阅读编辑）
+  const handsToEditText = (handsObj) => {
+    if (!handsObj) return ''
+    const order = ['南', '西', '北', '东']
+    const suitSymbols = ['♠', '♥', '♦', '♣']
+    const suitKeys = ['spades', 'hearts', 'diamonds', 'clubs']
+    return order.map(pos => {
+      const hand = handsObj[pos]
+      if (!hand) return ''
+      return suitKeys.map((k, i) => {
+        const cards = hand[k] || ''
+        return cards ? `${suitSymbols[i]}${cards}` : `${suitSymbols[i]}-`
+      }).join(' ')
+    }).join('\n')
+  }
+
+  // 将叫牌序列转换为编辑文本
+  const biddingToEditText = (seq) => {
+    if (!seq || seq.length === 0) return ''
+    return seq.map(b => `(${b.position})${b.bid}`).join('-')
+  }
   const screenshotCancelledRef = useRef(false)
   const [apiStatus, setApiStatus] = useState(null)
   const [currentRecordId, setCurrentRecordId] = useState(null) // 当前牌局的记录ID（用于覆盖保存）
@@ -258,6 +283,8 @@ function App({ darkMode, onToggleDarkMode }) {
   // 直接打牌：无叫牌定约时弹出输入框
   const [contractDialogOpen, setContractDialogOpen] = useState(false)
   const [contractDialogForm, setContractDialogForm] = useState({ contractStr: '', declarer: '南', openingLead: '', isDouble: false, isRedouble: false })
+  const [resetOpeningLeadDialogOpen, setResetOpeningLeadDialogOpen] = useState(false)
+  const [resetOpeningLeadValue, setResetOpeningLeadValue] = useState('')
   const [directPlayContractInfo, setDirectPlayContractInfo] = useState(null)
   const [imageOpeningLead, setImageOpeningLead] = useState(null) // 图片识别的首攻信息
   const [readonlyMode, setReadonlyMode] = useState(false) // 加载不完整记录时只读
@@ -830,10 +857,15 @@ function App({ darkMode, onToggleDarkMode }) {
     setCurrentRecordId(null) // 新牌局，重置记录ID
     setLoading(true)
     setError(null)
+    setWarning(null)
     try {
       const data = await imageDeal(imageFile)
       if (data.success) {
         setHands(data.hands)
+        // 显示校验警告
+        if (data.message && data.message !== '牌局已加载') {
+          setWarning(data.message)
+        }
         // 设置发牌人位置
         if (data.dealer) {
           setDealer(data.dealer)
@@ -896,6 +928,7 @@ function App({ darkMode, onToggleDarkMode }) {
     setLoading(true)
     screenshotCancelledRef.current = false
     setError('截屏已触发，请完成截图后等待识别...')
+    setWarning(null)
     try {
       const result = await triggerScreenshot()
       if (!result.success) {
@@ -930,6 +963,10 @@ function App({ darkMode, onToggleDarkMode }) {
         return
       }
       setHands(data.hands)
+      // 显示校验警告
+      if (data.message && data.message !== '识别成功') {
+        setWarning(data.message)
+      }
       // 设置发牌人位置
       if (data.dealer) {
         setDealer(data.dealer)
@@ -1521,13 +1558,15 @@ function App({ darkMode, onToggleDarkMode }) {
 
     const lastBid = nonPassBids[nonPassBids.length - 1]
     const bid = lastBid.bid
-    const position = lastBid.position
 
     // 解析叫品
     let level = 0
     let suit = ''
     let isDouble = false
     let isRedouble = false
+    // 定约方位置：对于加倍(X)，定约方是被加倍方而非加倍方
+    // 对于再加倍(XX)和普通叫品，定约方就是最后一个叫牌方
+    let contractPosition = lastBid.position
 
     if (bid === 'X') {
       // 找到被加倍的叫品
@@ -1537,6 +1576,7 @@ function App({ darkMode, onToggleDarkMode }) {
       level = parseInt(targetBid.bid[0])
       suit = targetBid.bid.substring(1)
       isDouble = true
+      contractPosition = targetBid.position  // 定约方是被加倍方，不是加倍方
     } else if (bid === 'XX') {
       // 找到被再加倍的叫品
       const targetBids = nonPassBids.slice(0, -1).filter(b => b.bid === 'X')
@@ -1549,18 +1589,20 @@ function App({ darkMode, onToggleDarkMode }) {
       suit = originalBid.bid.substring(1)
       isDouble = true
       isRedouble = true
+      // 再加倍方就是定约方（只有被加倍方才能再加倍），contractPosition 保持 lastBid.position
     } else {
       // 普通叫品
       level = parseInt(bid[0])
       suit = bid.substring(1)
+      // contractPosition 保持 lastBid.position
     }
 
     // 确定定约方（叫牌者所在的一方）
-    const partnership = ['南', '北'].includes(position) ? '南北' : '东西'
-    
+    const partnership = ['南', '北'].includes(contractPosition) ? '南北' : '东西'
+
     // 确定庄家：定约方中第一个叫出该花色的人
     const partnershipPositions = partnership === '南北' ? ['南', '北'] : ['东', '西']
-    let declarer = position
+    let declarer = contractPosition
     for (const bidItem of biddingSequence) {
       if (partnershipPositions.includes(bidItem.position) && bidItem.bid.includes(suit) && bidItem.bid !== 'pass' && bidItem.bid !== 'X' && bidItem.bid !== 'XX') {
         declarer = bidItem.position
@@ -1856,9 +1898,10 @@ function App({ darkMode, onToggleDarkMode }) {
   // 直接打牌：对话框确认，解析定约并调用 doPlayInit
   const handleContractDialogConfirm = async () => {
     const { contractStr, declarer, openingLead, isDouble, isRedouble } = contractDialogForm
-    const match = contractStr.trim().match(/^(\d)([SHDC]|NT)$/i)
+    // 支持 4H、4HX、4HXX 三种格式，X/XX 由 toggle 按钮单独追踪
+    const match = contractStr.trim().match(/^(\d)([SHDC]|NT)(X{1,2})?$/i)
     if (!match) {
-      setError('无效定约格式，请输入如 4S 或 3NT')
+      setError('无效定约格式，请输入如 4S、3NT、4HX 或 2SXX')
       return
     }
     const contract = {
@@ -2010,26 +2053,50 @@ function App({ darkMode, onToggleDarkMode }) {
   const handleBeginPlay = async () => {
     // 如果有首攻信息（图片识别或用户输入），先打出首攻再启动AI
     if (imageOpeningLead) {
-      const parts = imageOpeningLead.split(':')
+      // 支持英文冒号 ":" 和中文冒号 "：" 两种分隔符
+      const parts = imageOpeningLead.split(/[:：]/)
+      let leadPos, cardObj
+
       if (parts.length >= 2) {
-        const leadPos = parts[0].trim()
-        const cardObj = parseCardStr(parts.slice(1).join(':'))  // 支持 "西:S5" 和 "西:♠5" 两种格式
-        if (leadPos && cardObj) {
-          try {
-            const playResult = await playCard(leadPos, cardObj)
-            if (playResult.success) {
-              setPlayState(playResult.state)
-              setPlayStarted(true)
-            }
-          } catch (e) {
-            console.warn('首攻出牌失败:', e)
+        // 完整格式: "西:S5" 或 "西:DA"
+        leadPos = parts[0].trim()
+        cardObj = parseCardStr(parts.slice(1).join(':'))
+      } else {
+        // 只有牌张没有位置: "S5"、"DA"、"♠5" → 用当前应出牌人的位置
+        cardObj = parseCardStr(imageOpeningLead.trim())
+        if (cardObj) {
+          // 首攻人就是当前回合的玩家（playState初始化后current_player=lead_player）
+          leadPos = playState?.current_player
+        }
+      }
+
+      if (leadPos && cardObj) {
+        try {
+          const playResult = await playCard(leadPos, cardObj)
+          if (playResult.success) {
+            setPlayState(playResult.state)
+            setPlayStarted(true)
+          } else {
+            setError(playResult.error || '首攻出牌失败')
+            return
           }
-          setImageOpeningLead(null)
-          // 首攻打出后再启动AI自动出牌
-          setPlayInitiated(true)
-          setIsPlayPaused(false)
+        } catch (e) {
+          console.warn('首攻出牌失败:', e)
+          setError('首攻出牌失败: ' + (e.response?.data?.detail || e.message))
           return
         }
+        // 首攻打出后再启动AI自动出牌
+        setPlayInitiated(true)
+        setIsPlayPaused(false)
+        return
+      } else {
+        // 解析失败，提示但不清除输入
+        if (!cardObj) {
+          setError(`首攻牌张无效: "${imageOpeningLead}"，请输入花色+牌面（如 S5、DA、♠K）或完整格式 西:S5`)
+        } else {
+          setError(`无法确定首攻人位置，请加上位置，如 西:${imageOpeningLead}`)
+        }
+        return
       }
     }
     // 没有首攻信息，正常开始
@@ -2113,6 +2180,11 @@ function App({ darkMode, onToggleDarkMode }) {
       return
     }
 
+    setResetOpeningLeadValue(imageOpeningLead || '')
+    setResetOpeningLeadDialogOpen(true)
+  }
+
+  const doResetPlay = async (contract) => {
     setAiPlayHistory([])
     setSelectedPlayCard(null)
     setSelectedPlayRecord(null)
@@ -2121,6 +2193,21 @@ function App({ darkMode, onToggleDarkMode }) {
     setLoadedPlayRecord(null)
     setCurrentRecordId(null)
     await doPlayInit(contract, biddingSequence, aiBiddingHistory)
+  }
+
+  const handleResetOpeningLeadConfirm = (action) => {
+    setResetOpeningLeadDialogOpen(false)
+    let contract = getFinalContract()
+    if (!contract) contract = directPlayContractInfo
+
+    if (action === 'keep') {
+      // 保留当前首攻
+    } else if (action === 'clear') {
+      setImageOpeningLead(null)
+    } else if (action === 'edit') {
+      setImageOpeningLead(resetOpeningLeadValue || null)
+    }
+    doResetPlay(contract)
   }
 
   // 桌面点击已出牌，切换到对应的打牌细节
@@ -2242,7 +2329,7 @@ function App({ darkMode, onToggleDarkMode }) {
     if (!currentRecordId) {
       setCurrentRecordId(record.id)
     }
-  }, [playState, hands, biddingSequence, dealer, gameMode, practiceDirection, positionRoles, directPlayContractInfo, aiBiddingHistory, dealSystem, aiPlayHistory, currentRecordId])
+  }, [playState, hands, biddingSequence, dealer, gameMode, practiceDirection, positionRoles, directPlayContractInfo, aiBiddingHistory, dealSystem, aiPlayHistory, currentRecordId, imageOpeningLead])
 
   // 处理位置角色变化
   const handlePositionRoleChange = async (position, role) => {
@@ -2588,12 +2675,44 @@ function App({ darkMode, onToggleDarkMode }) {
         dealMode={dealMode}
         setDealMode={setDealMode}
         loading={loading}
+        mode={mode}
       />
 
       {/* 错误提示 */}
       {error && (
-        <Alert severity="error" onClose={() => { screenshotCancelledRef.current = true; setError(null) }} sx={{ mb: 3 }}>
+        <Alert severity="error" onClose={() => { screenshotCancelledRef.current = true; setError(null) }} sx={{ mb: 1 }}>
           {error}
+        </Alert>
+      )}
+      {warning && (
+        <Alert
+          severity="warning"
+          onClose={() => setWarning(null)}
+          sx={{ mb: 3 }}
+          action={
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              <Button
+                size="small" color="warning" variant="outlined"
+                onClick={() => {
+                  setCustomDealText(handsToEditText(hands))
+                  setCustomDealOpen(true)
+                }}
+              >
+                修正手牌
+              </Button>
+              <Button
+                size="small" color="warning" variant="outlined"
+                onClick={() => {
+                  setEditBiddingText(biddingToEditText(biddingSequence))
+                  setShowEditBiddingDialog(true)
+                }}
+              >
+                编辑叫牌
+              </Button>
+            </Box>
+          }
+        >
+          {warning}
         </Alert>
       )}
 
@@ -2640,6 +2759,14 @@ function App({ darkMode, onToggleDarkMode }) {
               showPlayPanel={showPlayPanel}
               declarer={finalContract?.declarer || directPlayContractInfo?.declarer}
               lastCompletedTrick={lastCompletedTrick}
+              onEditHands={() => {
+                setCustomDealText(handsToEditText(hands))
+                setCustomDealOpen(true)
+              }}
+              onEditBidding={() => {
+                setEditBiddingText(biddingToEditText(biddingSequence))
+                setShowEditBiddingDialog(true)
+              }}
               isPlayPaused={isPlayPaused}
               playInitiated={playInitiated}
               aiLoading={aiThinking}
@@ -2652,6 +2779,7 @@ function App({ darkMode, onToggleDarkMode }) {
               onSetPlayHand={handleSetPlayHand}
               readonlyMode={readonlyMode}
               mode={mode}
+              imageOpeningLead={imageOpeningLead}
               onImageDeal={() => setImageDealOpen(true)}
               onScreenshotDeal={handleScreenshotDeal}
               onCustomDeal={() => setCustomDealOpen(true)}
@@ -2786,6 +2914,14 @@ function App({ darkMode, onToggleDarkMode }) {
               showPlayPanel={showPlayPanel}
               declarer={finalContract?.declarer || directPlayContractInfo?.declarer}
               lastCompletedTrick={lastCompletedTrick}
+              onEditHands={() => {
+                setCustomDealText(handsToEditText(hands))
+                setCustomDealOpen(true)
+              }}
+              onEditBidding={() => {
+                setEditBiddingText(biddingToEditText(biddingSequence))
+                setShowEditBiddingDialog(true)
+              }}
               isPlayPaused={isPlayPaused}
               playInitiated={playInitiated}
               aiLoading={aiThinking}
@@ -2798,6 +2934,7 @@ function App({ darkMode, onToggleDarkMode }) {
               onSetPlayHand={handleSetPlayHand}
               readonlyMode={readonlyMode}
               mode={mode}
+              imageOpeningLead={imageOpeningLead}
               onImageDeal={() => setImageDealOpen(true)}
               onScreenshotDeal={handleScreenshotDeal}
               onCustomDeal={() => setCustomDealOpen(true)}
@@ -2945,14 +3082,14 @@ function App({ darkMode, onToggleDarkMode }) {
         <DialogTitle>输入自定义牌局</DialogTitle>
         <DialogContent>
           <Alert severity="info" sx={{ mb: 2 }}>
-            支持两种格式：<br />
-            格式1 - 标准格式（按南西北东顺序，每行一家）：<br />
+            支持多种格式（按南西北东顺序，每行一家）：<br />
+            格式1 - 标准格式：<br />
             K85 AT863 Q42 63<br />
-            J73 72 8763 T954<br />
-            QT94 5 KJT AQJ72<br />
-            A62 KQJ94 A95 K8<br />
+            格式2 - 带花色符号（修正手牌时使用）：<br />
+            ♠KT85 ♥AT863 ♦Q42 ♣63<br />
+            格式3 - Deep Finesse格式<br />
             <br />
-            格式2 - Deep Finesse格式
+            用 - 或空字符串表示缺门。行内用空格分隔四个花色。
           </Alert>
           <TextField
             multiline
@@ -2973,6 +3110,40 @@ function App({ darkMode, onToggleDarkMode }) {
             }
           }} variant="contained" disabled={!customDealText.trim() || loading}>
             {loading ? <CircularProgress size={20} /> : '确定'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 编辑叫牌对话框 */}
+      <Dialog open={showEditBiddingDialog} onClose={() => setShowEditBiddingDialog(false)} maxWidth="md" fullWidth>
+        <DialogTitle>编辑叫牌序列</DialogTitle>
+        <DialogContent>
+          <Alert severity="info" sx={{ mb: 2 }}>
+            格式：(位置)叫品，用 - 分隔。例如：(北)pass-(东)1H-(南)pass-(西)2D-...
+          </Alert>
+          <TextField
+            multiline
+            rows={4}
+            fullWidth
+            value={editBiddingText}
+            onChange={(e) => setEditBiddingText(e.target.value)}
+            placeholder="输入叫牌序列..."
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowEditBiddingDialog(false)}>取消</Button>
+          <Button onClick={() => {
+            if (editBiddingText.trim()) {
+              const parsed = parseBiddingSequenceStr(editBiddingText)
+              if (parsed.length > 0) {
+                setBiddingSequence(parsed)
+                setShowEditBiddingDialog(false)
+              } else {
+                setError('叫牌格式解析失败，请检查格式')
+              }
+            }
+          }} variant="contained">
+            确定
           </Button>
         </DialogActions>
       </Dialog>
@@ -3098,6 +3269,49 @@ function App({ darkMode, onToggleDarkMode }) {
         <DialogActions>
           <Button onClick={() => setContractDialogOpen(false)}>取消</Button>
           <Button onClick={handleContractDialogConfirm} variant="contained">开始打牌</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 重新打牌 — 首攻确认对话框 */}
+      <Dialog open={resetOpeningLeadDialogOpen} onClose={() => setResetOpeningLeadDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontSize: '1rem' }}>重新打牌 — 首攻牌</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mt: 1 }}>
+            {imageOpeningLead ? (
+              <Typography variant="body2" color="text.secondary">
+                当前首攻: <strong>{imageOpeningLead}</strong>
+              </Typography>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                当前无首攻（AI 决定）
+              </Typography>
+            )}
+            <TextField
+              label="修改首攻"
+              value={resetOpeningLeadValue}
+              onChange={(e) => setResetOpeningLeadValue(e.target.value)}
+              size="small"
+              fullWidth
+              placeholder="如 西:S5，留空则清除"
+              helperText="留空 + 点击「清除」= AI自行决定首攻"
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'space-between', px: 3, pb: 2 }}>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button onClick={() => handleResetOpeningLeadConfirm('clear')} color="error" variant="outlined" size="small">
+              清除
+            </Button>
+            <Button onClick={() => handleResetOpeningLeadConfirm('edit')} color="primary" variant="outlined" size="small">
+              修改
+            </Button>
+          </Box>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button onClick={() => { setResetOpeningLeadDialogOpen(false) }} size="small">取消</Button>
+            <Button onClick={() => handleResetOpeningLeadConfirm('keep')} variant="contained" size="small">
+              保留
+            </Button>
+          </Box>
         </DialogActions>
       </Dialog>
     </Box>

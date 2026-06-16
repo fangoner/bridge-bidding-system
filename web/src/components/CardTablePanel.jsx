@@ -42,6 +42,8 @@ function CardTablePanel({
   declarer,
   lastCompletedTrick,
   isPlayPaused,
+  onEditHands,
+  onEditBidding,
   playInitiated,
   aiLoading,
   showPlayedCards,
@@ -62,6 +64,7 @@ function CardTablePanel({
   aiThinking,
   studyMode,
   setStudyMode,
+  imageOpeningLead,
 }) {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
@@ -285,6 +288,8 @@ function CardTablePanel({
           onDealerChange={onDealerChange}
           onClearAllHands={onClearAllHands}
           onSimulatedReset={onSimulatedReset}
+          onEditHands={onEditHands}
+          onEditBidding={onEditBidding}
           setHands={setHands}
           biddingStarted={biddingStarted}
           stopBidding={stopBidding}
@@ -302,6 +307,7 @@ function CardTablePanel({
           onSetPlayHand={onSetPlayHand}
           readonlyMode={readonlyMode}
           mode={mode}
+          imageOpeningLead={imageOpeningLead}
         />
       </Box>
     </Paper>

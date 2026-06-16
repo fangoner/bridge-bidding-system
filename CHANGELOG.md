@@ -88,6 +88,66 @@
 - `web/src/App.css` — 移动端叫牌表格字体增大
 - `AGENTS.md` — 新增
 
+## 2026-06-17
+
+### Tiered 分层引擎重做：DD 替代 MCTS 中盘
+
+**背景**:
+v1.39 的 Tiered 引擎中盘使用 MCTS 树搜索，但 MCTS 在信息不完全条件下噪声大，采样效率不如 DD 蒙特卡洛。DD 每次求解 `solve_board` 可直接评估候选期望墩数。
+
+**改进**:
+- **中盘引擎从 MCTS 改为 DD** (`bridge/play_service.py`): 中盘阶段改用 DD 采样 + `solve_board`，速度快、统计更可靠
+- **阶段简化** (5→4): 去掉"第一墩收尾"LLM 阶段，首攻→明手亮开→残局→中盘
+- **残局阈值放宽**: `TIERED_ENDGAME_CARDS` 4→6，更早进入精确枚举
+- **关键决策阈值收紧**: 庄家方 0.5→0.2，防守方 0.8→0.3（DD 统计比 MCTS 更可靠，阈值可更严格）
+- **新增 `_llm_play_with_dd_hint()`**: 不确定时升级 LLM，注入 DD 候选信息，LLM 选择明显偏离 DD 最优时自动否决
+- **移除 Hybrid 引擎**: 不再维护独立 hybrid 分支，Tiered 自动混合已覆盖
+- **endplay 不可用回退**: 无 endplay 时自动回退 MCTS 路径
+- **新增 `_is_critical_decision_mcts()`**: MCTS 回退路径的独立关键决策检测
+
+**配置**:
+- `TIERED_ENDGAME_CARDS`: 6 (原 4)
+- `TIERED_CRITICAL_SPREAD_DECLARER`: 0.2 (原 0.5)
+- `TIERED_CRITICAL_SPREAD_DEFENDER`: 0.3 (原 0.8)
+- `TIERED_MIN_SAMPLES`: 30 — DD 有效样本少于此值不升级
+- `TIERED_OVERRIDE_THRESHOLD`: 1.5 — LLM 与 DD 最优差超此墩数时否决 LLM
+
+### Perfect DD 引擎 + 人类 DD 提示
+
+**改进**:
+- **`search_perfect()` 方法** (`bridge/mcts/dd_search.py`): 全知双明手搜索，AI 可访问四家完整手牌，一次 `solve_board` 得所有候选精确分
+- **`/api/play/dd-hints` 端点** (`api/main.py`): 人类回合获取可选牌的完美 DD 提示（`+N`/`=`/`-N`），基于后台完整四家手牌
+- **DD 提示默认开启** (`PlayDetailPanel.jsx`): `showDDHints` 默认 `true`，`localStorage` 持久化偏好，人类回合自动显示每张可选牌的 DD 预测
+- 眼睛图标一键切换，所有引擎模式 (LLM/MCTS/DD/Tiered) 均可使用
+- SettingsPanel 中 "完美DD (全知)" 引擎仅限发牌练习（AI 不应在模拟实战中获取未揭示手牌信息）
+
+### 视觉识别深化
+
+**改进**:
+- **`parse_hand_with_suits()`** (`api/main.py`): 按花色符号 (♠♥♦♣) 解析手牌，正确保留缺门花色用 `-` 占位，不再粗暴删除花色符号导致缺门丢失
+- **图片压缩** (`llm/doubao_client.py`): 长边 >1920px 等比缩至 1920，转 JPEG quality 85%，大幅减少传输量
+- VISION_PROMPT: 明确要求缺门用 `-` 占位，四花色必须全部列出
+
+### 前端多项改进
+
+- **校验警告展示** (`App.jsx`): 新增 `warning` 状态，图片/截屏识别后的校验警告显示为黄色 Alert
+- **编辑叫牌对话框**: 📋 按钮预填叫牌序列文本，支持 `(位置)叫品-` 格式解析
+- **手牌编辑**: 🖊 按钮预填当前手牌（带花色符号格式），编辑后走相同解析流程
+- **首攻重置**: 首攻解析失败后可重新输入
+- **定约解析增强**: 支持 `4HX`/`4HXX` 内联加倍格式
+
+**修改文件**:
+- `api/main.py` — dd-hints 端点 + parse_hand_with_suits + perfect 引擎 + 耗时日志
+- `bridge/play_service.py` — tiered 重做 (DD 中盘) + perfect + _llm_play_with_dd_hint + 否决机制
+- `bridge/mcts/dd_search.py` — search_perfect 全知双明手
+- `config.py` — 新阈值/配置项
+- `llm/doubao_client.py` — 图片压缩 + VISION_PROMPT + timeout
+- `web/src/App.jsx` — warning/编辑/首攻重置/手牌编辑/定约解析
+- `web/src/components/PlayDetailPanel.jsx` — DD 提示默认开启 + localStorage 持久化
+- `web/src/components/CardTable.jsx` — 花色颜色 + Tooltip
+- `web/src/components/SettingsPanel.jsx` — perfect 引擎限制
+- `web/src/services/api.js` — getDDHints API
+
 ## 2026-06-14
 
 ### 分层打牌引擎 (Tiered Play Engine)

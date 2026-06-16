@@ -13,6 +13,7 @@ const RecordItem = memo(function RecordItem({ record, isSelected, showDivider, o
   const hasPlay = !!(record.play?.state || record.play?.tricks)
   const contract = record.board?.contract || record.finalContract
   const dealer = record.board?.dealer || record.dealer
+  const openingLead = record.board?.opening_lead || null
 
   return (
     <Box>
@@ -48,8 +49,13 @@ const RecordItem = memo(function RecordItem({ record, isSelected, showDivider, o
               <Typography variant="body2">
                 <strong>定约:</strong>{' '}
                 {contract
-                  ? `${contract.level}${contract.suit} (${contract.partnership} - ${contract.declarer}家)`
+                  ? `${contract.level}${contract.suit}${contract.redoubled || contract.isRedouble ? 'XX' : contract.doubled || contract.isDouble ? 'X' : ''} (${contract.partnership} - ${contract.declarer}家)`
                   : '全部Pass'}
+                {openingLead && (
+                  <Box component="span" sx={{ ml: 2, color: 'warning.main', fontWeight: 500 }}>
+                    首攻: {openingLead}
+                  </Box>
+                )}
               </Typography>
               <Typography variant="body2" sx={{ mt: 0.5 }}>
                 <strong>叫牌序列:</strong> {biddingStr}

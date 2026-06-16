@@ -514,3 +514,120 @@ class DDSearch:
                 },
             },
         }
+
+    def search_perfect(self, state: PlayState) -> dict:
+        """全知双明手搜索：AI 知道四家手牌，一次 solve_board 得所有候选精确分。
+
+        与 search() 不同，此方法不采样，直接使用 state.hands 中的全部手牌。
+        每次出牌只需一次 solve_board 调用，极快且确定。
+        """
+        if not ENDPLAY_AVAILABLE:
+            raise RuntimeError("endplay 库不可用，无法运行完美DD搜索")
+
+        perspective = state.current_player
+        playable = state.get_playable_cards(perspective)
+
+        if len(playable) == 1:
+            return {
+                "card": playable[0],
+                "reasoning": "唯一选择",
+                "full_output": {"推荐出牌": str(playable[0])},
+            }
+
+        declarer = state.contract.declarer
+        dummy = state.dummy
+        trump = state.contract.suit
+        is_declarer_side = perspective in (declarer, dummy)
+
+        trick_state = get_current_trick_state(state)
+        trick_cards = trick_state["cards"]
+        trick_leader = trick_state.get("leader")
+
+        total_played = state.declarer_tricks + state.defender_tricks
+        remaining_tricks = 13 - total_played
+
+        # 从 state.hands 直接取全四家手牌（完整信息）
+        hands = {}
+        for pos in POSITION_ORDER:
+            hands[pos] = list(state.hands.get(pos, []))
+
+        # 移除当前墩已打出的牌（避免 PBN 中重复，之后通过 deal.play 重放）
+        for pos, card in trick_cards:
+            hands[pos] = [c for c in hands[pos]
+                          if not (c.suit == card.suit and c.rank == card.rank)]
+        # 加回当前墩牌（PBN 构建用）
+        for pos, card in trick_cards:
+            hands[pos].append(card)
+
+        pbn = _hands_to_pbn(hands)
+        deal = Deal(pbn)
+        deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
+
+        if trick_cards:
+            deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
+            for _pos, card in trick_cards:
+                deal.play(_to_ep(card), from_hand=True)
+        else:
+            deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
+
+        result = solve_board(deal)
+        score_map = {}
+        for ep_card, side_score in result:
+            key = (_DENOM_TO_SUIT.get(ep_card.suit),
+                   _RANK_TO_CHAR.get(ep_card.rank))
+            score_map[key] = side_score
+
+        curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
+        curplayer_is_declarer = curplayer_pos in (declarer, dummy)
+
+        best_card = None
+        best_score = -float("inf")
+        child_stats = []
+
+        for card in playable:
+            key = (card.suit, card.rank)
+            target_tricks = score_map.get(key, 0)
+            if curplayer_is_declarer:
+                decl_side_tricks = target_tricks
+            else:
+                decl_side_tricks = remaining_tricks - target_tricks
+            total = state.declarer_tricks + decl_side_tricks
+            child_stats.append({
+                "card": str(card),
+                "samples": 1,
+                "avg_tricks": total,
+                "min_tricks": total,
+                "max_tricks": total,
+            })
+            rank_bonus = RANK_ORDER.get(card.rank, 0) / 50.0
+            score = (total + rank_bonus) if is_declarer_side else -(total + rank_bonus)
+            if score > best_score:
+                best_score = score
+                best_card = card
+
+        child_stats.sort(key=lambda s: s["avg_tricks"], reverse=is_declarer_side)
+
+        top_plays_str = ", ".join(
+            f"{s['card']}({s['avg_tricks']})" for s in child_stats[:5]
+        )
+        reasoning = (
+            f"DD·完美: 全知双明手分析 {len(playable)} 个候选. "
+            f"Top: {top_plays_str}"
+        )
+
+        return {
+            "card": best_card,
+            "reasoning": reasoning,
+            "full_output": {
+                "推荐出牌": str(best_card),
+                "核心逻辑": reasoning,
+                "候选对比": str(child_stats),
+                "局面评估": "DD·完美：基于全知四家手牌的双明手精确分析",
+                "mcts_stats": {
+                    "iterations": 1,
+                    "time_sec": 0,
+                    "candidates": child_stats,
+                },
+            },
+            "prompt": "[DD·完美] no prompt",
+        }

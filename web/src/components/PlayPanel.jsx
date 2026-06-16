@@ -374,9 +374,9 @@ function PlayPanel({
           )}
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'nowrap' }}>
-          <Chip 
-            label={`${contract?.level || '?'}${contract?.suit || '?'}`} 
-            color="primary" 
+          <Chip
+            label={`${contract?.level || '?'}${contract?.suit || '?'}${contract?.redoubled ? 'XX' : contract?.doubled ? 'X' : ''}`}
+            color="primary"
             size="small"
           />
           <Chip 

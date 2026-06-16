@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { Box, Typography, Paper, Chip, Divider, CircularProgress, Button, Card as MuiCard, ToggleButtonGroup, ToggleButton, TextField, useTheme } from '@mui/material'
+import { Box, Typography, Paper, Chip, Divider, CircularProgress, Button, Card as MuiCard, ToggleButtonGroup, ToggleButton, TextField, useTheme, IconButton, Tooltip } from '@mui/material'
+import VisibilityIcon from '@mui/icons-material/Visibility'
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import { getSuitColor } from '../constants/suits'
 import { PANEL_LAYOUT } from '../styles/constants'
+import { getDDHints } from '../services/api'
 
 function PlayDetailPanel({
   isMobile,
@@ -33,6 +36,23 @@ function PlayDetailPanel({
   const [selectedRecord, setSelectedRecord] = useState(null)
   const [viewMode, setViewMode] = useState('output')
   const [manualCardInput, setManualCardInput] = useState('')
+  const [showDDHints, setShowDDHints] = useState(() => {
+    try {
+      const saved = localStorage.getItem('bridge_showDDHints')
+      return saved !== null ? saved === 'true' : true // 默认开启
+    } catch { return true }
+  })
+
+  // 持久化 showDDHints 偏好
+  const toggleDDHints = () => {
+    setShowDDHints(prev => {
+      const next = !prev
+      try { localStorage.setItem('bridge_showDDHints', String(next)) } catch {}
+      return next
+    })
+  }
+  const [ddHints, setDDHints] = useState(null)
+  const [ddHintsLoading, setDDHintsLoading] = useState(false)
   const prevIsPausedRef = useRef(isPaused)
   
   useEffect(() => {
@@ -65,6 +85,26 @@ function PlayDetailPanel({
     return positionRoles[cp] === 'human'
   })()
   const isComplete = playState?.phase === 'complete'
+
+  // 轮到人类出牌时自动获取DD提示
+  useEffect(() => {
+    if (showDDHints && isHumanTurn && playState) {
+      setDDHintsLoading(true)
+      getDDHints()
+        .then(data => {
+          if (data.success) {
+            setDDHints(data.hints)
+          } else {
+            setDDHints(null)
+          }
+        })
+        .catch(() => setDDHints(null))
+        .finally(() => setDDHintsLoading(false))
+    } else {
+      setDDHints(null)  // 关闭提示或非人类回合时清除
+    }
+  }, [isHumanTurn, showDDHints, playState?.current_trick?.cards?.length])
+
   const isStartOfTrick = (playState?.current_trick?.cards?.length || 0) === 0
   const currentHand = playState?.hands?.[currentPlayer] || []
   
@@ -111,8 +151,10 @@ function PlayDetailPanel({
       opening_lead: '首攻',
       dummy_reveal: '明手亮开',
       first_trick: '第一墩',
-      midgame: '中盘MCTS',
+      midgame: '中盘DD',
+      midgame_mcts: '中盘MCTS',
       critical: '关键LLM',
+      critical_mcts: '关键LLM',
       endgame: '残局DD',
     }
     const tieredPhaseLabel = TIERED_PHASE_LABELS[fullOutput.tiered_phase] || ''
@@ -142,17 +184,17 @@ function PlayDetailPanel({
               {record.card?.suit}{record.card?.rank}
             </Typography>
           </Typography>
-          {(record.used_engine || '') === 'dd' ? (
+          {(record.used_engine || '') === 'perfect' ? (
+            <Typography variant="caption" sx={{ color: '#6a1b9a', fontSize: '0.7rem', fontWeight: 500 }}>
+              DD·完美
+            </Typography>
+          ) : (record.used_engine || '') === 'dd' ? (
             <Typography variant="caption" sx={{ color: '#1565c0', fontSize: '0.7rem', fontWeight: 500 }}>
               DD
             </Typography>
           ) : record.used_engine === 'mcts' ? (
             <Typography variant="caption" sx={{ color: '#2e7d32', fontSize: '0.7rem', fontWeight: 500 }}>
               MCTS
-            </Typography>
-          ) : record.used_engine === 'hybrid' ? (
-            <Typography variant="caption" sx={{ color: '#7b1fa2', fontSize: '0.7rem', fontWeight: 500 }}>
-              Hybrid
             </Typography>
           ) : record.used_engine === 'tiered' ? (
             <Typography variant="caption" sx={{ color: '#e65100', fontSize: '0.7rem', fontWeight: 500 }}>
@@ -225,7 +267,7 @@ function PlayDetailPanel({
                 </Box>
               )
             })}
-            {(record.used_engine === 'mcts' || (record.used_engine || '') === 'dd' || record.used_engine === 'hybrid' || record.used_engine === 'tiered') && (() => {
+            {(record.used_engine === 'mcts' || (record.used_engine || '') === 'dd' || record.used_engine === 'tiered' || record.used_engine === 'perfect') && (() => {
               try {
                 const mctsRaw = fullOutput.mcts_stats
                 if (!mctsRaw) { console.log('[MCTS] no mcts_stats in fullOutput'); return null }
@@ -392,17 +434,25 @@ function PlayDetailPanel({
 
     return (
       <Box>
-        <Typography variant="subtitle2" gutterBottom sx={{ fontSize: '0.85rem' }}>
-          {currentPlayer === playState?.dummy
-            ? `${playState?.contract?.declarer}家替明手${currentPlayer}家出牌`
-            : `${currentPlayer}家出牌`
-          }
-          {selectedCard ? ' (再次点击确认)' : ' (点击选择)'}
-        </Typography>
-        <Paper sx={{ 
-          p: 0.5, 
-          bgcolor: isDark ? 'rgba(255, 253, 231, 0.12)' : '#fffde7', 
-          border: isDark ? '2px solid rgba(255, 193, 7, 0.4)' : '2px solid #ffc107',
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+          <Typography variant="subtitle2" sx={{ fontSize: '0.85rem' }}>
+            {currentPlayer === playState?.dummy
+              ? `${playState?.contract?.declarer}家替明手${currentPlayer}家出牌`
+              : `${currentPlayer}家出牌`
+            }
+            {selectedCard ? ' (再次点击确认)' : ' (点击选择)'}
+          </Typography>
+          <Tooltip title={showDDHints ? '隐藏DD提示' : '显示DD提示'} arrow>
+            <IconButton size="small" onClick={toggleDDHints} sx={{ p: 0.3 }}>
+              {showDDHints ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+            </IconButton>
+          </Tooltip>
+          {ddHintsLoading && <CircularProgress size={14} />}
+        </Box>
+        <Paper sx={{
+          p: 0.5,
+          bgcolor: isDark ? 'rgba(255, 253, 231, 0.08)' : '#fffde7',
+          border: isDark ? '2px solid rgba(255, 193, 7, 0.3)' : '2px solid #ffc107',
         }}>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
             {(() => {
@@ -414,33 +464,51 @@ function PlayDetailPanel({
               
               const color = getSuitColor(card.suit, isDark)
 
+              const hintKey = card.suit + card.rank
+              const hint = ddHints?.[hintKey]
+
               return (
-                <MuiCard
-                  key={idx}
-                  onClick={() => handleCardClick(card)}
-                  sx={{
-                    width: 32,
-                    height: 42,
-                    cursor: isPlayable ? 'pointer' : 'default',
-                    bgcolor: isSelected 
-                      ? (isDark ? 'rgba(25, 118, 210, 0.25)' : '#bbdefb') 
-                      : (isPlayable ? (isDark ? 'rgba(30, 41, 59, 0.9)' : '#fff') : (isDark ? 'rgba(255,255,255,0.05)' : '#f5f5f5')),
-                    border: isSelected ? '2px solid #1976d2' : (isDark ? '1px solid rgba(255,255,255,0.15)' : '1px solid #ddd'),
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    transition: 'all 0.15s',
-                    opacity: isPlayable ? 1 : 0.5,
-                    '&:hover': isPlayable ? {
-                      bgcolor: isDark ? 'rgba(25, 118, 210, 0.35)' : '#bbdefb',
-                      transform: 'translateY(-2px)',
-                    } : {},
-                  }}
-                >
-                  <Typography sx={{ color, fontSize: '0.8rem', fontWeight: 500 }}>
-                    {card.suit}{card.rank}
-                  </Typography>
-                </MuiCard>
+                <Box key={idx} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.2 }}>
+                  <MuiCard
+                    onClick={() => handleCardClick(card)}
+                    sx={{
+                      width: 32,
+                      height: 38,
+                      cursor: isPlayable ? 'pointer' : 'default',
+                      bgcolor: isSelected
+                        ? (isDark ? 'rgba(66, 165, 245, 0.35)' : '#bbdefb')
+                        : (isPlayable ? (isDark ? 'rgba(255,255,255,0.12)' : '#fff') : (isDark ? 'rgba(255,255,255,0.04)' : '#f5f5f5')),
+                      border: isSelected ? '2px solid #42a5f5' : (isDark ? '1px solid rgba(255,255,255,0.2)' : '1px solid #ddd'),
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.15s',
+                      opacity: isPlayable ? 1 : 0.5,
+                      '&:hover': isPlayable ? {
+                        bgcolor: isDark ? 'rgba(66, 165, 245, 0.45)' : '#bbdefb',
+                        transform: 'translateY(-2px)',
+                      } : {},
+                    }}
+                  >
+                    <Typography sx={{ color, fontSize: '0.8rem', fontWeight: 500 }}>
+                      {card.suit}{card.rank}
+                    </Typography>
+                  </MuiCard>
+                  {hint !== undefined && (
+                    <Typography sx={{
+                      fontSize: '0.6rem',
+                      fontWeight: 700,
+                      color: hint === '='
+                        ? (isDark ? '#66bb6a' : '#2e7d32')
+                        : hint.startsWith('+')
+                          ? (isDark ? '#42a5f5' : '#1565c0')
+                          : (isDark ? '#ef5350' : '#c62828'),
+                      lineHeight: 1,
+                    }}>
+                      {hint}
+                    </Typography>
+                  )}
+                </Box>
               )
             })})()}
           </Box>
@@ -569,130 +637,43 @@ function PlayDetailPanel({
       flexDirection: 'column',
       overflow: 'hidden'
     }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5, flexShrink: 0, minHeight: 40 }}>
-        <Typography variant="h6" sx={{ fontSize: '1rem', color: isDark ? '#e2e8f0' : undefined }}>打牌详情</Typography>
+      {/* 标题栏：打牌详情 + 墩数统计 + 操作按钮在一行 */}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5, flexShrink: 0, minHeight: 36, flexWrap: 'wrap' }}>
+        <Typography variant="h6" sx={{ fontSize: '0.95rem', color: isDark ? '#e2e8f0' : undefined }}>打牌详情</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Typography component="span" variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+            庄家方 <strong style={{ color: theme.palette.primary.main }}>{declarerTricks}</strong>
+          </Typography>
+          <Typography component="span" variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+            防守方 <strong style={{ color: theme.palette.warning.main }}>{defenderTricks}</strong>
+          </Typography>
+          <Typography component="span" variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+            需要 <strong>{contract?.tricks_needed || '?'}</strong>
+          </Typography>
+        </Box>
         <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
-          <Chip 
-            label={`${contract?.level || '?'}${contract?.suit || 'NT'}`} 
-            color="primary" 
-            size="small"
-            sx={{ fontSize: '0.75rem' }}
-          />
-          <Chip 
-            label={`庄家: ${contract?.declarer || '?'}`} 
-            variant="outlined" 
-            size="small"
-            sx={{ fontSize: '0.75rem' }}
-          />
-          {dummy && (
-            <Chip 
-              label={`明手: ${dummy}`} 
-              variant="outlined" 
-              size="small"
-              sx={{ fontSize: '0.75rem' }}
-            />
+          {!isComplete && !playInitiated && (
+            <Button variant="outlined" color="success" onClick={onBeginPlay} disabled={aiLoading} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.2 }}>开始</Button>
           )}
-          {imageOpeningLead && !playStarted && (
-            <Chip 
-              label={`首攻: ${imageOpeningLead}`} 
-              color="warning"
-              variant="outlined" 
-              size="small"
-              sx={{ fontSize: '0.75rem' }}
-            />
+          {!isComplete && playInitiated && isPaused && (isHistoryRecord || !isHumanTurn || isStartOfTrick) && (
+            <Button variant="outlined" color="primary" onClick={onResume} disabled={aiLoading} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.2 }}>继续</Button>
+          )}
+          {!isComplete && playInitiated && !isPaused && !isHumanTurn && (
+            <Button variant="outlined" color="warning" onClick={onPausePlay} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.2 }}>暂停</Button>
+          )}
+          {((!isComplete && playStarted) || (isComplete && !isHistoryRecord)) && onUndoPlay && (
+            <Button variant="outlined" color="secondary" onClick={onUndoPlay} disabled={aiLoading} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.2 }}>撤销</Button>
+          )}
+          {onSave && (
+            <Button variant="outlined" color="info" size="small" onClick={onSave} disabled={!canSave} sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.2 }}>保存</Button>
+          )}
+          {onResetPlay && (
+            <Button variant="outlined" color="error" size="small" onClick={onResetPlay} disabled={aiLoading} sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 56, py: 0.2 }}>重新打牌</Button>
           )}
         </Box>
       </Box>
 
       <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: isDark ? 'rgba(255,255,255,0.04)' : '#fafafa', borderRadius: 2, border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd', minHeight: 0, p: 1 }}>
-        <Box sx={{ display: 'flex', gap: 1, mb: 1, flexShrink: 0 }}>
-          <Paper sx={{ p: 0.5, bgcolor: isDark ? 'rgba(99, 102, 241, 0.15)' : '#e3f2fd', textAlign: 'center', minWidth: 50 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>庄家方</Typography>
-            <Typography variant="body2" fontWeight="bold" color="primary">{declarerTricks}</Typography>
-          </Paper>
-          <Paper sx={{ p: 0.5, bgcolor: isDark ? 'rgba(255, 152, 0, 0.1)' : '#fff3e0', textAlign: 'center', minWidth: 50 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>防守方</Typography>
-            <Typography variant="body2" fontWeight="bold" color="warning.main">{defenderTricks}</Typography>
-          </Paper>
-          <Paper sx={{ p: 0.5, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : '#f5f5f5', textAlign: 'center', minWidth: 50 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>需要</Typography>
-            <Typography variant="body2" fontWeight="bold">{contract?.tricks_needed || '?'}</Typography>
-          </Paper>
-          {/* 开始/暂停/继续 + 撤销 + 重新打牌按钮，右对齐 */}
-          <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', ml: 'auto' }}>
-            {!isComplete && !playInitiated && (
-              <Button
-                variant="outlined"
-                color="success"
-                onClick={onBeginPlay}
-                disabled={aiLoading}
-                size="small"
-                sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-              >
-                开始
-              </Button>
-            )}
-            {!isComplete && playInitiated && isPaused && (isHistoryRecord || !isHumanTurn || isStartOfTrick) && (
-              <Button
-                variant="outlined"
-                color="primary"
-                onClick={onResume}
-                disabled={aiLoading}
-                size="small"
-                sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-              >
-                继续
-              </Button>
-            )}
-            {!isComplete && playInitiated && !isPaused && !isHumanTurn && (
-              <Button
-                variant="outlined"
-                color="warning"
-                onClick={onPausePlay}
-                size="small"
-                sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-              >
-                暂停
-              </Button>
-            )}
-            {((!isComplete && playStarted) || (isComplete && !isHistoryRecord)) && onUndoPlay && (
-              <Button
-                variant="outlined"
-                color="secondary"
-                onClick={onUndoPlay}
-                disabled={aiLoading}
-                size="small"
-                sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-              >
-                撤销
-              </Button>
-            )}
-            {onSave && (
-              <Button
-                variant="outlined"
-                color="info"
-                size="small"
-                onClick={onSave}
-                disabled={!canSave}
-                sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-              >
-                保存
-              </Button>
-            )}
-            {onResetPlay && (
-              <Button
-                variant="outlined"
-                color="error"
-                size="small"
-                onClick={onResetPlay}
-                disabled={aiLoading}
-                sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-              >
-                重新打牌
-              </Button>
-            )}
-          </Box>
-        </Box>
 
         <Box sx={{ flex: 2, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
           {renderAIOutput()}

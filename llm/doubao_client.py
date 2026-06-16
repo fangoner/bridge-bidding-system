@@ -1,5 +1,7 @@
 import json
 import base64
+import time
+import io
 from typing import Optional, Dict, Any
 from openai import OpenAI
 
@@ -8,6 +10,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import DOUBAO_API_KEY, DOUBAO_BASE_URL, DOUBAO_VISION_ENDPOINT, DOUBAO_SEED_ENDPOINT
+
+# 视觉识别最大图片尺寸（长边像素），超过会等比缩放
+VISION_MAX_IMAGE_SIZE = 1920
+# 视觉识别 JPEG 压缩质量（1-100）
+VISION_JPEG_QUALITY = 85
 
 
 VISION_PROMPT = """你的任务是从桥牌游戏图片中提取四项关键信息。四项同等重要，必须尽力完整提取。
@@ -18,6 +25,8 @@ VISION_PROMPT = """你的任务是从桥牌游戏图片中提取四项关键信�
 - **牌面10必须用T表示**，例如：♠KT85 而不是 ♠K1085
 - **每手牌必须正好13张**，这是一个严格的校验规则
 - 花色符号用 ♠ ♥ ♦ ♣，牌面从大到小排列（A K Q J T 9 8 7 6 5 4 3 2）
+- **缺门花色必须用"-"占位**，例如：♠KT85 ♥AT863 ♦- ♣63（方块缺门）
+- 四个花色必须按♠♥♦♣顺序全部列出，即使缺门也不能省略
 - 检查每种花色是否有正确的牌张数（每种花色最多13张）
 - 如果某手牌不足13张或总张数超过13，仔细复查图片
 - 注意区分相似字符：♠和♣、8和B、T和7
@@ -25,10 +34,15 @@ VISION_PROMPT = """你的任务是从桥牌游戏图片中提取四项关键信�
 ═══════════════════════════════════════
 二、叫牌序列
 ═══════════════════════════════════════
-- 从庄家（dealer，通常标注为"发牌"或"庄"）开始，严格按照叫牌顺序列出
-- 每个叫品必须准确对应其位置（南/西/北/东）
-- 叫牌顺序是顺时针：南→西→北→东→南→...
-- 所有叫品都必须记录，包括开头的pass和结尾的pass
+- **叫牌表中空着的位置不等于pass！** 第一轮中，发牌人之前的空位只是还没轮到叫牌，不要记录为pass
+- **pass 的多种表示形式**：pass 可能显示为"不叫"、"-"、"/"、"Pass"等，这些都是pass，必须记录。与之区别的是**完全空白的格子**，那才是未叫牌，不能记录
+- 发牌人（dealer）的判断方法：叫牌表第一行中，第一个有叫品（pass/不叫/-//具体叫品）的位置就是发牌人
+  * 例如第一行南为空、西为空、北为"-"、东为"1H" → 发牌人是北，序列从北的pass开始
+  * 例如第一行南是"不叫"、西是"不叫"、北是"1H"、东是pass → 发牌人是南，序列从南开始
+- 从发牌人开始，按顺时针方向（南→西→北→东→南→...）依次记录每个位置的叫品
+- **只记录叫牌表中有内容的格子**（pass/不叫/-//具体叫品），完全空白的格子一律跳过
+- 如果整个叫牌表第一行全空，则查看图片中是否有"发牌"或dealer标注来确定起始位置
+- 所有实际存在的叫品都必须记录，包括pass
 - 最终定约叫品之后通常还有三个pass结束叫牌，也可能有加倍/再加倍
 - 仔细观察叫牌区域，每个叫品框通常有位置标签，不要混淆相邻位置的叫品
 - 如果图片中没有叫牌区域或叫牌序列完全不显示，则为null
@@ -80,7 +94,7 @@ VISION_PROMPT = """你的任务是从桥牌游戏图片中提取四项关键信�
 ═══════════════════════════════════════
 请严格按照以下JSON格式输出，不要添加任何额外说明文字：
 {
-  "南家手牌": "如 ♠KT85 ♥AT863 ♦Q42 ♣63",
+  "南家手牌": "如 ♠KT85 ♥AT863 ♦- ♣63（♦缺门用-占位）",
   "西家手牌": "...",
   "北家手牌": "...",
   "东家手牌": "...",
@@ -97,11 +111,13 @@ class DoubaoVisionClient:
         self.base_url = base_url or DOUBAO_BASE_URL
         self.endpoint = endpoint or DOUBAO_VISION_ENDPOINT
         self.client = None
-        
+
         if self.api_key:
+            import httpx
             self.client = OpenAI(
                 api_key=self.api_key,
-                base_url=self.base_url
+                base_url=self.base_url,
+                timeout=httpx.Timeout(120.0, connect=10.0)
             )
     
     def is_configured(self) -> bool:
@@ -110,47 +126,78 @@ class DoubaoVisionClient:
     def read_cards_from_image(self, image_path: str) -> Dict[str, Any]:
         if not self.client:
             return {"error": "Doubao API Key未配置，请设置环境变量 DOUBAO_API_KEY"}
-        
+
         if not self.endpoint or self.endpoint == "YOUR_VISION_ENDPOINT_ID":
             return {"error": "Doubao Vision Endpoint未配置，请在火山引擎控制台创建视觉模型推理接入点，并设置环境变量 DOUBAO_VISION_ENDPOINT"}
-        
+
         try:
+            t0 = time.time()
+
+            # 1. 读取原始图片
             with open(image_path, "rb") as f:
-                image_data = base64.b64encode(f.read()).decode("utf-8")
-            
-            ext = image_path.lower().split(".")[-1]
-            mime_type = {
-                "jpg": "image/jpeg",
-                "jpeg": "image/jpeg",
-                "png": "image/png",
-                "gif": "image/gif",
-                "webp": "image/webp"
-            }.get(ext, "image/jpeg")
-            
+                raw_bytes = f.read()
+            raw_size_kb = len(raw_bytes) / 1024
+            print(f"[DoubaoVision] 原始图片大小: {raw_size_kb:.1f} KB")
+
+            # 2. 压缩图片（缩小分辨率 + JPEG 压缩）
+            try:
+                from PIL import Image
+                img = Image.open(io.BytesIO(raw_bytes))
+                orig_w, orig_h = img.size
+                # 等比缩放
+                if max(orig_w, orig_h) > VISION_MAX_IMAGE_SIZE:
+                    ratio = VISION_MAX_IMAGE_SIZE / max(orig_w, orig_h)
+                    new_w, new_h = int(orig_w * ratio), int(orig_h * ratio)
+                    img = img.resize((new_w, new_h), Image.LANCZOS)
+                    print(f"[DoubaoVision] 图片缩放: {orig_w}x{orig_h} → {new_w}x{new_h}")
+                # 转 JPEG 压缩到内存
+                buf = io.BytesIO()
+                img.convert("RGB").save(buf, format="JPEG", quality=VISION_JPEG_QUALITY)
+                compressed_bytes = buf.getvalue()
+                compressed_kb = len(compressed_bytes) / 1024
+                print(f"[DoubaoVision] 压缩后大小: {compressed_kb:.1f} KB (节省 {(1 - compressed_kb/raw_size_kb)*100:.0f}%)")
+                mime_type = "image/jpeg"
+            except Exception as e:
+                print(f"[DoubaoVision] 图片压缩失败({e})，使用原始图片")
+                compressed_bytes = raw_bytes
+                ext = image_path.lower().split(".")[-1]
+                mime_type = {
+                    "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                    "png": "image/png", "gif": "image/gif", "webp": "image/webp"
+                }.get(ext, "image/jpeg")
+
+            # 3. Base64 编码
+            t1 = time.time()
+            image_b64 = base64.b64encode(compressed_bytes).decode("utf-8")
+            print(f"[DoubaoVision] Base64编码耗时: {time.time() - t1:.1f}s, 长度: {len(image_b64)}")
+
+            # 4. 调用视觉模型 API
+            t2 = time.time()
+            print(f"[DoubaoVision] 开始调用API (max_tokens=4096)...")
             response = self.client.chat.completions.create(
                 model=self.endpoint,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": VISION_PROMPT
-                    },
+                    {"role": "system", "content": VISION_PROMPT},
                     {
                         "role": "user",
-                        "content": [
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:{mime_type};base64,{image_data}"
-                                }
+                        "content": [{
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{image_b64}"
                             }
-                        ]
+                        }]
                     }
                 ],
-                temperature=0
+                temperature=0,
+                max_tokens=4096,
+                extra_body={"thinking": {"type": "disabled"}}
             )
-            
+            api_elapsed = time.time() - t2
+            print(f"[DoubaoVision] API调用耗时: {api_elapsed:.1f}s")
+
             result_text = response.choices[0].message.content
-            
+
+            # 5. 解析 JSON
             try:
                 if "```json" in result_text:
                     json_match = result_text.split("```json")[1].split("```")[0]
@@ -158,9 +205,14 @@ class DoubaoVisionClient:
                     json_match = result_text.split("```")[1].split("```")[0]
                 else:
                     json_match = result_text
-                
-                return json.loads(json_match.strip())
+
+                parsed = json.loads(json_match.strip())
+                total_elapsed = time.time() - t0
+                print(f"[DoubaoVision] 总耗时: {total_elapsed:.1f}s (压缩: {t2-t1:.1f}s, API: {api_elapsed:.1f}s)")
+                return parsed
             except json.JSONDecodeError:
+                total_elapsed = time.time() - t0
+                print(f"[DoubaoVision] JSON解析失败，总耗时: {total_elapsed:.1f}s")
                 return {"raw_response": result_text, "error": "JSON解析失败"}
                 
         except FileNotFoundError:

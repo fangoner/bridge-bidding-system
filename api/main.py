@@ -712,6 +712,40 @@ def _parse_opening_lead(lead_str):
 
 def _parse_vision_hands(result):
     """从视觉识别结果中解析手牌，返回 (hands_dict, validation_errors)"""
+    import re
+    
+    def parse_hand_with_suits(hand_str: str) -> Hand:
+        """按花色符号解析手牌，正确处理缺门花色。
+        例如 "♠KT85 ♥AT863 ♣63" → 黑桃KT85, 红心AT863, 方块空, 草花63
+        """
+        hand_str = convert_10_to_T(hand_str)
+        # 用花色符号分割，保留花色标记
+        suit_map = {"♠": "spades", "♥": "hearts", "♦": "diamonds", "♣": "clubs"}
+        suits = {"spades": "", "hearts": "", "diamonds": "", "clubs": ""}
+        
+        # 找到所有花色符号的位置
+        suit_positions = []
+        for m in re.finditer(r'[♠♥♦♣]', hand_str):
+            suit_positions.append((m.start(), m.group()))
+        
+        # 按花色符号提取每个花色的牌
+        for i, (pos, symbol) in enumerate(suit_positions):
+            # 牌面从花色符号后开始，到下一个花色符号前结束
+            start = pos + 1
+            end = suit_positions[i + 1][0] if i + 1 < len(suit_positions) else len(hand_str)
+            card_str = hand_str[start:end].strip()
+            # 统一各种破折号为标准"-"，再清理：只保留有效的牌面字符
+            card_str = re.sub(r'[-—–－―‐]', '-', card_str)
+            card_str = re.sub(r'[^AKQJT98765432]', '', card_str)
+            suits[suit_map[symbol]] = card_str
+        
+        return Hand(
+            spades=suits["spades"],
+            hearts=suits["hearts"],
+            diamonds=suits["diamonds"],
+            clubs=suits["clubs"]
+        )
+    
     hands = {}
     position_map = {
         "南家手牌": Position.SOUTH,
@@ -723,9 +757,7 @@ def _parse_vision_hands(result):
     for key, pos in position_map.items():
         hand_str = result.get(key)
         if hand_str and hand_str != "null":
-            hand_str_clean = convert_10_to_T(hand_str)
-            hand_str_clean = hand_str_clean.replace("♠", " ").replace("♥", " ").replace("♦", " ").replace("♣", " ")
-            hands[pos] = parse_hand_string(hand_str_clean)
+            hands[pos] = parse_hand_with_suits(hand_str)
     
     validation_errors = []
     for pos, hand in hands.items():
@@ -880,7 +912,9 @@ class ImageDealResponse(BaseModel):
 async def image_deal(image: bytes = File(..., description="图片文件")):
     """从图片读取牌局接口"""
     try:
-        
+        import time
+        t_start = time.time()
+
         print(f"[INFO] 收到图片上传请求，大小: {len(image)} bytes")
         
         # 保存上传的文件到临时目录
@@ -929,6 +963,7 @@ async def image_deal(image: bytes = File(..., description="图片文件")):
                 missing = [p for p in ["南", "西", "北", "东"] if p not in [get_position_name(pos) for pos in hands]]
                 warnings.append(f"缺少{','.join(missing)}的手牌")
 
+            print(f"[INFO] 图片识别总耗时: {time.time() - t_start:.1f}s")
             return ImageDealResponse(
                 hands=hands_dict,
                 dealer=dealer,
@@ -1025,6 +1060,9 @@ async def read_clipboard():
 
         print(f"[INFO] 检测到新剪贴板内容（当前: {current_hash[:8]}...，截屏前: {_pre_screenshot_hash[:8] if _pre_screenshot_hash else 'None'}）")
 
+        import time
+        t_clipboard = time.time()
+
         with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{fmt}') as tmp:
             tmp.write(image_data)
             image_path = tmp.name
@@ -1064,6 +1102,7 @@ async def read_clipboard():
                 missing = [p for p in ["南", "西", "北", "东"] if p not in [get_position_name(pos) for pos in hands]]
                 warnings.append(f"缺少{','.join(missing)}的手牌")
 
+            print(f"[INFO] 截屏识别总耗时: {time.time() - t_clipboard:.1f}s")
             return {
                 "success": True,
                 "message": ("识别成功" if not warnings else "识别完成（" + "; ".join(warnings) + "）"),
@@ -1339,7 +1378,7 @@ async def undo_play():
 class PlayAIRequest(BaseModel):
     use_reasoning: bool = False
     play_model: Optional[str] = None
-    play_engine: Optional[str] = None  # "llm" | "mcts" | "dd" | "hybrid" | "tiered"
+    play_engine: Optional[str] = None  # "llm" | "mcts" | "dd" | "tiered" | "perfect"
     dd_sample_count: Optional[int] = None  # DD 蒙地卡罗采样数
 
 
@@ -1406,17 +1445,17 @@ async def ai_play(request: PlayAIRequest):
                 engine = request.play_engine or DEFAULT_PLAY_ENGINE
                 use_mcts = engine == "mcts"
                 use_dd = engine == "dd"
-                use_hybrid = engine == "hybrid"
                 use_tiered = engine == "tiered"
+                use_perfect = engine == "perfect"
                 dd_samples = (request.dd_sample_count
-                              if (use_dd or use_hybrid or use_tiered) else None)
+                              if (use_dd or use_tiered) else None)
                 t0 = time.time()
                 result = await service.get_ai_play(
                     use_reasoning=request.use_reasoning,
                     use_mcts=use_mcts,
                     use_dd=use_dd,
-                    use_hybrid=use_hybrid,
                     use_tiered=use_tiered,
+                    use_perfect=use_perfect,
                     dd_samples=dd_samples)
                 elapsed_ms = int((time.time() - t0) * 1000)
 
@@ -1542,6 +1581,98 @@ async def get_play_state():
             error=f"获取状态失败: {str(e)}"
         )
 
+
+@app.get("/api/play/dd-hints")
+async def get_dd_hints():
+    """获取当前人类玩家可选牌的完美DD结果提示（基于剩余手牌）"""
+    try:
+        service = get_play_service()
+        state = service.get_state()
+        if not state:
+            return {"success": False, "error": "打牌未初始化"}
+
+        from bridge.mcts.dd_search import ENDPLAY_AVAILABLE
+        if not ENDPLAY_AVAILABLE:
+            return {"success": False, "error": "endplay库不可用"}
+
+        from endplay import Deal
+        from endplay.dds import solve_board
+        from endplay.types import Card as EpCard, Denom, Player
+        from bridge.mcts.dd_search import _hands_to_pbn, _to_ep, _DENOM_TO_SUIT, _RANK_TO_CHAR, RANK_ORDER
+        from bridge.mcts.state_utils import get_current_trick_state, POSITION_TO_PLAYER, PLAYER_TO_POSITION, SUIT_TO_DENOM
+
+        perspective = state.current_player
+        playable = service.get_playable_cards()
+        if len(playable) <= 1:
+            return {"success": True, "hints": {}}
+
+        declarer = state.contract.declarer
+        dummy = state.dummy
+        trump = state.contract.suit
+
+        trick_state = get_current_trick_state(state)
+        trick_cards = trick_state["cards"]
+        trick_leader = trick_state.get("leader")
+
+        total_played = state.declarer_tricks + state.defender_tricks
+        remaining_tricks = 13 - total_played
+
+        # 用剩余手牌 + 当前墩牌构建 deal
+        hands = {}
+        for pos in ["北", "东", "南", "西"]:
+            hands[pos] = list(state.hands.get(pos, []))
+        for pos, card in trick_cards:
+            hands[pos] = [c for c in hands[pos]
+                          if not (c.suit == card.suit and c.rank == card.rank)]
+        for pos, card in trick_cards:
+            hands[pos].append(card)
+
+        pbn = _hands_to_pbn(hands)
+        deal = Deal(pbn)
+        deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
+
+        if trick_cards:
+            deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
+            for _pos, card in trick_cards:
+                deal.play(_to_ep(card), from_hand=True)
+        else:
+            deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
+
+        result = solve_board(deal)
+        score_map = {}
+        for ep_card, side_score in result:
+            key = (_DENOM_TO_SUIT.get(ep_card.suit), _RANK_TO_CHAR.get(ep_card.rank))
+            score_map[key] = side_score
+
+        curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
+        curplayer_is_declarer = curplayer_pos in (declarer, dummy)
+
+        contract_level = state.contract.level
+        target_tricks = contract_level + 6
+        hints = {}
+
+        for card in playable:
+            key = (card.suit, card.rank)
+            target_tricks_for_card = score_map.get(key, 0)
+            if curplayer_is_declarer:
+                decl_side_tricks = target_tricks_for_card
+            else:
+                decl_side_tricks = remaining_tricks - target_tricks_for_card
+            total = state.declarer_tricks + decl_side_tricks
+            delta = total - target_tricks
+            card_str = str(card)
+            if delta > 0:
+                hints[card_str] = f"+{delta}"
+            elif delta == 0:
+                hints[card_str] = "="
+            else:
+                hints[card_str] = str(delta)
+
+        return {"success": True, "hints": hints}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
