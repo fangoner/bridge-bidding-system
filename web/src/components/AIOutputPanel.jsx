@@ -11,18 +11,12 @@ import {
   MenuItem,
   FormControlLabel,
   Checkbox,
+  useTheme,
+  alpha,
 } from '@mui/material';
 
 /**
  * AIOutputPanel component for displaying detailed AI bidding output
- *
- * @param {Object} props
- * @param {Array} props.aiBiddingHistory - Array of AI bidding history records
- * @param {boolean} props.simpleDisplayMode - Whether to use simple display mode
- * @param {Function} props.setSimpleDisplayMode - Function to set simple display mode
- * @param {number} props.selectedBiddingIndex - Selected bidding index
- * @param {Function} props.setSelectedBiddingIndex - Function to set selected bidding index
- * @param {string|null} props.currentBiddingPosition - Current bidding position (if AI is bidding)
  */
 function AIOutputPanel({
   aiBiddingHistory,
@@ -32,12 +26,49 @@ function AIOutputPanel({
   setSelectedBiddingIndex,
   currentBiddingPosition,
 }) {
-  // If no AI bidding history, show placeholder
+  const theme = useTheme();
+
+  // ── Shared sub-styles (theme-aware) ──────────────────────────────────
+  const preBlockSx = {
+    mt: 0.5,
+    p: 1,
+    background: alpha(theme.palette.primary.main, 0.04),
+    borderRadius: 1,
+    fontSize: '0.85rem',
+    lineHeight: 1.4,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    border: `1px solid ${theme.palette.divider}`,
+    maxHeight: '150px',
+    overflow: 'auto',
+  };
+
+  const recordCardSx = {
+    p: 1.5,
+    background: alpha(theme.palette.background.paper, 0.6),
+    backdropFilter: 'blur(8px)',
+    borderRadius: 1,
+    borderLeft: `4px solid ${theme.palette.primary.main}`,
+    boxShadow: theme.shadows[1],
+  };
+
+  const detailCardSx = {
+    p: 2,
+    background: alpha(theme.palette.background.paper, 0.6),
+    backdropFilter: 'blur(8px)',
+    borderRadius: 1,
+    borderLeft: `4px solid ${theme.palette.primary.main}`,
+    boxShadow: theme.shadows[1],
+  };
+
+  const bidColor = theme.palette.error.main;
+  const mutedColor = theme.palette.text.secondary;
+
+  // ── Empty state ──────────────────────────────────────────────────────
   if (aiBiddingHistory.length === 0) {
     return (
       <Paper elevation={3} sx={{
         p: 2,
-        bgcolor: '#f5f5f5',
         display: 'flex',
         flexDirection: 'column',
         width: '600px',
@@ -58,12 +89,12 @@ function AIOutputPanel({
   return (
     <Paper elevation={3} sx={{
       p: 2,
-      bgcolor: '#f5f5f5',
       display: 'flex',
       flexDirection: 'column',
       width: '600px',
       height: '700px',
     }}>
+      {/* ── Header ─────────────────────────────────────────────────── */}
       <Box sx={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -88,7 +119,7 @@ function AIOutputPanel({
         />
       </Box>
 
-      {/* Dropdown for selecting bidding record */}
+      {/* ── Record selector ─────────────────────────────────────────── */}
       {aiBiddingHistory.length > 0 && !simpleDisplayMode && (
         <FormControl size="small" sx={{ mb: 2, minWidth: 200, flexShrink: 0 }}>
           <InputLabel>选择叫牌记录</InputLabel>
@@ -109,7 +140,7 @@ function AIOutputPanel({
         </FormControl>
       )}
 
-      {/* Bidding progress indicator */}
+      {/* ── Progress ────────────────────────────────────────────────── */}
       {currentBiddingPosition && (
         <Alert severity="info" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
           <CircularProgress size={20} />
@@ -119,38 +150,29 @@ function AIOutputPanel({
         </Alert>
       )}
 
-      {/* Content area */}
+      {/* ── Content ─────────────────────────────────────────────────── */}
       <Box sx={{
         flex: 1,
         overflow: 'auto',
         p: 1,
-        background: '#fafafa',
+        background: alpha(theme.palette.background.default, 0.5),
         borderRadius: 1,
-        border: '1px solid #ddd',
+        border: `1px solid ${theme.palette.divider}`,
         minHeight: 0,
       }}>
         {simpleDisplayMode ? (
-          // Simple display mode: show all records
           aiBiddingHistory.map((record, index) => (
-            <Box
-              key={index}
-              sx={{
-                mb: 1,
-                p: 1.5,
-                background: 'white',
-                borderRadius: 1,
-                borderLeft: '4px solid #2196f3',
-                boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
-              }}
-            >
+            <Box key={index} sx={{ mb: 1, ...recordCardSx }}>
               <Typography variant="body2">
-                <strong>{record.position}家</strong> → <span style={{ color: '#d32f2f', fontWeight: 'bold' }}>{record.result.bid}</span>
-                {record.result.meaning && <span style={{ color: '#666' }}> ({record.result.meaning})</span>}
+                <strong>{record.position}家</strong> →{' '}
+                <span style={{ color: bidColor, fontWeight: 'bold' }}>{record.result.bid}</span>
+                {record.result.meaning && (
+                  <span style={{ color: mutedColor }}> ({record.result.meaning})</span>
+                )}
               </Typography>
             </Box>
           ))
         ) : (
-          // Detailed display mode: show single selected record
           (() => {
             const record = selectedBiddingIndex === -1
               ? aiBiddingHistory[aiBiddingHistory.length - 1]
@@ -158,14 +180,8 @@ function AIOutputPanel({
             if (!record) return null;
             const fullOutput = record.result.full_output || {};
             return (
-              <Box sx={{
-                p: 2,
-                background: 'white',
-                borderRadius: 1,
-                borderLeft: '4px solid #2196f3',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-              }}>
-                <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 'bold', color: '#1976d2' }}>
+              <Box sx={detailCardSx}>
+                <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 'bold', color: theme.palette.primary.main }}>
                   {record.timestamp} - {record.position}家
                 </Typography>
                 <Typography variant="body2" sx={{ mt: 1 }}>
@@ -198,19 +214,7 @@ function AIOutputPanel({
                 {fullOutput["手牌分析"] && (
                   <Typography variant="body2" sx={{ mt: 1 }}>
                     <strong>手牌分析:</strong>
-                    <Box component="pre" sx={{
-                      mt: 0.5,
-                      p: 1,
-                      background: '#f8f9fa',
-                      borderRadius: 1,
-                      fontSize: '0.85rem',
-                      lineHeight: 1.4,
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      border: '1px solid #e9ecef',
-                      maxHeight: '150px',
-                      overflow: 'auto',
-                    }}>
+                    <Box component="pre" sx={preBlockSx}>
                       {fullOutput["手牌分析"]}
                     </Box>
                   </Typography>
@@ -218,19 +222,7 @@ function AIOutputPanel({
                 {fullOutput["叫牌历史"] && (
                   <Typography variant="body2" sx={{ mt: 1 }}>
                     <strong>叫牌历史:</strong>
-                    <Box component="pre" sx={{
-                      mt: 0.5,
-                      p: 1,
-                      background: '#f8f9fa',
-                      borderRadius: 1,
-                      fontSize: '0.85rem',
-                      lineHeight: 1.4,
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      border: '1px solid #e9ecef',
-                      maxHeight: '150px',
-                      overflow: 'auto',
-                    }}>
+                    <Box component="pre" sx={preBlockSx}>
                       {fullOutput["叫牌历史"]}
                     </Box>
                   </Typography>
@@ -238,19 +230,7 @@ function AIOutputPanel({
                 {fullOutput["自己和队友配合花色张数合计"] && (
                   <Typography variant="body2" sx={{ mt: 1 }}>
                     <strong>配合花色张数合计:</strong>
-                    <Box component="pre" sx={{
-                      mt: 0.5,
-                      p: 1,
-                      background: '#f8f9fa',
-                      borderRadius: 1,
-                      fontSize: '0.85rem',
-                      lineHeight: 1.4,
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      border: '1px solid #e9ecef',
-                      maxHeight: '150px',
-                      overflow: 'auto',
-                    }}>
+                    <Box component="pre" sx={preBlockSx}>
                       {fullOutput["自己和队友配合花色张数合计"]}
                     </Box>
                   </Typography>
@@ -273,19 +253,7 @@ function AIOutputPanel({
                 {fullOutput["止张分析"] && (
                   <Typography variant="body2" sx={{ mt: 1 }}>
                     <strong>止张分析:</strong>
-                    <Box component="pre" sx={{
-                      mt: 0.5,
-                      p: 1,
-                      background: '#f8f9fa',
-                      borderRadius: 1,
-                      fontSize: '0.85rem',
-                      lineHeight: 1.4,
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      border: '1px solid #e9ecef',
-                      maxHeight: '150px',
-                      overflow: 'auto',
-                    }}>
+                    <Box component="pre" sx={preBlockSx}>
                       {fullOutput["止张分析"]}
                     </Box>
                   </Typography>
@@ -293,19 +261,7 @@ function AIOutputPanel({
                 {fullOutput["扣叫控制"] && (
                   <Typography variant="body2" sx={{ mt: 1 }}>
                     <strong>扣叫控制:</strong>
-                    <Box component="pre" sx={{
-                      mt: 0.5,
-                      p: 1,
-                      background: '#f8f9fa',
-                      borderRadius: 1,
-                      fontSize: '0.85rem',
-                      lineHeight: 1.4,
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      border: '1px solid #e9ecef',
-                      maxHeight: '150px',
-                      overflow: 'auto',
-                    }}>
+                    <Box component="pre" sx={preBlockSx}>
                       {fullOutput["扣叫控制"]}
                     </Box>
                   </Typography>
@@ -313,26 +269,15 @@ function AIOutputPanel({
                 {fullOutput["自己和队友关键张合计"] && (
                   <Typography variant="body2" sx={{ mt: 1 }}>
                     <strong>关键张合计:</strong>
-                    <Box component="pre" sx={{
-                      mt: 0.5,
-                      p: 1,
-                      background: '#f8f9fa',
-                      borderRadius: 1,
-                      fontSize: '0.85rem',
-                      lineHeight: 1.4,
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      border: '1px solid #e9ecef',
-                      maxHeight: '150px',
-                      overflow: 'auto',
-                    }}>
+                    <Box component="pre" sx={preBlockSx}>
                       {fullOutput["自己和队友关键张合计"]}
                     </Box>
                   </Typography>
                 )}
 
                 <Typography variant="body2" sx={{ mt: 1 }}>
-                  <strong>选定叫品:</strong> <span style={{ fontWeight: 'bold', color: '#d32f2f' }}>{record.result.bid}</span>
+                  <strong>选定叫品:</strong>{' '}
+                  <span style={{ fontWeight: 'bold', color: bidColor }}>{record.result.bid}</span>
                 </Typography>
                 {record.result.meaning && (
                   <Typography variant="body2" sx={{ mt: 1 }}>
@@ -342,19 +287,7 @@ function AIOutputPanel({
                 {record.result.selection_process && (
                   <Typography variant="body2" sx={{ mt: 1 }}>
                     <strong>叫品筛选过程:</strong>
-                    <Box component="pre" sx={{
-                      mt: 1,
-                      p: 1,
-                      background: '#f8f9fa',
-                      borderRadius: 1,
-                      fontSize: '0.85rem',
-                      lineHeight: 1.4,
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      border: '1px solid #e9ecef',
-                      maxHeight: '200px',
-                      overflow: 'auto',
-                    }}>
+                    <Box component="pre" sx={{ ...preBlockSx, maxHeight: '200px' }}>
                       {record.result.selection_process}
                     </Box>
                   </Typography>

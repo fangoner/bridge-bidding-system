@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Typography } from '@mui/material';
+import { Box, Typography, useTheme, alpha } from '@mui/material';
 
 /**
  * BiddingTable component for displaying bidding history in a table format
@@ -9,12 +9,13 @@ import { Box, Typography } from '@mui/material';
  * @param {string} props.dealer - Dealer position
  */
 function BiddingTable({ biddingSequence, dealer }) {
+  const theme = useTheme();
   const isMobile = window.innerWidth < 600;
-  
+
   if (biddingSequence.length === 0) {
     return (
       <Box className="bidding-empty" sx={{
-        color: '#666',
+        color: theme.palette.text.secondary,
         fontStyle: 'italic',
         textAlign: 'center',
         padding: 3,
@@ -48,17 +49,18 @@ function BiddingTable({ biddingSequence, dealer }) {
   return (
     <Box className="bidding-table" sx={{
       width: '100%',
-      fontFamily: '"Courier New", monospace',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", Roboto, sans-serif',
+      fontWeight: 600,
       fontSize: isMobile ? '0.9rem' : '0.9rem',
     }}>
       <Box className="bidding-header" sx={{
         display: 'flex',
         justifyContent: 'space-around',
-        borderBottom: '2px solid #333',
+        borderBottom: `2px solid ${theme.palette.text.primary}`,
         paddingBottom: isMobile ? 0.5 : 1,
         marginBottom: isMobile ? 0.5 : 1,
         fontWeight: 'bold',
-        color: '#333',
+        color: theme.palette.text.primary,
       }}>
         {positions.map(pos => (
           <Box
@@ -68,7 +70,7 @@ function BiddingTable({ biddingSequence, dealer }) {
               flex: 1,
               textAlign: 'center',
               minWidth: isMobile ? 70 : 50,
-              color: pos === dealer ? '#d32f2f' : 'inherit',
+              color: pos === dealer ? theme.palette.error.main : 'inherit',
             }}
             className={pos === dealer ? 'dealer' : ''}
           >
@@ -85,7 +87,7 @@ function BiddingTable({ biddingSequence, dealer }) {
             display: 'flex',
             justifyContent: 'space-around',
             padding: '4px 0',
-            borderBottom: '1px solid #ddd',
+            borderBottom: `1px solid ${theme.palette.divider}`,
             '&:last-child': {
               borderBottom: 'none',
             },
@@ -101,8 +103,8 @@ function BiddingTable({ biddingSequence, dealer }) {
                 textAlign: 'center',
                 minWidth: isMobile ? 70 : 50,
                 fontWeight: 500,
-                color: '#333',
-                backgroundColor: row[colIndex] ? '#e3f2fd' : 'transparent',
+                color: theme.palette.text.primary,
+                backgroundColor: row[colIndex] ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
                 borderRadius: 1,
               }}
             >

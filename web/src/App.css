@@ -5,22 +5,22 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", 'Segoe UI', "Microsoft YaHei UI", 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #fafafa;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   NOTE: Colours & dark-mode variants are now handled by MUI theme / inline sx.
+   This file only keeps structural layout helpers.
+   ═══════════════════════════════════════════════════════════════════════════ */
 .card-table-container {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 10px;
-  background: linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%);
   border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   min-height: 500px;
 }
 
@@ -52,12 +52,10 @@ body {
 .table-border {
   width: 280px;
   min-height: 200px;
-  border: 3px solid rgba(255, 255, 255, 0.5);
   border-radius: 12px;
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  background: rgba(255, 255, 255, 0.95);
   padding: 15px;
   overflow-y: auto;
   max-height: 300px;
@@ -65,12 +63,10 @@ body {
 
 .bidding-table {
   width: 100%;
-  font-family: 'Courier New', monospace;
   font-size: 0.9rem;
 }
 
 .bidding-empty {
-  color: #666;
   font-style: italic;
   text-align: center;
   padding: 20px;
@@ -79,11 +75,9 @@ body {
 .bidding-header {
   display: flex;
   justify-content: space-around;
-  border-bottom: 2px solid #333;
   padding-bottom: 8px;
   margin-bottom: 8px;
   font-weight: bold;
-  color: #333;
 }
 
 .bidding-header span {
@@ -92,19 +86,10 @@ body {
   min-width: 50px;
 }
 
-.bidding-header span.dealer {
-  color: #d32f2f;
-}
-
 .bidding-row {
   display: flex;
   justify-content: space-around;
   padding: 4px 0;
-  border-bottom: 1px solid #ddd;
-}
-
-.bidding-row:last-child {
-  border-bottom: none;
 }
 
 .bidding-cell {
@@ -112,8 +97,6 @@ body {
   text-align: center;
   min-width: 50px;
   font-weight: 500;
-  color: #333;
-  background-color: #e3f2fd;
   border-radius: 4px;
 }
 
@@ -125,18 +108,20 @@ body {
   margin-top: 10px;
 }
 
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+
 @media (max-width: 768px) {
   .card-table-container {
     padding: 8px;
     min-height: auto;
   }
-  
+
   .middle-row {
     flex-direction: row !important;
     gap: 6px;
     flex-wrap: nowrap;
   }
-  
+
   .table-border {
     width: auto !important;
     min-width: 120px;
@@ -145,11 +130,11 @@ body {
     padding: 8px 6px !important;
     overflow: visible !important;
   }
-  
+
   .bidding-table {
     font-size: 0.72rem;
   }
-  
+
   .bidding-header {
     justify-content: center !important;
     padding-bottom: 2px;
@@ -157,7 +142,7 @@ body {
     border-bottom-width: 1px;
     gap: 0;
   }
-  
+
   .bidding-header span {
     flex: 0 0 26px !important;
     min-width: 26px !important;
@@ -166,13 +151,13 @@ body {
     text-align: center;
     padding: 0;
   }
-  
+
   .bidding-row {
     justify-content: center !important;
     padding: 1px 0;
     gap: 0;
   }
-  
+
   .bidding-cell {
     flex: 0 0 26px !important;
     min-width: 26px !important;
@@ -183,52 +168,15 @@ body {
   }
 }
 
-/* ========== 暗色模式 ========== */
-
-[data-theme="dark"] body {
-  background-color: #0f172a;
-}
-
-[data-theme="dark"] .card-table-container {
-  background: linear-gradient(135deg, #1a3a1c 0%, #0d1f0f 100%);
-}
-
-[data-theme="dark"] .table-border {
-  background: rgba(30, 41, 59, 0.95);
-  border-color: rgba(255, 255, 255, 0.15);
-}
-
-[data-theme="dark"] .bidding-empty {
-  color: #94a3b8;
-}
-
-[data-theme="dark"] .bidding-header {
-  border-bottom-color: rgba(255, 255, 255, 0.2);
-  color: #e2e8f0;
-}
-
-[data-theme="dark"] .bidding-row {
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-}
-
-[data-theme="dark"] .bidding-cell {
-  color: #e2e8f0;
-  background-color: rgba(99, 102, 241, 0.2);
-}
-
-[data-theme="dark"] .bidding-header span.dealer {
-  color: #f87171;
-}
-
 @media (max-width: 360px) {
   .card-table-container {
     padding: 6px;
   }
-  
+
   .middle-row {
     gap: 4px;
   }
-  
+
   .table-border {
     width: auto !important;
     min-width: 100px;
@@ -237,18 +185,18 @@ body {
     padding: 6px 4px !important;
     overflow: visible !important;
   }
-  
+
   .bidding-table {
     font-size: 0.7rem;
   }
-  
+
   .bidding-header {
     justify-content: center !important;
     padding-bottom: 1px;
     margin-bottom: 1px;
     gap: 0;
   }
-  
+
   .bidding-header span {
     flex: 0 0 22px !important;
     min-width: 22px !important;
@@ -257,13 +205,13 @@ body {
     text-align: center;
     padding: 0;
   }
-  
+
   .bidding-row {
     justify-content: center !important;
     padding: 0;
     gap: 0;
   }
-  
+
   .bidding-cell {
     flex: 0 0 22px !important;
     min-width: 22px !important;

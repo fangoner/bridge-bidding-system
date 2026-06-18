@@ -178,9 +178,9 @@ function PlayDetailPanel({
     return (
       <Box sx={{ p: 1.5, background: bgWhite, borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', overflow: viewMode === 'input' ? 'hidden' : undefined }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#1976d2', fontSize: '0.85rem' }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#1976d2', fontSize: '0.75rem' }}>
             {record.position}家 -{' '}
-            <Typography component="span" sx={{ color: getSuitColor(record.card?.suit, isDark), fontWeight: 'bold', fontSize: '0.85rem' }}>
+            <Typography component="span" sx={{ color: getSuitColor(record.card?.suit, isDark), fontWeight: 'bold', fontSize: '0.75rem' }}>
               {record.card?.suit}{record.card?.rank}
             </Typography>
           </Typography>
@@ -246,7 +246,7 @@ function PlayDetailPanel({
                 <Box key={key} sx={{ mt: 0.5 }}>
                   {multiline ? (
                     <Box>
-                      <Typography variant="body2" sx={{ fontSize: '0.8rem', color, fontWeight: 500 }}>
+                      <Typography variant="body2" sx={{ fontSize: '0.7rem', color, fontWeight: 500 }}>
                         {label}:
                       </Typography>
                       <Box component="pre" sx={{
@@ -260,7 +260,7 @@ function PlayDetailPanel({
                       </Box>
                     </Box>
                   ) : (
-                    <Typography variant="body2" sx={{ fontSize: '0.8rem', color }}>
+                    <Typography variant="body2" sx={{ fontSize: '0.7rem', color }}>
                       <strong>{label}:</strong> {value}
                     </Typography>
                   )}
@@ -328,7 +328,7 @@ function PlayDetailPanel({
               </Box>
             </Box>
           ) : (
-            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem' }}>
+            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
               无输入数据
             </Typography>
           )
@@ -399,7 +399,7 @@ function PlayDetailPanel({
                   setManualCardInput('')
                 }
               }}
-              sx={{ width: 140, '& input': { fontSize: '0.85rem', textAlign: 'center' } }}
+              sx={{ width: 140, '& input': { fontSize: '0.75rem', textAlign: 'center' } }}
             />
             <Button
               variant="contained"
@@ -435,7 +435,7 @@ function PlayDetailPanel({
     return (
       <Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-          <Typography variant="subtitle2" sx={{ fontSize: '0.85rem' }}>
+          <Typography variant="subtitle2" sx={{ fontSize: '0.75rem' }}>
             {currentPlayer === playState?.dummy
               ? `${playState?.contract?.declarer}家替明手${currentPlayer}家出牌`
               : `${currentPlayer}家出牌`
@@ -490,7 +490,7 @@ function PlayDetailPanel({
                       } : {},
                     }}
                   >
-                    <Typography sx={{ color, fontSize: '0.8rem', fontWeight: 500 }}>
+                    <Typography sx={{ color, fontSize: '0.7rem', fontWeight: 500 }}>
                       {card.suit}{card.rank}
                     </Typography>
                   </MuiCard>

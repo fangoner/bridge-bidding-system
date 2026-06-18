@@ -1,4 +1,4 @@
-import { Box, Typography, Paper, FormControl, InputLabel, Select, MenuItem, Button, Divider, Switch, FormControlLabel, TextField } from '@mui/material'
+import { Box, Typography, Paper, FormControl, InputLabel, Select, MenuItem, Button, Divider, Switch, FormControlLabel, TextField, useTheme } from '@mui/material'
 
 function SettingsPanel({
   showSettings,
@@ -20,9 +20,14 @@ function SettingsPanel({
   setDealSystem,
   dealMode,
   setDealMode,
+  colorSchemeKey,
+  onColorSchemeChange,
+  colorSchemes,
   loading,
   mode,
 }) {
+  const theme = useTheme()
+
   if (!showSettings) return null
 
   return (
@@ -70,7 +75,7 @@ function SettingsPanel({
           </Box>
         </Box>
 
-        <Divider orientation="vertical" flexItem sx={{ borderColor: 'rgba(0, 0, 0, 0.2)' }} />
+        <Divider orientation="vertical" flexItem sx={{ borderColor: theme.palette.divider }} />
 
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
           <Typography variant="h6">
@@ -125,7 +130,7 @@ function SettingsPanel({
           </Box>
         </Box>
 
-        <Divider orientation="vertical" flexItem sx={{ borderColor: 'rgba(0, 0, 0, 0.2)' }} />
+        <Divider orientation="vertical" flexItem sx={{ borderColor: theme.palette.divider }} />
 
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
           <Typography variant="h6">
@@ -141,6 +146,16 @@ function SettingsPanel({
               </Select>
             </FormControl>
 
+            {colorSchemes && onColorSchemeChange && (
+              <FormControl sx={{ minWidth: 130 }} size="small">
+                <InputLabel>牌桌配色</InputLabel>
+                <Select value={colorSchemeKey} label="牌桌配色" onChange={onColorSchemeChange}>
+                  {Object.entries(colorSchemes).map(([key, scheme]) => (
+                    <MenuItem key={key} value={key}>{scheme.name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
           </Box>
         </Box>
       </Box>

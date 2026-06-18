@@ -73,13 +73,16 @@ function CardTable({
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   const isDark = theme.palette.mode === 'dark'
   const iconBtnStyle = {
-    bgcolor: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.5)',
+    bgcolor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.35)',
+    backdropFilter: 'blur(8px)',
     color: 'white',
-    '&:hover': { bgcolor: isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.7)' },
+    border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(255,255,255,0.3)',
+    '&:hover': { bgcolor: isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.55)' },
+    transition: 'all 0.2s ease',
     width: 30, height: 30,
   }
-  const textMuted = isDark ? '#94a3b8' : '#666'
-  const textPrimary = isDark ? '#e2e8f0' : '#333'
+  const textMuted = theme.palette.text.secondary
+  const textPrimary = theme.palette.text.primary
   const handBoxSize = isMobile ? 'calc((100vw - 12px) * 0.42)' : 160
   const biddingTableWidth = isMobile ? 'calc((100vw - 12px) * 0.5)' : 160
   const centerBoxSize = isMobile ? 120 : 220
@@ -104,15 +107,21 @@ function CardTable({
     },
   }
 
+  const schemeBase = colorScheme || defaultScheme;
   const scheme = {
-    ...(colorScheme || defaultScheme),
+    ...schemeBase,
     table: {
-      ...((colorScheme || defaultScheme).table),
+      ...schemeBase.table,
       ...(isDark ? {
-        background: 'linear-gradient(135deg, #1a3a1c 0%, #0d1f0f 100%)',
-        border: '3px solid rgba(255, 255, 255, 0.15)',
-        centerBg: 'rgba(30, 41, 59, 0.95)',
-      } : {}),
+        background: 'radial-gradient(ellipse at center, #1a2a1a 0%, #0d1a10 40%, #060d08 100%)',
+        border: schemeBase.table.border || '3px solid rgba(255, 255, 255, 0.08)',
+        centerBg: 'rgba(255, 255, 255, 0.06)',
+        centerBackdrop: schemeBase.table.centerBackdrop || 'blur(16px) saturate(160%)',
+        centerBorder: schemeBase.table.centerBorder || '1px solid rgba(255, 255, 255, 0.08)',
+      } : {
+        centerBackdrop: schemeBase.table.centerBackdrop || 'blur(16px) saturate(160%)',
+        centerBorder: schemeBase.table.centerBorder || '1px solid rgba(255, 255, 255, 0.15)',
+      }),
     },
   };
 
@@ -400,7 +409,7 @@ function CardTable({
           color: textPrimary,
         }}>
           {positions.map(pos => (
-            <Box key={pos} component="span" sx={{ flex: 1, textAlign: 'center', minWidth: 50, color: pos === dealer ? '#d32f2f' : 'inherit' }}>
+            <Box key={pos} component="span" sx={{ flex: 1, textAlign: 'center', minWidth: 50, color: pos === dealer ? theme.palette.error.main : 'inherit' }}>
               {pos}
             </Box>
           ))}
@@ -521,18 +530,7 @@ function CardTable({
       const card = getCardAtPosition(position)
       
       if (!card) {
-        return (
-          <Box sx={{
-            width: 44,
-            height: 60,
-            border: isDark ? '1px dashed rgba(255,255,255,0.15)' : '1px dashed #ccc',
-            borderRadius: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            bgcolor: isDark ? 'rgba(255,255,255,0.04)' : '#fafafa',
-          }} />
-        )
+        return <Box sx={{ width: 44, height: 60 }} />
       }
       
       const color = getSuitColor(card.suit, isDark)
@@ -547,12 +545,17 @@ function CardTable({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : '#fff',
-            border: isDark ? '1px solid rgba(255,255,255,0.15)' : '1px solid #ddd',
+            bgcolor: isDark ? 'rgba(30, 41, 59, 0.7)' : 'rgba(255,255,255,0.25)',
+            backdropFilter: 'blur(6px)',
+            border: isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(255,255,255,0.25)',
             borderRadius: 1,
             boxShadow: 1,
             cursor: canClick ? 'pointer' : 'default',
-            transition: 'all 0.15s',
+            animation: 'cardIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)',
+            '@keyframes cardIn': {
+              '0%': { opacity: 0, transform: 'scale(0.7) translateY(-6px)' },
+              '100%': { opacity: 1, transform: 'scale(1) translateY(0)' },
+            },
             '&:hover': canClick ? { bgcolor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e3f2fd', transform: 'scale(1.05)' } : {},
           }}
         >
@@ -579,16 +582,15 @@ function CardTable({
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1 }}>
           {renderCard('西')}
           <Box sx={{ width: 60, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-            {(displayTrick?.cards?.length === 4 && getLastTrickWinner()) ? (
+            {aiLoading ? (
+              <CircularProgress size={22} />
+            ) : (displayTrick?.cards?.length === 4 && getLastTrickWinner()) ? (
               <Typography color="primary" sx={{ fontSize: '0.85rem', fontWeight: 'bold' }}>
                 {getLastTrickWinner()}赢
               </Typography>
             ) : !isComplete && current_player ? (
-              <Typography color="text.secondary" sx={{ fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+              <Typography color="text.secondary" sx={{ fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 {current_player}出牌
-                {aiLoading && (
-                  <CircularProgress size={22} sx={{ position: 'absolute', top: '50%', left: '50%', marginTop: '-11px', marginLeft: '-11px', color: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.45)' }} />
-                )}
               </Typography>
             ) : null}
           </Box>
@@ -627,29 +629,35 @@ function CardTable({
             top: 10,
             right: 8,
             zIndex: 100,
-            bgcolor: 'rgba(0, 0, 0, 0.5)',
+            bgcolor: 'rgba(0, 0, 0, 0.45)',
+            backdropFilter: 'blur(6px)',
             borderRadius: '50%',
             p: 0.5,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            border: '1px solid rgba(255,255,255,0.12)',
           }}>
             <CircularProgress size={14} sx={{ color: '#ffeb3b' }} />
           </Box>
         )}
         
         <Box sx={{
-          bgcolor: isDark ? 'rgba(30, 41, 59, 0.95)' : 'rgba(255, 255, 255, 0.98)',
+          bgcolor: isDark ? 'rgba(17, 24, 39, 0.2)' : 'rgba(255, 255, 255, 0.3)',
           borderRadius: 2,
           p: isMobile ? 0.5 : 1,
           width: handBoxSize,
           height: handBoxSize,
           flexShrink: 0,
-          boxShadow: '0 2px 6px rgba(0,0,0,0.12)',
+          boxShadow: isDark
+            ? '0 4px 16px rgba(0,0,0,0.3)'
+            : '0 4px 16px rgba(0,0,0,0.15)',
           display: 'flex',
           flexDirection: 'column',
-          border: isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(255,255,255,0.5)',
-          backdropFilter: 'blur(10px)',
+          border: isDark ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(255,255,255,0.12)',
+          backdropFilter: 'blur(10px) saturate(140%)',
+          WebkitBackdropFilter: 'blur(10px) saturate(140%)',
+          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
         }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
             <Typography 
@@ -657,7 +665,7 @@ function CardTable({
               sx={{ 
                 fontWeight: declarer === position ? 700 : 600, 
                 fontSize: '0.85rem',
-                color: declarer === position ? '#d32f2f' : 'inherit',
+                color: declarer === position ? theme.palette.error.main : 'inherit',
                 cursor: onDealerChange && (!biddingStarted || stopBidding) && !showPlayPanel && !readonlyMode ? 'pointer' : 'default',
                 transition: 'color 0.2s',
                 '&:hover': onDealerChange && (!biddingStarted || stopBidding) && !showPlayPanel && !readonlyMode ? { color: 'primary.main' } : {}
@@ -669,34 +677,36 @@ function CardTable({
               {hasHandData && hand && hand.hcp !== undefined && !showInput && ` (${hand.hcp})`}
             </Typography>
             {onPositionRoleChange && (
-              <ToggleButtonGroup
-                value={positionRoles[position]}
-                exclusive
+              <ToggleButton
+                value="check"
+                selected={positionRoles[position] === 'human'}
                 disabled={
                   (showPlayPanel && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading))
                   || readonlyMode
                   || (!showPlayPanel && biddingStarted && !hasHand(position))
                 }
-                onChange={(e, newRole) => {
-                  if (newRole !== null) {
-                    onPositionRoleChange(position, newRole)
-                  }
+                onChange={() => {
+                  onPositionRoleChange(position, positionRoles[position] === 'human' ? 'ai' : 'human')
                 }}
                 size="small"
-                sx={{ 
-                  height: 24,
-                  '& .MuiToggleButton-root': {
-                    px: 0.8,
-                    py: 0.3,
-                    fontSize: '0.7rem',
-                    fontWeight: 500,
-                    borderRadius: 1,
-                  }
+                sx={{
+                  height: 22,
+                  px: 0.8,
+                  py: 0,
+                  fontSize: '0.7rem',
+                  fontWeight: 600,
+                  borderRadius: 1,
+                  minWidth: 36,
+                  border: 'none',
+                  bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.12)' : 'action.hover',
+                  color: 'text.primary',
+                  '&:hover': {
+                    bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.2)' : 'action.selected',
+                  },
                 }}
               >
-                <ToggleButton value="ai" sx={{ minWidth: 32 }}>AI</ToggleButton>
-                <ToggleButton value="human" sx={{ minWidth: 32 }}>人类</ToggleButton>
-              </ToggleButtonGroup>
+                {positionRoles[position] === 'human' ? '人类' : 'AI'}
+              </ToggleButton>
             )}
           </Box>
           
@@ -716,10 +726,10 @@ function CardTable({
                   fontSize: '0.75rem',
                   zIndex: 1,
                 }}>
-                  <span style={{ color: '#000' }}>♠</span>{' '}
-                  <span style={{ color: '#d32f2f' }}>♥</span>{' '}
-                  <span style={{ color: '#f57c00' }}>♦</span>{' '}
-                  <span style={{ color: '#000' }}>♣</span>
+                  <span style={{ color: theme.suits.spades }}>♠</span>{' '}
+                  <span style={{ color: theme.suits.hearts }}>♥</span>{' '}
+                  <span style={{ color: theme.suits.diamonds }}>♦</span>{' '}
+                  <span style={{ color: theme.suits.clubs }}>♣</span>
                 </Box>
               )}
               <TextField
@@ -757,10 +767,10 @@ function CardTable({
                   fontSize: '0.75rem',
                   zIndex: 1,
                 }}>
-                  <span style={{ color: '#000' }}>♠</span>{' '}
-                  <span style={{ color: '#d32f2f' }}>♥</span>{' '}
-                  <span style={{ color: '#f57c00' }}>♦</span>{' '}
-                  <span style={{ color: '#000' }}>♣</span>
+                  <span style={{ color: theme.suits.spades }}>♠</span>{' '}
+                  <span style={{ color: theme.suits.hearts }}>♥</span>{' '}
+                  <span style={{ color: theme.suits.diamonds }}>♦</span>{' '}
+                  <span style={{ color: theme.suits.clubs }}>♣</span>
                 </Box>
               )}
               <TextField
@@ -802,7 +812,7 @@ function CardTable({
               <HandDisplay
                 hand={displayHand}
                 position={position}
-                isActive={currentBidder === position}
+                isActive={showPlayPanel ? playState?.current_player === position : currentBidder === position}
                 isHuman={isHuman}
                 isDealer={dealer === position}
                 isPartner={hasAnyHuman(positionRoles) && isHumanPosition(positionRoles, getPartnerPosition(position))}
@@ -1003,12 +1013,14 @@ function CardTable({
               minWidth: biddingTableWidth,
               flexShrink: 0,
               minHeight: 80,
-              border: scheme.table.border,
+              border: scheme.table.centerBorder,
               borderRadius: 2,
               display: 'flex',
               justifyContent: 'center',
               alignItems: 'flex-start',
               background: scheme.table.centerBg,
+              backdropFilter: scheme.table.centerBackdrop,
+              WebkitBackdropFilter: scheme.table.centerBackdrop,
               padding: 1,
               overflowY: 'auto',
             }}>
@@ -1034,12 +1046,14 @@ function CardTable({
               <Box className="table-border" sx={{
                 width: centerBoxSize,
                 height: centerBoxSize,
-                border: scheme.table.border,
+                border: scheme.table.centerBorder,
                 borderRadius: 2,
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'flex-start',
                 background: scheme.table.centerBg,
+                backdropFilter: scheme.table.centerBackdrop,
+                WebkitBackdropFilter: scheme.table.centerBackdrop,
                 padding: 1,
                 overflowY: 'auto',
               }}>

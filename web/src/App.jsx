@@ -50,7 +50,7 @@ import useBridgeRecords from './hooks/useBridgeRecords'
 import { isHumanPosition, hasAnyHuman, getHumanPositions, getPartnerPosition } from './utils/position'
 import './App.css'
 
-const COLOR_SCHEME_KEY = 'bridge_color_scheme'
+const COLOR_SCHEME_KEY = 'bridge_color_scheme_v2'
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
 const BIDDING_DRAFT_KEY = 'bridge_bidding_draft'
 
@@ -385,14 +385,14 @@ function App({ darkMode, onToggleDarkMode }) {
   const DD_SAMPLE_COUNT_KEY = 'bridge_dd_sample_count'
   const [ddSampleCount, setDDSampleCount] = useState(() => {
     try {
-      return parseInt(localStorage.getItem(DD_SAMPLE_COUNT_KEY)) || 100
+      return parseInt(localStorage.getItem(DD_SAMPLE_COUNT_KEY)) || 200
     } catch {
-      return 100
+      return 200
     }
   })
 
   const handleDDSampleCountChange = (value) => {
-    const num = parseInt(value) || 100
+    const num = parseInt(value) || 200
     setDDSampleCount(num)
     localStorage.setItem(DD_SAMPLE_COUNT_KEY, num)
   }
@@ -1813,7 +1813,8 @@ function App({ darkMode, onToggleDarkMode }) {
 
     // 始终弹出定约确认对话框，预填识别到的信息以便调整
     if (contract) {
-      const contractStr = `${contract.level}${contract.suit}${contract.isDouble ? 'X' : ''}${contract.isRedouble ? 'XX' : ''}`
+      const suitLetter = { '♠': 'S', '♥': 'H', '♦': 'D', '♣': 'C', 'S': 'S', 'H': 'H', 'D': 'D', 'C': 'C', 'NT': 'NT' }[contract.suit] || contract.suit
+      const contractStr = `${contract.level}${suitLetter}${contract.isDouble ? 'X' : ''}${contract.isRedouble ? 'XX' : ''}`
       setContractDialogForm({
         contractStr,
         declarer: contract.declarer,
@@ -1863,7 +1864,8 @@ function App({ darkMode, onToggleDarkMode }) {
     }
 
     try {
-      const contractStr = `${contract.level}${contract.suit}`
+      const suitLetter = { '♠': 'S', '♥': 'H', '♦': 'D', '♣': 'C', 'S': 'S', 'H': 'H', 'D': 'D', 'C': 'C', 'NT': 'NT' }[contract.suit] || contract.suit
+      const contractStr = `${contract.level}${suitLetter}`
       if (!contract.level || !contract.suit) {
         setError(`定约信息不完整: ${contractStr}，请检查识别结果`)
         setLoading(false)
@@ -2612,7 +2614,7 @@ function App({ darkMode, onToggleDarkMode }) {
   }
 
   return (
-    <Box sx={{ display: 'block', width: '100%', py: { xs: 2, md: 4 }, px: { xs: 1, md: 3 } }}>
+    <Box sx={{ maxWidth: 1400, mx: 'auto', py: { xs: 1.5, md: 2.5 }, px: { xs: 1, md: 3 } }}>
       {/* 草稿恢复提示横幅 */}
       {showDraftBanner && (
         <Alert
@@ -2632,8 +2634,6 @@ function App({ darkMode, onToggleDarkMode }) {
           检测到上次未完成的叫牌，是否需要恢复？
         </Alert>
       )}
-      <Divider sx={{ mb: 2, borderColor: 'rgba(0, 0, 0, 0.3)', borderBottomWidth: 2 }} />
-
       <Header
         onBack={exitMode}
         mode={mode}
@@ -2651,8 +2651,6 @@ function App({ darkMode, onToggleDarkMode }) {
         onToggleDarkMode={onToggleDarkMode}
         aiThinking={aiThinking}
       />
-      <Divider sx={{ my: 3, borderColor: 'rgba(0, 0, 0, 0.3)', borderBottomWidth: 2 }} />
-
       {/* 游戏设置 */}
       <SettingsPanel
         showSettings={showSettings}
@@ -2674,6 +2672,9 @@ function App({ darkMode, onToggleDarkMode }) {
         setDealSystem={setDealSystem}
         dealMode={dealMode}
         setDealMode={setDealMode}
+        colorSchemeKey={colorSchemeKey}
+        onColorSchemeChange={handleColorSchemeChange}
+        colorSchemes={colorSchemes}
         loading={loading}
         mode={mode}
       />

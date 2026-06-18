@@ -9,18 +9,40 @@ import {
   Divider,
   CircularProgress,
   useTheme,
+  alpha,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import { isHumanPosition, hasAnyHuman } from '../utils/position';
 
-const getBidColor = (bid, isDark) => {
+const getBidColor = (bid, theme) => {
   if (!bid) return {};
+  const isDark = theme.palette.mode === 'dark';
   const suit = bid.slice(-1);
-  
+
+  // Dark mode: muted but distinct tones on dark backgrounds
   if (isDark) {
-    return { color: '#e2e8f0', bgColor: '#1e293b', borderColor: '#475569' };
+    if (suit === 'H' || suit === 'D') {
+      return { color: '#fca5a5', bgColor: 'rgba(239,68,68,0.15)', borderColor: 'rgba(239,68,68,0.25)' };
+    }
+    if (suit === 'S' || suit === 'C') {
+      return { color: '#cbd5e1', bgColor: 'rgba(148,163,184,0.12)', borderColor: 'rgba(148,163,184,0.2)' };
+    }
+    if (suit === 'T') {
+      return { color: '#c4b5fd', bgColor: 'rgba(139,92,246,0.15)', borderColor: 'rgba(139,92,246,0.25)' };
+    }
+    if (bid === 'X') {
+      return { color: '#fca5a5', bgColor: 'rgba(239,68,68,0.15)', borderColor: 'rgba(239,68,68,0.3)' };
+    }
+    if (bid === 'XX') {
+      return { color: '#f87171', bgColor: 'rgba(239,68,68,0.2)', borderColor: 'rgba(239,68,68,0.35)' };
+    }
+    if (bid === 'pass') {
+      return { color: '#6ee7b7', bgColor: 'rgba(16,185,129,0.12)', borderColor: 'rgba(16,185,129,0.2)' };
+    }
+    return { color: '#94a3b8', bgColor: 'rgba(148,163,184,0.1)', borderColor: 'rgba(148,163,184,0.15)' };
   }
 
+  // Light mode
   if (suit === 'H' || suit === 'D') {
     return { color: '#dc2626', bgColor: '#fef2f2', borderColor: '#fca5a5' };
   }
@@ -167,7 +189,8 @@ function BiddingControls({
         border: '1px solid',
         borderColor: 'divider',
         borderRadius: 3,
-        background: isDark ? 'linear-gradient(180deg, #1e293b 0%, #1a1f2e 100%)' : 'linear-gradient(180deg, #ffffff 0%, #fafafa 100%)',
+        background: isDark ? 'rgba(17,24,39,0.65)' : 'rgba(255,255,255,0.65)',
+        backdropFilter: 'blur(16px) saturate(160%)',
         boxSizing: 'border-box'
       }}>
         {!checkBiddingComplete() ? (
@@ -208,7 +231,7 @@ function BiddingControls({
             }}>
               {isVerticalLayout ? (
                 allBidsCompact.flat().map((bid, index) => {
-                  const bidColor = getBidColor(bid, isDark);
+                  const bidColor = getBidColor(bid, theme);
                   return bid === null ? (
                     <Box key={index} />
                   ) : (
@@ -227,7 +250,7 @@ function BiddingControls({
                   {bidLevels.map((level, levelIndex) => (
                     <Box key={levelIndex} sx={{ display: 'flex', gap: 0.8 }}>
                       {level.map((bid) => {
-                        const bidColor = getBidColor(bid, isDark);
+                        const bidColor = getBidColor(bid, theme);
                         return (
                           <BidButton
                             key={bid}
@@ -243,7 +266,7 @@ function BiddingControls({
                   ))}
                   <Box sx={{ display: 'flex', gap: 0.8, mt: 1.5 }}>
                     {specialBids.map((bid) => {
-                      const bidColor = getBidColor(bid, isDark);
+                      const bidColor = getBidColor(bid, theme);
                       return (
                         <BidButton
                           key={bid}
@@ -294,29 +317,29 @@ function BiddingControls({
               叫牌结束
             </Typography>
             {finalContract ? (
-              <Box sx={{ 
-                mt: 2, 
-                p: 2, 
-                borderRadius: 2, 
-                background: isDark ? 'linear-gradient(135deg, #064e3b 0%, #065f46 100%)' : 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)',
-                border: isDark ? '1px solid #059669' : '1px solid #6ee7b7',
+              <Box sx={{
+                mt: 2,
+                p: 2,
+                borderRadius: 2,
+                background: alpha(theme.palette.success.main, isDark ? 0.12 : 0.08),
+                border: `1px solid ${alpha(theme.palette.success.main, isDark ? 0.3 : 0.25)}`,
               }}>
-                <Typography variant="h6" sx={{ color: isDark ? '#6ee7b7' : '#059669', fontWeight: 600, mb: 1 }}>
+                <Typography variant="h6" sx={{ color: theme.palette.success.main, fontWeight: 600, mb: 1 }}>
                   最终定约: {finalContract.level}{finalContract.suit}{finalContract.isRedouble ? 'XX' : finalContract.isDouble ? 'X' : ''}
                 </Typography>
-                <Typography variant="body2" sx={{ color: isDark ? '#a7f3d0' : '#047857' }}>
+                <Typography variant="body2" sx={{ color: isDark ? theme.palette.success.light : theme.palette.success.dark }}>
                   定约方: {finalContract.partnership} | 庄家: {finalContract.declarer}家
                 </Typography>
               </Box>
             ) : (
-              <Box sx={{ 
-                mt: 2, 
-                p: 2, 
-                borderRadius: 2, 
-                background: isDark ? 'linear-gradient(135deg, #0c4a6e 0%, #075985 100%)' : 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
-                border: isDark ? '1px solid #0284c7' : '1px solid #7dd3fc',
+              <Box sx={{
+                mt: 2,
+                p: 2,
+                borderRadius: 2,
+                background: alpha(theme.palette.info.main, isDark ? 0.12 : 0.08),
+                border: `1px solid ${alpha(theme.palette.info.main, isDark ? 0.3 : 0.25)}`,
               }}>
-                <Typography variant="body1" sx={{ color: isDark ? '#7dd3fc' : '#0369a1' }}>
+                <Typography variant="body1" sx={{ color: isDark ? theme.palette.info.light : theme.palette.info.dark }}>
                   叫牌结束，无最终定约（全部pass）
                 </Typography>
               </Box>
@@ -339,7 +362,8 @@ function BiddingControls({
           border: '1px solid',
           borderColor: 'divider',
           borderRadius: 3,
-          background: isDark ? 'linear-gradient(180deg, #1e293b 0%, #1a1f2e 100%)' : 'linear-gradient(180deg, #ffffff 0%, #fafafa 100%)',
+          background: isDark ? 'rgba(17,24,39,0.65)' : 'rgba(255,255,255,0.65)',
+        backdropFilter: 'blur(16px) saturate(160%)',
         }}>
           <Typography variant="h6" gutterBottom sx={{ flexShrink: 0, fontWeight: 600 }}>
             JF约定片段
@@ -352,17 +376,18 @@ function BiddingControls({
               </Box>
             ) : bidSuggestion ? (
               <Box>
-                <Typography variant="subtitle2" gutterBottom sx={{ color: isDark ? '#94a3b8' : '#64748b', fontWeight: 500 }}>
-                  检索关键字: <strong style={{ color: isDark ? '#818cf8' : '#6366f1' }}>{bidSuggestion.keyword}</strong>
+                <Typography variant="subtitle2" gutterBottom sx={{ color: theme.palette.text.secondary, fontWeight: 500 }}>
+                  检索关键字: <strong style={{ color: theme.palette.primary.main }}>{bidSuggestion.keyword}</strong>
                 </Typography>
                 {bidSuggestion.content ? (
-                  <Box sx={{ 
-                    mt: 1, 
-                    p: 1.5, 
-                    background: isDark ? 'linear-gradient(135deg, #1a1f2e 0%, #1e293b 100%)' : 'linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%)', 
-                    borderRadius: 2, 
-                    border: isDark ? '1px solid #334155' : '1px solid #e2e8f0', 
-                    overflow: 'auto', 
+                  <Box sx={{
+                    mt: 1,
+                    p: 1.5,
+                    background: alpha(theme.palette.background.default, 0.5),
+                    backdropFilter: 'blur(8px)',
+                    borderRadius: 2,
+                    border: `1px solid ${theme.palette.divider}`,
+                    overflow: 'auto',
                     maxWidth: '100%' 
                   }}>
                     <Typography variant="body2" component="pre" sx={{

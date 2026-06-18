@@ -1,9 +1,8 @@
 import React from 'react'
-import { Box, useTheme } from '@mui/material'
+import { Box, useTheme, alpha } from '@mui/material'
 
 function DoubleDummyTable({ tableData }) {
   const theme = useTheme()
-  const isDark = theme.palette.mode === 'dark'
 
   if (!tableData) return null
 
@@ -26,17 +25,18 @@ function DoubleDummyTable({ tableData }) {
   return (
     <Box className="bidding-table" sx={{
       width: '100%',
-      fontFamily: '"Courier New", monospace',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", Roboto, sans-serif',
+      fontWeight: 600,
       fontSize: { xs: '0.75rem', md: '0.9rem' },
     }}>
       <Box className="bidding-header" sx={{
         display: 'flex',
         justifyContent: 'space-around',
-        borderBottom: isDark ? '1px solid rgba(255,255,255,0.2)' : '1px solid #333',
+        borderBottom: `2px solid ${theme.palette.text.primary}`,
         paddingBottom: { xs: 0.5, md: 1 },
         marginBottom: { xs: 0.5, md: 1 },
         fontWeight: 'bold',
-        color: isDark ? '#e2e8f0' : '#333',
+        color: theme.palette.text.primary,
       }}>
         {positions.map(pos => (
           <Box
@@ -46,7 +46,6 @@ function DoubleDummyTable({ tableData }) {
               flex: 1,
               textAlign: 'center',
               minWidth: { xs: 35, md: 50 },
-              color: isDark ? '#e2e8f0' : '#333',
             }}
           >
             {pos}
@@ -62,7 +61,7 @@ function DoubleDummyTable({ tableData }) {
             display: 'flex',
             justifyContent: 'space-around',
             padding: '4px 0',
-            borderBottom: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd',
+            borderBottom: `1px solid ${theme.palette.divider}`,
             '&:last-child': {
               borderBottom: 'none',
             },
@@ -78,8 +77,8 @@ function DoubleDummyTable({ tableData }) {
                 textAlign: 'center',
                 minWidth: 50,
                 fontWeight: 500,
-                color: isDark ? '#e2e8f0' : '#333',
-                backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e3f2fd',
+                color: theme.palette.text.primary,
+                backgroundColor: alpha(theme.palette.primary.main, 0.08),
                 borderRadius: 1,
               }}
             >

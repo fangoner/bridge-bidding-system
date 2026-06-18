@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import { getFallbackModel, setFallbackModel } from '../services/api'
 import { getPartnerPosition } from '../utils/position'
 
-const COLOR_SCHEME_KEY = 'bridge_color_scheme'
+const COLOR_SCHEME_KEY = 'bridge_color_scheme_v2'
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
 const PLAY_MODEL_KEY = 'bridge_play_model'
 const BIDDING_REASONING_KEY = 'bridge_bidding_reasoning'

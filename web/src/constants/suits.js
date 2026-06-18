@@ -12,15 +12,15 @@ export const SUIT_SYMBOLS = {
 const LIGHT_SUIT_COLORS = {
   '♠': '#1e293b',
   '♥': '#dc2626',
-  '♦': '#ea580c',
+  '♦': '#dc2626',
   '♣': '#1e293b',
 }
 
-// 暗色模式（在深色背景上需要更亮才能看清）
+// 暗色模式
 const DARK_SUIT_COLORS = {
   '♠': '#cbd5e1',
   '♥': '#f87171',
-  '♦': '#fb923c',
+  '♦': '#f87171',
   '♣': '#cbd5e1',
 }
 

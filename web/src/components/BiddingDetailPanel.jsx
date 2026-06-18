@@ -67,86 +67,6 @@ function BiddingDetailPanel({
     }))
   }, [aiBiddingHistory])
 
-  const renderButtons = () => (
-    <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', mb: 0.5, flexShrink: 0, flexWrap: 'wrap' }}>
-      <Box sx={{ minWidth: isMobile ? 200 : 120 }}>
-        <FormControl size="small" sx={{ minWidth: isMobile ? 200 : 120, '& .MuiInputBase-input': { fontSize: '0.875rem' }, '& .MuiInputLabel-root': { fontSize: '0.875rem' } }} disabled={simpleDisplayMode || aiBiddingHistory.length === 0}>
-          <InputLabel>{isMobile ? '选择叫牌记录' : '记录'}</InputLabel>
-          <Select
-            value={selectedBiddingIndex}
-            label={isMobile ? '选择叫牌记录' : '记录'}
-            onChange={(e) => setSelectedBiddingIndex(e.target.value)}
-            sx={{ fontSize: '0.875rem' }}
-          >
-            <MenuItem value={-1}>最新 ({aiBiddingHistory[aiBiddingHistory.length - 1]?.position}家 {aiBiddingHistory[aiBiddingHistory.length - 1]?.result.bid})</MenuItem>
-            {historySelectOptions.map((opt) => (
-              <MenuItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Box>
-      <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', ml: 'auto', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-        <Button
-            variant="outlined"
-            size="small"
-            onClick={!biddingStarted ? onStartBidding : onResetBidding}
-            disabled={!hands || aiThinking || readonlyMode}
-            sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-          >
-            {!biddingStarted ? '开始' : '重新叫牌'}
-          </Button>
-        {biddingStarted && !isBiddingCompleteFn() && (
-          <Button
-            variant={stopBidding ? "contained" : "outlined"}
-            color={stopBidding ? "success" : "warning"}
-            size="small"
-            onClick={onToggleStopBidding}
-            disabled={(stopBidding && aiThinking) || readonlyMode}
-            sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-          >
-            {stopBidding ? '继续' : '暂停'}
-          </Button>
-        )}
-        {showUndo && (
-          <Button
-            variant="outlined"
-            color="secondary"
-            size="small"
-            onClick={onUndo}
-            disabled={!canUndo || readonlyMode}
-            sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-          >
-            撤销
-          </Button>
-        )}
-        <Button
-          variant="outlined"
-          color="info"
-          size="small"
-          onClick={onSave}
-          disabled={!canSave || readonlyMode}
-          sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-        >
-          保存
-        </Button>
-        {gameMode !== 'pair' && onStartPlay && (
-          <Button
-            variant="contained"
-            color="primary"
-            size="small"
-            onClick={onStartPlay}
-            disabled={playLoading}
-            sx={{ fontSize: '0.75rem', textTransform: 'none' }}
-          >
-            {playLoading ? <CircularProgress size={16} /> : '切换到打牌'}
-          </Button>
-        )}
-      </Box>
-    </Box>
-  )
-
   const renderBiddingDetails = () => {
     if (aiBiddingHistory.length === 0) {
       return (
@@ -211,7 +131,7 @@ function BiddingDetailPanel({
             <strong>手牌分析:</strong>
             <Box component="pre" sx={{ 
               mt: 0.5, p: 1, background: bgCode, borderRadius: 1,
-              fontSize: '0.85rem', lineHeight: 1.4,
+              fontSize: '0.75rem', lineHeight: 1.4,
               whiteSpace: 'pre-wrap', wordBreak: 'break-word',
               border: borderCode, maxHeight: '150px', overflow: 'auto'
             }}>
@@ -224,7 +144,7 @@ function BiddingDetailPanel({
             <strong>叫牌历史:</strong>
             <Box component="pre" sx={{ 
               mt: 0.5, p: 1, background: bgCode, borderRadius: 1,
-              fontSize: '0.85rem', lineHeight: 1.4,
+              fontSize: '0.75rem', lineHeight: 1.4,
               whiteSpace: 'pre-wrap', wordBreak: 'break-word',
               border: borderCode, maxHeight: '150px', overflow: 'auto'
             }}>
@@ -262,7 +182,7 @@ function BiddingDetailPanel({
             <strong>扣叫控制:</strong>
             <Box component="pre" sx={{ 
               mt: 0.5, p: 1, background: bgCode, borderRadius: 1,
-              fontSize: '0.85rem', lineHeight: 1.4,
+              fontSize: '0.75rem', lineHeight: 1.4,
               whiteSpace: 'pre-wrap', wordBreak: 'break-word',
               border: borderCode, maxHeight: '150px', overflow: 'auto'
             }}>
@@ -280,7 +200,7 @@ function BiddingDetailPanel({
             <strong>主提示词输出:</strong>
             <Box component="pre" sx={{ 
               mt: 0.5, p: 1, background: bgWarn, borderRadius: 1,
-              fontSize: '0.85rem', lineHeight: 1.4,
+              fontSize: '0.75rem', lineHeight: 1.4,
               whiteSpace: 'pre-wrap', wordBreak: 'break-word',
               border: isDark ? '1px solid rgba(255, 204, 128, 0.3)' : '1px solid #ffcc80'
             }}>
@@ -303,7 +223,7 @@ function BiddingDetailPanel({
             <strong>叫品筛选过程:</strong>
             <Box component="pre" sx={{ 
               mt: 1, p: 1, background: bgCode, borderRadius: 1,
-              fontSize: '0.85rem', lineHeight: 1.4,
+              fontSize: '0.75rem', lineHeight: 1.4,
               whiteSpace: 'pre-wrap', wordBreak: 'break-word',
               border: borderCode, maxHeight: '200px', overflow: 'auto'
             }}>
@@ -410,9 +330,9 @@ function BiddingDetailPanel({
       overflow: isMobile ? undefined : 'hidden',
       boxSizing: 'border-box'
     }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5, flexShrink: 0, minHeight: 40, flexWrap: isMobile ? 'wrap' : 'nowrap', gap: isMobile ? 0.5 : 0 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5, flexShrink: 0, minHeight: 40, flexWrap: 'wrap', gap: 0.5 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant={isMobile ? "h6" : "subtitle1"} sx={{ fontWeight: 600, fontSize: isMobile ? undefined : '1rem', color: isDark ? '#e2e8f0' : undefined }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600, fontSize: '1rem' }}>
             叫牌细节
           </Typography>
           <ToggleButtonGroup
@@ -435,17 +355,56 @@ function BiddingDetailPanel({
             </ToggleButton>
           </ToggleButtonGroup>
         </Box>
-        <FormControlLabel
-          control={<Checkbox checked={simpleDisplayMode} onChange={(e) => setSimpleDisplayMode(e.target.checked)} size="small" />}
-          label="简单"
-          sx={{ ml: 'auto', '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, height: 24 }}
-        />
+        <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
+          <FormControlLabel
+            control={<Checkbox checked={simpleDisplayMode} onChange={(e) => setSimpleDisplayMode(e.target.checked)} size="small" />}
+            label="简单"
+            sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, height: 24 }}
+          />
+          <Select
+            size="small"
+            value={selectedBiddingIndex}
+            onChange={(e) => setSelectedBiddingIndex(e.target.value)}
+            disabled={simpleDisplayMode || aiBiddingHistory.length === 0}
+            sx={{ fontSize: '0.75rem', height: 24, minWidth: 80, '& .MuiSelect-select': { py: 0 } }}
+          >
+              <MenuItem value={-1}>最新</MenuItem>
+              {historySelectOptions.map((opt) => (
+                <MenuItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </MenuItem>
+              ))}
+            </Select>
+        </Box>
+        <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+          <Button variant="outlined" size="small" onClick={!biddingStarted ? onStartBidding : onResetBidding} disabled={!hands || aiThinking || readonlyMode} sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, px: 0.5, py: 0, minWidth: 36 }}>
+            {!biddingStarted ? '开始' : '重新叫牌'}
+          </Button>
+          {biddingStarted && !isBiddingCompleteFn() && (
+            <Button variant={stopBidding ? "contained" : "outlined"} color={stopBidding ? "success" : "warning"} size="small" onClick={onToggleStopBidding} disabled={(stopBidding && aiThinking) || readonlyMode} sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, px: 0.5, py: 0, minWidth: 36 }}>
+              {stopBidding ? '继续' : '暂停'}
+            </Button>
+          )}
+          {showUndo && (
+            <Button variant="outlined" color="secondary" size="small" onClick={onUndo} disabled={!canUndo || readonlyMode} sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, px: 0.5, py: 0, minWidth: 36 }}>
+              撤销
+            </Button>
+          )}
+          <Button variant="outlined" color="info" size="small" onClick={onSave} disabled={!canSave || readonlyMode} sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, px: 0.5, py: 0, minWidth: 36 }}>
+            保存
+          </Button>
+          {gameMode !== 'pair' && onStartPlay && (
+            <Button variant="contained" color="primary" size="small" onClick={onStartPlay} disabled={playLoading} sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, px: 0.5, py: 0, minWidth: 36 }}>
+              {playLoading ? <CircularProgress size={16} /> : '切换到打牌'}
+            </Button>
+          )}
+        </Box>
       </Box>
 
       {effectiveShowControls ? (
         /* 叫牌控制 + JF片段 */
         <Box sx={{ flex: 1, overflow: 'hidden', p: 1, background: bgPanel, borderRadius: 2, border: borderLine, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {renderButtons()}
+          {renderRecordSelector()}
           <Box sx={{ flex: '0 0 auto' }}>
             <BiddingControls
               hands={hands}
@@ -471,7 +430,6 @@ function BiddingDetailPanel({
       ) : (
         /* 叫牌细节 */
         <Box sx={{ flex: 1, overflow: 'hidden', p: 1, background: bgPanel, borderRadius: 2, border: borderLine, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          {renderButtons()}
           <Box sx={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
             {renderBiddingDetails()}
             {renderOutputFormats()}
