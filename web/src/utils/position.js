@@ -1,3 +1,6 @@
+/** 桥牌四家位置（南-西-北-东，顺时针叫牌顺序） */
+export const BRIDGE_POSITIONS = ['南', '西', '北', '东']
+
 export const isHumanPosition = (roles, pos) => roles?.[pos] === 'human'
 
 export const hasAnyHuman = (roles) => Object.values(roles || {}).some(r => r === 'human')

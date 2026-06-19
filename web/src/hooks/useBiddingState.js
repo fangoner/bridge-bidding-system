@@ -8,7 +8,6 @@ function useBiddingState() {
   const [currentBiddingPosition, setCurrentBiddingPosition] = useState(null)
   const [selectedBiddingIndex, setSelectedBiddingIndex] = useState(-1)
   const [simpleDisplayMode, setSimpleDisplayMode] = useState(false)
-  const [showBiddingControls, setShowBiddingControls] = useState(false)
   const [biddingStarted, setBiddingStarted] = useState(false)
   const [stopBidding, setStopBidding] = useState(false)
   const [passedAIPositions, setPassedAIPositions] = useState(new Set())
@@ -82,8 +81,6 @@ function useBiddingState() {
     setSelectedBiddingIndex,
     simpleDisplayMode,
     setSimpleDisplayMode,
-    showBiddingControls,
-    setShowBiddingControls,
     biddingStarted,
     setBiddingStarted,
     stopBidding,

@@ -24,6 +24,18 @@ _DEBUG_LOG = os.path.join(BASE_DIR, "dd_debug.log")
 RANK_ORDER = {"A": 14, "K": 13, "Q": 12, "J": 11, "T": 10,
               "9": 9, "8": 8, "7": 7, "6": 6, "5": 5, "4": 4, "3": 3, "2": 2}
 
+
+def _has_duplicates(hands: Dict[str, List[Card]]) -> bool:
+    """检测采样手牌中是否存在同一张牌出现在多个位置的情况。"""
+    seen = set()
+    for pos, cards in hands.items():
+        for c in cards:
+            key = (c.suit, c.rank)
+            if key in seen:
+                return True
+            seen.add(key)
+    return False
+
 try:
     from endplay import Deal
     from endplay.dds import solve_board
@@ -132,10 +144,20 @@ class DDSearch:
             samples_done += 1
 
             try:
-                # 1. 安全网：从所有采样手牌中清除已出牌（正常情况下不应出现）
-                for _, card in all_played:
-                    for p in sampled:
-                        sampled[p] = [c for c in sampled[p] if not (c.suit == card.suit and c.rank == card.rank)]
+                # 1. 安全网：只从打出牌的位置移除已出牌（不跨位置移除，避免重复牌污染其他手牌）
+                for pos, card in all_played:
+                    if pos in sampled:
+                        sampled[pos] = [c for c in sampled[pos] if not (c.suit == card.suit and c.rank == card.rank)]
+
+                # 1.5 验证：检测采样手牌中是否有重复牌，有则跳过
+                if _has_duplicates(sampled):
+                    if samples_done <= 3:
+                        with open(_DEBUG_LOG, "a", encoding="utf-8") as f:
+                            f.write(f"\n--- sample {samples_done} SKIPPED (duplicates in sampled hands) ---\n")
+                            for p in ["北", "东", "南", "西"]:
+                                cs = sampled.get(p, [])
+                                f.write(f"  sampled[{p}]({len(cs)}): {sorted(str(c) for c in cs)}\n")
+                    continue
 
                 # 2. 只加回当前墩的牌（已完成墩的牌不保留），使每个位置均为 13-已完成墩出牌 张
                 for pos, card in trick_cards:
@@ -408,11 +430,14 @@ class DDSearch:
                 valid_count += 1
 
                 try:
-                    # 安全网清除已出牌
-                    for _, card in all_played:
-                        for p in hands:
-                            hands[p] = [c for c in hands[p]
-                                        if not (c.suit == card.suit and c.rank == card.rank)]
+                    # 安全网清除已出牌（只从打出位置移除）
+                    for pos, card in all_played:
+                        if pos in hands:
+                            hands[pos] = [c for c in hands[pos]
+                                          if not (c.suit == card.suit and c.rank == card.rank)]
+                    # 验证无重复牌
+                    if _has_duplicates(hands):
+                        continue
                     # 加回当前墩牌
                     for pos, card in trick_cards:
                         hands[pos].append(card)

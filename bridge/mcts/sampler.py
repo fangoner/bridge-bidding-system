@@ -91,6 +91,20 @@ class DealSampler:
         for _, card in state.current_trick.cards:
             known_cards.add(card)
 
+        # 1.5 检测 state.hands 中是否有跨位置重复牌（数据完整性检查）
+        all_hand_cards = {}
+        for pos in POSITION_ORDER:
+            for c in state.hands.get(pos, []):
+                key = (c.suit, c.rank)
+                if key in all_hand_cards:
+                    other = all_hand_cards[key]
+                    import os as _os
+                    log_path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), "dd_debug.log")
+                    with open(log_path, "a", encoding="utf-8") as f:
+                        f.write(f"\n[WARN] DUPLICATE in state.hands: {c} in both {other} and {pos}\n")
+                else:
+                    all_hand_cards[key] = pos
+
         # 2. 计算每个位置剩余张数
         remaining_counts = {}
         for pos in POSITION_ORDER:
@@ -101,19 +115,50 @@ class DealSampler:
         unknown_pool = [c for c in ALL_CARDS if c not in known_cards]
         random.shuffle(unknown_pool)
 
-        # 4. 已知位置的牌保留原样
+        # 4. 已知位置的牌保留原样；手牌为空的位置不保留，留给后续填充
         result = {}
         if is_declarer_side and dummy:
-            # 庄家方：庄家和明手的手牌照原样
-            result[declarer] = [Card(suit=c.suit, rank=c.rank) for c in state.hands.get(declarer, [])]
-            result[dummy] = [Card(suit=c.suit, rank=c.rank) for c in state.hands.get(dummy, [])]
+            for pos in (declarer, dummy):
+                hand = state.hands.get(pos, [])
+                if hand:
+                    result[pos] = [Card(suit=c.suit, rank=c.rank) for c in hand]
         else:
-            # 防守方：只知道自己的牌
-            result[perspective] = [Card(suit=c.suit, rank=c.rank) for c in own_hand]
+            if own_hand:
+                result[perspective] = [Card(suit=c.suit, rank=c.rank) for c in own_hand]
             if dummy and state.phase != PlayPhase.LEAD:
-                result[dummy] = [Card(suit=c.suit, rank=c.rank) for c in state.hands.get(dummy, [])]
+                hand = state.hands.get(dummy, [])
+                if hand:
+                    result[dummy] = [Card(suit=c.suit, rank=c.rank) for c in hand]
 
-        # 5. 分配未知牌到未知位置
+        # 4.5 修正：确保已知手牌的张数与 remaining_counts 一致（防止 state.hands 计数不准）
+        for pos in list(result.keys()):
+            expected = remaining_counts.get(pos, 0)
+            actual = len(result[pos])
+            if actual > expected:
+                # 牌太多：随机移除多余牌，放回未知牌池
+                excess = actual - expected
+                to_remove = random.sample(result[pos], excess)
+                result[pos] = [c for c in result[pos] if c not in set(to_remove)]
+            elif actual < expected:
+                # 牌太少：该位置退出 result，由分布逻辑用正确数量重新分配
+                del result[pos]
+
+        # 4.6 重建未知牌池（基于已分配牌 + 已出牌，保证一致性）
+        assigned = set()
+        for pos, cards in result.items():
+            for c in cards:
+                assigned.add((c.suit, c.rank))
+        played_set = set()
+        for trick in state.tricks:
+            for _, c in trick.cards:
+                played_set.add((c.suit, c.rank))
+        for _, c in state.current_trick.cards:
+            played_set.add((c.suit, c.rank))
+        unknown_pool = [c for c in ALL_CARDS
+                        if (c.suit, c.rank) not in assigned
+                        and (c.suit, c.rank) not in played_set]
+
+        # 5. 分配未知牌到未知位置（含手牌为空的位置）
         if self.constraints:
             self._distribute_biased(result, unknown_pool, remaining_counts)
         else:

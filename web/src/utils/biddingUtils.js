@@ -102,8 +102,10 @@ export function isBiddingComplete(sequenceStr) {
  * @param {string} dealer - 发牌人 (南/西/北/东)
  * @returns {string} - 下一个叫牌位置
  */
+import { BRIDGE_POSITIONS } from './position'
+
 export function getNextBidder(sequenceStr, dealer) {
-  const positions = ['南', '西', '北', '东']
+  const positions = BRIDGE_POSITIONS
   const bids = parseBiddingSequence(sequenceStr)
   
   if (bids.length === 0) {

@@ -1,4 +1,6 @@
-import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, Button, useTheme } from '@mui/material'
+import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, Button, IconButton, Tooltip, useTheme } from '@mui/material'
+import VisibilityIcon from '@mui/icons-material/Visibility'
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import CardTable from './CardTable'
 import BiddingTable from './BiddingTable'
 import { hasAnyHuman, getHumanPositions } from '../utils/position'
@@ -65,9 +67,22 @@ function CardTablePanel({
   studyMode,
   setStudyMode,
   imageOpeningLead,
+  // 叫牌/打牌控件相关
+  addBid,
+  isBiddingCompleteFn,
+  onHandCardClick,
+  onManualPlay,
+  cardHints,
+  showDDHints,
+  onToggleDDHints,
 }) {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
+  // 检测是否四家手牌齐全（模拟实战牌不全时隐藏小房子/DD相关功能）
+  const allHandsComplete = ['南','北','东','西'].every(p => {
+    const h = hands?.[p]
+    return h && (h.spades || h.hearts || h.diamonds || h.clubs)
+  })
   return (
     <Paper elevation={3} sx={{ 
       p: 1, 
@@ -111,9 +126,11 @@ function CardTablePanel({
               <ToggleButton value="table" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 50 }}>
                 叫牌过程
               </ToggleButton>
-              <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 50 }}>
-                小房子
-              </ToggleButton>
+              {allHandsComplete && (
+                <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 50 }}>
+                  小房子
+                </ToggleButton>
+              )}
             </ToggleButtonGroup>
           )}
           {showPlayPanel && (
@@ -135,12 +152,21 @@ function CardTablePanel({
               <ToggleButton value="bidding" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 40 }}>
                 叫牌过程
               </ToggleButton>
-              <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 40 }}>
-                小房子
-              </ToggleButton>
+              {allHandsComplete && (
+                <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 40 }}>
+                  小房子
+                </ToggleButton>
+              )}
             </ToggleButtonGroup>
           )}
-          
+          {showPlayPanel && onToggleDDHints && ['南','北','东','西'].every(p => playState?.hands?.[p]?.length > 0) && (
+            <Tooltip title={showDDHints ? '隐藏DD提示' : '显示DD提示'} arrow>
+              <IconButton size="small" onClick={onToggleDDHints} sx={{ p: 0.3 }}>
+                {showDDHints ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+          )}
+
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {!showPlayPanel && hasAnyHuman(positionRoles) && getHumanPositions(positionRoles).length < 3 && (
@@ -308,6 +334,12 @@ function CardTablePanel({
           readonlyMode={readonlyMode}
           mode={mode}
           imageOpeningLead={imageOpeningLead}
+          addBid={addBid}
+          isBiddingCompleteFn={isBiddingCompleteFn}
+          onHandCardClick={onHandCardClick}
+          onManualPlay={onManualPlay}
+          biddingSequence={biddingSequence}
+          cardHints={cardHints}
         />
       </Box>
     </Paper>

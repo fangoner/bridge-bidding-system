@@ -1,20 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { Box, Typography, Paper, Chip, Divider, CircularProgress, Button, Card as MuiCard, ToggleButtonGroup, ToggleButton, TextField, useTheme, IconButton, Tooltip } from '@mui/material'
-import VisibilityIcon from '@mui/icons-material/Visibility'
-import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
+import { Box, Typography, Paper, Divider, Button, ToggleButtonGroup, ToggleButton, useTheme } from '@mui/material'
 import { getSuitColor } from '../constants/suits'
 import { PANEL_LAYOUT } from '../styles/constants'
-import { getDDHints } from '../services/api'
 
 function PlayDetailPanel({
   isMobile,
   playState,
   aiPlayHistory,
-  selectedCard,
-  onCardSelect,
-  onConfirmPlay,
-  onManualPlay,
-  loading,
   aiLoading,
   isPaused,
   onResume,
@@ -35,33 +27,16 @@ function PlayDetailPanel({
 }) {
   const [selectedRecord, setSelectedRecord] = useState(null)
   const [viewMode, setViewMode] = useState('output')
-  const [manualCardInput, setManualCardInput] = useState('')
-  const [showDDHints, setShowDDHints] = useState(() => {
-    try {
-      const saved = localStorage.getItem('bridge_showDDHints')
-      return saved !== null ? saved === 'true' : true // 默认开启
-    } catch { return true }
-  })
-
-  // 持久化 showDDHints 偏好
-  const toggleDDHints = () => {
-    setShowDDHints(prev => {
-      const next = !prev
-      try { localStorage.setItem('bridge_showDDHints', String(next)) } catch {}
-      return next
-    })
-  }
-  const [ddHints, setDDHints] = useState(null)
-  const [ddHintsLoading, setDDHintsLoading] = useState(false)
   const prevIsPausedRef = useRef(isPaused)
-  
+
+  // 恢复继续时清除选中记录
   useEffect(() => {
     if (prevIsPausedRef.current && !isPaused) {
       setTimeout(() => setSelectedRecord(null), 0)
     }
     prevIsPausedRef.current = isPaused
   }, [isPaused])
-  
+
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
   const bgWhite = isDark ? 'rgba(30, 41, 59, 0.7)' : 'white'
@@ -85,41 +60,7 @@ function PlayDetailPanel({
     return positionRoles[cp] === 'human'
   })()
   const isComplete = playState?.phase === 'complete'
-
-  // 轮到人类出牌时自动获取DD提示
-  useEffect(() => {
-    if (showDDHints && isHumanTurn && playState) {
-      setDDHintsLoading(true)
-      getDDHints()
-        .then(data => {
-          if (data.success) {
-            setDDHints(data.hints)
-          } else {
-            setDDHints(null)
-          }
-        })
-        .catch(() => setDDHints(null))
-        .finally(() => setDDHintsLoading(false))
-    } else {
-      setDDHints(null)  // 关闭提示或非人类回合时清除
-    }
-  }, [isHumanTurn, showDDHints, playState?.current_trick?.cards?.length])
-
   const isStartOfTrick = (playState?.current_trick?.cards?.length || 0) === 0
-  const currentHand = playState?.hands?.[currentPlayer] || []
-  
-  const getPlayableCards = () => {
-    if (!currentHand || currentHand.length === 0) return []
-    const currentTrick = playState?.current_trick
-    if (!currentTrick?.cards || currentTrick.cards.length === 0) {
-      return currentHand
-    }
-    const leadSuit = currentTrick.cards[0][1].suit
-    const sameSuit = currentHand.filter(c => c.suit === leadSuit)
-    return sameSuit.length > 0 ? sameSuit : currentHand
-  }
-  
-  const playableCards = getPlayableCards()
 
   // 估算token数（中文字符≈1 token，其他≈4字符/token）
   const estimateTokens = (text) => {
@@ -359,164 +300,6 @@ function PlayDetailPanel({
     return renderAIOutputCard(latestRecord || null)
   }
 
-  const renderCardSelector = () => {
-    if (isComplete) {
-      return (
-        <Box sx={{ textAlign: 'center', py: 1 }}>
-          <Typography color="text.secondary" variant="body2">打牌已结束</Typography>
-        </Box>
-      )
-    }
-
-    // 每墩开始前隐藏选牌面板，显示开始/继续按钮
-    if (!playInitiated || (isPaused && isStartOfTrick)) {
-      return null
-    }
-
-    if (isPaused && !isHumanTurn) {
-      return null
-    }
-
-    if (!isHumanTurn) {
-      return null
-    }
-
-    if (currentHand.length === 0) {
-      return (
-        <Box sx={{ textAlign: 'center', py: 1 }}>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            {playState?.current_player}家出牌 — 直接输入牌张
-          </Typography>
-          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', justifyContent: 'center' }}>
-            <TextField
-              size="small"
-              placeholder="如 ♠A 或 S A"
-              value={manualCardInput}
-              onChange={(e) => setManualCardInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && manualCardInput.trim()) {
-                  onManualPlay?.(playState?.current_player, manualCardInput.trim())
-                  setManualCardInput('')
-                }
-              }}
-              sx={{ width: 140, '& input': { fontSize: '0.75rem', textAlign: 'center' } }}
-            />
-            <Button
-              variant="contained"
-              size="small"
-              disabled={!manualCardInput.trim()}
-              onClick={() => {
-                onManualPlay?.(playState?.current_player, manualCardInput.trim())
-                setManualCardInput('')
-              }}
-            >
-              出牌
-            </Button>
-          </Box>
-        </Box>
-      )
-    }
-
-    const handleCardClick = (card) => {
-      const isPlayable = playableCards.some(
-        c => c.suit === card.suit && c.rank === card.rank
-      )
-      if (!isPlayable) return
-
-      // 如果点击的是已选中的牌，确认出牌
-      if (selectedCard?.suit === card.suit && selectedCard?.rank === card.rank) {
-        onConfirmPlay()
-      } else {
-        // 否则选中该牌
-        onCardSelect(card)
-      }
-    }
-
-    return (
-      <Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-          <Typography variant="subtitle2" sx={{ fontSize: '0.75rem' }}>
-            {currentPlayer === playState?.dummy
-              ? `${playState?.contract?.declarer}家替明手${currentPlayer}家出牌`
-              : `${currentPlayer}家出牌`
-            }
-            {selectedCard ? ' (再次点击确认)' : ' (点击选择)'}
-          </Typography>
-          <Tooltip title={showDDHints ? '隐藏DD提示' : '显示DD提示'} arrow>
-            <IconButton size="small" onClick={toggleDDHints} sx={{ p: 0.3 }}>
-              {showDDHints ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-            </IconButton>
-          </Tooltip>
-          {ddHintsLoading && <CircularProgress size={14} />}
-        </Box>
-        <Paper sx={{
-          p: 0.5,
-          bgcolor: isDark ? 'rgba(255, 253, 231, 0.08)' : '#fffde7',
-          border: isDark ? '2px solid rgba(255, 193, 7, 0.3)' : '2px solid #ffc107',
-        }}>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
-            {(() => {
-              const playableSet = new Set(playableCards.map(c => c.suit + c.rank))
-              return currentHand.map((card, idx) => {
-              const isPlayable = playableSet.has(card.suit + card.rank)
-              const isSelected = selectedCard?.suit === card.suit && 
-                                 selectedCard?.rank === card.rank
-              
-              const color = getSuitColor(card.suit, isDark)
-
-              const hintKey = card.suit + card.rank
-              const hint = ddHints?.[hintKey]
-
-              return (
-                <Box key={idx} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.2 }}>
-                  <MuiCard
-                    onClick={() => handleCardClick(card)}
-                    sx={{
-                      width: 32,
-                      height: 38,
-                      cursor: isPlayable ? 'pointer' : 'default',
-                      bgcolor: isSelected
-                        ? (isDark ? 'rgba(66, 165, 245, 0.35)' : '#bbdefb')
-                        : (isPlayable ? (isDark ? 'rgba(255,255,255,0.12)' : '#fff') : (isDark ? 'rgba(255,255,255,0.04)' : '#f5f5f5')),
-                      border: isSelected ? '2px solid #42a5f5' : (isDark ? '1px solid rgba(255,255,255,0.2)' : '1px solid #ddd'),
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      transition: 'all 0.15s',
-                      opacity: isPlayable ? 1 : 0.5,
-                      '&:hover': isPlayable ? {
-                        bgcolor: isDark ? 'rgba(66, 165, 245, 0.45)' : '#bbdefb',
-                        transform: 'translateY(-2px)',
-                      } : {},
-                    }}
-                  >
-                    <Typography sx={{ color, fontSize: '0.7rem', fontWeight: 500 }}>
-                      {card.suit}{card.rank}
-                    </Typography>
-                  </MuiCard>
-                  {hint !== undefined && (
-                    <Typography sx={{
-                      fontSize: '0.6rem',
-                      fontWeight: 700,
-                      color: hint === '='
-                        ? (isDark ? '#66bb6a' : '#2e7d32')
-                        : hint.startsWith('+')
-                          ? (isDark ? '#42a5f5' : '#1565c0')
-                          : (isDark ? '#ef5350' : '#c62828'),
-                      lineHeight: 1,
-                    }}>
-                      {hint}
-                    </Typography>
-                  )}
-                </Box>
-              )
-            })})()}
-          </Box>
-        </Paper>
-      </Box>
-    )
-  }
-
   const renderCompletedTricks = () => {
     // 合并已完成的墩和当前墩进行中的牌
     const currentTrick = playState?.current_trick
@@ -682,7 +465,6 @@ function PlayDetailPanel({
         <Divider sx={{ my: 1, flexShrink: 0 }} />
 
         <Box sx={{ flexShrink: 0 }}>
-          {renderCardSelector()}
           {renderCompletedTricks()}
         </Box>
       </Box>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Typography, useTheme, alpha } from '@mui/material';
+import { BRIDGE_POSITIONS } from '../utils/position';
 
 /**
  * BiddingTable component for displaying bidding history in a table format
@@ -26,7 +27,7 @@ function BiddingTable({ biddingSequence, dealer }) {
     );
   }
 
-  const positions = ['南', '西', '北', '东'];
+  const positions = BRIDGE_POSITIONS;
   const rows = [];
   let currentRow = Array(4).fill(null);
 
@@ -61,6 +62,9 @@ function BiddingTable({ biddingSequence, dealer }) {
         marginBottom: isMobile ? 0.5 : 1,
         fontWeight: 'bold',
         color: theme.palette.text.primary,
+        position: 'sticky',
+        top: 0,
+        zIndex: 2,
       }}>
         {positions.map(pos => (
           <Box

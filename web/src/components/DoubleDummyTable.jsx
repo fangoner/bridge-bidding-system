@@ -1,12 +1,13 @@
 import React from 'react'
 import { Box, useTheme, alpha } from '@mui/material'
+import { BRIDGE_POSITIONS } from '../utils/position'
 
 function DoubleDummyTable({ tableData }) {
   const theme = useTheme()
 
   if (!tableData) return null
 
-  const positions = ['南', '西', '北', '东'];
+  const positions = BRIDGE_POSITIONS;
   const trumpOrder = ['S', 'H', 'D', 'C', 'NT'];
 
   const rows = [];
@@ -37,6 +38,9 @@ function DoubleDummyTable({ tableData }) {
         marginBottom: { xs: 0.5, md: 1 },
         fontWeight: 'bold',
         color: theme.palette.text.primary,
+        position: 'sticky',
+        top: 0,
+        zIndex: 2,
       }}>
         {positions.map(pos => (
           <Box

@@ -1,4 +1,11 @@
-import { Box, Typography, Paper, FormControl, InputLabel, Select, MenuItem, Button, Divider, Switch, FormControlLabel, TextField, useTheme } from '@mui/material'
+import { Box, Typography, Paper, FormControl, InputLabel, Select, MenuItem, Button, Divider, TextField, useTheme } from '@mui/material'
+
+const BID_MODELS = [
+  { label: 'V4-Flash', value: 'deepseek-v4-flash' },
+  { label: 'V4-Flash (R1)', value: 'deepseek-v4-flash::reasoning' },
+  { label: 'V4-Pro', value: 'deepseek-v4-pro' },
+  { label: 'V4-Pro (R1)', value: 'deepseek-v4-pro::reasoning' },
+]
 
 function SettingsPanel({
   showSettings,
@@ -6,12 +13,8 @@ function SettingsPanel({
   setGameMode,
   fallbackModel,
   handleFallbackModelChange,
-  biddingReasoning,
-  handleBiddingReasoningChange,
   playModel,
   handlePlayModelChange,
-  playReasoning,
-  handlePlayReasoningChange,
   playEngine,
   handlePlayEngineChange,
   ddSampleCount,
@@ -20,9 +23,6 @@ function SettingsPanel({
   setDealSystem,
   dealMode,
   setDealMode,
-  colorSchemeKey,
-  onColorSchemeChange,
-  colorSchemes,
   loading,
   mode,
 }) {
@@ -46,24 +46,14 @@ function SettingsPanel({
               </Select>
             </FormControl>
 
-            <FormControl sx={{ minWidth: 140 }} size="small">
+            <FormControl sx={{ minWidth: 160 }} size="small">
               <InputLabel>模型</InputLabel>
               <Select value={fallbackModel} label="模型" onChange={handleFallbackModelChange}>
-                <MenuItem value="deepseek-v4-flash">V4-Flash</MenuItem>
-                <MenuItem value="deepseek-v4-pro">V4-Pro</MenuItem>
+                {BID_MODELS.map(m => (
+                  <MenuItem key={m.value} value={m.value}>{m.label}</MenuItem>
+                ))}
               </Select>
             </FormControl>
-
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={biddingReasoning}
-                  onChange={handleBiddingReasoningChange}
-                />
-              }
-              label="深度思考"
-              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem', whiteSpace: 'nowrap' } }}
-            />
 
             <FormControl sx={{ minWidth: 180 }} size="small">
               <InputLabel>阻击叫牌体系</InputLabel>
@@ -82,25 +72,14 @@ function SettingsPanel({
             打牌设置
           </Typography>
           <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
-            <FormControl sx={{ minWidth: 140 }} size="small" disabled={playEngine !== 'llm' && playEngine !== 'tiered'}>
+            <FormControl sx={{ minWidth: 160 }} size="small" disabled={playEngine !== 'llm' && playEngine !== 'tiered'}>
               <InputLabel>模型</InputLabel>
               <Select value={playModel} label="模型" onChange={handlePlayModelChange}>
-                <MenuItem value="deepseek-v4-flash">V4-Flash</MenuItem>
-                <MenuItem value="deepseek-v4-pro">V4-Pro</MenuItem>
+                {BID_MODELS.map(m => (
+                  <MenuItem key={m.value} value={m.value}>{m.label}</MenuItem>
+                ))}
               </Select>
             </FormControl>
-
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={playReasoning}
-                  onChange={handlePlayReasoningChange}
-                  disabled={playEngine !== 'llm' && playEngine !== 'tiered'}
-                />
-              }
-              label="深度思考"
-              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem', whiteSpace: 'nowrap' } }}
-            />
 
             <FormControl size="small" sx={{ minWidth: 120 }}>
               <InputLabel>打牌引擎</InputLabel>
@@ -146,16 +125,6 @@ function SettingsPanel({
               </Select>
             </FormControl>
 
-            {colorSchemes && onColorSchemeChange && (
-              <FormControl sx={{ minWidth: 130 }} size="small">
-                <InputLabel>牌桌配色</InputLabel>
-                <Select value={colorSchemeKey} label="牌桌配色" onChange={onColorSchemeChange}>
-                  {Object.entries(colorSchemes).map(([key, scheme]) => (
-                    <MenuItem key={key} value={key}>{scheme.name}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            )}
           </Box>
         </Box>
       </Box>

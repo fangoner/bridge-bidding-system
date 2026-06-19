@@ -1,11 +1,11 @@
 import React from 'react';
-import { Box, Button, Typography, useMediaQuery, useTheme } from '@mui/material';
+import { Box, Typography, ToggleButton, ToggleButtonGroup, useMediaQuery, useTheme } from '@mui/material';
 import ControlButtons from '../ControlButtons';
 
 /**
  * Minimal inline toolbar — flows with page content.
  */
-export default function Header({ onBack, mode, ...controlProps }) {
+export default function Header({ onModeChange, mode, ...controlProps }) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -18,31 +18,20 @@ export default function Header({ onBack, mode, ...controlProps }) {
       gap: isMobile ? 1 : 2,
       mb: 2,
     }}>
-      <Button
+      <ToggleButtonGroup
+        value={mode}
+        exclusive
+        onChange={(e, v) => v && onModeChange && onModeChange(v)}
         size="small"
-        onClick={onBack}
-        sx={{
-          fontSize: '0.8125rem',
-          textTransform: 'none',
-          color: 'text.secondary',
-          '&:hover': { color: 'primary.main' },
-        }}
+        sx={{ height: 28 }}
       >
-        ← 返回
-      </Button>
-
-      <Typography
-        variant="h4"
-        component="h1"
-        sx={{
-          fontSize: isMobile ? '1.1rem' : '1.35rem',
-          whiteSpace: 'nowrap',
-          fontWeight: 700,
-          color: 'text.primary',
-        }}
-      >
-        {mode === 'practice' ? '发牌练习' : '模拟实战'}
-      </Typography>
+        <ToggleButton value="practice" sx={{ px: 1.5, py: 0, fontSize: '0.75rem', textTransform: 'none' }}>
+          发牌练习
+        </ToggleButton>
+        <ToggleButton value="simulated" sx={{ px: 1.5, py: 0, fontSize: '0.75rem', textTransform: 'none' }}>
+          模拟实战
+        </ToggleButton>
+      </ToggleButtonGroup>
 
       <ControlButtons
         size={isMobile ? 'medium' : 'large'}

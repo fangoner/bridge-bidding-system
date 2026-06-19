@@ -66,6 +66,13 @@ body {
   font-size: 0.9rem;
 }
 
+.bidding-table-center {
+  width: calc(100% + 30px);
+  margin: -15px;
+  padding: 0 15px 15px 15px;
+  box-sizing: border-box;
+}
+
 .bidding-empty {
   font-style: italic;
   text-align: center;
@@ -78,6 +85,15 @@ body {
   padding-bottom: 8px;
   margin-bottom: 8px;
   font-weight: bold;
+}
+
+.bidding-table-center .bidding-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-top: 15px;
+  background-color: transparent;
+  border-bottom: 1px solid currentColor;
 }
 
 .bidding-header span {

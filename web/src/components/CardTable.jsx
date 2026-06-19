@@ -1,14 +1,15 @@
-import React, { useState, useMemo } from 'react';
-import { Box, Button, Chip, CircularProgress, TextField, ToggleButton, ToggleButtonGroup, Typography, IconButton, Tooltip, useTheme, useMediaQuery } from '@mui/material';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Box, Button, Chip, CircularProgress, TextField, ToggleButton, ToggleButtonGroup, Typography, IconButton, Tooltip, useTheme, useMediaQuery, alpha } from '@mui/material';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
 import BorderColorIcon from '@mui/icons-material/BorderColor'
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted'
-import PlayArrowIcon from '@mui/icons-material/PlayArrow'
+
 import GridOnIcon from '@mui/icons-material/GridOn'
 import HandDisplay from './HandDisplay';
 import { getSuitColor } from '../constants/suits';
 import DoubleDummyTable from './DoubleDummyTable';
-import { isHumanPosition, hasAnyHuman, getHumanPositions } from '../utils/position';
+import { isHumanPosition, hasAnyHuman, getHumanPositions, BRIDGE_POSITIONS } from '../utils/position';
+import { colorSchemes } from '../theme/colorSchemes';
 
 function CardTable({
   hands,
@@ -24,7 +25,6 @@ function CardTable({
   outputFormatsLoading,
   handleAnalyzeContract,
   analyzeLoading,
-  colorScheme,
   currentBiddingPosition,
   showDoubleDummy,
   doubleDummyResult,
@@ -55,6 +55,13 @@ function CardTable({
   readonlyMode = false,
   mode,
   imageOpeningLead,
+  // 叫牌控件相关
+  addBid,
+  isBiddingCompleteFn,
+  onHandCardClick,
+  cardHints,
+  biddingSequence,
+  onManualPlay,
 }) {
   const [handInputs, setHandInputs] = useState({
     '南': '',
@@ -68,6 +75,13 @@ function CardTable({
     '东': '',
     '西': ''
   })
+  const [selectedBidLevel, setSelectedBidLevel] = useState(null)
+  const [mobileSelectedCard, setMobileSelectedCard] = useState(null) // 手机端双击出牌
+  const [manualCardInput, setManualCardInput] = useState({}) // {position: string} 手动出牌输入
+  // 出牌人变化时清除手机端选中
+  useEffect(() => {
+    setMobileSelectedCard(null)
+  }, [playState?.current_player])
 
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
@@ -95,32 +109,28 @@ function CardTable({
   const west = hands['西'];
 
   const defaultScheme = {
+    ...colorSchemes.classicGreen,
     table: {
-      background: 'linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%)',
-      border: '3px solid rgba(255, 255, 255, 0.5)',
-      centerBg: 'rgba(255, 255, 255, 0.95)',
-    },
-    button: {
-      primary: '#1976d2',
-      primaryHover: '#1565c0',
-      text: 'white',
+      ...colorSchemes.classicGreen.table,
+      centerShadow: 'inset 0 2px 12px rgba(0,0,0,0.25), 0 4px 20px rgba(0,0,0,0.2)',
     },
   }
 
-  const schemeBase = colorScheme || defaultScheme;
   const scheme = {
-    ...schemeBase,
+    ...defaultScheme,
     table: {
-      ...schemeBase.table,
+      ...defaultScheme.table,
       ...(isDark ? {
-        background: 'radial-gradient(ellipse at center, #1a2a1a 0%, #0d1a10 40%, #060d08 100%)',
-        border: schemeBase.table.border || '3px solid rgba(255, 255, 255, 0.08)',
-        centerBg: 'rgba(255, 255, 255, 0.06)',
-        centerBackdrop: schemeBase.table.centerBackdrop || 'blur(16px) saturate(160%)',
-        centerBorder: schemeBase.table.centerBorder || '1px solid rgba(255, 255, 255, 0.08)',
+        background: 'radial-gradient(ellipse at center, #1a2f22 0%, #0d1f15 50%, #06120d 100%)',
+        border: defaultScheme.table.border ?? 'none',
+        centerBg: 'rgba(0, 0, 0, 0.28)',
+        centerBackdrop: defaultScheme.table.centerBackdrop || 'blur(12px) saturate(140%)',
+        centerBorder: defaultScheme.table.centerBorder || '1px solid rgba(255, 255, 255, 0.10)',
+        centerShadow: defaultScheme.table.centerShadow || 'inset 0 2px 12px rgba(0,0,0,0.35), 0 4px 20px rgba(0,0,0,0.25)',
       } : {
-        centerBackdrop: schemeBase.table.centerBackdrop || 'blur(16px) saturate(160%)',
-        centerBorder: schemeBase.table.centerBorder || '1px solid rgba(255, 255, 255, 0.15)',
+        centerBackdrop: defaultScheme.table.centerBackdrop || 'blur(12px) saturate(140%)',
+        centerBorder: defaultScheme.table.centerBorder || '1px solid rgba(255, 255, 255, 0.12)',
+        centerShadow: defaultScheme.table.centerShadow || 'inset 0 2px 12px rgba(0,0,0,0.25), 0 4px 20px rgba(0,0,0,0.2)',
       }),
     },
   };
@@ -158,6 +168,28 @@ function CardTable({
   const getPlayedCardsSet = () => {
     return playedCardCache?.playedCardsSet ?? null
   }
+
+  // 计算当前可出的牌（跟花色规则）
+  const playableCardSet = useMemo(() => {
+    if (!showPlayPanel || !playState || playState.phase === 'complete') return null
+    const cp = playState.current_player
+    if (!cp) return null
+    const hand = playState.hands?.[cp]
+    if (!hand || hand.length === 0) return null
+    const trickCards = playState.current_trick?.cards || []
+    const ledSuit = trickCards.length > 0 ? trickCards[0][1]?.suit : null
+    const set = new Set()
+    for (const card of hand) {
+      if (!ledSuit || card.suit === ledSuit) {
+        set.add(card.suit + card.rank)
+      }
+    }
+    // 如果没有可跟的花色，所有牌都可出
+    if (set.size === 0) {
+      for (const card of hand) set.add(card.suit + card.rank)
+    }
+    return set
+  }, [showPlayPanel, playState?.current_player, playState?.current_trick?.cards?.length, playState?.hands])
 
   // 打牌阶段的手牌：隐藏模式下用剩余手牌，显示模式下用原始手牌+已出标记
   const getManualPlayedCards = (position) => {
@@ -223,14 +255,20 @@ function CardTable({
     if (suits.length !== 4) {
       return { valid: false, error: '请输入4个花色，用空格分隔' }
     }
-    
+
     const validCards = /^[AKQJTakqjt2-9\-]+$/
     for (const suit of suits) {
       if (suit !== '-' && !validCards.test(suit)) {
         return { valid: false, error: '包含无效字符' }
       }
     }
-    
+
+    // 张数校验：每手牌必须是13张
+    const totalCards = suits.reduce((sum, s) => sum + (s === '-' ? 0 : s.length), 0)
+    if (totalCards !== 13) {
+      return { valid: false, error: `张数不对：${totalCards}张（需要13张）` }
+    }
+
     const calculateHCP = (cards) => {
       let hcp = 0
       for (const card of cards.toUpperCase()) {
@@ -241,12 +279,36 @@ function CardTable({
       }
       return hcp
     }
-    
+
     const spades = suits[0] === '-' ? '' : suits[0].toUpperCase()
     const hearts = suits[1] === '-' ? '' : suits[1].toUpperCase()
     const diamonds = suits[2] === '-' ? '' : suits[2].toUpperCase()
     const clubs = suits[3] === '-' ? '' : suits[3].toUpperCase()
-    
+
+    // 重复牌校验：与已确认的其他位置手牌比对
+    const allHandCards = new Map() // '♠A' -> position
+    for (const [pos, hand] of Object.entries(hands || {})) {
+      if (!hand || typeof hand !== 'object') continue
+      for (const [suit, suitRanks] of Object.entries(hand)) {
+        if (!suitRanks || suitRanks === '-' || typeof suitRanks !== 'string') continue
+        const suitSymbol = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' }[suit] || suit
+        for (const rank of suitRanks) {
+          allHandCards.set(`${suitSymbol}${rank}`, pos)
+        }
+      }
+    }
+    const newCards = [
+      ...(spades ? spades.split('').map(r => `♠${r}`) : []),
+      ...(hearts ? hearts.split('').map(r => `♥${r}`) : []),
+      ...(diamonds ? diamonds.split('').map(r => `♦${r}`) : []),
+      ...(clubs ? clubs.split('').map(r => `♣${r}`) : []),
+    ]
+    for (const card of newCards) {
+      if (allHandCards.has(card)) {
+        return { valid: false, error: `${card} 已在${allHandCards.get(card)}家手牌中` }
+      }
+    }
+
     return {
       valid: true,
       hand: {
@@ -342,24 +404,9 @@ function CardTable({
 
   // 打牌阶段的叫牌过程表格（带tooltip显示叫牌含义）
   const renderPlayBiddingTable = () => {
-    const positions = ['南', '西', '北', '东']
+    const positions = BRIDGE_POSITIONS
 
-    // 构建 bid -> meaning 的映射（按位置和叫品匹配）
-    const meaningMap = {}
-    if (aiBiddingHistory && aiBiddingHistory.length > 0) {
-      for (const record of aiBiddingHistory) {
-        if (record.position && record.result?.bid != null) {
-          const key = `${record.position}:${record.result.bid}`
-          if (!meaningMap[key]) {
-            meaningMap[key] = record.result.meaning || ''
-          }
-        }
-      }
-    }
-
-    // 用 renderBiddingTable 的数据源（biddingSequence）来构建行
-    // 但需要获取 biddingSequence —— 从 renderBiddingTable 间接获取不了
-    // 所以从 aiBiddingHistory 提取序列
+    // 从 aiBiddingHistory 提取序列
     let seq = []
     if (aiBiddingHistory && aiBiddingHistory.length > 0) {
       seq = aiBiddingHistory.map(r => ({ position: r.position, bid: r.result?.bid || 'pass', meaning: r.result?.meaning || '' }))
@@ -396,17 +443,20 @@ function CardTable({
     return (
       <Box sx={{
         width: '100%',
-        fontFamily: '"Courier New", monospace',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", Roboto, sans-serif',
         fontSize: '0.9rem',
       }}>
         <Box sx={{
           display: 'flex',
           justifyContent: 'space-around',
-          borderBottom: isDark ? '2px solid rgba(255,255,255,0.2)' : '2px solid #333',
+          borderBottom: `2px solid ${theme.palette.text.primary}`,
           paddingBottom: 0.5,
           marginBottom: 0.5,
           fontWeight: 'bold',
           color: textPrimary,
+          position: 'sticky',
+          top: 0,
+          zIndex: 2,
         }}>
           {positions.map(pos => (
             <Box key={pos} component="span" sx={{ flex: 1, textAlign: 'center', minWidth: 50, color: pos === dealer ? theme.palette.error.main : 'inherit' }}>
@@ -419,7 +469,7 @@ function CardTable({
             display: 'flex',
             justifyContent: 'space-around',
             padding: '4px 0',
-            borderBottom: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd',
+            borderBottom: `1px solid ${theme.palette.divider}`,
             '&:last-child': { borderBottom: 'none' },
           }}>
             {positions.map((pos, colIndex) => {
@@ -438,7 +488,7 @@ function CardTable({
                     minWidth: 50,
                     fontWeight: 500,
                     color: textPrimary,
-                    backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e3f2fd',
+                    backgroundColor: alpha(theme.palette.primary.main, 0.08),
                     borderRadius: 1,
                     cursor: meaning ? 'pointer' : 'default',
                     padding: '2px 0',
@@ -528,13 +578,29 @@ function CardTable({
     
     const renderCard = (position) => {
       const card = getCardAtPosition(position)
-      
-      if (!card) {
-        return <Box sx={{ width: 44, height: 60 }} />
-      }
-      
-      const color = getSuitColor(card.suit, isDark)
+      const positionLabels = { '北': 'N', '东': 'E', '南': 'S', '西': 'W' }
       const canClick = onPlayCardClick
+
+      if (!card) {
+        return (
+          <Box sx={{
+            width: 44,
+            height: 60,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            bgcolor: 'rgba(255,255,255,0.06)',
+            border: '1px dashed rgba(255,255,255,0.18)',
+            borderRadius: '6px',
+          }}>
+            <Typography sx={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.7rem', fontWeight: 600 }}>
+              {positionLabels[position]}
+            </Typography>
+          </Box>
+        )
+      }
+
+      const color = getSuitColor(card.suit, isDark)
 
       return (
         <Box
@@ -545,18 +611,17 @@ function CardTable({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            bgcolor: isDark ? 'rgba(30, 41, 59, 0.7)' : 'rgba(255,255,255,0.25)',
-            backdropFilter: 'blur(6px)',
-            border: isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(255,255,255,0.25)',
-            borderRadius: 1,
-            boxShadow: 1,
+            bgcolor: '#fbfbf8',
+            border: '1px solid rgba(0,0,0,0.08)',
+            borderRadius: '6px',
+            boxShadow: '0 2px 6px rgba(0,0,0,0.22)',
             cursor: canClick ? 'pointer' : 'default',
             animation: 'cardIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)',
             '@keyframes cardIn': {
               '0%': { opacity: 0, transform: 'scale(0.7) translateY(-6px)' },
               '100%': { opacity: 1, transform: 'scale(1) translateY(0)' },
             },
-            '&:hover': canClick ? { bgcolor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e3f2fd', transform: 'scale(1.05)' } : {},
+            '&:hover': canClick ? { transform: 'scale(1.05) translateY(-2px)', boxShadow: '0 4px 10px rgba(0,0,0,0.28)' } : {},
           }}
         >
           <Typography sx={{ color, fontWeight: 'bold', fontSize: '1.1rem' }}>
@@ -565,7 +630,7 @@ function CardTable({
         </Box>
       )
     }
-    
+
     return (
       <Box sx={{
         display: 'flex',
@@ -574,23 +639,23 @@ function CardTable({
         justifyContent: 'center',
         height: '100%',
         width: '100%',
-        gap: 0.5,
+        gap: '6px',
       }}>
         <Box sx={{ display: 'flex', justifyContent: 'center' }}>
           {renderCard('北')}
         </Box>
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px' }}>
           {renderCard('西')}
-          <Box sx={{ width: 60, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+          <Box sx={{ width: 56, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', borderRadius: '50%', bgcolor: 'rgba(0,0,0,0.2)' }}>
             {aiLoading ? (
-              <CircularProgress size={22} />
+              <CircularProgress size={22} sx={{ color: 'rgba(255,255,255,0.8)' }} />
             ) : (displayTrick?.cards?.length === 4 && getLastTrickWinner()) ? (
-              <Typography color="primary" sx={{ fontSize: '0.85rem', fontWeight: 'bold' }}>
+              <Typography sx={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#ffeb3b' }}>
                 {getLastTrickWinner()}赢
               </Typography>
             ) : !isComplete && current_player ? (
-              <Typography color="text.secondary" sx={{ fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {current_player}出牌
+              <Typography sx={{ fontSize: '0.7rem', fontWeight: 600, color: 'rgba(255,255,255,0.75)', textAlign: 'center' }}>
+                {current_player}<br/>出牌
               </Typography>
             ) : null}
           </Box>
@@ -605,6 +670,7 @@ function CardTable({
 
   const renderHandWithStatus = (hand, position, sxProps) => {
     const isCurrentlyBidding = currentBiddingPosition === position;
+    const currentTurnPos = showPlayPanel ? playState?.current_player : currentBiddingPosition;
     const isAI = isAIPosition(position)
     const hasHandData = hasHand(position)
     const showInput = !readonlyMode && !showPlayPanel && isAI && !hasHandData && (!biddingStarted || stopBidding)
@@ -613,8 +679,8 @@ function CardTable({
     const showPlayHandInput = !readonlyMode && showPlayPanel && playState
       && (!playState.hands?.[position] || playState.hands[position].length === 0)
       && manualPlayedCount === 0
-      && !(position === playState.dummy && playState.phase === 'lead') // 明手首攻前隐藏输入框
-      && (isAI || position === playState.dummy) // AI无手牌 或 明手(无论人类/AI)无手牌
+      && !(position === playState.dummy && playState.phase === 'lead')
+      && (isAI || position === playState.dummy)
     const handKnownInPlay = showPlayPanel && playState?.hands?.[position]?.length > 0
     
     // 打牌阶段：根据模式选择手牌数据和已出牌标记
@@ -643,21 +709,22 @@ function CardTable({
         )}
         
         <Box sx={{
-          bgcolor: isDark ? 'rgba(17, 24, 39, 0.2)' : 'rgba(255, 255, 255, 0.3)',
+          bgcolor: isDark ? '#1e293b' : '#fbfbf8',
           borderRadius: 2,
           p: isMobile ? 0.5 : 1,
           width: handBoxSize,
           height: handBoxSize,
           flexShrink: 0,
           boxShadow: isDark
-            ? '0 4px 16px rgba(0,0,0,0.3)'
-            : '0 4px 16px rgba(0,0,0,0.15)',
+            ? '0 3px 10px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.25)'
+            : '0 3px 10px rgba(0,0,0,0.15), 0 1px 2px rgba(0,0,0,0.08)',
           display: 'flex',
           flexDirection: 'column',
-          border: isDark ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(255,255,255,0.12)',
-          backdropFilter: 'blur(10px) saturate(140%)',
-          WebkitBackdropFilter: 'blur(10px) saturate(140%)',
-          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.06)',
+          transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+          ...(currentTurnPos === position && {
+            boxShadow: `0 0 0 2px ${theme.palette.primary.main}, 0 4px 14px rgba(0,0,0,0.2)`,
+          }),
         }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
             <Typography 
@@ -717,27 +784,12 @@ function CardTable({
             </Box>
           ) : showInput ? (
             <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
-              {!handInputs[position] && (
-                <Box sx={{
-                  position: 'absolute',
-                  top: '8px',
-                  left: '8px',
-                  pointerEvents: 'none',
-                  fontSize: '0.75rem',
-                  zIndex: 1,
-                }}>
-                  <span style={{ color: theme.suits.spades }}>♠</span>{' '}
-                  <span style={{ color: theme.suits.hearts }}>♥</span>{' '}
-                  <span style={{ color: theme.suits.diamonds }}>♦</span>{' '}
-                  <span style={{ color: theme.suits.clubs }}>♣</span>
-                </Box>
-              )}
               <TextField
                 size="small"
                 value={handInputs[position]}
                 onChange={(e) => handleHandInputChange(position, e.target.value)}
                 error={!!inputErrors[position]}
-                helperText={inputErrors[position] || '如: AKQJ - T87 654'}
+                helperText={inputErrors[position] || 'AKQJ T98 T87 654（13张，用 - 表示缺门）'}
                 fullWidth
                 multiline
                 maxRows={2}
@@ -757,28 +809,13 @@ function CardTable({
               </Button>
             </Box>
           ) : showPlayHandInput ? (
-            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
-              {!handInputs[position] && (
-                <Box sx={{
-                  position: 'absolute',
-                  top: '8px',
-                  left: '8px',
-                  pointerEvents: 'none',
-                  fontSize: '0.75rem',
-                  zIndex: 1,
-                }}>
-                  <span style={{ color: theme.suits.spades }}>♠</span>{' '}
-                  <span style={{ color: theme.suits.hearts }}>♥</span>{' '}
-                  <span style={{ color: theme.suits.diamonds }}>♦</span>{' '}
-                  <span style={{ color: theme.suits.clubs }}>♣</span>
-                </Box>
-              )}
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
               <TextField
                 size="small"
                 value={handInputs[position]}
                 onChange={(e) => handleHandInputChange(position, e.target.value)}
                 error={!!inputErrors[position]}
-                helperText={inputErrors[position] || `输入${position}家完整手牌`}
+                helperText={inputErrors[position] || `输入${position}家手牌（13张，如 AKQJ T98 T87 654）`}
                 fullWidth
                 multiline
                 maxRows={2}
@@ -819,6 +856,21 @@ function CardTable({
                 showContent={shouldShowHandContent(position)}
                 hideTitle={true}
                 playedCards={playedCardsSet}
+                clickable={showPlayPanel && isHuman && playState?.current_player === position && onHandCardClick}
+                onCardClick={isMobile ? (suit, rank) => {
+                  const key = suit + rank
+                  if (mobileSelectedCard === key) {
+                    // 第二次点击：出牌
+                    onHandCardClick(suit, rank)
+                    setMobileSelectedCard(null)
+                  } else {
+                    // 第一次点击：选中
+                    setMobileSelectedCard(key)
+                  }
+                } : onHandCardClick}
+                playableSet={playableCardSet}
+                selectedCardKey={isMobile ? mobileSelectedCard : null}
+                cardHints={cardHints}
               />
             </Box>
           )}
@@ -843,36 +895,29 @@ function CardTable({
       position: 'relative',
       overflow: 'hidden',
     }}>
-      {/* 模拟实战按钮：叫牌阶段未开始/已完成时可点击；3H+1AI任何阶段显示（打牌时仅作状态指示） */}
+      {/* 模拟实战清空按钮：任何阶段可见可点击（叫牌/打牌均可） */}
       {!readonlyMode && onSimulatedReset && gameMode !== 'pair' && (
-        getHumanPositions(positionRoles).length >= 3 ||
-        (!showPlayPanel && (!biddingStarted || (checkBiddingComplete && checkBiddingComplete())))
-      ) && (
         <Box sx={{
           position: 'absolute',
           top: 8,
           left: 8,
           zIndex: 10,
         }}>
-          <Tooltip title={showPlayPanel ? '模拟实战模式' : '模拟实战'} arrow slotProps={{
+          <Tooltip title={showPlayPanel ? '清空手牌，重新开始' : '模拟实战'} arrow slotProps={{
             tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
             arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
           }}>
-            <span>
-              <IconButton
-                size="small"
-                onClick={onSimulatedReset}
-                disabled={!!showPlayPanel}
-                sx={{
-                  bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : 'rgba(255, 255, 255, 0.9)',
-                  color: isDark ? '#e2e8f0' : undefined,
-                  '&:hover': { bgcolor: isDark ? 'rgba(30, 41, 59, 1)' : 'rgba(255, 255, 255, 1)' },
-                  opacity: showPlayPanel ? 0.5 : 1,
-                }}
-              >
-                <PlayArrowIcon />
-              </IconButton>
-            </span>
+            <IconButton
+              size="small"
+              onClick={onSimulatedReset}
+              sx={{
+                bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : 'rgba(255, 255, 255, 0.9)',
+                color: isDark ? '#e2e8f0' : undefined,
+                '&:hover': { bgcolor: isDark ? 'rgba(30, 41, 59, 1)' : 'rgba(255, 255, 255, 1)' },
+              }}
+            >
+              <DeleteSweepIcon fontSize="small" />
+            </IconButton>
           </Tooltip>
         </Box>
       )}
@@ -1007,7 +1052,7 @@ function CardTable({
             {renderHandWithStatus(south, '南', { mb: '12px' })}
           </Box>
           
-          <Box className="table-center" sx={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+          <Box className="table-center" sx={{ width: '100%', display: 'flex', justifyContent: isMobile ? 'flex-start' : 'center' }}>
             <Box className="table-border" sx={{
               width: biddingTableWidth,
               minWidth: biddingTableWidth,
@@ -1021,6 +1066,7 @@ function CardTable({
               background: scheme.table.centerBg,
               backdropFilter: scheme.table.centerBackdrop,
               WebkitBackdropFilter: scheme.table.centerBackdrop,
+              boxShadow: scheme.table.centerShadow,
               padding: 1,
               overflowY: 'auto',
             }}>
@@ -1054,6 +1100,7 @@ function CardTable({
                 background: scheme.table.centerBg,
                 backdropFilter: scheme.table.centerBackdrop,
                 WebkitBackdropFilter: scheme.table.centerBackdrop,
+                boxShadow: scheme.table.centerShadow,
                 padding: 1,
                 overflowY: 'auto',
               }}>
@@ -1067,6 +1114,195 @@ function CardTable({
           {renderHandWithStatus(south, '南', { mt: 0 })}
         </>
       )}
+
+      {/* 人类回合浮动叫牌面板（右下角） */}
+      {!showPlayPanel && !showDoubleDummy && hasAnyHuman(positionRoles) && biddingStarted && (() => {
+        const humanTurn = isHumanPosition(positionRoles, currentBidder)
+        const biddingComplete = isBiddingCompleteFn ? isBiddingCompleteFn() : false
+        if (!humanTurn || biddingComplete) return null
+        const suits = ['C', 'D', 'H', 'S', 'NT']
+        const suitOrder = { C: 0, D: 1, H: 2, S: 3, NT: 4 }
+        // 找到最后一个实质性叫品，确定最低合法叫品
+        const seq = biddingSequence || []
+        const lastRealBid = [...seq].reverse().find(b => b.bid !== 'pass')
+        let minLevel = 1, minSuitIdx = -1
+        if (lastRealBid) {
+          const re = /^(\d+)([CDHSNT]+)$/
+          const m = lastRealBid.bid.match(re)
+          if (m) {
+            minLevel = parseInt(m[1])
+            minSuitIdx = suitOrder[m[2]] ?? -1
+          }
+        }
+        // 每个阶数是否可用
+        const levelAvailable = (l) => {
+          if (l > minLevel) return true
+          if (l === minLevel && minSuitIdx < 4) return true // 同阶还有更高花色
+          return false
+        }
+        // 每个花色在给定阶数下是否可用
+        const suitAvailable = (l, s) => {
+          if (l > minLevel) return true
+          if (l === minLevel) return suitOrder[s] > minSuitIdx
+          return false
+        }
+        const getBidColor = (bid, disabled) => {
+          const d = theme.palette.mode === 'dark'
+          const s = bid?.slice(-1)
+          const dim = disabled ? (d ? 0.35 : 0.3) : 1
+          if (d) {
+            if (s === 'H' || s === 'D') return { c: `rgba(252,165,165,${dim})`, bg: `rgba(239,68,68,${0.22*dim})`, b: `rgba(239,68,68,${0.35*dim})` }
+            if (s === 'S' || s === 'C') return { c: `rgba(203,213,225,${dim})`, bg: `rgba(148,163,184,${0.18*dim})`, b: `rgba(148,163,184,${0.28*dim})` }
+            if (s === 'T') return { c: `rgba(196,181,253,${dim})`, bg: `rgba(139,92,246,${0.22*dim})`, b: `rgba(139,92,246,${0.35*dim})` }
+            if (bid === 'X') return { c: `rgba(252,165,165,${dim})`, bg: `rgba(239,68,68,${0.22*dim})`, b: `rgba(239,68,68,${0.40*dim})` }
+            if (bid === 'XX') return { c: `rgba(248,113,113,${dim})`, bg: `rgba(239,68,68,${0.26*dim})`, b: `rgba(239,68,68,${0.45*dim})` }
+            if (bid === 'pass') return { c: `rgba(110,231,183,${dim})`, bg: `rgba(16,185,129,${0.18*dim})`, b: `rgba(16,185,129,${0.30*dim})` }
+            return { c: `rgba(148,163,184,${dim})`, bg: `rgba(148,163,184,${0.12*dim})`, b: `rgba(148,163,184,${0.18*dim})` }
+          }
+          if (s === 'H' || s === 'D') return { c: `rgba(220,38,38,${dim})`, bg: `rgba(254,242,242,${dim})`, b: `rgba(252,165,165,${dim})` }
+          if (s === 'S' || s === 'C') return { c: `rgba(30,41,59,${dim})`, bg: `rgba(241,245,249,${dim})`, b: `rgba(148,163,184,${dim})` }
+          if (s === 'T') return { c: `rgba(124,58,237,${dim})`, bg: `rgba(245,243,255,${dim})`, b: `rgba(167,139,250,${dim})` }
+          if (bid === 'X') return { c: `rgba(220,38,38,${dim})`, bg: `rgba(254,242,242,${dim})`, b: `rgba(252,165,165,${dim})` }
+          if (bid === 'XX') return { c: `rgba(220,38,38,${dim})`, bg: `rgba(254,226,226,${dim})`, b: `rgba(248,113,113,${dim})` }
+          if (bid === 'pass') return { c: `rgba(5,150,105,${dim})`, bg: `rgba(236,253,245,${dim})`, b: `rgba(110,231,183,${dim})` }
+          return { c: `rgba(71,85,105,${dim})`, bg: `rgba(248,250,252,${dim})`, b: `rgba(203,213,225,${dim})` }
+        }
+        const btnSx = (bid, h, fs, disabled) => {
+          const x = getBidColor(bid, disabled)
+          return {
+            minWidth: 0, flex: 1, height: h || 26, p: 0, fontSize: fs || '0.7rem', fontWeight: 600,
+            color: x.c, bgcolor: x.bg, border: `1px solid ${x.b}`, borderRadius: '4px', textTransform: 'none',
+            '&:hover': disabled ? {} : { filter: 'brightness(0.9)', border: `1px solid ${getBidColor(bid, false).c}` },
+          }
+        }
+        // 使用外层 state 追踪选中的阶数（hooks 必须在顶层调用）
+        return (
+          <Box sx={{
+            position: 'absolute',
+            bottom: isMobile ? 8 : '5%',
+            right: isMobile ? 8 : '3%',
+            zIndex: 10,
+            bgcolor: isDark ? 'rgba(17,24,39,0.88)' : 'rgba(255,255,255,0.88)',
+            backdropFilter: 'blur(12px)', borderRadius: 2, p: 0.75,
+            border: '1px solid', borderColor: 'divider',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+            display: 'flex', flexDirection: 'column', gap: '4px',
+            width: isMobile ? 130 : 200,
+          }}>
+            {/* 阶数选择：桌面一行，手机两行 */}
+            {isMobile ? (
+              <>
+                <Box sx={{ display: 'flex', gap: '3px' }}>
+                  {[1,2,3,4].map(l => {
+                    const avail = levelAvailable(l)
+                    const sel = selectedBidLevel === l
+                    return (
+                      <Button key={l} size="small"
+                        sx={{ ...btnSx(l + 'NT', 24, '0.7rem', !avail), flex: 1,
+                          ...(sel && avail ? { boxShadow: `0 0 0 2px ${getBidColor(l + 'NT', false).c}`, transform: 'scale(1.05)' } : {}),
+                        }}
+                        onClick={() => { if (avail) setSelectedBidLevel(sel ? null : l) }}
+                        disabled={!avail}>{l}</Button>
+                    )
+                  })}
+                </Box>
+                <Box sx={{ display: 'flex', gap: '3px' }}>
+                  {[5,6,7].map(l => {
+                    const avail = levelAvailable(l)
+                    const sel = selectedBidLevel === l
+                    return (
+                      <Button key={l} size="small"
+                        sx={{ ...btnSx(l + 'NT', 24, '0.7rem', !avail), flex: 1,
+                          ...(sel && avail ? { boxShadow: `0 0 0 2px ${getBidColor(l + 'NT', false).c}`, transform: 'scale(1.05)' } : {}),
+                        }}
+                        onClick={() => { if (avail) setSelectedBidLevel(sel ? null : l) }}
+                        disabled={!avail}>{l}</Button>
+                    )
+                  })}
+                  <Box sx={{ flex: 1, minWidth: 0 }} />
+                </Box>
+              </>
+            ) : (
+              <Box sx={{ display: 'flex', gap: '3px' }}>
+                {[1,2,3,4,5,6,7].map(l => {
+                  const avail = levelAvailable(l)
+                  const sel = selectedBidLevel === l
+                  return (
+                    <Button key={l} size="small"
+                      sx={{ ...btnSx(l + 'NT', 24, '0.7rem', !avail), flex: 1,
+                        ...(sel && avail ? { boxShadow: `0 0 0 2px ${getBidColor(l + 'NT', false).c}`, transform: 'scale(1.05)' } : {}),
+                      }}
+                      onClick={() => { if (avail) setSelectedBidLevel(sel ? null : l) }}
+                      disabled={!avail}>{l}</Button>
+                  )
+                })}
+              </Box>
+            )}
+            {/* 行2: 花色选择 — 固定高度防止布局跳动 */}
+            <Box sx={{ display: 'flex', gap: '3px', minHeight: 28 }}>
+              {suits.map(s => {
+                const lvl = selectedBidLevel || 1
+                const avail = selectedBidLevel !== null && suitAvailable(lvl, s)
+                const bid = lvl + s
+                return (
+                  <Button key={s} size="small" sx={btnSx(bid, 28, '0.7rem', !avail)}
+                    onClick={() => { if (avail) { addBid && addBid(bid); setSelectedBidLevel(null) } }}
+                    disabled={!avail || !addBid}>
+                    {s === 'NT' ? 'NT' : s}
+                  </Button>
+                )
+              })}
+            </Box>
+            {/* 行3: pass / X / XX */}
+            <Box sx={{ display: 'flex', gap: '4px', minHeight: 28 }}>
+              {['pass', 'X', 'XX'].map(bid => (
+                <Button key={bid} size="small" sx={{ ...btnSx(bid, 28, '0.7rem', false), flex: 1 }}
+                  onClick={() => { addBid && addBid(bid); setSelectedBidLevel(null) }}
+                  disabled={!addBid}>
+                  {bid}
+                </Button>
+              ))}
+            </Box>
+          </Box>
+        )
+      })()}
+
+      {/* 人类无手牌时手动输入出牌 */}
+      {showPlayPanel && playState && (() => {
+        const cp = playState.current_player
+        if (!cp) return null
+        const isHuman = positionRoles?.[cp] === 'human' || (cp === playState.dummy && positionRoles?.[playState.contract?.declarer] === 'human')
+        if (!isHuman) return null
+        if (playState.phase === 'complete') return null
+        if (!playInitiated) return null
+        const isStartOfTrick = (playState.current_trick?.cards?.length || 0) === 0
+        if (isPlayPaused && isStartOfTrick) return null
+        const handLen = playState.hands?.[cp]?.length || 0
+        if (handLen > 0) return null // 有手牌时用牌桌点击出牌
+        const style = { bottom: isMobile ? 8 : '12%', right: isMobile ? 8 : '10%' }
+        return (
+          <Box sx={{ position: 'absolute', zIndex: 10, ...style, display: 'flex', gap: 0.5, alignItems: 'center', bgcolor: isDark ? 'rgba(17,24,39,0.88)' : 'rgba(255,255,255,0.88)', backdropFilter: 'blur(12px)', borderRadius: 2, p: 0.5, border: '1px solid', borderColor: 'divider', boxShadow: '0 4px 20px rgba(0,0,0,0.15)' }}>
+            <TextField size="small" placeholder="♠A 或 SA"
+              value={manualCardInput[cp] || ''}
+              onChange={(e) => setManualCardInput(prev => ({ ...prev, [cp]: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (manualCardInput[cp] || '').trim()) {
+                  onManualPlay?.(cp, (manualCardInput[cp] || '').trim())
+                  setManualCardInput(prev => ({ ...prev, [cp]: '' }))
+                }
+              }}
+              sx={{ width: 100, '& input': { fontSize: '0.75rem', textAlign: 'center', py: 0.5 } }}
+            />
+            <Button variant="contained" size="small"
+              disabled={!(manualCardInput[cp] || '').trim()}
+              onClick={() => {
+                onManualPlay?.(cp, (manualCardInput[cp] || '').trim())
+                setManualCardInput(prev => ({ ...prev, [cp]: '' }))
+              }}
+              sx={{ fontSize: '0.7rem', py: 0.3, px: 0.75, minWidth: 36 }}>出牌</Button>
+          </Box>
+        )
+      })()}
     </Box>
   );
 }

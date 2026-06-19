@@ -1617,7 +1617,14 @@ async def get_dd_hints():
         total_played = state.declarer_tricks + state.defender_tricks
         remaining_tricks = 13 - total_played
 
-        # 用剩余手牌 + 当前墩牌构建 deal
+        # 模拟实战中人类位置手牌为空，无法做有意义的DD提示
+        has_incomplete_hands = any(
+            not state.hands.get(pos) for pos in ["北", "东", "南", "西"]
+        )
+        if has_incomplete_hands:
+            return {"success": True, "hints": {}}
+
+        # 正常模式：所有手牌已知，直接用 state.hands 构建 deal
         hands = {}
         for pos in ["北", "东", "南", "西"]:
             hands[pos] = list(state.hands.get(pos, []))
