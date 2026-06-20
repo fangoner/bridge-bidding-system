@@ -159,15 +159,22 @@ class MctsSearch:
                 "visits": child.visits,
                 "avg_tricks": round(avg_value, 2),
             })
+            # 双方均使用 avg_value（exploitation），与 UCB 探索项解耦
+            # 庄家方：avg_value 越大越好（赢墩多）
+            # 防守方：avg_value 越小越好（庄家赢墩少 = 防守赢墩多）
             if is_root_declarer_side:
-                score = child.visits  # 庄家方：选探索最多的出牌
+                score = avg_value
             else:
-                score = -avg_value  # 防守方：选庄家赢墩最少的出牌
+                score = -avg_value
             if score > best_score:
                 best_score = score
                 best_card_str = card_str
 
-        child_stats.sort(key=lambda s: s["visits"], reverse=True)
+        # 排序也改为按 avg_value（与选牌标准一致），庄家方降序、防守方升序
+        if is_root_declarer_side:
+            child_stats.sort(key=lambda s: s["avg_tricks"], reverse=True)
+        else:
+            child_stats.sort(key=lambda s: s["avg_tricks"])
 
         selected_card = None
         if best_card_str:

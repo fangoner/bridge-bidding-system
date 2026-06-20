@@ -3,6 +3,8 @@
  * 统一使用字符串格式: "(南)1NT-(西)pass-(北)2C-(东)pass-"
  */
 
+import { BRIDGE_POSITIONS } from './position'
+
 /**
  * 将叫牌序列字符串解析为数组
  * @param {string} sequenceStr - 叫牌序列字符串，如 "(南)1NT-(西)pass-"
@@ -102,8 +104,6 @@ export function isBiddingComplete(sequenceStr) {
  * @param {string} dealer - 发牌人 (南/西/北/东)
  * @returns {string} - 下一个叫牌位置
  */
-import { BRIDGE_POSITIONS } from './position'
-
 export function getNextBidder(sequenceStr, dealer) {
   const positions = BRIDGE_POSITIONS
   const bids = parseBiddingSequence(sequenceStr)

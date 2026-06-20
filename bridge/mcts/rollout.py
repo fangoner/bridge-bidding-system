@@ -8,11 +8,12 @@ from bridge.mcts.state_utils import clone_hands, get_playable_from_hands, apply_
 class HeuristicRollout:
     """启发式快速模拟打牌到底。
 
-    规则：
-    - 领出：从最长套选最大牌攻出
-    - 跟牌（能赢）：用恰好能赢的最小牌
-    - 跟牌（不能赢）：跟最小牌
-    - 将吃：只在必须跟花色出不了时才将吃，用最小将牌
+    规则（已强化，对齐 RandomizedRollout 的策略但保持确定性）：
+    - 领出：从最长套选 4th best（≥4张）或最大中间张，避免送大牌
+    - 跟牌（第二家）：能赢出最小赢张，不能赢出最小牌（"二家小"）
+    - 跟牌（第三/四家）：能赢出最小赢张，不能赢出最大牌（"三家大"，帮同伴提升）
+    - 将吃：同伴赢则垫短套，敌方赢则用最小将牌；已有将吃时超将吃
+    - 垫牌：垫最短套小牌（保留长套实力）
     """
 
     def rollout(
@@ -76,54 +77,75 @@ class HeuristicRollout:
         trick_cards = current_trick.get("cards", [])
 
         if not trick_cards:
-            # 领出：选最长套中最大的牌
+            # 领出：最长套 4th best
             return self._lead_card(playable, hands[position])
         else:
             lead_suit = trick_cards[0][1].suit
             if playable[0].suit == lead_suit:
-                # 跟领出花色
-                return self._follow_suit(playable, trick_cards, trump)
+                # 跟领出花色：第二家小 / 第三四家大
+                return self._follow_suit(playable, trick_cards, trump, position)
             else:
                 # 将吃或垫牌
-                return self._discard_or_trump(playable, trick_cards, trump, position)
+                return self._discard_or_trump(
+                    playable, trick_cards, trump, hands[position], position)
 
     def _lead_card(self, playable: List[Card], hand: List[Card]) -> Card:
-        """领出：从最长套中选最大牌"""
+        """领出：最长套 4th best（≥4张时），否则最大中间张，避免送大牌。"""
         suit_counts = {}
         for c in hand:
             suit_counts[c.suit] = suit_counts.get(c.suit, 0) + 1
         longest = max(suit_counts, key=lambda s: suit_counts[s])
         longest_cards = [c for c in playable if c.suit == longest]
-        if longest_cards:
-            return max(longest_cards, key=lambda c: c.rank_value)
-        return max(playable, key=lambda c: c.rank_value)
+        if not longest_cards:
+            return max(playable, key=lambda c: c.rank_value)
 
-    def _follow_suit(self, playable: List[Card], trick_cards: list, trump: str) -> Card:
-        """跟领出花色"""
-        # 找到当前墩已出的最大同花色牌
+        sorted_cards = sorted(longest_cards, key=lambda c: c.rank_value, reverse=True)
+        if suit_counts.get(longest, 0) >= 4 and len(sorted_cards) >= 4:
+            # 长四首攻：4th best
+            return sorted_cards[3]
+        # 短套：出中间张（避免送 A/K，也避免出最小让对手轻松赢）
+        honors = [c for c in sorted_cards if c.rank_value >= 9]  # J=9 以上
+        if honors:
+            return honors[-1]
+        return sorted_cards[-1]
+
+    def _follow_suit(
+        self, playable: List[Card], trick_cards: list, trump: str, position: str,
+    ) -> Card:
+        """跟领出花色：第二家小 / 第三四家大。"""
         lead_suit = trick_cards[0][1].suit
+        num_played = len(trick_cards)
+
+        # 找到当前墩已出的最大同花色牌（忽略将吃）
         best = None
         for _, c in trick_cards:
             if c.suit == lead_suit:
                 if best is None or c.rank_value > best:
                     best = c.rank_value
             elif trump and trump != "NT" and c.suit == trump:
-                # 有将吃，不考虑同花色比较
-                pass
+                pass  # 有将吃，同花色比较无意义
 
         if best is None:
             return min(playable, key=lambda c: c.rank_value)
 
         # 找能赢的牌中最小的一张
         winners = [c for c in playable if c.rank_value > best]
-        if winners:
-            return min(winners, key=lambda c: c.rank_value)
-        # 不能赢，跟最小
-        return min(playable, key=lambda c: c.rank_value)
+        if num_played == 1:
+            # 第二家：能赢则最小赢张，不能则最小（"二家小"）
+            if winners:
+                return min(winners, key=lambda c: c.rank_value)
+            return min(playable, key=lambda c: c.rank_value)
+        else:
+            # 第三/四家：能赢则最小赢张，不能则最大（"三家大"，帮同伴提升）
+            if winners:
+                return min(winners, key=lambda c: c.rank_value)
+            return max(playable, key=lambda c: c.rank_value)
 
-    def _discard_or_trump(self, playable: List[Card], trick_cards: list, trump: str,
-                          position: str = "") -> Card:
-        """不能跟领出花色时：将吃或垫牌。同伴赢则垫，敌方赢则将。"""
+    def _discard_or_trump(
+        self, playable: List[Card], trick_cards: list, trump: str,
+        hand: List[Card], position: str = "",
+    ) -> Card:
+        """不能跟领出花色时：将吃或垫牌。同伴赢则垫短套，敌方赢则将。"""
         if trump and trump != "NT":
             trump_cards = [c for c in playable if c.suit == trump]
             if trump_cards:
@@ -132,8 +154,8 @@ class HeuristicRollout:
                 current_winner = trick_winner(trick_cards, trump)
                 if current_winner in (partner, position):
                     # 同伴或自己已经在赢，不浪费将牌，垫牌
-                    return min(playable, key=lambda c: (c.suit_order, c.rank_value))
-                # 检查是否已有将吃 需要超将吃
+                    return self._discard(playable, hand)
+                # 检查是否已有将吃，需要超将吃
                 best_trump_played = None
                 for _, c in trick_cards:
                     if c.suit == trump:
@@ -143,10 +165,19 @@ class HeuristicRollout:
                     over = [c for c in trump_cards if c.rank_value > best_trump_played]
                     if over:
                         return min(over, key=lambda c: c.rank_value)
+                    # 无法超将吃，垫牌
+                    return self._discard(playable, hand)
                 # 将吃——用最小将牌
                 return min(trump_cards, key=lambda c: c.rank_value)
-        # 垫牌：垫最小
-        return min(playable, key=lambda c: (c.suit_order, c.rank_value))
+        # 垫牌：垫最短套小牌
+        return self._discard(playable, hand)
+
+    def _discard(self, playable: List[Card], hand: List[Card]) -> Card:
+        """垫牌：垫最短套小牌（保留长套实力）。"""
+        suit_counts = {}
+        for c in hand:
+            suit_counts[c.suit] = suit_counts.get(c.suit, 0) + 1
+        return min(playable, key=lambda c: (suit_counts.get(c.suit, 0), c.rank_value))
 
 
 

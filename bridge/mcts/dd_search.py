@@ -136,6 +136,13 @@ class DDSearch:
             all_played.extend(trick.cards)
         all_played.extend(trick_cards)
 
+        # 信念跟踪器：在采样循环前生成加权粒子集
+        # sampler.sample() 会自动从粒子集按权重抽样
+        belief_stats = None
+        if self.sampler.belief_tracker is not None:
+            self.sampler.belief_tracker.prepare(state, perspective)
+            belief_stats = self.sampler.belief_tracker.stats()
+
         while samples_done < adaptive_samples:
             if time.time() - start_time > self.time_limit:
                 break
@@ -246,6 +253,13 @@ class DDSearch:
             print(f"[DD] sample 1 OK: card_scores example {first_key} = {card_scores[first_key][:3]}...")
         elif samples_done > 0 and not any(card_scores.values()):
             print(f"[DD] WARNING: {samples_done} samples but all scores empty!")
+
+        # 信念跟踪器统计
+        if belief_stats and belief_stats.get("prepared"):
+            active = belief_stats["active_particles"]
+            total = belief_stats["num_particles"]
+            filtered = belief_stats["void_filtered"]
+            print(f"[DD] 信念跟踪: {active}/{total} 粒子有效, {filtered} 被 void 过滤")
 
         elapsed = time.time() - start_time
 

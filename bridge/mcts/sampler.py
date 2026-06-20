@@ -1,9 +1,11 @@
+import os
 import random
 from typing import Dict, List, Set, Optional
 
 from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER
 from bridge.mcts.state_utils import clone_hands, SUIT_DISPLAY_ORDER, RANK_DESC
 from bridge.mcts.constraints import BidConstraint, validate_sample, HCP_MAP
+from bridge.mcts.belief import collect_voids, BeliefTracker
 
 
 # 一副完整的52张牌
@@ -11,6 +13,10 @@ ALL_CARDS = [Card(suit=s, rank=r) for s in SUIT_DISPLAY_ORDER for r in RANK_DESC
 
 # 约束采样最大重试次数（_constrained_select 保证约束前提下仍保留重试安全网）
 MAX_CONSTRAINT_RETRIES = 3
+
+# 调试日志路径
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_DEBUG_LOG = os.path.join(_BASE_DIR, "dd_debug.log")
 
 
 class DealSampler:
@@ -22,6 +28,7 @@ class DealSampler:
 
     def __init__(self):
         self.constraints: Dict[str, BidConstraint] = {}
+        self.belief_tracker: Optional[BeliefTracker] = None  # 信念跟踪器（可选）
 
     def set_constraints(self, constraints: Dict[str, BidConstraint]) -> None:
         """设置叫牌约束，后续 sample() 会验证采样结果。
@@ -31,8 +38,15 @@ class DealSampler:
         """
         self.constraints = constraints or {}
 
+    def set_belief_tracker(self, tracker: Optional[BeliefTracker]) -> None:
+        """设置信念跟踪器，启用粒子滤波采样。"""
+        self.belief_tracker = tracker
+
     def sample(self, state: PlayState, perspective: str) -> Dict[str, List[Card]]:
         """采样一套与当前信息一致且满足叫牌约束的完整手牌。
+
+        若信念跟踪器已 prepare，则按权重从粒子集抽样；
+        否则回退到约束验证 + 随机采样。
 
         Args:
             state: 当前PlayState
@@ -41,6 +55,11 @@ class DealSampler:
         Returns:
             完整4家手牌 Dict[str, List[Card]]
         """
+        # 信念跟踪器路径：按权重抽样
+        if self.belief_tracker is not None and self.belief_tracker.particles:
+            return self.belief_tracker.draw()
+
+        # 原始路径：约束验证 + 随机采样
         if self.constraints:
             for attempt in range(MAX_CONSTRAINT_RETRIES):
                 result = self._sample_once(state, perspective)
@@ -91,19 +110,27 @@ class DealSampler:
         for _, card in state.current_trick.cards:
             known_cards.add(card)
 
-        # 1.5 检测 state.hands 中是否有跨位置重复牌（数据完整性检查）
+        # 1.5 检测 state.hands 中是否有跨位置重复牌（数据完整性检查），发现则就地修复
         all_hand_cards = {}
         for pos in POSITION_ORDER:
-            for c in state.hands.get(pos, []):
+            hand = state.hands.get(pos, [])
+            seen_in_this_pos = set()
+            cleaned = []
+            for c in hand:
                 key = (c.suit, c.rank)
                 if key in all_hand_cards:
                     other = all_hand_cards[key]
-                    import os as _os
-                    log_path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))), "dd_debug.log")
-                    with open(log_path, "a", encoding="utf-8") as f:
-                        f.write(f"\n[WARN] DUPLICATE in state.hands: {c} in both {other} and {pos}\n")
+                    with open(_DEBUG_LOG, "a", encoding="utf-8") as f:
+                        f.write(f"\n[WARN] DUPLICATE in state.hands: {c} in both {other} and {pos}, removed from {pos}\n")
+                elif key in seen_in_this_pos:
+                    with open(_DEBUG_LOG, "a", encoding="utf-8") as f:
+                        f.write(f"\n[WARN] DUPLICATE in state.hands[{pos}]: {c} appears twice, removed\n")
                 else:
+                    seen_in_this_pos.add(key)
                     all_hand_cards[key] = pos
+                    cleaned.append(c)
+            if len(cleaned) != len(hand):
+                state.hands[pos] = cleaned
 
         # 2. 计算每个位置剩余张数
         remaining_counts = {}
@@ -159,8 +186,11 @@ class DealSampler:
                         and (c.suit, c.rank) not in played_set]
 
         # 5. 分配未知牌到未知位置（含手牌为空的位置）
+        # 收集已知 void：void 位置不应收到 void 花色的牌
+        known_voids = collect_voids(state)
+
         if self.constraints:
-            self._distribute_biased(result, unknown_pool, remaining_counts)
+            self._distribute_biased(result, unknown_pool, remaining_counts, known_voids)
         else:
             random.shuffle(unknown_pool)
             idx = 0
@@ -168,8 +198,12 @@ class DealSampler:
                 if pos in result:
                     continue
                 count = remaining_counts[pos]
+                void_suits = known_voids.get(pos, set())
                 result[pos] = []
                 for _ in range(count):
+                    # 跳过 void 花色的牌，找下一张合法牌
+                    while idx < len(unknown_pool) and unknown_pool[idx].suit in void_suits:
+                        idx += 1
                     if idx < len(unknown_pool):
                         result[pos].append(unknown_pool[idx])
                         idx += 1
@@ -193,8 +227,13 @@ class DealSampler:
         result: Dict[str, List[Card]],
         pool: List[Card],
         remaining_counts: Dict[str, int],
+        known_voids: Dict[str, Set[str]] = None,
     ) -> None:
-        """保证约束的牌张分配：有约束的位置先分配，用 _constrained_select 满足HCP和花色下限。"""
+        """保证约束的牌张分配：有约束的位置先分配，用 _constrained_select 满足HCP和花色下限。
+
+        同时强制 void 约束：void 位置不收到 void 花色的牌。
+        """
+        known_voids = known_voids or {}
         # 按约束优先级排序：有实质性约束的位置优先分配
         unknown_positions = [p for p in POSITION_ORDER if p not in result]
 
@@ -218,20 +257,28 @@ class DealSampler:
                 result[pos] = []
                 continue
 
+            # 过滤掉 void 花色的牌
+            void_suits = known_voids.get(pos, set())
+            if void_suits:
+                available = [c for c in remaining if c.suit not in void_suits]
+            else:
+                available = remaining
+
             constraint = self.constraints.get(pos)
 
             if constraint is None:
-                # 无约束：随机选
-                if count >= len(remaining):
-                    result[pos] = list(remaining)
-                    remaining = []
+                # 无约束：随机选（从 void 过滤后的池中）
+                if count >= len(available):
+                    result[pos] = list(available)
+                    for c in result[pos]:
+                        remaining.remove(c)
                 else:
-                    result[pos] = random.sample(remaining, count)
+                    result[pos] = random.sample(available, count)
                     for c in result[pos]:
                         remaining.remove(c)
             else:
-                # 有约束：保证满足约束的选取
-                result[pos] = self._constrained_select(remaining, count, constraint)
+                # 有约束：保证满足约束的选取（从 void 过滤后的池中）
+                result[pos] = self._constrained_select(available, count, constraint)
                 for c in result[pos]:
                     remaining.remove(c)
 

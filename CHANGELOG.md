@@ -1,5 +1,94 @@
 # 开发日志
 
+## 2026-06-20
+
+### 打牌引擎大师级优化（优先级 1-7 全套实施）
+
+**背景**:
+基于对 LLM / MCTS / DD / Tiered 四引擎的系统性评估，识别出阻碍达到大师级水平的 7 个优化方向。本次提交一次性落地优先级 1-7 全部改进，核心是修复 PIMC 的 strategy fusion 和 non-locality 缺陷，并强化信号体系、首攻融合、LLM 校验等专项能力。
+
+**改进**:
+
+#### 优先级 1：三信号关键决策检测（低成本，高收益）
+- 重写 `_is_critical_decision`，从固定阈值改为三信号融合检测：
+  - **Strategy Fusion 信号**：候选牌 min-max 跨度 ≥ `TIERED_FUSION_SPREAD`(3墩) → 不同分布下结果差异大
+  - **集群信号**：候选牌按得分聚类，#1 与 #2 距离 > `TIERED_CLUSTER_SE`(2.0)×SE → 决策不确定
+  - **样本不足信号**：有效样本 < `TIERED_MIN_SAMPLES`(30) → 统计不可靠
+- 任一信号触发即升级 LLM 深度推理，避免 DD 在关键局面给出次优选择
+
+#### 优先级 2：MCTS 根节点选牌 + rollout 策略强化
+- 修复 MCTS 根节点选牌逻辑，按访问次数+胜率综合排序
+- 强化 rollout 策略：`ROLLOUT_GREEDY_PROB`=0.80，80% 概率走启发式（赢墩/跟花色/弃牌），20% 随机探索
+- MCTS 回退路径同样应用三信号检测（`_is_critical_decision_mcts`）
+
+#### 优先级 3：信念状态跟踪 + 粒子滤波
+- 新增 `bridge/mcts/belief.py`：粒子滤波器，维护 60 个加权粒子（possible worlds）
+- 通过 void 约束（某家某花色已无牌）和防守信号更新粒子权重
+- `BELIEF_SIGNAL_WEIGHT`=1.3（信号一致加权），`BELIEF_SIGNAL_PENALTY`=0.7（不一致降权）
+- DD/MCTS 采样器接入 belief tracker，采样分布更贴近真实
+
+#### 优先级 4：αμ 搜索（高成本，大师级核心）
+- 新增 `bridge/mcts/alpha_mu.py`：实现 Wbridge5 的 αμ 搜索算法
+- **核心数据结构**：
+  - `OutcomeVector`：长度 N 的 0/1 向量（N=粒子数），表示各 possible world 下庄家方是否成约
+  - `ParetoFront`：不被支配的向量集合，`add()` 自动去支配、`union()` 合并前沿
+- **算法流程**：
+  - Max 节点（庄家方）：所有候选 move 递归，front = 子 fronts 并集 → 强制所有 worlds 选同一 move（解决 strategy fusion）
+  - Min 节点（防守方）：每个 world 独立选最小化 Max 的 move（假设完美信息，解决 non-locality）
+  - 叶子节点：DDS `solve_board` 评估每个 world
+- **触发条件**：每手 ≤8 张（`ALPHA_MU_ENDGAME_CARDS`），20 worlds，深度 ≤4，时间限制 8s
+- 集成到 Tiered 引擎残局阶段，`tiered_phase: endgame_alpha_mu`
+
+#### 优先级 5：首攻 DD + LLM 融合（中等成本）
+- 新增 `_opening_lead_play`：首攻阶段并行跑 DD 蒙特卡洛（期望墩数 + min-max 区间）和 LLM（战略性首攻）
+- LLM 拿到 DD 候选统计后做最终选择，复用 `_llm_play_with_dd_hint` 机制
+- DD 不可用时回退纯 LLM 首攻
+
+#### 优先级 6：防守信号模型（中等成本，防守专项）
+- 新增 `bridge/mcts/signals.py`：编码三类防守信号
+  - **Attitude**：高=欢迎/低=不欢迎（`BELIEF_SIGNAL_MIN_RANK`=8）
+  - **Count**：张数信号（高/低暗示偶/奇张数）
+  - **Suit Preference**：花色偏好信号
+- `collect_all_signals` 从已完成墩和当前墩收集信号证据
+- `format_partner_signals_for_prompt` 将同伴信号注入 LLM 防守提示词
+- belief tracker 用信号约束过滤粒子分布
+
+#### 优先级 7：LLM 输出校验层（低成本，稳定性）
+- 新增 `bridge/mcts/llm_validator.py`：规则化校验 LLM 推荐出牌
+  - 规则1：推荐牌必须在 `playable` 中（基本合法性）
+  - 规则2：第四家"能赢却出小牌输墩"检测
+  - 规则3：第二家"小牌盖大牌"错误检测
+- 新增 `_validate_and_fallback`：校验失败时回退到 `_select_best_card`
+- 校验器异常不阻塞主流程
+
+**修改文件**:
+- `bridge/mcts/alpha_mu.py` — 新增，αμ 搜索核心（OutcomeVector + ParetoFront + 递归搜索）
+- `bridge/mcts/belief.py` — 新增，粒子滤波信念跟踪
+- `bridge/mcts/signals.py` — 新增，防守信号模型（attitude/count/suit_preference）
+- `bridge/mcts/llm_validator.py` — 新增，LLM 输出校验层
+- `bridge/play_service.py` — 集成 αμ/首攻融合/信号注入/LLM 校验，新增 `_alpha_mu_play`、`_opening_lead_play`、`_validate_and_fallback`
+- `bridge/mcts/dd_search.py` — 残局枚举阈值改为每手墩数
+- `bridge/mcts/sampler.py` — 接入 belief tracker 和信号约束
+- `bridge/mcts/search.py` — MCTS 根节点选牌逻辑修复
+- `bridge/mcts/rollout.py` — rollout 策略强化（greedy_prob=0.80）
+- `config.py` — 新增 αμ/信念/信号/Tiered 三信号参数
+- `tests/test_alpha_mu.py` — 新增，αμ 算法测试（5 用例）
+- `tests/test_belief_tracker.py` — 新增，信念跟踪测试
+- `tests/test_signals_and_validator.py` — 新增，信号模型 + LLM 校验测试
+- `tests/test_play_service_integration.py` — 新增，PlayService 全流程集成测试（15 用例）
+
+**测试验证**:
+- αμ 测试：5/5 通过（OutcomeVector 支配、ParetoFront 合并、残局端到端、DD 一致性、唯一选择）
+- PlayService 集成测试：15/15 通过（初始化/首攻/中盘/残局αμ/撤销/完成判定/多引擎一致性）
+- 端到端验证：残局场景 αμ 搜索 20 worlds、12 DDS calls、0.3s 完成搜索
+
+**对打牌引擎的影响评估**:
+- **LLM 引擎**：首攻阶段获得 DD 候选统计提示，防守阶段获得同伴信号注入，输出经规则校验。整体决策质量提升，违规出牌自动回退
+- **MCTS 引擎**：根节点选牌更准确，rollout 策略更贴近实战，belief tracker 提供更真实的采样分布
+- **DD 引擎**：残局阶段让位 αμ（≤8张），中盘阶段 belief tracker 改善采样分布，关键决策由三信号检测升级 LLM
+- **Tiered 引擎**：残局阶段优先 αμ（解决 strategy fusion），不可用回退 DD 枚举（≤6张）；首攻阶段 DD+LLM 融合；中盘三信号检测升级 LLM
+- **Perfect DD 引擎**：不受影响（全知双明手，无采样）
+
 ## 2026-06-15
 
 ### 截屏/图片识别全面优化

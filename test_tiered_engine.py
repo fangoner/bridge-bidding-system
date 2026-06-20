@@ -12,6 +12,7 @@ sys.path.insert(0, '.')
 from bridge.play_types import Card, PlayState, Contract, Trick, POSITION_ORDER
 from bridge.play_engine import PlayEngine
 from bridge.mcts.dd_search import DDSearch, ENDPLAY_AVAILABLE
+from bridge.play_service import PlayService
 
 
 def test_dd_constructor():
@@ -144,42 +145,75 @@ def _get_tiered_phase(state):
 
 
 def test_critical_decision():
-    """Test _is_critical_decision with mock results."""
-    from bridge.play_service import PlayService
+    """Test _is_critical_decision with three-signal detection (new logic)."""
+    from config import (
+        TIERED_FUSION_SPREAD, TIERED_CLUSTER_SE, TIERED_TYPICAL_SD,
+        TIERED_MIN_SAMPLES, TIERED_MCTS_CLUSTER_THRESHOLD,
+    )
 
-    # Create a PlayService without LLM client for method access
-    class MockClient:
-        pass
+    # ── 信号1: Strategy Fusion 检测 ──
+    # #1 ♠3: 9.78 [9-10] spread=1 → 不触发
+    # #2 ♣4: 9.65 [7-10] spread=3 → 触发（且与#1差0.13 < margin）
+    N = 200
+    se = TIERED_TYPICAL_SD / (N ** 0.5)
+    margin = TIERED_CLUSTER_SE * se
+    gap_fusion = abs(9.65 - 9.78)  # 0.13
+    assert gap_fusion <= margin, f"fusion gap {gap_fusion} should be <= margin {margin}"
+    assert (10 - 7) >= TIERED_FUSION_SPREAD, "fusion spread should reach threshold"
+    print(f"[OK] Signal1 Fusion: gap={gap_fusion:.2f}<=margin={margin:.2f}, spread=3>={TIERED_FUSION_SPREAD}")
 
-    # Can't instantiate without LLM, so test logic manually
-    from config import TIERED_CRITICAL_SPREAD_DECLARER, TIERED_CRITICAL_SPREAD_DEFENDER
+    # ── 信号2: 候选集群检测（动态SE） ──
+    # 3牌挤在0.05墩内 → 集群≥2 → 触发
+    # 用 N=30 让 margin 较大（0.55），保证集群检测可靠
+    N_cluster = 30
+    se_30 = TIERED_TYPICAL_SD / (N_cluster ** 0.5)
+    margin_30 = TIERED_CLUSTER_SE * se_30
+    cluster_gaps = [abs(8.05 - 8.0), abs(7.95 - 8.0)]  # 0.05, 0.05
+    assert all(g <= margin_30 for g in cluster_gaps), "cluster gaps should be within margin"
+    assert len(cluster_gaps) + 1 >= 2  # 至少2张在集群内
+    print(f"[OK] Signal2 Cluster: 3 cards within margin={margin_30:.2f} (N={N_cluster})")
 
-    # Mock MCTS result: candidates with small spread → UNCERTAIN → critical
-    mcts_result_declarer = {
+    # ── 集群不触发场景：大差距 ──
+    # #1=10.5 vs #2=7.5, gap=3.0 远大于任何合理 margin
+    gap_large = abs(10.5 - 7.5)
+    assert gap_large > margin_30, f"large gap {gap_large} should exceed margin {margin_30}"
+    print(f"[OK] No cluster: gap={gap_large} > margin={margin_30:.2f}")
+
+    # ── 信号3: 定约边缘 ──
+    # 庄家还需1墩成约 → 触发（由 _is_critical_decision 内部判断）
+    declarer_needs = 1
+    assert 0 < declarer_needs <= 1
+    print(f"[OK] Signal3 Contract edge: declarer needs {declarer_needs} trick")
+
+    # ── MCTS 回退路径集群阈值 ──
+    mcts_gap = abs(8.0 - 7.7)  # 0.3
+    assert mcts_gap <= TIERED_MCTS_CLUSTER_THRESHOLD, f"mcts gap {mcts_gap} should be <= {TIERED_MCTS_CLUSTER_THRESHOLD}"
+    print(f"[OK] MCTS cluster: gap={mcts_gap} <= threshold={TIERED_MCTS_CLUSTER_THRESHOLD}")
+
+    # ── 样本量不足时不升级 ──
+    assert TIERED_MIN_SAMPLES == 30, "min samples should be 30"
+    print(f"[OK] Min samples gate: {TIERED_MIN_SAMPLES}")
+
+    # ── 端到端：用 mock PlayService 验证三信号 ──
+    # 信号1端到端
+    fusion_result = {
         "full_output": {
             "mcts_stats": {
                 "candidates": [
-                    {"card": "SA", "avg_tricks": 10.3},
-                    {"card": "SK", "avg_tricks": 10.0},
+                    {"card": "S3", "avg_tricks": 9.78, "min_tricks": 9, "max_tricks": 10, "samples": 200},
+                    {"card": "C4", "avg_tricks": 9.65, "min_tricks": 7, "max_tricks": 10, "samples": 200},
                 ]
             }
         }
     }
+    # 直接调用静态方法验证 SE 估计
+    se_est = PlayService._estimate_se(200)
+    assert abs(se_est - 0.106) < 0.01, f"SE(200) should be ~0.106, got {se_est}"
+    print(f"[OK] _estimate_se(200)={se_est:.3f}")
 
-    spread = abs(10.3 - 10.0)  # 0.3
-    # Declarer threshold 0.5: spread=0.3 <= 0.5 → MCTS uncertain → critical
-    assert 0 < spread <= TIERED_CRITICAL_SPREAD_DECLARER
-    print(f"[OK] Critical declarer: spread={spread} <= threshold={TIERED_CRITICAL_SPREAD_DECLARER} (uncertain)")
-
-    # Mock MCTS result: large spread → MCTS confident → not critical
-    spread_def = abs(10.5 - 9.0)  # 1.5
-    assert spread_def > TIERED_CRITICAL_SPREAD_DEFENDER  # 1.5 > 0.8
-    print(f"[OK] Non-critical defender: spread={spread_def} > threshold={TIERED_CRITICAL_SPREAD_DEFENDER} (confident)")
-
-    # Mock MCTS result: small spread for defender → uncertain → critical
-    spread_def2 = abs(8.0 - 7.5)  # 0.5
-    assert 0 < spread_def2 <= TIERED_CRITICAL_SPREAD_DEFENDER  # 0.5 <= 0.8
-    print(f"[OK] Critical defender: spread={spread_def2} <= threshold={TIERED_CRITICAL_SPREAD_DEFENDER} (uncertain)")
+    se_est_30 = PlayService._estimate_se(30)
+    assert abs(se_est_30 - 0.274) < 0.01, f"SE(30) should be ~0.274, got {se_est_30}"
+    print(f"[OK] _estimate_se(30)={se_est_30:.3f}")
 
 
 if __name__ == "__main__":

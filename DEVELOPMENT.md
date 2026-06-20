@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。v1.39新增截屏/图片识别导入牌局（Doubao Vision API）、定约/首攻确认对话框、研究模式、花色主题感知系统。v1.40 Tiered分层引擎重做（DD替代MCTS中盘）、新增Perfect DD全知引擎和人类DD提示功能。
+本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。v1.39新增截屏/图片识别导入牌局（Doubao Vision API）、定约/首攻确认对话框、研究模式、花色主题感知系统。v1.40 Tiered分层引擎重做（DD替代MCTS中盘）、新增Perfect DD全知引擎和人类DD提示功能。v1.41打牌引擎大师级优化：αμ搜索解决PIMC缺陷、信念跟踪粒子滤波、防守信号模型、LLM校验层、三信号关键决策检测、首攻DD+LLM融合、MCTS根节点选牌修复。
 
 ## 功能模块
 
@@ -178,10 +178,41 @@
   - **DD** (`"dd"`): 纯蒙特卡洛 + solve_board 双明手评估
   - **Perfect DD** (`"perfect"`): 全知双明手，一次 solve_board 得所有候选精确分，仅发牌练习模式可用
   - **Tiered** (`"tiered"`): 分层自动调度 —
-    - 首攻(LEAD) → LLM reasoning, 明手亮开 → LLM reasoning
-    - 残局(<=6张/人) → DD 精确枚举
-    - 中盘 → DD 采样 + 关键决策升级 LLM
+    - 首攻(LEAD) → DD 蒙特卡洛 + LLM 战略性首攻融合（v1.41）
+    - 明手亮开 → LLM reasoning
+    - 残局(≤8张/人) → αμ 搜索多步前瞻（v1.41），不可用回退 DD 精确枚举(≤6张)
+    - 中盘 → DD 采样 + 三信号关键决策升级 LLM（v1.41）
     - endplay 不可用时回退 MCTS
+- **αμ 搜索** (`bridge/mcts/alpha_mu.py`, v1.41新增):
+  - 实现 Wbridge5 的 αμ 算法，解决 PIMC 的 strategy fusion 和 non-locality 缺陷
+  - `OutcomeVector`: 长度 N 的 0/1 向量（N=粒子数），表示各 possible world 下庄家方是否成约
+  - `ParetoFront`: 不被支配的向量集合，`add()` 自动去支配、`union()` 合并前沿
+  - Max 节点（庄家方）：所有候选 move 递归，front = 子 fronts 并集（强制所有 worlds 选同一 move）
+  - Min 节点（防守方）：每个 world 独立选最小化 Max 的 move（假设完美信息）
+  - 叶子节点：DDS `solve_board` 评估每个 world
+  - 触发条件：`ALPHA_MU_ENDGAME_CARDS`=8, `ALPHA_MU_NUM_WORLDS`=20, `ALPHA_MU_MAX_DEPTH`=4, `ALPHA_MU_TIME_LIMIT`=8.0s
+- **信念状态跟踪** (`bridge/mcts/belief.py`, v1.41新增):
+  - 粒子滤波器，维护 `BELIEF_NUM_PARTICLES`=60 个加权粒子（possible worlds）
+  - 通过 void 约束（某家某花色已无牌）和防守信号更新粒子权重
+  - `BELIEF_SIGNAL_WEIGHT`=1.3（信号一致加权），`BELIEF_SIGNAL_PENALTY`=0.7（不一致降权）
+  - DD/MCTS 采样器接入 belief tracker，采样分布更贴近真实
+- **防守信号模型** (`bridge/mcts/signals.py`, v1.41新增):
+  - 三类信号：Attitude（高=欢迎/低=不欢迎）、Count（张数信号）、Suit Preference（花色偏好）
+  - `collect_all_signals(state)`: 从已完成墩和当前墩收集信号证据
+  - `format_partner_signals_for_prompt`: 将同伴信号注入 LLM 防守提示词
+  - belief tracker 用信号约束过滤粒子分布
+- **LLM 输出校验** (`bridge/mcts/llm_validator.py`, v1.41新增):
+  - `validate_llm_play(card, playable, state)`: 规则化校验 LLM 推荐出牌
+  - 规则1：推荐牌必须在 `playable` 中（基本合法性）
+  - 规则2：第四家"能赢却出小牌输墩"检测
+  - 规则3：第二家"小牌盖大牌"错误检测
+  - `_validate_and_fallback`: 校验失败时回退到 `_select_best_card`
+- **三信号关键决策检测** (v1.41重写):
+  - `_is_critical_decision`: 三信号融合检测，替代固定阈值
+    - Strategy Fusion 信号：候选牌 min-max 跨度 ≥ `TIERED_FUSION_SPREAD`(3墩)
+    - 集群信号：#1 与 #2 距离 > `TIERED_CLUSTER_SE`(2.0)×SE
+    - 样本不足信号：有效样本 < `TIERED_MIN_SAMPLES`(30)
+  - 任一信号触发即升级 LLM 深度推理
 - **引擎选择**: 前端 SettingsPanel 下拉框选引擎，API play_engine 参数控制
 - **DD 提示**: 眼睛图标一键切换，showDDHints 默认 true + localStorage 持久化，所有引擎模式通用
 - **前端组件**:
@@ -675,7 +706,20 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 
 ## 版本历史
 
-### v1.38 (当前版本)
+### v1.41 (当前版本)
+- **打牌引擎大师级优化（优先级 1-7 全套实施）**
+  - **优先级 1：三信号关键决策检测** — 重写 `_is_critical_decision`，融合 Strategy Fusion 信号（min-max 跨度≥3墩）、集群信号（#1-#2 距离>2.0×SE）、样本不足信号（<30样本），任一触发即升级 LLM
+  - **优先级 2：MCTS 根节点选牌 + rollout 策略强化** — 修复根节点选牌逻辑（访问次数+胜率综合排序），`ROLLOUT_GREEDY_PROB`=0.80 启发式主导
+  - **优先级 3：信念状态跟踪 + 粒子滤波** — 新增 `bridge/mcts/belief.py`，60 个加权粒子，通过 void 约束和防守信号更新权重，DD/MCTS 采样器接入
+  - **优先级 4：αμ 搜索（大师级核心）** — 新增 `bridge/mcts/alpha_mu.py`，实现 Wbridge5 αμ 算法，OutcomeVector + ParetoFront 数据结构，Max 节点强制所有 worlds 选同一 move（解决 strategy fusion），Min 节点每 world 独立选（解决 non-locality），残局 ≤8 张触发
+  - **优先级 5：首攻 DD + LLM 融合** — 新增 `_opening_lead_play`，首攻阶段并行跑 DD 蒙特卡洛和 LLM，LLM 拿 DD 候选统计后做最终选择
+  - **优先级 6：防守信号模型** — 新增 `bridge/mcts/signals.py`，三类信号（Attitude/Count/Suit Preference），`collect_all_signals` 收集证据，`format_partner_signals_for_prompt` 注入 LLM 防守提示词
+  - **优先级 7：LLM 输出校验层** — 新增 `bridge/mcts/llm_validator.py`，规则化校验（合法性/第四家能赢却出小/第二家小牌盖大），校验失败回退 `_select_best_card`
+  - **集成测试** — 新增 `tests/test_play_service_integration.py`（15 用例全通过），覆盖初始化/首攻/中盘/残局αμ/撤销/完成判定/多引擎一致性
+  - **对引擎影响**：LLM 引擎首攻+防守增强；MCTS 根节点+rollout 修复；DD 残局让位 αμ；Tiered 残局优先 αμ 回退 DD 枚举；Perfect DD 不受影响
+  - 修改文件: `bridge/mcts/alpha_mu.py`(新增), `bridge/mcts/belief.py`(新增), `bridge/mcts/signals.py`(新增), `bridge/mcts/llm_validator.py`(新增), `bridge/play_service.py`, `bridge/mcts/dd_search.py`, `bridge/mcts/sampler.py`, `bridge/mcts/search.py`, `bridge/mcts/rollout.py`, `config.py`, `tests/test_alpha_mu.py`(新增), `tests/test_belief_tracker.py`(新增), `tests/test_signals_and_validator.py`(新增), `tests/test_play_service_integration.py`(新增)
+
+### v1.38
 - **DeepSeek V4 非思考模式显式禁用修复**
   - 根因：DeepSeek V4 thinking 默认为 `enabled`，非思考模式下不传参数等价于开启思考
   - `chat()` 和 `chat_json()` 增加 `extra_body={"thinking": {"type": "disabled"}}` 显式关闭

@@ -265,7 +265,6 @@ function App({ darkMode, onToggleDarkMode }) {
     setShowDDHints(next)
     try { localStorage.setItem('bridge_showDDHints', String(next)) } catch {}
   }
-  const [selectedPlayCard, setSelectedPlayCard] = useState(null) // 选中的出牌（PlayDetailPanel已移除，保留用于清理逻辑）
   const [selectedPlayRecord, setSelectedPlayRecord] = useState(null) // 桌面点击选中的AI打牌记录
   const [playStarted, setPlayStarted] = useState(false) // 打牌是否已开始（第一张牌打出后）
   const [playInitiated, setPlayInitiated] = useState(false) // 打牌是否已启动（点击"开始"后或重新打牌AI首攻）
@@ -477,7 +476,6 @@ function App({ darkMode, onToggleDarkMode }) {
       setShowPlayPanel(false)
       setPlayState(null)
       setAiPlayHistory([])
-      setSelectedPlayCard(null)
       setIsPlayPaused(false)
     } else if (record.play && record.play.tricks && record.play.tricks.length > 0) {
       // 兼容旧格式：完整记录含 tricks 数组
@@ -516,14 +514,12 @@ function App({ darkMode, onToggleDarkMode }) {
       setShowPlayPanel(false)
       setPlayState(null)
       setAiPlayHistory([])
-      setSelectedPlayCard(null)
       setIsPlayPaused(false)
     } else {
       setLoadedPlayRecord(null)
       setShowPlayPanel(false)
       setPlayState(null)
       setAiPlayHistory([])
-      setSelectedPlayCard(null)
       setIsPlayPaused(false)
     }
 
@@ -725,7 +721,6 @@ function App({ darkMode, onToggleDarkMode }) {
       setShowPlayPanel(false)
       setPlayState(null)
       setAiPlayHistory([])
-      setSelectedPlayCard(null)
       setIsPlayPaused(false)
       setLoadedPlayRecord(null)
       setLastCompletedTrick(null)
@@ -765,8 +760,7 @@ function App({ darkMode, onToggleDarkMode }) {
         setShowPlayPanel(false)
         setPlayState(null)
         setAiPlayHistory([])
-        setSelectedPlayCard(null)
-        setIsPlayPaused(false)
+          setIsPlayPaused(false)
         setLoadedPlayRecord(null)
         setLastCompletedTrick(null)
         setImageOpeningLead(data.opening_lead || null)
@@ -866,8 +860,7 @@ function App({ darkMode, onToggleDarkMode }) {
         setShowPlayPanel(false)
         setPlayState(null)
         setAiPlayHistory([])
-        setSelectedPlayCard(null)
-        setIsPlayPaused(false)
+          setIsPlayPaused(false)
         setLoadedPlayRecord(null)
         setLastCompletedTrick(null)
         // 如果识别到完整定约，设置直接打牌信息
@@ -968,7 +961,6 @@ function App({ darkMode, onToggleDarkMode }) {
       setShowPlayPanel(false)
       setPlayState(null)
       setAiPlayHistory([])
-      setSelectedPlayCard(null)
       setIsPlayPaused(false)
       setLoadedPlayRecord(null)
       setLastCompletedTrick(null)
@@ -1061,7 +1053,7 @@ function App({ darkMode, onToggleDarkMode }) {
     setShowPlayPanel(false)
     setPlayState(null)
     setAiPlayHistory([])
-    setSelectedPlayCard(null)
+    
     setIsPlayPaused(false)
     setPlayStarted(false)
     setPlayInitiated(false)
@@ -1103,7 +1095,7 @@ function App({ darkMode, onToggleDarkMode }) {
     setShowPlayPanel(false)
     setPlayState(null)
     setAiPlayHistory([])
-    setSelectedPlayCard(null)
+    
     setIsPlayPaused(false)
     setLoadedPlayRecord(null)
   }, [gameMode, practiceDirection])
@@ -2093,8 +2085,7 @@ function App({ darkMode, onToggleDarkMode }) {
       if (result.success) {
         const state = result.state
         setPlayState(state)
-        setSelectedPlayCard(null)
-        setSelectedPlayRecord(null)
+          setSelectedPlayRecord(null)
         
         // 撤销的牌是刚出的那张，出牌者现在是current_player（撤销后轮到他重新出牌）
         // 如果这张牌是AI出的，从aiPlayHistory中删除对应记录
@@ -2216,8 +2207,13 @@ function App({ darkMode, onToggleDarkMode }) {
     const isHuman = isCurrentPlayerHuman()
     if (!isHuman || playState.phase === 'complete') return
     setDDHintsLoading(true)
-    getDDHints().then(data => { if (data?.success) setDDHints(data.hints) }).finally(() => setDDHintsLoading(false))
-  }, [showDDHints, playState?.current_player, showPlayPanel])
+    let cancelled = false
+    getDDHints()
+      .then(data => { if (!cancelled && data?.success) setDDHints(data.hints) })
+      .catch(err => { if (!cancelled) console.error('DD hints fetch failed:', err) })
+      .finally(() => { if (!cancelled) setDDHintsLoading(false) })
+    return () => { cancelled = true }
+  }, [showDDHints, playState?.current_player, playState?.phase, showPlayPanel, positionRoles])
 
   // AI自动出牌
   useEffect(() => {
@@ -2244,7 +2240,7 @@ function App({ darkMode, onToggleDarkMode }) {
 
   // 最后一墩自动出牌（仅剩一张时无需选择）
   useEffect(() => {
-    if (!showPlayPanel || !playState || aiThinking || playLoading || !playInitiated) return
+    if (!showPlayPanel || !playState || aiThinking || playLoading || isPlayPaused || !playInitiated) return
     if (playState.phase === 'complete') return
     const cp = playState.current_player
     if (!cp) return
@@ -2256,7 +2252,7 @@ function App({ darkMode, onToggleDarkMode }) {
       const timer = setTimeout(() => handlePlayCard(cp, card), 400)
       return () => clearTimeout(timer)
     }
-  }, [playState?.current_player, playState?.hands?.[playState?.current_player]?.length, showPlayPanel, playInitiated, aiThinking, playLoading])
+  }, [playState?.current_player, playState?.hands?.[playState?.current_player]?.length, showPlayPanel, playInitiated, aiThinking, playLoading, isPlayPaused])
 
   // 轮到人类出牌时自动暂停（每墩首张除外，由继续按钮控制）
   useEffect(() => {
