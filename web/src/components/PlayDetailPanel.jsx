@@ -1,7 +1,58 @@
-import { useState, useEffect, useRef } from 'react'
-import { Box, Typography, Paper, Divider, Button, ToggleButtonGroup, ToggleButton, useTheme } from '@mui/material'
+import { useState, useEffect, useRef, useMemo } from 'react'
+import { Box, Typography, Paper, Divider, Button, ToggleButtonGroup, ToggleButton, useTheme, Chip } from '@mui/material'
 import { getSuitColor } from '../constants/suits'
 import { PANEL_LAYOUT } from '../styles/constants'
+
+// ── 桥牌计分（前端版本）──
+const TRICK_VALUE = { '♣': 20, '♦': 20, '♥': 30, '♠': 30, 'NT': 30 }
+const NT_FIRST = 10
+
+function calcScore(level, suit, doubled, redoubled, tricksMade, vul) {
+  const needed = level + 6
+  const diff = tricksMade - needed
+  if (diff >= 0) return contractMade(level, suit, doubled, redoubled, diff, vul)
+  return contractDown(-diff, doubled, redoubled, vul)
+}
+
+function contractMade(level, suit, doubled, redoubled, overtricks, vul) {
+  const mult = redoubled ? 4 : doubled ? 2 : 1
+  let score = TRICK_VALUE[suit] * level * mult
+  if (suit === 'NT') score += NT_FIRST * (doubled || redoubled ? mult : 1)
+
+  if (overtricks > 0) {
+    let each
+    if (doubled || redoubled) each = vul ? (redoubled ? 400 : 200) : (redoubled ? 200 : 100)
+    else each = TRICK_VALUE[suit]
+    score += each * overtricks
+  }
+
+  if ((TRICK_VALUE[suit] * level) >= 100) score += vul ? 500 : 300  // game bonus
+  else score += 50  // partscore
+
+  if (level === 6) score += vul ? 750 : 500
+  else if (level === 7) score += vul ? 1500 : 1000
+
+  if (doubled) score += 50
+  else if (redoubled) score += 100
+
+  return score
+}
+
+function contractDown(undertricks, doubled, redoubled, vul) {
+  let penalty = 0
+  if (doubled || redoubled) {
+    const perTrick = vul ? [200, 300, 300] : [100, 200, 200]
+    for (let i = 1; i <= undertricks; i++) {
+      penalty += i <= 3 ? perTrick[i - 1] : 300
+    }
+    if (redoubled) penalty *= 2
+  } else {
+    penalty = vul
+      ? [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300][Math.min(undertricks - 1, 12)]
+      : [50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650][Math.min(undertricks - 1, 12)]
+  }
+  return -penalty
+}
 
 function PlayDetailPanel({
   isMobile,
@@ -24,6 +75,11 @@ function PlayDetailPanel({
   onSave,
   canSave,
   imageOpeningLead,
+  reviewCursor,
+  onReviewPrev,
+  onReviewNext,
+  onRewindToTrick,
+  onStartReview,
 }) {
   const [selectedRecord, setSelectedRecord] = useState(null)
   const [viewMode, setViewMode] = useState('output')
@@ -62,6 +118,21 @@ function PlayDetailPanel({
   const isComplete = playState?.phase === 'complete'
   const isStartOfTrick = (playState?.current_trick?.cards?.length || 0) === 0
 
+  // 完成后计算得分（无局 + 有局两种）
+  const finalScores = useMemo(() => {
+    if (!isComplete || !contract) return null
+    const lvl = contract.level || 0
+    const st = contract.suit || 'NT'
+    const dbl = contract.doubled || false
+    const rdl = contract.redoubled || false
+    const made = declarerTricks
+    if (!lvl) return null
+    return {
+      nonVul: calcScore(lvl, st, dbl, rdl, made, false),
+      vul: calcScore(lvl, st, dbl, rdl, made, true),
+    }
+  }, [isComplete, contract, declarerTricks])
+
   // 估算token数（中文字符≈1 token，其他≈4字符/token）
   const estimateTokens = (text) => {
     if (!text) return 0
@@ -92,22 +163,33 @@ function PlayDetailPanel({
       opening_lead: '首攻',
       dummy_reveal: '明手亮开',
       first_trick: '第一墩',
+      first_trick_third: '第一墩·三家',
+      first_trick_fourth: '第一墩·四家',
       midgame: '中盘DD',
       midgame_mcts: '中盘MCTS',
       critical: '关键LLM',
       critical_mcts: '关键LLM',
       endgame: '残局DD',
+      endgame_alpha_mu: '残局αμ',
     }
     const tieredPhaseLabel = TIERED_PHASE_LABELS[fullOutput.tiered_phase] || ''
 
-    // 输出模式的字段定义（v1.38 精简：局面评估+候选对比+核心逻辑）
-    const fields = [
-      { key: '候选对比', label: '抉择过程', color: 'text.primary', multiline: true },
-      { key: '核心逻辑', label: '核心逻辑', color: '#2e7d32' },
-      { key: '局面评估', label: '局面评估', color: '#1976d2', multiline: true },
-    ]
+    // 输出模式：显示 fullOutput 中所有有效字段（排除内部/已渲染的）
+    const SKIP_KEYS = ['mcts_stats', 'tiered_phase', 'tiered_dd_fallback', 'tiered_mcts_fallback', 'validation_warning']
+    const FIELD_COLORS = ['#e65100', 'text.primary', '#2e7d32', '#1976d2', '#6a1b9a', '#1565c0']
+    const fields = Object.keys(fullOutput)
+      .filter(k => !SKIP_KEYS.includes(k) && fullOutput[k] != null && fullOutput[k] !== '')
+      .map((k, i) => ({
+        key: k,
+        label: k,
+        color: FIELD_COLORS[i % FIELD_COLORS.length],
+        multiline: typeof fullOutput[k] === 'string' && fullOutput[k].length > 40,
+      }))
+    // dd_hint 确保在最前面
+    if (fullOutput.dd_hint && !fields.find(f => f.key === 'dd_hint')) {
+      fields.unshift({ key: 'dd_hint', label: 'DD注入', color: '#e65100', multiline: true })
+    }
 
-    // 兼容旧字段名，确保旧记录也能显示；防御性转为字符串避免React渲染报错
     const getValue = (key) => {
       const val = fullOutput[key] || record[key]
       if (val === null || val === undefined) return ''
@@ -176,11 +258,7 @@ function PlayDetailPanel({
         {viewMode === 'output' ? (
           // 输出模式：显示AI返回的字段
           <>
-            {fields.filter(({ key }) => {
-              const isNonLLM = record.used_engine && record.used_engine !== 'llm'
-              if (!isNonLLM) return true
-              return key !== '候选对比' && key !== '核心逻辑'
-            }).map(({ key, label, color, multiline }) => {
+            {fields.map(({ key, label, color, multiline }) => {
               const value = getValue(key)
               if (!value) return null
               return (
@@ -208,24 +286,34 @@ function PlayDetailPanel({
                 </Box>
               )
             })}
-            {(record.used_engine === 'mcts' || (record.used_engine || '') === 'dd' || record.used_engine === 'tiered' || record.used_engine === 'perfect') && (() => {
+            {(record.used_engine === 'mcts' || (record.used_engine || '') === 'dd' || record.used_engine === 'tiered' || record.used_engine === 'perfect' || record.used_engine === 'alphamu') && (() => {
               try {
                 const mctsRaw = fullOutput.mcts_stats
-                if (!mctsRaw) { console.log('[MCTS] no mcts_stats in fullOutput'); return null }
+                if (!mctsRaw) { console.log('[Stats] no mcts_stats'); return null }
                 const mctsData = typeof mctsRaw === 'string' ? JSON.parse(mctsRaw) : mctsRaw
                 const candidates = mctsData.candidates
-                if (!candidates || candidates.length === 0) { console.log('[MCTS] no candidates'); return null }
-                const isDD = (record.used_engine || '') === 'dd' || candidates[0].samples !== undefined
+                if (!candidates || candidates.length === 0) { console.log('[Stats] no candidates'); return null }
 
-                // MCTS: bar width = visits比例; DD: bar width = avg_tricks比例
-                const barValues = candidates.map(c => isDD ? (c.avg_tricks || 0) : (c.visits || 0))
+                const isAlphaMu = mctsData.algorithm === 'alpha_mu'
+                const isDD = (record.used_engine || '') === 'dd' || (!isAlphaMu && candidates[0].samples !== undefined)
+
+                // αμ: bar = success_rate (成功率 0-1); DD: bar = avg_tricks; MCTS: bar = visits
+                const barValues = candidates.map(c =>
+                  isAlphaMu ? ((c.success_rate || 0) * 100) :
+                  isDD ? (c.avg_tricks || 0) :
+                  (c.visits || 0)
+                )
                 const maxVal = Math.max(...barValues.map(v => Math.abs(v)), 0.01)
-                const barColors = ['#1976d2', '#42a5f5', '#90caf9', '#bbdefb', '#e3f2fd']
-                console.log('[MCTS] rendering bars:', mctsData.iterations, 'candidates:', candidates.length)
+                const barColors = isAlphaMu
+                  ? ['#6a1b9a', '#9c27b0', '#ce93d8', '#e1bee7', '#f3e5f5']
+                  : ['#1976d2', '#42a5f5', '#90caf9', '#bbdefb', '#e3f2fd']
                 return (
-                  <Box key="mcts" sx={{ mt: 0.75 }}>
+                  <Box key="stats" sx={{ mt: 0.75 }}>
                     <Typography variant="caption" sx={{ fontSize: '0.7rem', color: colorMuted, mb: 0.25, display: 'block' }}>
-                      {isDD ? 'DDMC' : 'MCTS'}: {mctsData.iterations}次搜索 · {mctsData.time_sec}s · {mctsData.iters_per_sec}it/s · 剩{mctsData.remaining_cards}张
+                      {isAlphaMu
+                        ? `αμ: ${mctsData.num_worlds || '?'} worlds · depth≤4 · ${mctsData.nodes_searched || '?'} nodes · ${mctsData.iterations || '?'} DDS · ${mctsData.time_sec || '?'}s`
+                        : `${isDD ? 'DDMC' : 'MCTS'}: ${mctsData.iterations}次搜索 · ${mctsData.time_sec}s · ${mctsData.iters_per_sec}it/s · 剩${mctsData.remaining_cards}张`
+                      }
                     </Typography>
                     {candidates.map((c, i) => (
                       <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.15 }}>
@@ -241,14 +329,19 @@ function PlayDetailPanel({
                             transition: 'width 0.3s',
                           }} />
                         </Box>
-                        <Typography variant="caption" sx={{ minWidth: 68, fontSize: '0.65rem', color: colorMuted, textAlign: 'right' }}>
-                          {isDD ? `${c.avg_tricks}墩 [${c.min_tricks}-${c.max_tricks}]` : `${c.visits}次 · ${c.avg_tricks}墩`}
+                        <Typography variant="caption" sx={{ minWidth: 72, fontSize: '0.65rem', color: colorMuted, textAlign: 'right' }}>
+                          {isAlphaMu
+                            ? `${((c.success_rate || 0) * 100).toFixed(0)}% · ${c.success_count || 0}/${c.total_useful || '?'} · front${c.front_size || 1}`
+                            : isDD
+                              ? `${c.avg_tricks}墩 [${c.min_tricks}-${c.max_tricks}]`
+                              : `${c.visits}次 · ${c.avg_tricks}墩`
+                          }
                         </Typography>
                       </Box>
                     ))}
                   </Box>
                 )
-              } catch (e) { console.error('[MCTS] viz error:', e); return null }
+              } catch (e) { console.error('[Stats] viz error:', e); return null }
             })()}
           </>
         ) : (
@@ -331,22 +424,26 @@ function PlayDetailPanel({
 
     const renderTrickRow = (trick, idx) => {
       const isCurrentTrick = trick.isCurrentTrick
+      const isReviewTrick = reviewCursor != null && idx === reviewCursor
       const isDeclarerSide = !isCurrentTrick && (trick.winner === contract?.declarer || trick.winner === dummy)
-      
+
       return (
-        <Box 
-          key={idx} 
-          sx={{ 
-            display: 'flex', 
-            alignItems: 'center', 
+        <Box
+          key={idx}
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
             gap: 0.5,
             py: 0.25,
             px: 0.5,
-            bgcolor: isCurrentTrick 
-              ? (isDark ? 'rgba(156, 39, 176, 0.15)' : '#f3e5f5')
-              : (isDeclarerSide ? (isDark ? 'rgba(99, 102, 241, 0.12)' : '#e3f2fd') : (isDark ? 'rgba(255, 152, 0, 0.1)' : '#fff3e0')),
+            bgcolor: isReviewTrick
+              ? (isDark ? 'rgba(255, 193, 7, 0.25)' : '#fff8e1')
+              : isCurrentTrick
+                ? (isDark ? 'rgba(156, 39, 176, 0.15)' : '#f3e5f5')
+                : (isDeclarerSide ? (isDark ? 'rgba(99, 102, 241, 0.12)' : '#e3f2fd') : (isDark ? 'rgba(255, 152, 0, 0.1)' : '#fff3e0')),
             borderRadius: 0.5,
-            border: isCurrentTrick ? (isDark ? '1px dashed rgba(156, 39, 176, 0.5)' : '1px dashed #9c27b0') : 'none',
+            border: isReviewTrick ? '2px solid #ffc107'
+              : isCurrentTrick ? (isDark ? '1px dashed rgba(156, 39, 176, 0.5)' : '1px dashed #9c27b0') : 'none',
           }}
         >
           <Typography variant="caption" sx={{ fontWeight: 'bold', fontSize: '0.75rem', minWidth: 35 }}>
@@ -392,9 +489,30 @@ function PlayDetailPanel({
 
     return (
       <Box sx={{ mt: 1 }}>
-        <Typography variant="subtitle2" gutterBottom sx={{ fontSize: '0.75rem' }}>
-          出牌记录 ({tricks.length}/13)
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+          <Typography variant="subtitle2" sx={{ fontSize: '0.75rem' }}>
+            出牌记录 ({tricks.length}/13)
+          </Typography>
+          {reviewCursor != null && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <Button size="small" onClick={onReviewPrev} disabled={reviewCursor === 0}
+                sx={{ fontSize: '0.7rem', minWidth: 24, py: 0 }}>◀</Button>
+              <Typography variant="caption" sx={{ fontSize: '0.75rem', fontWeight: 600, minWidth: 50, textAlign: 'center' }}>
+                第{reviewCursor + 1}/{playState?.tricks?.length || '?'}墩
+              </Typography>
+              <Button size="small" onClick={onReviewNext}
+                disabled={reviewCursor >= (playState?.tricks?.length || 0) - 1}
+                sx={{ fontSize: '0.7rem', minWidth: 24, py: 0 }}>▶</Button>
+              {onRewindToTrick && (
+                <Button size="small" color="warning" variant="outlined"
+                  onClick={() => onRewindToTrick(reviewCursor)}
+                  sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 52, py: 0 }}>
+                  从此重打
+                </Button>
+              )}
+            </Box>
+          )}
+        </Box>
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
             {allTricks.slice(0, 7).map((trick, idx) => renderTrickRow(trick, idx))}
@@ -433,6 +551,35 @@ function PlayDetailPanel({
           <Typography component="span" variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
             需要 <strong>{contract?.tricks_needed || '?'}</strong>
           </Typography>
+          {isComplete && finalScores && (
+            <>
+              <Chip
+                label={`无局 ${finalScores.nonVul >= 0 ? '+' : ''}${finalScores.nonVul}`}
+                size="small"
+                sx={{
+                  fontSize: '0.7rem', fontWeight: 700, height: 22,
+                  bgcolor: isDark ? 'rgba(76,175,80,0.2)' : '#e8f5e9',
+                  color: finalScores.nonVul >= 0 ? '#2e7d32' : '#c62828',
+                }}
+              />
+              <Chip
+                label={`有局 ${finalScores.vul >= 0 ? '+' : ''}${finalScores.vul}`}
+                size="small"
+                sx={{
+                  fontSize: '0.7rem', fontWeight: 700, height: 22,
+                  bgcolor: isDark ? 'rgba(255,152,0,0.2)' : '#fff3e0',
+                  color: finalScores.vul >= 0 ? '#e65100' : '#c62828',
+                }}
+              />
+            </>
+          )}
+          {isComplete && reviewCursor == null && onStartReview && (
+            <Button size="small" variant="contained" color="warning"
+              onClick={onStartReview}
+              sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.1, height: 22 }}>
+              复盘
+            </Button>
+          )}
         </Box>
         <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
           {!isComplete && !playInitiated && (

@@ -93,6 +93,7 @@ function SettingsPanel({
                 <MenuItem value="dd">DD 蒙地卡罗</MenuItem>
                 <MenuItem value="perfect" disabled={mode !== 'practice'} title={mode !== 'practice' ? '完美DD需要四家完整手牌，仅发牌练习模式可用' : ''}>完美DD (全知)</MenuItem>
                 <MenuItem value="tiered">Tiered 分层</MenuItem>
+                <MenuItem value="alphamu">αμ 搜索</MenuItem>
               </Select>
             </FormControl>
             {(playEngine === 'dd' || playEngine === 'tiered') && (

@@ -269,6 +269,7 @@ function App({ darkMode, onToggleDarkMode }) {
   const [playStarted, setPlayStarted] = useState(false) // 打牌是否已开始（第一张牌打出后）
   const [playInitiated, setPlayInitiated] = useState(false) // 打牌是否已启动（点击"开始"后或重新打牌AI首攻）
   const [loadedPlayRecord, setLoadedPlayRecord] = useState(null) // 从历史记录预加载的打牌数据
+  const [reviewCursor, setReviewCursor] = useState(null) // 复盘模式游标: null=非复盘, 0=第1墩
   const prevTricksCountRef = useRef(0) // 用于检测一墩完成
   // 直接打牌：无叫牌定约时弹出输入框
   const [contractDialogOpen, setContractDialogOpen] = useState(false)
@@ -1762,6 +1763,10 @@ function App({ darkMode, onToggleDarkMode }) {
       setIsPlayPaused(true)
       setPlayInitiated(true)
       setPlayStarted(true)
+      // 已完成记录 → 进入复盘模式
+      if (savedState.phase === 'complete') {
+        setReviewCursor(0)
+      }
       return
     }
 
@@ -1783,6 +1788,83 @@ function App({ darkMode, onToggleDarkMode }) {
     }
     setContractDialogOpen(true)
     return
+  }
+
+  const handleRewindToTrick = async (targetTrick) => {
+    // targetTrick: 从第几墩开始重打 (0=第1墩, 即从头开始)
+    const savedState = loadedPlayRecord?.playState
+    if (!savedState?.contract) return
+    setPlayLoading(true)
+    setError(null)
+    try {
+      const contract = savedState.contract
+      let biddingStr = null
+      let meaningLines = ''
+      if (biddingSequence.length > 0) {
+        const seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
+        meaningLines = aiBiddingHistory
+          .filter(r => r.result?.meaning)
+          .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
+          .join('\n')
+        biddingStr = meaningLines
+          ? `${seqStr}\n\n叫牌含义:\n${meaningLines}`
+          : seqStr
+      }
+      const initResult = await playInit(
+        hands,
+        `${contract.level}${contract.suit}`,
+        contract.declarer,
+        positionRoles,
+        contract.doubled || contract.isDouble || false,
+        contract.redoubled || contract.isRedouble || false,
+        biddingStr,
+        meaningLines
+      )
+      if (!initResult.success) {
+        console.error('重打初始化失败:', initResult.error)
+        setPlayLoading(false)
+        return
+      }
+      // 回放前 targetTrick 墩的牌
+      const cardsToReplay = []
+      if (savedState.tricks) {
+        for (let i = 0; i < targetTrick && i < savedState.tricks.length; i++) {
+          for (const [pos, card] of savedState.tricks[i].cards || []) {
+            cardsToReplay.push({ position: pos, card })
+          }
+        }
+      }
+      for (const { position, card } of cardsToReplay) {
+        try { await playCard(position, card) } catch (e) { console.warn('重放出牌失败:', position, card, e) }
+      }
+      // 裁剪 aiPlayHistory
+      const totalCardsReplayed = cardsToReplay.length
+      const trimmedHistory = (loadedPlayRecord.aiPlayHistory || []).slice(0, totalCardsReplayed)
+      // 构建截断后的 playState
+      const truncatedState = {
+        ...savedState,
+        tricks: (savedState.tricks || []).slice(0, targetTrick),
+        current_trick: { cards: [], leader: null, trump: savedState.contract?.suit || null },
+        current_player: null,
+        phase: targetTrick === 0 ? 'lead' : 'playing',
+        declarer_tricks: (savedState.tricks || []).slice(0, targetTrick)
+          .filter(t => t.winner === savedState.contract?.declarer || t.winner === savedState.dummy).length,
+        defender_tricks: (savedState.tricks || []).slice(0, targetTrick)
+          .filter(t => t.winner && t.winner !== savedState.contract?.declarer && t.winner !== savedState.dummy).length,
+      }
+      setPlayState(truncatedState)
+      setAiPlayHistory(trimmedHistory)
+      setShowPlayPanel(true)
+      setIsPlayPaused(true)
+      setPlayInitiated(true)
+      setPlayStarted(targetTrick > 0)
+      setReviewCursor(null)
+      setCurrentRecordId(null) // 不覆盖原记录，保存时新建
+    } catch (err) {
+      console.error('重打失败:', err)
+    } finally {
+      setPlayLoading(false)
+    }
   }
 
   // 抽取公共打牌初始化逻辑（handleStartPlay / handleResetPlay / 直接打牌 共用）
@@ -2197,15 +2279,12 @@ function App({ darkMode, onToggleDarkMode }) {
     return positionRoles[cp] === 'human'
   }
 
-  // 牌桌DD提示获取
+  // 牌桌DD提示获取（仅发牌练习模式，不限人类/AI）
   useEffect(() => {
     if (!showPlayPanel || !playState) return
-    if (!showDDHints) {
-      setDDHints(null)
-      return
-    }
-    const isHuman = isCurrentPlayerHuman()
-    if (!isHuman || playState.phase === 'complete') return
+    if (mode !== 'practice') { setDDHints(null); return }
+    if (!showDDHints) { setDDHints(null); return }
+    if (playState.phase === 'complete') return
     setDDHintsLoading(true)
     let cancelled = false
     getDDHints()
@@ -2213,7 +2292,7 @@ function App({ darkMode, onToggleDarkMode }) {
       .catch(err => { if (!cancelled) console.error('DD hints fetch failed:', err) })
       .finally(() => { if (!cancelled) setDDHintsLoading(false) })
     return () => { cancelled = true }
-  }, [showDDHints, playState?.current_player, playState?.phase, showPlayPanel, positionRoles])
+  }, [showDDHints, playState?.current_player, playState?.phase, showPlayPanel, mode])
 
   // AI自动出牌
   useEffect(() => {
@@ -2620,6 +2699,8 @@ function App({ darkMode, onToggleDarkMode }) {
               cardHints={ddHints}
               showDDHints={showDDHints}
               onToggleDDHints={toggleDDHints}
+              reviewCursor={reviewCursor}
+              reviewTrick={reviewCursor != null && playState?.tricks ? playState.tricks[reviewCursor] : null}
             />
 
             {/* 右侧面板：叫牌细节或打牌面板 */}
@@ -2644,6 +2725,14 @@ function App({ darkMode, onToggleDarkMode }) {
                 onSave={handleSaveProgress}
                 canSave={playCanSave}
                 imageOpeningLead={imageOpeningLead}
+                reviewCursor={reviewCursor}
+                onReviewPrev={() => setReviewCursor(c => Math.max(0, (c || 0) - 1))}
+                onReviewNext={() => setReviewCursor(c => {
+                  const total = (playState?.tricks?.length || 0)
+                  return Math.min(total - 1, (c || 0) + 1)
+                })}
+                onRewindToTrick={handleRewindToTrick}
+                onStartReview={() => setReviewCursor(0)}
               />
             ) : (
               (hasAnyHuman(positionRoles) || showAIBiddingOutput) && (
@@ -2763,6 +2852,8 @@ function App({ darkMode, onToggleDarkMode }) {
               cardHints={ddHints}
               showDDHints={showDDHints}
               onToggleDDHints={toggleDDHints}
+              reviewCursor={reviewCursor}
+              reviewTrick={reviewCursor != null && playState?.tricks ? playState.tricks[reviewCursor] : null}
             />
 
             {/* 叫牌细节面板或打牌面板 */}
@@ -2788,6 +2879,14 @@ function App({ darkMode, onToggleDarkMode }) {
                 onSave={handleSaveProgress}
                 canSave={playCanSave}
                 imageOpeningLead={imageOpeningLead}
+                reviewCursor={reviewCursor}
+                onReviewPrev={() => setReviewCursor(c => Math.max(0, (c || 0) - 1))}
+                onReviewNext={() => setReviewCursor(c => {
+                  const total = (playState?.tricks?.length || 0)
+                  return Math.min(total - 1, (c || 0) + 1)
+                })}
+                onRewindToTrick={handleRewindToTrick}
+                onStartReview={() => setReviewCursor(0)}
               />
             ) : (
               (hasAnyHuman(positionRoles) || showAIBiddingOutput) && (

@@ -20,7 +20,7 @@ from bridge.play_types import (
 
 
 def test_outcome_vector_dominance():
-    """测试 OutcomeVector 支配关系。"""
+    """测试 OutcomeVector 支配关系（布尔版本）。"""
     print("=" * 60)
     print("测试 1: OutcomeVector 支配关系")
     print("=" * 60)
@@ -46,28 +46,31 @@ def test_outcome_vector_dominance():
     assert not v6.dominates(v5)
     print(f"  ✓ [1,0] 与 [0,1] 互不支配")
 
-    # score 计算
-    assert abs(v1.score() - 2/3) < 1e-6, f"v1 score 应为 2/3, 实际 {v1.score()}"
-    assert v4.score() == 1.0
-    print(f"  ✓ score 计算: v1={v1.score():.3f}, v4={v4.score():.3f}")
+    # success_rate 计算
+    assert abs(v1.success_rate() - 2/3) < 1e-6, f"v1 应为 2/3, 实际 {v1.success_rate()}"
+    assert v4.success_rate() == 1.0
+    print(f"  ✓ success_rate: v1={v1.success_rate():.1%}, v4={v4.success_rate():.1%}")
 
-    # useful_mask: 标记某 world 为 impossible
+    # worst
+    assert v1.worst() == 0
+    assert v4.worst() == 1
+    print(f"  ✓ worst: v1={v1.worst()}, v4={v4.worst()}")
+
+    # useful_mask
     v7 = OutcomeVector([1, 0, 1], useful_mask=[True, False, True])
-    # useful worlds: [1, _, 1] → score = 1.0
-    assert v7.score() == 1.0, f"v7 score 应为 1.0, 实际 {v7.score()}"
-    print(f"  ✓ useful_mask: impossible world 不计入 score")
+    assert v7.success_rate() == 1.0, f"v7 success_rate 应为 1.0, 实际 {v7.success_rate()}"
+    print(f"  ✓ useful_mask: impossible world 不计入")
 
     print("  测试通过!\n")
 
 
 def test_pareto_front():
-    """测试 ParetoFront 添加和合并。"""
+    """测试 ParetoFront 添加和合并（布尔版本）。"""
     print("=" * 60)
     print("测试 2: ParetoFront 添加/合并")
     print("=" * 60)
 
     pf = ParetoFront()
-    # 添加 v2 = [1,0,0]
     v2 = OutcomeVector([1, 0, 0])
     assert pf.add(v2)
     assert len(pf) == 1
@@ -78,7 +81,7 @@ def test_pareto_front():
     assert pf.add(v1)
     assert len(pf) == 1, f"v1 应替换 v2, front size = {len(pf)}"
     assert v1 in pf.vectors
-    print(f"  ✓ [1,1,0] 替换 [1,0,0], front size = {len(pf)}")
+    print(f"  ✓ [1,1,0] 支配 [1,0,0], front size = {len(pf)}")
 
     # 添加 v3 = [0,1,1]，不可比较，应保留
     v3 = OutcomeVector([0, 1, 1])
@@ -86,27 +89,30 @@ def test_pareto_front():
     assert len(pf) == 2
     print(f"  ✓ 添加 [0,1,1] (不可比较), front size = {len(pf)}")
 
-    # 添加被支配的 v4 = [0,0,1]，应被拒绝
-    v4 = OutcomeVector([0, 0, 1])
+    # 添加被支配的 v4 = [0,1,0]，应被拒绝（被 [0,1,1] 支配）
+    v4 = OutcomeVector([0, 1, 0])
     assert not pf.add(v4)
     assert len(pf) == 2
-    print(f"  ✓ 拒绝 [0,0,1] (被 [0,1,1] 支配), front size = {len(pf)}")
+    print(f"  ✓ 拒绝 [0,1,0] (被 [0,1,1] 支配), front size = {len(pf)}")
 
     # 合并两个 front
     pf2 = ParetoFront([OutcomeVector([1, 1, 1])])
     pf_merged = pf.union(pf2)
-    # [1,1,1] 支配 [1,1,0] 和 [0,1,1]，所以合并后只剩 [1,1,1]
     assert len(pf_merged) == 1
     assert OutcomeVector([1, 1, 1]) in pf_merged.vectors
     print(f"  ✓ 合并: [1,1,1] 支配所有, merged size = {len(pf_merged)}")
 
-    # best_score / best_vector
+    # best_score / maximin
     pf3 = ParetoFront([
         OutcomeVector([1, 0, 0]),
         OutcomeVector([0, 1, 1]),
     ])
     assert abs(pf3.best_score() - 2/3) < 1e-6
-    print(f"  ✓ best_score = {pf3.best_score():.3f}")
+    print(f"  ✓ best_score = {pf3.best_score():.1%}")
+    mv = pf3.maximin_vector()
+    assert mv is not None and mv.worst() == 0  # both have worst=0, maximin picks the one with higher rate
+    assert mv.success_rate() == 2/3
+    print(f"  ✓ maximin: worst={mv.worst()}, rate={mv.success_rate():.1%} (picks [0,1,1] with 2/3)")
 
     print("  测试通过!\n")
 

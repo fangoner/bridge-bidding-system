@@ -81,7 +81,8 @@ class DDSearch:
 
     def __init__(self, sampler: DealSampler = None, num_samples: int = 100,
                  min_samples: int = 15, time_limit: float = 5.0,
-                 endgame_card_threshold: int = 10, max_enumerations: int = 5000):
+                 endgame_card_threshold: int = 10, max_enumerations: int = 5000,
+                 use_maximin: bool = True):
         if not ENDPLAY_AVAILABLE:
             raise RuntimeError("endplay library not available (pip install endplay)")
         self.sampler = sampler or DealSampler()
@@ -90,6 +91,7 @@ class DDSearch:
         self.time_limit = time_limit
         self.endgame_card_threshold = endgame_card_threshold
         self.max_enumerations = max_enumerations
+        self.use_maximin = use_maximin
 
     def search(self, state: PlayState) -> dict:
         perspective = state.current_player
@@ -266,6 +268,7 @@ class DDSearch:
         best_card = None
         best_score = -float("inf")
         child_stats = []
+        use_maximin = getattr(self, 'use_maximin', True)
 
         for card in playable:
             scores = card_scores[str(card)]
@@ -279,10 +282,39 @@ class DDSearch:
                 "min_tricks": mn,
                 "max_tricks": mx,
             })
-            # Rank偏置打破平局：庄家方偏好大牌赢墩，防守方偏好小牌保留实力
-            # Ace=0.28, 3=0.06 → 最大差异0.22墩，足以破平但不颠覆明显差距
+
             rank_bonus = RANK_ORDER.get(card.rank, 0) / 50.0
-            score = (avg + rank_bonus) if is_declarer_side else -(avg + rank_bonus)
+
+            if use_maximin:
+                # Maximin: 混合 avg 和 min，偏好低方差安全牌
+                # 权重取决于合约状态（领先→保守，落后→冒险）
+                from config import DD_REGRET_BASE
+                declarer_tricks = state.declarer_tricks
+                defender_tricks = state.defender_tricks
+                tricks_needed = state.contract.tricks_needed
+                remaining = 13 - (declarer_tricks + defender_tricks)
+
+                if is_declarer_side:
+                    margin = declarer_tricks + remaining - tricks_needed
+                else:
+                    tricks_to_beat = 14 - tricks_needed
+                    margin = defender_tricks + remaining - tricks_to_beat
+
+                # margin>0: 领先, margin<0: 落后, margin=0: 持平
+                if margin > 1:
+                    regret_weight = DD_REGRET_BASE          # 领先→保守(高min权重)
+                elif margin == 1:
+                    regret_weight = DD_REGRET_BASE * 0.7    # 微领先→偏保守
+                elif margin == 0:
+                    regret_weight = DD_REGRET_BASE * 0.4    # 持平→中性
+                else:
+                    regret_weight = 0.0                      # 落后→纯avg冒险
+
+                blended = (1 - regret_weight) * avg + regret_weight * mn
+                score = (blended + rank_bonus) if is_declarer_side else -(blended + rank_bonus)
+            else:
+                score = (avg + rank_bonus) if is_declarer_side else -(avg + rank_bonus)
+
             if score > best_score:
                 best_score = score
                 best_card = card
@@ -517,7 +549,30 @@ class DDSearch:
                 "max_tricks": mx,
             })
             rank_bonus = RANK_ORDER.get(card.rank, 0) / 50.0
-            score = (avg + rank_bonus) if is_declarer_side else -(avg + rank_bonus)
+            # 残局枚举同样适用 maximin（精确分布下 min 更可靠）
+            if getattr(self, 'use_maximin', True):
+                from config import DD_REGRET_BASE
+                declarer_tricks = state.declarer_tricks
+                defender_tricks = state.defender_tricks
+                tricks_needed = state.contract.tricks_needed
+                remaining = 13 - (declarer_tricks + defender_tricks)
+                if is_declarer_side:
+                    margin = declarer_tricks + remaining - tricks_needed
+                else:
+                    tricks_to_beat = 14 - tricks_needed
+                    margin = defender_tricks + remaining - tricks_to_beat
+                if margin > 1:
+                    regret_weight = DD_REGRET_BASE
+                elif margin == 1:
+                    regret_weight = DD_REGRET_BASE * 0.7
+                elif margin == 0:
+                    regret_weight = DD_REGRET_BASE * 0.4
+                else:
+                    regret_weight = 0.0
+                blended = (1 - regret_weight) * avg + regret_weight * mn
+                score = (blended + rank_bonus) if is_declarer_side else -(blended + rank_bonus)
+            else:
+                score = (avg + rank_bonus) if is_declarer_side else -(avg + rank_bonus)
             if score > best_score:
                 best_score = score
                 best_card = card

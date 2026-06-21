@@ -62,6 +62,8 @@ function CardTable({
   cardHints,
   biddingSequence,
   onManualPlay,
+  reviewCursor,
+  reviewTrick,
 }) {
   const [handInputs, setHandInputs] = useState({
     '南': '',
@@ -554,14 +556,17 @@ function CardTable({
 
   const renderCurrentTrick = () => {
     if (!playState) return null
-    
+
     const { current_trick, current_player, phase } = playState
     const isComplete = phase === 'complete'
-    
-    // 优先显示当前墩（有牌时），否则显示上一墩直到新墩第一张牌打出
-    const displayTrick = (current_trick?.cards && current_trick.cards.length > 0)
-      ? current_trick
-      : lastCompletedTrick ? lastCompletedTrick : current_trick
+    const isReview = reviewCursor != null
+
+    // 复盘模式：显示 reviewTrick；否则优先当前墩，再 lastCompletedTrick
+    const displayTrick = isReview && reviewTrick
+      ? reviewTrick
+      : (current_trick?.cards && current_trick.cards.length > 0)
+        ? current_trick
+        : lastCompletedTrick ? lastCompletedTrick : current_trick
     
     const getCardAtPosition = (position) => {
       if (!displayTrick?.cards) return null
@@ -649,6 +654,10 @@ function CardTable({
           <Box sx={{ width: 56, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', borderRadius: '50%', bgcolor: 'rgba(0,0,0,0.2)' }}>
             {aiLoading ? (
               <CircularProgress size={22} sx={{ color: 'rgba(255,255,255,0.8)' }} />
+            ) : isReview ? (
+              <Typography sx={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#ffc107', textAlign: 'center' }}>
+                第{reviewCursor + 1}墩
+              </Typography>
             ) : (displayTrick?.cards?.length === 4 && getLastTrickWinner()) ? (
               <Typography sx={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#ffeb3b' }}>
                 {getLastTrickWinner()}赢

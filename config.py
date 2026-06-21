@@ -45,7 +45,7 @@ AI_PROVIDER_DOUBAO = "doubao"
 DEFAULT_AI_PROVIDER = AI_PROVIDER_DEEPSEEK
 
 # MCTS / DD play engine settings
-DEFAULT_PLAY_ENGINE = "llm"  # "llm" | "mcts" | "dd" | "tiered" | "perfect"
+DEFAULT_PLAY_ENGINE = "llm"  # "llm" | "mcts" | "dd" | "tiered" | "perfect" | "alphamu"
 MCTS_SEARCH_MODE = "mcts"  # "mcts" (tree+rollout) | "dd" (pure Monte Carlo + double-dummy)
 MCTS_ITERATIONS = 5000
 MCTS_TIME_LIMIT = 10.0  # seconds per play decision
@@ -55,6 +55,8 @@ ROLLOUT_GREEDY_PROB = 0.80  # probability of heuristic vs random in rollout
 DD_NUM_SAMPLES = 100  # max samples per candidate card for DD search
 DD_MIN_SAMPLES = 15   # floor for adaptive sample scaling
 DD_TIME_LIMIT = 60.0  # seconds per DD play decision (solve_board is heavy)
+DD_MAXIMIN_ENABLE = True   # 最大化选牌：混合avg和min，偏好稳定牌
+DD_REGRET_BASE = 0.25      # 领先时 min 权重（保守）；落后时 min 权重=0（纯avg冒险）
 
 # DD 残局精确枚举
 DD_ENDGAME_CARD_THRESHOLD = 4    # 每手剩余牌数≤此值时触发枚举所有分布
@@ -83,6 +85,6 @@ BELIEF_ENABLE = True            # 是否启用信念跟踪（False回退到纯�
 # αμ 搜索参数（残局多步前瞻，解决 strategy fusion）
 ALPHA_MU_ENABLE = True            # 是否启用 αμ 搜索
 ALPHA_MU_ENDGAME_CARDS = 8        # 每手剩余牌数≤此值时启用 αμ（残局）
-ALPHA_MU_NUM_WORLDS = 20          # possible worlds 数量（粒子数）
+ALPHA_MU_NUM_WORLDS = 100         # possible worlds 数量（粒子数）
 ALPHA_MU_MAX_DEPTH = 4            # 最大搜索深度（Max moves 数）
 ALPHA_MU_TIME_LIMIT = 8.0         # 时间限制（秒）

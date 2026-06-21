@@ -1447,6 +1447,7 @@ async def ai_play(request: PlayAIRequest):
                 use_dd = engine == "dd"
                 use_tiered = engine == "tiered"
                 use_perfect = engine == "perfect"
+                use_alphamu = engine == "alphamu"
                 dd_samples = (request.dd_sample_count
                               if (use_dd or use_tiered) else None)
                 t0 = time.time()
@@ -1456,6 +1457,7 @@ async def ai_play(request: PlayAIRequest):
                     use_dd=use_dd,
                     use_tiered=use_tiered,
                     use_perfect=use_perfect,
+                    use_alphamu=use_alphamu,
                     dd_samples=dd_samples)
                 elapsed_ms = int((time.time() - t0) * 1000)
 
@@ -1465,7 +1467,6 @@ async def ai_play(request: PlayAIRequest):
                     reason = result.get("reasoning", "")
                     success, message = service.play_card(current_player, card, is_ai=True, reason=reason)
                     
-                    engine = request.play_engine or DEFAULT_PLAY_ENGINE
                     return PlayAIResponse(
                         success=success,
                         card=result["card"],

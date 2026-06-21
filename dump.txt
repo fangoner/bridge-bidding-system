@@ -1,11 +1,14 @@
-Error code=-2
+Error code=-14
 
 Deal data:
-trump=D
+trump=S
 first=N
+index=0 currentTrickSuit=C currentTrickRank= J
+index=1 currentTrickSuit=H currentTrickRank= 2
+index=2 currentTrickSuit=D currentTrickRank= 3
 index1=0 index2=0 remainCards=0
 index1=0 index2=1 remainCards=0
-index1=0 index2=2 remainCards=0
+index1=0 index2=2 remainCards=512
 index1=0 index2=3 remainCards=0
 index1=1 index2=0 remainCards=0
 index1=1 index2=1 remainCards=0
@@ -13,28 +16,28 @@ index1=1 index2=2 remainCards=0
 index1=1 index2=3 remainCards=0
 index1=2 index2=0 remainCards=0
 index1=2 index2=1 remainCards=0
-index1=2 index2=2 remainCards=0
+index1=2 index2=2 remainCards=32
 index1=2 index2=3 remainCards=0
 index1=3 index2=0 remainCards=0
 index1=3 index2=1 remainCards=0
-index1=3 index2=2 remainCards=0
+index1=3 index2=2 remainCards=4100
 index1=3 index2=3 remainCards=0
 
-target=-1
-solutions=1
+target=0
+solutions=3
 mode=1
 
 
         S --
         H --
-        D --
+        D 9
         C --
 S --            S --
 H --            H --
-D --            D --
+D Q2            D --
 C --            C --
         S --
         H --
-        D --
+        D 5
         C --
 

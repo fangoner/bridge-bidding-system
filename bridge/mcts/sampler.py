@@ -12,7 +12,7 @@ from bridge.mcts.belief import collect_voids, BeliefTracker
 ALL_CARDS = [Card(suit=s, rank=r) for s in SUIT_DISPLAY_ORDER for r in RANK_DESC]
 
 # 约束采样最大重试次数（_constrained_select 保证约束前提下仍保留重试安全网）
-MAX_CONSTRAINT_RETRIES = 3
+MAX_CONSTRAINT_RETRIES = 200  # 有约束时最多重试次数（提高约束命中率）
 
 # 调试日志路径
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -132,11 +132,15 @@ class DealSampler:
             if len(cleaned) != len(hand):
                 state.hands[pos] = cleaned
 
-        # 2. 计算每个位置剩余张数
+        # 2. 计算每个位置剩余张数 = 13 - 已完成墩 - 该位置在当前墩已出牌
+        # 当前墩牌已从 state.hands 移除，但必须从 remaining 中扣除，
+        # 否则调用方加回当前墩牌后总数会超标（如 8+1=9 导致 Deal 报错）
+        total_completed = state.declarer_tricks + state.defender_tricks
+        base_remaining = 13 - total_completed
         remaining_counts = {}
         for pos in POSITION_ORDER:
-            played = self._count_played(state, pos)
-            remaining_counts[pos] = 13 - played
+            in_trick = sum(1 for p, _ in state.current_trick.cards if p == pos)
+            remaining_counts[pos] = base_remaining - in_trick
 
         # 3. 未知牌张池
         unknown_pool = [c for c in ALL_CARDS if c not in known_cards]
@@ -157,18 +161,17 @@ class DealSampler:
                 if hand:
                     result[dummy] = [Card(suit=c.suit, rank=c.rank) for c in hand]
 
-        # 4.5 修正：确保已知手牌的张数与 remaining_counts 一致（防止 state.hands 计数不准）
+        # 4.5 修正：确保已知手牌张数不超过 remaining_counts
+        # 注意：actual < expected 是正常的（当前墩牌已从 state.hands 移除），
+        # 不删除该位置——调用方（DD/αμ）会在 solve_board 前加回当前墩牌
         for pos in list(result.keys()):
             expected = remaining_counts.get(pos, 0)
             actual = len(result[pos])
             if actual > expected:
-                # 牌太多：随机移除多余牌，放回未知牌池
+                # 牌太多：随机移除多余牌
                 excess = actual - expected
                 to_remove = random.sample(result[pos], excess)
                 result[pos] = [c for c in result[pos] if c not in set(to_remove)]
-            elif actual < expected:
-                # 牌太少：该位置退出 result，由分布逻辑用正确数量重新分配
-                del result[pos]
 
         # 4.6 重建未知牌池（基于已分配牌 + 已出牌，保证一致性）
         assigned = set()
