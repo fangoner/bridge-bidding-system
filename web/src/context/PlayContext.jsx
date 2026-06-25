@@ -60,13 +60,13 @@ export function PlayProvider({ children }) {
   const toggleDDHints = () => {
     setShowDDHints(prev => {
       const next = !prev
-      try { localStorage.setItem('bridge_showDDHints', String(next)) } catch {}
+      try { localStorage.setItem('bridge_showDDHints', String(next)) } catch {/* empty */}
       return next
     })
   }
   const handlePlayEngineChange = (value) => {
     setPlayEngineState(value)
-    try { localStorage.setItem(PLAY_ENGINE_KEY, value) } catch {}
+    try { localStorage.setItem(PLAY_ENGINE_KEY, value) } catch {/* empty */}
   }
 
   const value = useMemo(

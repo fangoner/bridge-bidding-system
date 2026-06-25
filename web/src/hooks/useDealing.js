@@ -52,14 +52,14 @@ export function parseBiddingSequenceStr(biddingStr) {
 // clearBiddingDraft 由调用方传入（依赖 BIDDING_DRAFT_KEY 等本地逻辑）
 export function useDealing({ clearBiddingDraft }) {
   const {
-    hands, setHands,
+    setHands,
     loading, setLoading,
-    error, setError,
-    warning, setWarning,
+    setError,
+    setWarning,
     dealer, setDealer,
-    positionRoles, setPositionRoles,
-    showPartnerHand, setShowPartnerHand,
-    showOpponentHands, setShowOpponentHands,
+    setPositionRoles,
+    setShowPartnerHand,
+    setShowOpponentHands,
     setCurrentRecordId,
     setUseFallback,
     setReadonlyMode,

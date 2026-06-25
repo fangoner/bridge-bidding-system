@@ -131,8 +131,7 @@ function RightPanelSwitcher({
   // 打牌回调
   onResume,
   onResetPlay,
-  onClearExternalRecord,
-  onBeginPlay,
+    onBeginPlay,
   onPausePlay,
   onUndoPlay,
   onSavePlay,

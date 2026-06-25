@@ -5,13 +5,9 @@ import LightModeIcon from '@mui/icons-material/LightMode'
 
 function ControlButtons({
   size = 'large',
-  mode,
-  showSettings,
+    showSettings,
   setShowSettings,
-  loading,
-  handleDeal,
-  dealMode,
-  biddingRecords,
+        biddingRecords,
   setHistoryDialogOpen,
   checkApiStatus,
   apiStatus,
@@ -21,9 +17,7 @@ function ControlButtons({
   aiThinking,
 }) {
   const isLarge = size === 'large'
-  const gap = isLarge ? 2 : 1
   const buttonSize = isLarge ? 'large' : 'small'
-  const progressSize = isLarge ? 20 : 16
   
   return (
     <>

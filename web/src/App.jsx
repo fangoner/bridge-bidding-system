@@ -73,8 +73,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     dealer, setDealer,
     practiceDirection, setPracticeDirection,
     positionRoles, setPositionRoles,
-    showPartnerHand, setShowPartnerHand,
-    showOpponentHands, setShowOpponentHands,
+    setShowPartnerHand,
+    setShowOpponentHands,
     useFallback, setUseFallback,
     dealMode, setDealMode,
     showSettings, setShowSettings,
@@ -91,7 +91,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     imageFile, setImageFile,
     imageOpeningLead, setImageOpeningLead,
     mode, setMode,
-    readonlyMode, setReadonlyMode,
+    setReadonlyMode,
     studyMode, setStudyMode,
   } = useGame()
 
@@ -121,18 +121,16 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const {
     biddingSequence, setBiddingSequence,
     currentBidder, setCurrentBidder,
-    bidSuggestion, setBidSuggestion,
+    setBidSuggestion,
     aiBiddingHistory, setAiBiddingHistory,
     currentBiddingPosition, setCurrentBiddingPosition,
-    selectedBiddingIndex,
-    simpleDisplayMode,
-    biddingStarted, setBiddingStarted,
+            biddingStarted, setBiddingStarted,
     stopBidding, setStopBidding,
     passedAIPositions, setPassedAIPositions,
     biddingStartTime,
     setBiddingTotalTime,
     customBidMeaning, setCustomBidMeaning,
-    suggestionLoading, setSuggestionLoading,
+    setSuggestionLoading,
     isBiddingComplete,
     initBiddingState,
     toggleStopBiddingState,
@@ -160,11 +158,11 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     isPlayPaused, setIsPlayPaused,
     setLastCompletedTrick,
     aiPlayHistory, setAiPlayHistory,
-    selectedPlayRecord, setSelectedPlayRecord,
-    playStarted, setPlayStarted,
+    setSelectedPlayRecord,
+    setPlayStarted,
     playInitiated, setPlayInitiated,
     loadedPlayRecord, setLoadedPlayRecord,
-    reviewCursor, setReviewCursor,
+    setReviewCursor,
     showDDHints,
     setDDHints,
     setDDHintsLoading,
@@ -189,7 +187,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         return
       }
       setShowDraftBanner(true)
-    } catch (e) {
+    } catch {
       localStorage.removeItem(BIDDING_DRAFT_KEY)
     }
   }, [])
@@ -198,7 +196,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const clearBiddingDraft = () => {
     try {
       localStorage.removeItem(BIDDING_DRAFT_KEY)
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
     setShowDraftBanner(false)
   }
 
@@ -1747,8 +1745,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const handleUndoPlay = async () => {
     try {
       // 记录撤销前的状态，用于判断撤销了谁出的牌
-      const prevPlayer = playState?.current_player
-      const prevTricksCount = playState?.tricks?.length || 0
       
       const result = await undoPlay()
       if (result.success) {

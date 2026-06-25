@@ -23,8 +23,7 @@ function SettingsPanel({
   setDealSystem,
   dealMode,
   setDealMode,
-  loading,
-  mode,
+    mode,
 }) {
   const theme = useTheme()
 

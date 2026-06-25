@@ -23,7 +23,7 @@ class ErrorBoundary extends Component {
     // 清除草稿后刷新页面
     try {
       localStorage.removeItem('bridge_bidding_draft')
-    } catch (e) {
+    } catch {
       // ignore
     }
     window.location.reload()

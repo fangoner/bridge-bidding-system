@@ -74,8 +74,7 @@ function PlayDetailPanel({
   positionRoles,
   onSave,
   canSave,
-  imageOpeningLead,
-  reviewCursor,
+    reviewCursor,
   onReviewPrev,
   onReviewNext,
   onRewindToTrick,
@@ -105,7 +104,6 @@ function PlayDetailPanel({
   const tricks = playState?.tricks || []
   const declarerTricks = playState?.declarer_tricks || 0
   const defenderTricks = playState?.defender_tricks || 0
-  const currentPlayer = playState?.current_player
   const isHumanTurn = (() => {
     const cp = playState?.current_player
     if (!cp || !positionRoles) return false

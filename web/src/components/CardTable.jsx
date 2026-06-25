@@ -53,8 +53,7 @@ function CardTable({
   onPlayCardClick,
   onSetPlayHand,
   readonlyMode = false,
-  mode,
-  imageOpeningLead,
+    imageOpeningLead,
   // 叫牌控件相关
   addBid,
   isBiddingCompleteFn,
@@ -258,7 +257,7 @@ function CardTable({
       return { valid: false, error: '请输入4个花色，用空格分隔' }
     }
 
-    const validCards = /^[AKQJTakqjt2-9\-]+$/
+    const validCards = /^[AKQJTakqjt2-9-]+$/
     for (const suit of suits) {
       if (suit !== '-' && !validCards.test(suit)) {
         return { valid: false, error: '包含无效字符' }

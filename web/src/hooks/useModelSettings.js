@@ -16,8 +16,8 @@ export function parseModelValue(value) {
 export function useModelSettings() {
   const {
     fallbackModel, setFallbackModelState,
-    playModel, setPlayModelState,
-    apiStatus, setApiStatus,
+    setPlayModelState,
+    setApiStatus,
   } = useGame()
 
   const [ddSampleCount, setDDSampleCount] = useState(() => {
@@ -41,7 +41,7 @@ export function useModelSettings() {
   const handleFallbackModelChange = useCallback(async (event) => {
     const newModel = event.target.value
     setFallbackModelState(newModel)
-    try { localStorage.setItem(FALLBACK_MODEL_KEY, newModel) } catch {}
+    try { localStorage.setItem(FALLBACK_MODEL_KEY, newModel) } catch {/* empty */}
     try {
       await setFallbackModel(parseModelValue(newModel).model)
     } catch (err) {
@@ -52,13 +52,13 @@ export function useModelSettings() {
   const handlePlayModelChange = useCallback((event) => {
     const newModel = event.target.value
     setPlayModelState(newModel)
-    try { localStorage.setItem(PLAY_MODEL_KEY, newModel) } catch {}
+    try { localStorage.setItem(PLAY_MODEL_KEY, newModel) } catch {/* empty */}
   }, [setPlayModelState])
 
   const handleDDSampleCountChange = useCallback((value) => {
     const num = parseInt(value) || 200
     setDDSampleCount(num)
-    try { localStorage.setItem(DD_SAMPLE_COUNT_KEY, num) } catch {}
+    try { localStorage.setItem(DD_SAMPLE_COUNT_KEY, num) } catch {/* empty */}
   }, [])
 
   const checkApiStatus = useCallback(async () => {
