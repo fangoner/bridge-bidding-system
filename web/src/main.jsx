@@ -61,7 +61,7 @@ window.addEventListener('error', (event) => {
   try {
     // 只保留最近一次崩溃日志
     localStorage.setItem(BIDDING_CRASH_LOG_KEY, JSON.stringify(crash))
-  } catch (e) { /* ignore */ }
+  } catch { /* ignore */ }
 })
 
 window.addEventListener('unhandledrejection', (event) => {
@@ -76,7 +76,7 @@ window.addEventListener('unhandledrejection', (event) => {
   console.error('[Global Unhandled Rejection]', crash)
   try {
     localStorage.setItem(BIDDING_CRASH_LOG_KEY, JSON.stringify(crash))
-  } catch (e) { /* ignore */ }
+  } catch { /* ignore */ }
 })
 
 createRoot(document.getElementById('root')).render(

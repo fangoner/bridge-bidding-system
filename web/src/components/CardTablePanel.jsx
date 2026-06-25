@@ -3,92 +3,92 @@ import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import CardTable from './CardTable'
 import BiddingTable from './BiddingTable'
-import { hasAnyHuman, getHumanPositions } from '../utils/position'
+import { hasAnyHuman, getHumanPositions, getPartnerPosition } from '../utils/position'
 import { PANEL_LAYOUT } from '../styles/constants'
+import { useGame } from '../context/GameContext'
+import { useBidding } from '../context/BiddingContext'
+import { usePlay } from '../context/PlayContext'
 
+// 重构后：state 从 Game/Bidding/Play Context 获取，仅保留业务回调与派生值作为 props
 function CardTablePanel({
   isMobile,
-  hands,
-  currentBidder,
-  dealer,
-  gameMode,
-  showPartnerHand,
-  setShowPartnerHand,
-  showOpponentHands,
-  setShowOpponentHands,
-  getPartnerPosition,
-  biddingSequence,
-  isBiddingComplete,
-  outputFormats,
-  outputFormatsLoading,
-  handleAnalyzeContract,
-  analyzeLoading,
-  colorScheme,
-  currentBiddingPosition,
-  showDoubleDummy,
-  toggleDoubleDummy,
-  doubleDummyResult,
-  doubleDummyLoading,
-  biddingTotalTime,
-  positionRoles,
-  handlePositionRoleChange,
+  // 派生值（App 端计算后传入）
+  declarer,
+  // 业务回调
+  onAnalyzeContract,
+  onToggleDoubleDummy,
   onDealerChange,
+  onPositionRoleChange,
   onClearAllHands,
   onSimulatedReset,
-  setHands,
-  biddingStarted,
-  stopBidding,
-  height = '680px',
-  playState,
-  showPlayPanel,
-  declarer,
-  lastCompletedTrick,
-  isPlayPaused,
   onEditHands,
   onEditBidding,
-  playInitiated,
-  aiLoading,
-  showPlayedCards,
-  setShowPlayedCards,
-  playCenterView,
-  setPlayCenterView,
-  aiBiddingHistory,
   onPlayCardClick,
   onSetPlayHand,
-  readonlyMode,
-  mode,
   onImageDeal,
   onScreenshotDeal,
   onCustomDeal,
   onDeal,
-  dealMode,
-  loading,
-  aiThinking,
-  studyMode,
-  setStudyMode,
-  imageOpeningLead,
-  // 叫牌/打牌控件相关
-  addBid,
-  isBiddingCompleteFn,
   onHandCardClick,
   onManualPlay,
-  cardHints,
-  showDDHints,
-  onToggleDDHints,
+  onStudyModeChange,
+  addBid,
+  startBidding,
 }) {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
+
+  // ── 从 Context 获取 state（替代原 70 个 props）──
+  const {
+    hands, setHands,
+    loading, aiThinking,
+    gameMode, dealer,
+    showPartnerHand, setShowPartnerHand,
+    showOpponentHands, setShowOpponentHands,
+    positionRoles,
+    readonlyMode, mode,
+    studyMode,
+    imageOpeningLead,
+    dealMode,
+  } = useGame()
+
+  const {
+    biddingSequence, currentBidder,
+    isBiddingComplete,
+    outputFormats, outputFormatsLoading,
+    analyzeLoading,
+    currentBiddingPosition,
+    showDoubleDummy, doubleDummyResult, doubleDummyLoading,
+    biddingTotalTime,
+    biddingStarted, stopBidding,
+    aiBiddingHistory,
+  } = useBidding()
+
+  const {
+    playState, showPlayPanel,
+    lastCompletedTrick, isPlayPaused,
+    playInitiated,
+    showPlayedCards, setShowPlayedCards,
+    playCenterView, setPlayCenterView,
+    showDDHints, toggleDDHints,
+    ddHints,
+    reviewCursor,
+  } = usePlay()
+
+  // 复盘游标对应的墩（派生）
+  const reviewTrick = reviewCursor != null && playState?.tricks ? playState.tricks[reviewCursor] : null
+
   // 检测是否四家手牌齐全（模拟实战牌不全时隐藏小房子/DD相关功能）
   const allHandsComplete = ['南','北','东','西'].every(p => {
     const h = hands?.[p]
     return h && (h.spades || h.hearts || h.diamonds || h.clubs)
   })
   return (
-    <Paper elevation={3} sx={{ 
-      p: 1, 
-      bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : (isMobile ? '#f5f5f5' : '#e8e8e8'), 
-      display: 'flex', 
-      flexDirection: 'column', 
+    <Paper elevation={3} sx={{
+      p: 1,
+      bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : (isMobile ? '#f5f5f5' : '#e8e8e8'),
+      display: 'flex',
+      flexDirection: 'column',
       flex: isMobile ? undefined : '1 1 0%',
       minWidth: isMobile ? undefined : PANEL_LAYOUT.minWidth,
       maxWidth: isMobile ? undefined : PANEL_LAYOUT.maxWidth,
@@ -96,12 +96,12 @@ function CardTablePanel({
       height: isMobile ? 'auto' : `${PANEL_LAYOUT.height}px`,
       overflow: 'hidden'
     }}>
-      <Box sx={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        mb: 0.5, 
-        flexShrink: 0, 
+      <Box sx={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        mb: 0.5,
+        flexShrink: 0,
         minHeight: 40,
         flexWrap: isMobile ? 'wrap' : 'nowrap',
         gap: isMobile ? 0.5 : 0,
@@ -116,7 +116,7 @@ function CardTablePanel({
               exclusive
               onChange={(e, newValue) => {
                 if (newValue !== null) {
-                  toggleDoubleDummy(newValue === 'result')
+                  onToggleDoubleDummy(newValue === 'result')
                 }
               }}
               size="small"
@@ -140,7 +140,7 @@ function CardTablePanel({
               onChange={(e, newValue) => {
                 if (newValue !== null) {
                   setPlayCenterView(newValue)
-                  toggleDoubleDummy(newValue === 'result')
+                  onToggleDoubleDummy(newValue === 'result')
                 }
               }}
               size="small"
@@ -159,9 +159,9 @@ function CardTablePanel({
               )}
             </ToggleButtonGroup>
           )}
-          {showPlayPanel && onToggleDDHints && ['南','北','东','西'].every(p => playState?.hands?.[p]?.length > 0) && (
+          {showPlayPanel && toggleDDHints && ['南','北','东','西'].every(p => playState?.hands?.[p]?.length > 0) && (
             <Tooltip title={showDDHints ? '隐藏DD提示' : '显示DD提示'} arrow>
-              <IconButton size="small" onClick={onToggleDDHints} sx={{ p: 0.3 }}>
+              <IconButton size="small" onClick={toggleDDHints} sx={{ p: 0.3 }}>
                 {showDDHints ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
               </IconButton>
             </Tooltip>
@@ -234,7 +234,7 @@ function CardTablePanel({
           )}
           {showPlayPanel && (
             <FormControlLabel
-              control={<Checkbox checked={studyMode} onChange={(e) => setStudyMode(e.target.checked)} size="small" />}
+              control={<Checkbox checked={studyMode} onChange={(e) => onStudyModeChange(e.target.checked)} size="small" />}
               label="研究模式"
               sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem', color: studyMode ? '#e65100' : undefined, fontWeight: studyMode ? 700 : undefined }, mr: 0, height: 24 }}
             />
@@ -281,12 +281,12 @@ function CardTablePanel({
           )}
         </Box>
       </Box>
-      <Box sx={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center', 
-        flex: isMobile ? 1 : '1 1 auto', 
-        minHeight: 0, 
+      <Box sx={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flex: isMobile ? 1 : '1 1 auto',
+        minHeight: 0,
         overflow: 'hidden',
       }}>
         <CardTable
@@ -301,16 +301,15 @@ function CardTablePanel({
           checkBiddingComplete={isBiddingComplete}
           outputFormats={outputFormats}
           outputFormatsLoading={outputFormatsLoading}
-          handleAnalyzeContract={handleAnalyzeContract}
+          handleAnalyzeContract={onAnalyzeContract}
           analyzeLoading={analyzeLoading}
-          colorScheme={colorScheme}
           currentBiddingPosition={currentBiddingPosition}
           showDoubleDummy={showDoubleDummy}
           doubleDummyResult={doubleDummyResult}
           doubleDummyLoading={doubleDummyLoading}
           biddingTotalTime={biddingTotalTime}
           positionRoles={positionRoles}
-          onPositionRoleChange={handlePositionRoleChange}
+          onPositionRoleChange={onPositionRoleChange}
           onDealerChange={onDealerChange}
           onClearAllHands={onClearAllHands}
           onSimulatedReset={onSimulatedReset}
@@ -325,7 +324,7 @@ function CardTablePanel({
           lastCompletedTrick={lastCompletedTrick}
           isPlayPaused={isPlayPaused}
           playInitiated={playInitiated}
-          aiLoading={aiLoading}
+          aiLoading={aiThinking}
           showPlayedCards={showPlayedCards}
           playCenterView={playCenterView}
           aiBiddingHistory={aiBiddingHistory}
@@ -335,11 +334,14 @@ function CardTablePanel({
           mode={mode}
           imageOpeningLead={imageOpeningLead}
           addBid={addBid}
-          isBiddingCompleteFn={isBiddingCompleteFn}
+          isBiddingCompleteFn={isBiddingComplete}
           onHandCardClick={onHandCardClick}
           onManualPlay={onManualPlay}
           biddingSequence={biddingSequence}
-          cardHints={cardHints}
+          cardHints={ddHints}
+          startBidding={startBidding}
+          reviewCursor={reviewCursor}
+          reviewTrick={reviewTrick}
         />
       </Box>
     </Paper>

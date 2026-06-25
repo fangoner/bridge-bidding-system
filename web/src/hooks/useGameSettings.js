@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { getFallbackModel, setFallbackModel } from '../services/api'
+import { setFallbackModel } from '../services/api'
 import { getPartnerPosition } from '../utils/position'
 
 const COLOR_SCHEME_KEY = 'bridge_color_scheme_v2'

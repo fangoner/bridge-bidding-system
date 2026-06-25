@@ -34,7 +34,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import HistoryIcon from '@mui/icons-material/History'
-import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, doubleDummyAnalysis, getFallbackModel, setFallbackModel, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles, undoPlay, setPlayHand, getDDHints } from './services/api'
+import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, doubleDummyAnalysis, setFallbackModel, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles, undoPlay, setPlayHand, getDDHints } from './services/api'
 import HandDisplay from './components/HandDisplay'
 import Header from './components/layout/Header'
 import BiddingDetailPanel from './components/BiddingDetailPanel'
@@ -43,34 +43,55 @@ import SettingsPanel from './components/SettingsPanel'
 import PlayPanel from './components/PlayPanel'
 import PlayDetailPanel from './components/PlayDetailPanel'
 import HistoryDialog from './components/HistoryDialog'
-import useBiddingState from './hooks/useBiddingState'
 import useBridgeRecords from './hooks/useBridgeRecords'
 import { hasAnyHuman, getPartnerPosition, BRIDGE_POSITIONS } from './utils/position'
 import './App.css'
+import { GameProvider, useGame } from './context/GameContext'
+import { BiddingProvider, useBidding } from './context/BiddingContext'
+import { PlayProvider, usePlay } from './context/PlayContext'
 
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
+const PLAY_MODEL_KEY = 'bridge_play_model'
 const BIDDING_DRAFT_KEY = 'bridge_bidding_draft'
 
-function App({ darkMode, onToggleDarkMode }) {
+function AppShell({ darkMode, onToggleDarkMode }) {
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   
   const isLoadingRecordRef = useRef(false) // 用于标记是否正在加载历史记录（不触发保存）
   const draftRestoredRef = useRef(false) // 防止重复恢复草稿
   const draftSaveTimerRef = useRef(null) // debounce 叫牌草稿自动保存
-  const [showDraftBanner, setShowDraftBanner] = useState(false) // 显示草稿恢复提示
-  const [hands, setHands] = useState({
-    '南': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
-    '北': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
-    '东': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
-    '西': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 }
-  })
-  const [loading, setLoading] = useState(false)
-  const [aiThinking, setAiThinking] = useState(false)
-  const [error, setError] = useState(null)
-  const [warning, setWarning] = useState(null)  // 校验警告（非阻断，如手牌缺张、花色错位）
-  const [showEditBiddingDialog, setShowEditBiddingDialog] = useState(false) // 编辑叫牌对话框
-  const [editBiddingText, setEditBiddingText] = useState('')
+  // ── Game 域状态（迁入 GameContext）──
+  const {
+    hands, setHands,
+    loading, setLoading,
+    aiThinking, setAiThinking,
+    error, setError,
+    warning, setWarning,
+    gameMode, setGameMode,
+    dealer, setDealer,
+    practiceDirection, setPracticeDirection,
+    positionRoles, setPositionRoles,
+    showAIBiddingOutput,
+    useFallback, setUseFallback,
+    dealMode, setDealMode,
+    showSettings, setShowSettings,
+    dealSystem, setDealSystem,
+    fallbackModel, setFallbackModelState,
+    playModel, setPlayModelState,
+    apiStatus, setApiStatus,
+    currentRecordId, setCurrentRecordId,
+    showDraftBanner, setShowDraftBanner,
+    customDealOpen, setCustomDealOpen,
+    imageDealOpen, setImageDealOpen,
+    customDealText, setCustomDealText,
+    imagePath, setImagePath,
+    imageFile, setImageFile,
+    imageOpeningLead, setImageOpeningLead,
+    mode, setMode,
+    readonlyMode, setReadonlyMode,
+    studyMode, setStudyMode,
+  } = useGame()
 
   // 将当前手牌转换为自定义牌局文本格式（带花色符号，便于阅读编辑）
   const handsToEditText = (handsObj) => {
@@ -94,10 +115,8 @@ function App({ darkMode, onToggleDarkMode }) {
     return seq.map(b => `(${b.position})${b.bid}`).join('-')
   }
   const screenshotCancelledRef = useRef(false)
-  const [apiStatus, setApiStatus] = useState(null)
-  const [currentRecordId, setCurrentRecordId] = useState(null) // 当前牌局的记录ID（用于覆盖保存）
 
-  // 叫牌状态（使用 hook 管理）
+  // ── Bidding 域状态（迁入 BiddingContext）──
   const {
     biddingSequence, setBiddingSequence,
     currentBidder, setCurrentBidder,
@@ -110,20 +129,52 @@ function App({ darkMode, onToggleDarkMode }) {
     stopBidding, setStopBidding,
     passedAIPositions, setPassedAIPositions,
     biddingStartTime,
-    biddingTotalTime, setBiddingTotalTime,
+    setBiddingTotalTime,
     customBidMeaning, setCustomBidMeaning,
     suggestionLoading, setSuggestionLoading,
     isBiddingComplete,
     initBiddingState,
     toggleStopBiddingState,
     markBiddingStarted,
-  } = useBiddingState()
-  const [dealSystem, setDealSystem] = useState('2D/2H/2S：自然阻击') // 阻击叫牌体系
-  
-  // 叫牌回退历史
-  const [biddingHistory, setBiddingHistory] = useState([]) // 历史快照列表
-  const [historyIndex, setHistoryIndex] = useState(-1) // 当前历史位置
-  
+    biddingHistory, setBiddingHistory,
+    historyIndex, setHistoryIndex,
+    showEditBiddingDialog, setShowEditBiddingDialog,
+    editBiddingText, setEditBiddingText,
+    outputFormats, setOutputFormats,
+    setOutputFormatsLoading,
+    setAnalyzeLoading,
+    setAnalyzeResult,
+    setShowDoubleDummy,
+    setDoubleDummyResult,
+    setDoubleDummyLoading,
+  } = useBidding()
+
+  // ── Play 域状态（迁入 PlayContext）──
+  const {
+    playState, setPlayState,
+    playLoading, setPlayLoading,
+    showPlayPanel, setShowPlayPanel,
+    setShowPlayedCards,
+    setPlayCenterView,
+    isPlayPaused, setIsPlayPaused,
+    setLastCompletedTrick,
+    aiPlayHistory, setAiPlayHistory,
+    selectedPlayRecord, setSelectedPlayRecord,
+    playStarted, setPlayStarted,
+    playInitiated, setPlayInitiated,
+    loadedPlayRecord, setLoadedPlayRecord,
+    reviewCursor, setReviewCursor,
+    showDDHints,
+    setDDHints,
+    setDDHintsLoading,
+    contractDialogOpen, setContractDialogOpen,
+    contractDialogForm, setContractDialogForm,
+    resetOpeningLeadDialogOpen, setResetOpeningLeadDialogOpen,
+    resetOpeningLeadValue, setResetOpeningLeadValue,
+    directPlayContractInfo, setDirectPlayContractInfo,
+    playEngine,
+    handlePlayEngineChange,
+  } = usePlay()
 
   // 页面加载时检测是否有未完成的叫牌草稿
   useEffect(() => {
@@ -178,49 +229,9 @@ function App({ darkMode, onToggleDarkMode }) {
       clearBiddingDraft()
     }
   }
-  // 游戏设置
-  const [gameMode, setGameMode] = useState('four') // 'four' 或 'pair'
-  const [dealer, setDealer] = useState('南') // 发牌人位置
-  const [practiceDirection, setPracticeDirection] = useState('NS') // 双人模式练习方向
-  const [positionRoles, setPositionRoles] = useState({
-    '南': 'ai',
-    '北': 'ai',
-    '东': 'ai',
-    '西': 'ai'
-  }) // 每个位置的角色：'human' 或 'ai'
-  const [showPartnerHand, setShowPartnerHand] = useState(false) // 显示队友手牌
-
-  const [showOpponentHands, setShowOpponentHands] = useState(false) // 显示对方手牌
-  const [showAIBiddingOutput, setShowAIBiddingOutput] = useState(true) // 显示AI叫牌完整输出
-  const [useFallback, setUseFallback] = useState(false) // 是否使用备用提示词
-  const [dealMode, setDealMode] = useState('free') // 发牌模式：free/game/slam
-  const [showSettings, setShowSettings] = useState(false) // 显示设置面板
-  const [fallbackModel, setFallbackModelState] = useState(() => {
-    // 从 localStorage 读取保存的备用模型配置，默认使用 deepseek-v4-flash
-    try {
-      const saved = localStorage.getItem(FALLBACK_MODEL_KEY)
-      return saved || 'deepseek-v4-flash'
-    } catch {
-      return 'deepseek-v4-flash'
-    }
-  })
-
-  const PLAY_MODEL_KEY = 'bridge_play_model'
-  const [playModel, setPlayModelState] = useState(() => {
-    try {
-      const saved = localStorage.getItem(PLAY_MODEL_KEY)
-      return saved || 'deepseek-v4-flash'
-    } catch {
-      return 'deepseek-v4-flash'
-    }
-  })
+  // 游戏设置状态已迁入 GameContext（useGame）
+  // Bidding 域输出格式/分析状态已迁入 BiddingContext（useBidding）
   
-  // 更多输出格式
-  const [showMoreFormats, setShowMoreFormats] = useState(false) // 显示更多格式
-  const [outputFormats, setOutputFormats] = useState(null) // 输出格式数据
-  const [outputFormatsLoading, setOutputFormatsLoading] = useState(false) // 加载中
-  const [analyzeLoading, setAnalyzeLoading] = useState(false) // 检验定约加载中
-  const [analyzeResult, setAnalyzeResult] = useState(null) // 检验定约结果
   
   // 牌局记录管理（叫牌+打牌统一存储）
   const {
@@ -233,54 +244,11 @@ function App({ darkMode, onToggleDarkMode }) {
     updateRecordNote,
     importRecords,
   } = useBridgeRecords()
-  const [customDealOpen, setCustomDealOpen] = useState(false) // 自定义牌局对话框
-  const [imageDealOpen, setImageDealOpen] = useState(false) // 图片牌局对话框
-  const [customDealText, setCustomDealText] = useState('') // 自定义牌局文本
-  const [imagePath, setImagePath] = useState('') // 图片路径
-  const [imageFile, setImageFile] = useState(null) // 图片文件对象
-  
-  // 双明手分析
-  const [showDoubleDummy, setShowDoubleDummy] = useState(false) // 显示双明手结果
-  const [doubleDummyResult, setDoubleDummyResult] = useState(null) // 双明手分析结果
-  const [doubleDummyLoading, setDoubleDummyLoading] = useState(false) // 加载中
+  // 牌局对话框状态已迁入 GameContext
+  // 双明手分析状态已迁入 BiddingContext
+  // Play 域状态已迁入 PlayContext（usePlay）
 
-  // 打牌相关状态
-  const [playState, setPlayState] = useState(null) // 打牌状态
-  const [playLoading, setPlayLoading] = useState(false) // 打牌加载中
-  const [showPlayPanel, setShowPlayPanel] = useState(false) // 显示打牌面板
-  const [showPlayedCards, setShowPlayedCards] = useState(true) // 打牌时显示已出的牌（默认开启）
-  const [playCenterView, setPlayCenterView] = useState('play') // 打牌阶段中心区域视图: 'play'/'bidding'/'result'
-  const [isPlayPaused, setIsPlayPaused] = useState(false) // 打牌暂停状态
-  const [lastCompletedTrick, setLastCompletedTrick] = useState(null) // 暂停时保存的上一墩
-  const [aiPlayHistory, setAiPlayHistory] = useState([]) // AI打牌历史记录
-
-  // DD提示（牌桌Tooltip用）
-  const [showDDHints, setShowDDHints] = useState(() => {
-    try { return localStorage.getItem('bridge_showDDHints') !== 'false' } catch { return true }
-  })
-  const [ddHints, setDDHints] = useState(null)
-  const [ddHintsLoading, setDDHintsLoading] = useState(false)
-  const toggleDDHints = () => {
-    const next = !showDDHints
-    setShowDDHints(next)
-    try { localStorage.setItem('bridge_showDDHints', String(next)) } catch {}
-  }
-  const [selectedPlayRecord, setSelectedPlayRecord] = useState(null) // 桌面点击选中的AI打牌记录
-  const [playStarted, setPlayStarted] = useState(false) // 打牌是否已开始（第一张牌打出后）
-  const [playInitiated, setPlayInitiated] = useState(false) // 打牌是否已启动（点击"开始"后或重新打牌AI首攻）
-  const [loadedPlayRecord, setLoadedPlayRecord] = useState(null) // 从历史记录预加载的打牌数据
-  const [reviewCursor, setReviewCursor] = useState(null) // 复盘模式游标: null=非复盘, 0=第1墩
   const prevTricksCountRef = useRef(0) // 用于检测一墩完成
-  // 直接打牌：无叫牌定约时弹出输入框
-  const [contractDialogOpen, setContractDialogOpen] = useState(false)
-  const [contractDialogForm, setContractDialogForm] = useState({ contractStr: '', declarer: '南', openingLead: '', isDouble: false, isRedouble: false })
-  const [resetOpeningLeadDialogOpen, setResetOpeningLeadDialogOpen] = useState(false)
-  const [resetOpeningLeadValue, setResetOpeningLeadValue] = useState('')
-  const [directPlayContractInfo, setDirectPlayContractInfo] = useState(null)
-  const [imageOpeningLead, setImageOpeningLead] = useState(null) // 图片识别的首攻信息
-  const [readonlyMode, setReadonlyMode] = useState(false) // 加载不完整记录时只读
-  const [mode, setMode] = useState('practice') // 'practice'=发牌练习, 'simulated'=模拟实战
-  const [studyMode, setStudyMode] = useState(false) // 研究模式：取消庄家/明手角色绑定
 
   // 研究模式切换：关闭时所有位置恢复AI
   const handleStudyModeChange = (checked) => {
@@ -334,20 +302,6 @@ function App({ darkMode, onToggleDarkMode }) {
   const parseModelValue = (value) => {
     const parts = (value || 'deepseek-v4-flash').split('::')
     return { model: parts[0], reasoning: parts[1] === 'reasoning' }
-  }
-
-  const PLAY_ENGINE_KEY = 'bridge_play_engine'
-  const [playEngine, setPlayEngineState] = useState(() => {
-    try {
-      return localStorage.getItem(PLAY_ENGINE_KEY) || 'llm'
-    } catch {
-      return 'llm'
-    }
-  })
-
-  const handlePlayEngineChange = (value) => {
-    setPlayEngineState(value)
-    localStorage.setItem(PLAY_ENGINE_KEY, value)
   }
 
   const DD_SAMPLE_COUNT_KEY = 'bridge_dd_sample_count'
@@ -2626,42 +2580,13 @@ function App({ darkMode, onToggleDarkMode }) {
           <Box sx={{ display: 'flex', gap: 2, mb: 2, justifyContent: 'center' }}>
             <CardTablePanel
               isMobile={false}
-              hands={hands}
-              currentBidder={currentBidder}
-              dealer={dealer}
-              gameMode={gameMode}
-              showPartnerHand={showPartnerHand}
-              setShowPartnerHand={setShowPartnerHand}
-
-              showOpponentHands={showOpponentHands}
-              setShowOpponentHands={setShowOpponentHands}
-              getPartnerPosition={getPartnerPosition}
-              biddingSequence={biddingSequence}
-              isBiddingComplete={isBiddingComplete}
-              outputFormats={outputFormats}
-              outputFormatsLoading={outputFormatsLoading}
-              handleAnalyzeContract={handleAnalyzeContract}
-              analyzeLoading={analyzeLoading}
-
-              currentBiddingPosition={currentBiddingPosition}
-              showDoubleDummy={showDoubleDummy}
-              toggleDoubleDummy={toggleDoubleDummy}
-              doubleDummyResult={doubleDummyResult}
-              doubleDummyLoading={doubleDummyLoading}
-              biddingTotalTime={biddingTotalTime}
-              positionRoles={positionRoles}
-              handlePositionRoleChange={handlePositionRoleChange}
+              declarer={finalContract?.declarer || directPlayContractInfo?.declarer}
+              onAnalyzeContract={handleAnalyzeContract}
+              onToggleDoubleDummy={toggleDoubleDummy}
               onDealerChange={handleDealerChange}
+              onPositionRoleChange={handlePositionRoleChange}
               onClearAllHands={clearAllHands}
               onSimulatedReset={mode === 'simulated' ? clearAllHands : undefined}
-              setHands={setHands}
-              biddingStarted={biddingStarted}
-              stopBidding={stopBidding}
-              startBidding={startBidding}
-              playState={playState}
-              showPlayPanel={showPlayPanel}
-              declarer={finalContract?.declarer || directPlayContractInfo?.declarer}
-              lastCompletedTrick={lastCompletedTrick}
               onEditHands={() => {
                 setCustomDealText(handsToEditText(hands))
                 setCustomDealOpen(true)
@@ -2670,37 +2595,17 @@ function App({ darkMode, onToggleDarkMode }) {
                 setEditBiddingText(biddingToEditText(biddingSequence))
                 setShowEditBiddingDialog(true)
               }}
-              isPlayPaused={isPlayPaused}
-              playInitiated={playInitiated}
-              aiLoading={aiThinking}
-              showPlayedCards={showPlayedCards}
-              setShowPlayedCards={setShowPlayedCards}
-              playCenterView={playCenterView}
-              setPlayCenterView={setPlayCenterView}
-              aiBiddingHistory={aiBiddingHistory}
               onPlayCardClick={handlePlayCardClick}
               onSetPlayHand={handleSetPlayHand}
-              readonlyMode={readonlyMode}
-              mode={mode}
-              imageOpeningLead={imageOpeningLead}
               onImageDeal={() => setImageDealOpen(true)}
               onScreenshotDeal={handleScreenshotDeal}
               onCustomDeal={() => setCustomDealOpen(true)}
               onDeal={handleDeal}
-              dealMode={dealMode}
-              loading={loading}
-              aiThinking={aiThinking}
-              studyMode={studyMode}
-              setStudyMode={handleStudyModeChange}
-              addBid={addBid}
-              isBiddingCompleteFn={isBiddingComplete}
               onHandCardClick={handleHandCardClick}
               onManualPlay={handleManualPlay}
-              cardHints={ddHints}
-              showDDHints={showDDHints}
-              onToggleDDHints={toggleDDHints}
-              reviewCursor={reviewCursor}
-              reviewTrick={reviewCursor != null && playState?.tricks ? playState.tricks[reviewCursor] : null}
+              onStudyModeChange={handleStudyModeChange}
+              addBid={addBid}
+              startBidding={startBidding}
             />
 
             {/* 右侧面板：叫牌细节或打牌面板 */}
@@ -2779,42 +2684,13 @@ function App({ darkMode, onToggleDarkMode }) {
             {/* 当前牌局面板 */}
             <CardTablePanel
               isMobile={true}
-              hands={hands}
-              currentBidder={currentBidder}
-              dealer={dealer}
-              gameMode={gameMode}
-              showPartnerHand={showPartnerHand}
-              setShowPartnerHand={setShowPartnerHand}
-
-              showOpponentHands={showOpponentHands}
-              setShowOpponentHands={setShowOpponentHands}
-              getPartnerPosition={getPartnerPosition}
-              biddingSequence={biddingSequence}
-              isBiddingComplete={isBiddingComplete}
-              outputFormats={outputFormats}
-              outputFormatsLoading={outputFormatsLoading}
-              handleAnalyzeContract={handleAnalyzeContract}
-              analyzeLoading={analyzeLoading}
-
-              currentBiddingPosition={currentBiddingPosition}
-              showDoubleDummy={showDoubleDummy}
-              toggleDoubleDummy={toggleDoubleDummy}
-              doubleDummyResult={doubleDummyResult}
-              doubleDummyLoading={doubleDummyLoading}
-              biddingTotalTime={biddingTotalTime}
-              positionRoles={positionRoles}
-              handlePositionRoleChange={handlePositionRoleChange}
+              declarer={finalContract?.declarer || directPlayContractInfo?.declarer}
+              onAnalyzeContract={handleAnalyzeContract}
+              onToggleDoubleDummy={toggleDoubleDummy}
               onDealerChange={handleDealerChange}
+              onPositionRoleChange={handlePositionRoleChange}
               onClearAllHands={clearAllHands}
               onSimulatedReset={mode === 'simulated' ? clearAllHands : undefined}
-              setHands={setHands}
-              biddingStarted={biddingStarted}
-              stopBidding={stopBidding}
-              startBidding={startBidding}
-              playState={playState}
-              showPlayPanel={showPlayPanel}
-              declarer={finalContract?.declarer || directPlayContractInfo?.declarer}
-              lastCompletedTrick={lastCompletedTrick}
               onEditHands={() => {
                 setCustomDealText(handsToEditText(hands))
                 setCustomDealOpen(true)
@@ -2823,37 +2699,17 @@ function App({ darkMode, onToggleDarkMode }) {
                 setEditBiddingText(biddingToEditText(biddingSequence))
                 setShowEditBiddingDialog(true)
               }}
-              isPlayPaused={isPlayPaused}
-              playInitiated={playInitiated}
-              aiLoading={aiThinking}
-              showPlayedCards={showPlayedCards}
-              setShowPlayedCards={setShowPlayedCards}
-              playCenterView={playCenterView}
-              setPlayCenterView={setPlayCenterView}
-              aiBiddingHistory={aiBiddingHistory}
               onPlayCardClick={handlePlayCardClick}
               onSetPlayHand={handleSetPlayHand}
-              readonlyMode={readonlyMode}
-              mode={mode}
-              imageOpeningLead={imageOpeningLead}
               onImageDeal={() => setImageDealOpen(true)}
               onScreenshotDeal={handleScreenshotDeal}
               onCustomDeal={() => setCustomDealOpen(true)}
               onDeal={handleDeal}
-              dealMode={dealMode}
-              loading={loading}
-              aiThinking={aiThinking}
-              studyMode={studyMode}
-              setStudyMode={handleStudyModeChange}
-              addBid={addBid}
-              isBiddingCompleteFn={isBiddingComplete}
               onHandCardClick={handleHandCardClick}
               onManualPlay={handleManualPlay}
-              cardHints={ddHints}
-              showDDHints={showDDHints}
-              onToggleDDHints={toggleDDHints}
-              reviewCursor={reviewCursor}
-              reviewTrick={reviewCursor != null && playState?.tricks ? playState.tricks[reviewCursor] : null}
+              onStudyModeChange={handleStudyModeChange}
+              addBid={addBid}
+              startBidding={startBidding}
             />
 
             {/* 叫牌细节面板或打牌面板 */}
@@ -3214,6 +3070,18 @@ function App({ darkMode, onToggleDarkMode }) {
         </DialogActions>
       </Dialog>
     </Box>
+  )
+}
+
+function App({ darkMode, onToggleDarkMode }) {
+  return (
+    <GameProvider>
+      <BiddingProvider>
+        <PlayProvider>
+          <AppShell darkMode={darkMode} onToggleDarkMode={onToggleDarkMode} />
+        </PlayProvider>
+      </BiddingProvider>
+    </GameProvider>
   )
 }
 
