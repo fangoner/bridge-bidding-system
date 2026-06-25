@@ -39,6 +39,7 @@ import HandDisplay from './components/HandDisplay'
 import Header from './components/layout/Header'
 import BiddingDetailPanel from './components/BiddingDetailPanel'
 import CardTablePanel from './components/CardTablePanel'
+import MainTableArea from './components/MainTableArea'
 import SettingsPanel from './components/SettingsPanel'
 import PlayPanel from './components/PlayPanel'
 import PlayDetailPanel from './components/PlayDetailPanel'
@@ -46,7 +47,7 @@ import HistoryDialog from './components/HistoryDialog'
 import useBridgeRecords from './hooks/useBridgeRecords'
 import useModelSettings from './hooks/useModelSettings'
 import useDealing from './hooks/useDealing'
-import { hasAnyHuman, getPartnerPosition, BRIDGE_POSITIONS } from './utils/position'
+import { getPartnerPosition, BRIDGE_POSITIONS } from './utils/position'
 import './App.css'
 import { GameProvider, useGame } from './context/GameContext'
 import { BiddingProvider, useBidding } from './context/BiddingContext'
@@ -74,7 +75,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     positionRoles, setPositionRoles,
     showPartnerHand, setShowPartnerHand,
     showOpponentHands, setShowOpponentHands,
-    showAIBiddingOutput,
     useFallback, setUseFallback,
     dealMode, setDealMode,
     showSettings, setShowSettings,
@@ -124,8 +124,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     bidSuggestion, setBidSuggestion,
     aiBiddingHistory, setAiBiddingHistory,
     currentBiddingPosition, setCurrentBiddingPosition,
-    selectedBiddingIndex, setSelectedBiddingIndex,
-    simpleDisplayMode, setSimpleDisplayMode,
+    selectedBiddingIndex,
+    simpleDisplayMode,
     biddingStarted, setBiddingStarted,
     stopBidding, setStopBidding,
     passedAIPositions, setPassedAIPositions,
@@ -2206,213 +2206,63 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         </Alert>
       )}
 
-      {/* 桌面版布局 */}
-      {hands && !isMobile && (
-        <Box sx={{ maxWidth: 1400, mx: 'auto' }}>
-          {/* 牌桌和右侧面板并排 */}
-          <Box sx={{ display: 'flex', gap: 2, mb: 2, justifyContent: 'center' }}>
-            <CardTablePanel
-              isMobile={false}
-              declarer={finalContract?.declarer || directPlayContractInfo?.declarer}
-              onAnalyzeContract={handleAnalyzeContract}
-              onToggleDoubleDummy={toggleDoubleDummy}
-              onDealerChange={handleDealerChange}
-              onPositionRoleChange={handlePositionRoleChange}
-              onClearAllHands={clearAllHands}
-              onSimulatedReset={mode === 'simulated' ? clearAllHands : undefined}
-              onEditHands={() => {
-                setCustomDealText(handsToEditText(hands))
-                setCustomDealOpen(true)
-              }}
-              onEditBidding={() => {
-                setEditBiddingText(biddingToEditText(biddingSequence))
-                setShowEditBiddingDialog(true)
-              }}
-              onPlayCardClick={handlePlayCardClick}
-              onSetPlayHand={handleSetPlayHand}
-              onImageDeal={() => setImageDealOpen(true)}
-              onScreenshotDeal={onScreenshotDeal}
-              onCustomDeal={() => setCustomDealOpen(true)}
-              onDeal={handleDeal}
-              onHandCardClick={handleHandCardClick}
-              onManualPlay={handleManualPlay}
-              onStudyModeChange={handleStudyModeChange}
-              addBid={addBid}
-              startBidding={startBidding}
-            />
-
-            {/* 右侧面板：叫牌细节或打牌面板 */}
-            {showPlayPanel ? (
-              <PlayDetailPanel
-                isMobile={false}
-                playState={playState}
-                aiPlayHistory={aiPlayHistory}
-                aiLoading={aiThinking}
-                isPaused={isPlayPaused}
-                onResume={handleResumePlay}
-                onResetPlay={handleResetPlay}
-                externalSelectedRecord={selectedPlayRecord}
-                onClearExternalRecord={() => setSelectedPlayRecord(null)}
-                playStarted={playStarted}
-                onBeginPlay={handleBeginPlay}
-                onPausePlay={handlePausePlay}
-                playInitiated={playInitiated}
-                onUndoPlay={handleUndoPlay}
-                isHistoryRecord={!!loadedPlayRecord}
-                positionRoles={positionRoles}
-                onSave={handleSaveProgress}
-                canSave={playCanSave}
-                imageOpeningLead={imageOpeningLead}
-                reviewCursor={reviewCursor}
-                onReviewPrev={() => setReviewCursor(c => Math.max(0, (c || 0) - 1))}
-                onReviewNext={() => setReviewCursor(c => {
-                  const total = (playState?.tricks?.length || 0)
-                  return Math.min(total - 1, (c || 0) + 1)
-                })}
-                onRewindToTrick={handleRewindToTrick}
-                onStartReview={() => setReviewCursor(0)}
-              />
-            ) : (
-              (hasAnyHuman(positionRoles) || showAIBiddingOutput) && (
-                <BiddingDetailPanel
-                  isMobile={false}
-                  positionRoles={positionRoles}
-                  currentBidder={currentBidder}
-                  simpleDisplayMode={simpleDisplayMode}
-                  setSimpleDisplayMode={setSimpleDisplayMode}
-                  aiBiddingHistory={aiBiddingHistory}
-                  selectedBiddingIndex={selectedBiddingIndex}
-                  setSelectedBiddingIndex={setSelectedBiddingIndex}
-                  hands={hands}
-                  gameMode={gameMode}
-                  bidSuggestion={bidSuggestion}
-                  suggestionLoading={suggestionLoading}
-                  stopBidding={stopBidding}
-                  outputFormats={outputFormats}
-                  isBiddingCompleteFn={isBiddingComplete}
-                  onStartPlay={handleStartPlay}
-                  playLoading={playLoading}
-                  biddingStarted={biddingStarted}
-                  onStartBidding={startBidding}
-                  onResetBidding={resetBidding}
-                  onToggleStopBidding={toggleStopBidding}
-                  showUndo={showUndo}
-                  canUndo={canUndo}
-                  onUndo={undoBidding}
-                  onSave={handleSaveProgress}
-                  canSave={canSaveProgress}
-                  aiThinking={aiThinking}
-                  readonlyMode={readonlyMode}
-                />
-              )
-            )}
-          </Box>
-        </Box>
-      )}
-
-      {/* 手机端布局 */}
-      {hands && isMobile && (
-        <Box>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {/* 当前牌局面板 */}
-            <CardTablePanel
-              isMobile={true}
-              declarer={finalContract?.declarer || directPlayContractInfo?.declarer}
-              onAnalyzeContract={handleAnalyzeContract}
-              onToggleDoubleDummy={toggleDoubleDummy}
-              onDealerChange={handleDealerChange}
-              onPositionRoleChange={handlePositionRoleChange}
-              onClearAllHands={clearAllHands}
-              onSimulatedReset={mode === 'simulated' ? clearAllHands : undefined}
-              onEditHands={() => {
-                setCustomDealText(handsToEditText(hands))
-                setCustomDealOpen(true)
-              }}
-              onEditBidding={() => {
-                setEditBiddingText(biddingToEditText(biddingSequence))
-                setShowEditBiddingDialog(true)
-              }}
-              onPlayCardClick={handlePlayCardClick}
-              onSetPlayHand={handleSetPlayHand}
-              onImageDeal={() => setImageDealOpen(true)}
-              onScreenshotDeal={onScreenshotDeal}
-              onCustomDeal={() => setCustomDealOpen(true)}
-              onDeal={handleDeal}
-              onHandCardClick={handleHandCardClick}
-              onManualPlay={handleManualPlay}
-              onStudyModeChange={handleStudyModeChange}
-              addBid={addBid}
-              startBidding={startBidding}
-            />
-
-            {/* 叫牌细节面板或打牌面板 */}
-            {showPlayPanel ? (
-              <PlayDetailPanel
-                isMobile={true}
-                playState={playState}
-                aiPlayHistory={aiPlayHistory}
-                aiLoading={aiThinking}
-                isPaused={isPlayPaused}
-                onResume={handleResumePlay}
-                onResetPlay={handleResetPlay}
-                height="auto"
-                externalSelectedRecord={selectedPlayRecord}
-                onClearExternalRecord={() => setSelectedPlayRecord(null)}
-                playStarted={playStarted}
-                onBeginPlay={handleBeginPlay}
-                onPausePlay={handlePausePlay}
-                playInitiated={playInitiated}
-                onUndoPlay={handleUndoPlay}
-                isHistoryRecord={!!loadedPlayRecord}
-                positionRoles={positionRoles}
-                onSave={handleSaveProgress}
-                canSave={playCanSave}
-                imageOpeningLead={imageOpeningLead}
-                reviewCursor={reviewCursor}
-                onReviewPrev={() => setReviewCursor(c => Math.max(0, (c || 0) - 1))}
-                onReviewNext={() => setReviewCursor(c => {
-                  const total = (playState?.tricks?.length || 0)
-                  return Math.min(total - 1, (c || 0) + 1)
-                })}
-                onRewindToTrick={handleRewindToTrick}
-                onStartReview={() => setReviewCursor(0)}
-              />
-            ) : (
-              (hasAnyHuman(positionRoles) || showAIBiddingOutput) && (
-                <BiddingDetailPanel
-                  isMobile={true}
-                  positionRoles={positionRoles}
-                  currentBidder={currentBidder}
-                  simpleDisplayMode={simpleDisplayMode}
-                  setSimpleDisplayMode={setSimpleDisplayMode}
-                  aiBiddingHistory={aiBiddingHistory}
-                  selectedBiddingIndex={selectedBiddingIndex}
-                  setSelectedBiddingIndex={setSelectedBiddingIndex}
-                  hands={hands}
-                  gameMode={gameMode}
-                  bidSuggestion={bidSuggestion}
-                  suggestionLoading={suggestionLoading}
-                  stopBidding={stopBidding}
-                  outputFormats={outputFormats}
-                  isBiddingCompleteFn={isBiddingComplete}
-                  onStartPlay={handleStartPlay}
-                  playLoading={playLoading}
-                  biddingStarted={biddingStarted}
-                  onStartBidding={startBidding}
-                  onResetBidding={resetBidding}
-                  onToggleStopBidding={toggleStopBidding}
-                  showUndo={showUndo}
-                  canUndo={canUndo}
-                  onUndo={undoBidding}
-                  onSave={handleSaveProgress}
-                  canSave={canSaveProgress}
-                  aiThinking={aiThinking}
-                  readonlyMode={readonlyMode}
-                />
-              )
-            )}
-          </Box>
-        </Box>
+      {/* 牌桌主区域（桌面横排 / 手机纵排，由 MainTableArea 内部处理） */}
+      {hands && (
+        <MainTableArea
+          isMobile={isMobile}
+          declarer={finalContract?.declarer || directPlayContractInfo?.declarer}
+          onAnalyzeContract={handleAnalyzeContract}
+          onToggleDoubleDummy={toggleDoubleDummy}
+          onDealerChange={handleDealerChange}
+          onPositionRoleChange={handlePositionRoleChange}
+          onClearAllHands={clearAllHands}
+          onSimulatedReset={mode === 'simulated' ? clearAllHands : undefined}
+          onEditHands={() => {
+            setCustomDealText(handsToEditText(hands))
+            setCustomDealOpen(true)
+          }}
+          onEditBidding={() => {
+            setEditBiddingText(biddingToEditText(biddingSequence))
+            setShowEditBiddingDialog(true)
+          }}
+          onPlayCardClick={handlePlayCardClick}
+          onSetPlayHand={handleSetPlayHand}
+          onImageDeal={() => setImageDealOpen(true)}
+          onScreenshotDeal={onScreenshotDeal}
+          onCustomDeal={() => setCustomDealOpen(true)}
+          onDeal={handleDeal}
+          onHandCardClick={handleHandCardClick}
+          onManualPlay={handleManualPlay}
+          onStudyModeChange={handleStudyModeChange}
+          addBid={addBid}
+          startBidding={startBidding}
+          // 叫牌面板回调
+          onStartPlay={handleStartPlay}
+          onResetBidding={resetBidding}
+          onToggleStopBidding={toggleStopBidding}
+          onUndoBidding={undoBidding}
+          onSaveBidding={handleSaveProgress}
+          canSaveBiddingProgress={canSaveProgress}
+          showUndoBidding={showUndo}
+          canUndoBidding={canUndo}
+          onStartBidding={startBidding}
+          // 打牌面板回调
+          onResume={handleResumePlay}
+          onResetPlay={handleResetPlay}
+          onClearExternalRecord={() => setSelectedPlayRecord(null)}
+          onBeginPlay={handleBeginPlay}
+          onPausePlay={handlePausePlay}
+          onUndoPlay={handleUndoPlay}
+          onSavePlay={handleSaveProgress}
+          canSavePlay={playCanSave}
+          onReviewPrev={() => setReviewCursor(c => Math.max(0, (c || 0) - 1))}
+          onReviewNext={() => setReviewCursor(c => {
+            const total = (playState?.tricks?.length || 0)
+            return Math.min(total - 1, (c || 0) + 1)
+          })}
+          onRewindToTrick={handleRewindToTrick}
+          onStartReview={() => setReviewCursor(0)}
+        />
       )}
 
       {/* 使用说明 */}
