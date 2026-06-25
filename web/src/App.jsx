@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   Container,
   Typography,
@@ -34,7 +34,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import HistoryIcon from '@mui/icons-material/History'
-import { dealCards, healthCheck, aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, reloadJF, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, doubleDummyAnalysis, setFallbackModel, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles, undoPlay, setPlayHand, getDDHints } from './services/api'
+import { aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, doubleDummyAnalysis, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles, undoPlay, setPlayHand, getDDHints } from './services/api'
 import HandDisplay from './components/HandDisplay'
 import Header from './components/layout/Header'
 import BiddingDetailPanel from './components/BiddingDetailPanel'
@@ -44,14 +44,14 @@ import PlayPanel from './components/PlayPanel'
 import PlayDetailPanel from './components/PlayDetailPanel'
 import HistoryDialog from './components/HistoryDialog'
 import useBridgeRecords from './hooks/useBridgeRecords'
+import useModelSettings from './hooks/useModelSettings'
+import useDealing from './hooks/useDealing'
 import { hasAnyHuman, getPartnerPosition, BRIDGE_POSITIONS } from './utils/position'
 import './App.css'
 import { GameProvider, useGame } from './context/GameContext'
 import { BiddingProvider, useBidding } from './context/BiddingContext'
 import { PlayProvider, usePlay } from './context/PlayContext'
 
-const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
-const PLAY_MODEL_KEY = 'bridge_play_model'
 const BIDDING_DRAFT_KEY = 'bridge_bidding_draft'
 
 function AppShell({ darkMode, onToggleDarkMode }) {
@@ -72,14 +72,16 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     dealer, setDealer,
     practiceDirection, setPracticeDirection,
     positionRoles, setPositionRoles,
+    showPartnerHand, setShowPartnerHand,
+    showOpponentHands, setShowOpponentHands,
     showAIBiddingOutput,
     useFallback, setUseFallback,
     dealMode, setDealMode,
     showSettings, setShowSettings,
     dealSystem, setDealSystem,
-    fallbackModel, setFallbackModelState,
-    playModel, setPlayModelState,
-    apiStatus, setApiStatus,
+    fallbackModel,
+    playModel,
+    apiStatus,
     currentRecordId, setCurrentRecordId,
     showDraftBanner, setShowDraftBanner,
     customDealOpen, setCustomDealOpen,
@@ -114,7 +116,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     if (!seq || seq.length === 0) return ''
     return seq.map(b => `(${b.position})${b.bid}`).join('-')
   }
-  const screenshotCancelledRef = useRef(false)
 
   // ── Bidding 域状态（迁入 BiddingContext）──
   const {
@@ -264,83 +265,22 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   useEffect(() => { playStateRef.current = playState }, [playState])
   useEffect(() => { aiPlayHistoryRef.current = aiPlayHistory }, [aiPlayHistory])
 
-  // 检查API状态
+  // ── 模型配置 hook（备用模型/打牌模型/DD采样/API状态/JF重载）──
+  const {
+    ddSampleCount,
+    handleDDSampleCountChange,
+    handleFallbackModelChange,
+    handlePlayModelChange,
+    checkApiStatus,
+    handleReloadJF,
+    parseModelValue,
+  } = useModelSettings()
+
+  // 检查API状态 + 加载历史记录
   useEffect(() => {
     checkApiStatus()
     loadBridgeRecords()
-    syncFallbackModel()
-  }, [])
-
-  // 同步备用模型到后端
-  const syncFallbackModel = async () => {
-    try {
-      await setFallbackModel(parseModelValue(fallbackModel).model)
-    } catch (err) {
-      console.error('同步备用模型失败:', err)
-    }
-  }
-
-  // 处理备用模型变更
-  const handleFallbackModelChange = async (event) => {
-    const newModel = event.target.value
-    setFallbackModelState(newModel)
-    localStorage.setItem(FALLBACK_MODEL_KEY, newModel)
-    try {
-      await setFallbackModel(parseModelValue(newModel).model)
-    } catch (err) {
-      console.error('设置备用模型失败:', err)
-    }
-  }
-
-  const handlePlayModelChange = (event) => {
-    const newModel = event.target.value
-    setPlayModelState(newModel)
-    localStorage.setItem(PLAY_MODEL_KEY, newModel)
-  }
-
-  // 解析组合模型值 "model::reasoning" → { model, reasoning }
-  const parseModelValue = (value) => {
-    const parts = (value || 'deepseek-v4-flash').split('::')
-    return { model: parts[0], reasoning: parts[1] === 'reasoning' }
-  }
-
-  const DD_SAMPLE_COUNT_KEY = 'bridge_dd_sample_count'
-  const [ddSampleCount, setDDSampleCount] = useState(() => {
-    try {
-      return parseInt(localStorage.getItem(DD_SAMPLE_COUNT_KEY)) || 200
-    } catch {
-      return 200
-    }
-  })
-
-  const handleDDSampleCountChange = (value) => {
-    const num = parseInt(value) || 200
-    setDDSampleCount(num)
-    localStorage.setItem(DD_SAMPLE_COUNT_KEY, num)
-  }
-
-  const checkApiStatus = async () => {
-    try {
-      const status = await healthCheck()
-      setApiStatus(status)
-    } catch (err) {
-      setApiStatus({ error: 'API服务未启动' })
-    }
-  }
-
-  const handleReloadJF = async () => {
-    try {
-      const result = await reloadJF()
-      if (result.status === 'success') {
-        setApiStatus({ jf_segments_loaded: result.jf_segments_loaded })
-        alert(`约定片段已重新加载，共 ${result.jf_segments_loaded} 条`)
-      } else {
-        alert('加载失败: ' + result.message)
-      }
-    } catch (err) {
-      alert('加载失败: ' + err.message)
-    }
-  }
+  }, [checkApiStatus, loadBridgeRecords])
 
 
 
@@ -648,299 +588,19 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     }
   }, [hands, biddingSequence, dealer, gameMode, practiceDirection, positionRoles, aiBiddingHistory, dealSystem, currentRecordId, showPlayPanel])
 
-  // 发牌
-  const handleDeal = async (mode = 'free') => {
-    clearBiddingDraft()
-    setCurrentRecordId(null) // 新发牌，重置记录ID
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await dealCards(mode)
-      setHands(data.hands)
-      setBiddingSequence([])
-      setBidSuggestion(null) // 重置叫牌建议
-      setAiBiddingHistory([]) // 重置AI叫牌历史记录
-      setCurrentBidder(dealer) // 从发牌人开始叫牌
-      setBiddingStarted(false) // 重置叫牌开始状态
-      setStopBidding(false) // 重置停止叫牌状态
-      setPassedAIPositions(new Set()) // 重置已pass的AI位置
-      setUseFallback(false) // 重置备用提示词状态
-      setShowDoubleDummy(false) // 重置双明手显示状态
-      setDoubleDummyResult(null) // 重置双明手结果
-      setPositionRoles({ '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai' }) // 默认全AI旁观
-      // 重置回退历史
-      setBiddingHistory([])
-      setHistoryIndex(-1)
-      // 重置打牌相关状态
-      setDirectPlayContractInfo(null); setReadonlyMode(false)
-      setShowPlayPanel(false)
-      setPlayState(null)
-      setAiPlayHistory([])
-      setIsPlayPaused(false)
-      setLoadedPlayRecord(null)
-      setLastCompletedTrick(null)
-      setImageOpeningLead(null)
-    } catch (err) {
-      setError('发牌失败，请检查API服务是否正常运行')
-    } finally {
-      setLoading(false)
-    }
-  }
+  // ── 发牌流程 hook（发牌/自定义牌局/图片识别/截屏识别/清除手牌）──
+  const {
+    handleDeal,
+    handleCustomDeal,
+    handleImageDeal,
+    handleScreenshotDeal,
+    clearAllHands,
+    parseBiddingSequenceStr,
+    screenshotCancelledRef,
+  } = useDealing({ clearBiddingDraft })
 
-  // 自定义牌局
-  const handleCustomDeal = async (inputText) => {
-    clearBiddingDraft()
-    setCurrentRecordId(null) // 新牌局，重置记录ID
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await customDeal(inputText)
-      if (data.success) {
-        setHands(data.hands)
-        setBiddingSequence([])
-        setBidSuggestion(null)
-        setAiBiddingHistory([])
-        setCurrentBidder(dealer)
-        setBiddingStarted(false)
-        setStopBidding(false)
-        setPassedAIPositions(new Set())
-        setUseFallback(false)
-        setShowDoubleDummy(false)
-        setDoubleDummyResult(null)
-        setPositionRoles({ '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai' }) // 默认全AI旁观
-        setBiddingHistory([])
-        setHistoryIndex(-1)
-        // 重置打牌相关状态
-        setReadonlyMode(false)
-        setShowPlayPanel(false)
-        setPlayState(null)
-        setAiPlayHistory([])
-          setIsPlayPaused(false)
-        setLoadedPlayRecord(null)
-        setLastCompletedTrick(null)
-        setImageOpeningLead(data.opening_lead || null)
-      } else {
-        setError(data.message || '牌局解析失败')
-      }
-    } catch (err) {
-      setError('自定义牌局失败，请检查API服务是否正常运行')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // 解析后端返回的叫牌序列字符串为 biddingSequence 数组
-  // 格式: "(北)pass-(东)pass-(南)1NT-(西)pass-..."
-  const parseBiddingSequenceStr = (biddingStr) => {
-    if (!biddingStr) return []
-    const items = biddingStr.split('-').filter(s => s.trim())
-    const result = items.map(item => {
-      const match = item.trim().match(/^\(([^)]+)\)(.+)$/)
-      if (match) {
-        let bid = match[2]
-        // 统一中文叫品为英文
-        if (bid === '不叫' || bid === 'Pass' || bid === 'PASS') bid = 'pass'
-        if (bid === '加倍' || bid === 'Double') bid = 'X'
-        if (bid === '再加倍' || bid === 'Redouble') bid = 'XX'
-        return { position: match[1], bid }
-      }
-      return null
-    }).filter(Boolean)
-
-    // 补齐或裁剪结束叫牌的pass：最后一个实质性叫品后必须恰好3个pass
-    if (result.length > 0) {
-      // 找到最后一个非pass叫品的位置
-      let lastSubstantiveIdx = -1
-      for (let i = result.length - 1; i >= 0; i--) {
-        if (result[i].bid !== 'pass') {
-          lastSubstantiveIdx = i
-          break
-        }
-      }
-      if (lastSubstantiveIdx >= 0) {
-        const trailingPasses = result.length - 1 - lastSubstantiveIdx
-        if (trailingPasses > 3) {
-          // 多余的pass，裁剪到3个
-          result.splice(lastSubstantiveIdx + 4)
-        } else if (trailingPasses < 3) {
-          // 不足3个pass，补齐
-          const needed = 3 - trailingPasses
-          const lastPos = result[result.length - 1].position
-          const lastIdx = BRIDGE_POSITIONS.indexOf(lastPos)
-          for (let i = 1; i <= needed; i++) {
-            result.push({ position: BRIDGE_POSITIONS[(lastIdx + i) % 4], bid: 'pass' })
-          }
-        }
-      }
-    }
-
-    return result
-  }
-
-  const handleImageDeal = async (imageFile) => {
-    clearBiddingDraft()
-    setCurrentRecordId(null) // 新牌局，重置记录ID
-    setLoading(true)
-    setError(null)
-    setWarning(null)
-    try {
-      const data = await imageDeal(imageFile)
-      if (data.success) {
-        setHands(data.hands)
-        // 显示校验警告
-        if (data.message && data.message !== '牌局已加载') {
-          setWarning(data.message)
-        }
-        // 设置发牌人位置
-        if (data.dealer) {
-          setDealer(data.dealer)
-        }
-        // 如果识别到叫牌序列，设置到状态中（仅展示，不触发自动叫牌）
-        const parsedBidding = parseBiddingSequenceStr(data.bidding_sequence)
-        setBiddingSequence(parsedBidding)
-        setBidSuggestion(null)
-        setAiBiddingHistory([])
-        setCurrentBidder(data.dealer || dealer)
-        setBiddingStarted(false)
-        setStopBidding(false)
-        setPassedAIPositions(new Set())
-        setUseFallback(false)
-        setShowDoubleDummy(false)
-        setDoubleDummyResult(null)
-        setPositionRoles({ '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai' }) // 默认全AI旁观
-        setBiddingHistory([])
-        setHistoryIndex(-1)
-        // 重置打牌相关状态
-        setReadonlyMode(false)
-        setShowPlayPanel(false)
-        setPlayState(null)
-        setAiPlayHistory([])
-          setIsPlayPaused(false)
-        setLoadedPlayRecord(null)
-        setLastCompletedTrick(null)
-        // 如果识别到完整定约，设置直接打牌信息
-        if (data.contract_level && data.contract_suit && data.contract_declarer) {
-          setDirectPlayContractInfo({
-            level: data.contract_level,
-            suit: data.contract_suit,
-            declarer: data.contract_declarer,
-            isDouble: data.contract_doubled || false,
-            isRedouble: data.contract_redoubled || false,
-            partnership: ['南', '北'].includes(data.contract_declarer) ? '南北' : '东西',
-            bid: `${data.contract_level}${data.contract_suit}${data.contract_doubled ? 'X' : ''}${data.contract_redoubled ? 'X' : ''}`,
-          })
-        } else {
-          setDirectPlayContractInfo(null)
-        }
-        // 如果识别到首攻，保存首攻信息
-        setImageOpeningLead(data.opening_lead || null)
-      } else {
-        setError(data.message || '图片识别失败')
-      }
-    } catch (err) {
-      setError('图片识别失败，请检查API服务是否正常运行')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // 截屏读取牌局 - 点击触发截图，等待后自动读取剪贴板识别
-  const handleScreenshotDeal = async () => {
-    if (loading) return
-
-    setShowSettings(false)
-    setLoading(true)
-    screenshotCancelledRef.current = false
-    setError('截屏已触发，请完成截图后等待识别...')
-    setWarning(null)
-    try {
-      const result = await triggerScreenshot()
-      if (!result.success) {
-        setError(result.message || '触发截屏失败')
-        setLoading(false)
-        return
-      }
-
-      // 轮询读取剪贴板，每2秒尝试一次，最多10次（20秒）
-      let data = null
-      for (let i = 0; i < 10; i++) {
-        await new Promise(resolve => setTimeout(resolve, 2000))
-        if (screenshotCancelledRef.current) {
-          setLoading(false)
-          return
-        }
-        try {
-          const resp = await readClipboardDeal()
-          if (resp.success) {
-            data = resp
-            break
-          }
-        } catch (e) {
-          // 剪贴板还没有图片，继续等待
-        }
-        setError(`等待截屏中... (${i + 1}/10)`)
-      }
-
-      if (!data) {
-        setError('截屏识别超时，请确保已完成截图并重试')
-        setLoading(false)
-        return
-      }
-      setHands(data.hands)
-      // 显示校验警告
-      if (data.message && data.message !== '识别成功') {
-        setWarning(data.message)
-      }
-      // 设置发牌人位置
-      if (data.dealer) {
-        setDealer(data.dealer)
-      }
-      // 如果识别到叫牌序列，设置到状态中
-      const parsedBidding = parseBiddingSequenceStr(data.bidding_sequence)
-      setBiddingSequence(parsedBidding)
-      setBidSuggestion(null)
-      setAiBiddingHistory([])
-      setCurrentBidder(data.dealer || dealer)
-      setBiddingStarted(false)
-      setStopBidding(false)
-      setPassedAIPositions(new Set())
-      setUseFallback(false)
-      setShowDoubleDummy(false)
-      setDoubleDummyResult(null)
-      setPositionRoles({ '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai' }) // 默认全AI旁观
-      setBiddingHistory([])
-      setHistoryIndex(-1)
-      setError(null)
-      // 重置打牌相关状态
-      setReadonlyMode(false)
-      setShowPlayPanel(false)
-      setPlayState(null)
-      setAiPlayHistory([])
-      setIsPlayPaused(false)
-      setLoadedPlayRecord(null)
-      setLastCompletedTrick(null)
-      // 如果识别到完整定约，设置直接打牌信息
-      if (data.contract_level && data.contract_suit && data.contract_declarer) {
-        setDirectPlayContractInfo({
-          level: data.contract_level,
-          suit: data.contract_suit,
-          declarer: data.contract_declarer,
-          isDouble: data.contract_doubled || false,
-          isRedouble: data.contract_redoubled || false,
-          partnership: ['南', '北'].includes(data.contract_declarer) ? '南北' : '东西',
-          bid: `${data.contract_level}${data.contract_suit}${data.contract_doubled ? 'X' : ''}${data.contract_redoubled ? 'X' : ''}`,
-        })
-      } else {
-        setDirectPlayContractInfo(null)
-      }
-      // 如果识别到首攻，保存首攻信息
-      setImageOpeningLead(data.opening_lead || null)
-    } catch (err) {
-      setError('截屏识别失败，请检查API服务是否正常运行')
-    } finally {
-      setLoading(false)
-    }
-  }
+  // 截屏识别需要关闭设置面板
+  const onScreenshotDeal = () => handleScreenshotDeal({ setShowSettings })
 
   // 开始叫牌
   const startBidding = () => {
@@ -988,34 +648,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     setCurrentRecordId(null)
   }
 
-  // 清除所有手牌（重新开始一局）
-  const clearAllHands = useCallback(() => {
-    clearBiddingDraft()
-    setHands({
-      '南': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
-      '北': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
-      '东': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
-      '西': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 }
-    })
-    initBiddingState(dealer)
-    setOutputFormats(null)
-    setShowDoubleDummy(false)
-    setDoubleDummyResult(null)
-    setBiddingHistory([])
-    setHistoryIndex(-1)
-    // 重置打牌相关状态
-    setReadonlyMode(false)
-    setShowPlayPanel(false)
-    setPlayState(null)
-    setAiPlayHistory([])
-    
-    setIsPlayPaused(false)
-    setPlayStarted(false)
-    setPlayInitiated(false)
-    setLoadedPlayRecord(null)
-    setShowPartnerHand(false)
-    setShowOpponentHands(false)
-  }, [])
+  // 清除所有手牌已迁入 useDealing hook
 
   const handleModeChange = (newMode) => {
     if (newMode !== mode) {
@@ -1160,7 +793,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         
         // 继续计算下一个
         const nextNextIndex = (nextIndex + 1) % 4
-        const nextNextBidder = positions[nextNextIndex]
+        const nextNextBidder = BRIDGE_POSITIONS[nextNextIndex]
         
         setBiddingSequence(newSequence)
         setCurrentBidder(nextNextBidder)
@@ -2598,7 +2231,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
               onPlayCardClick={handlePlayCardClick}
               onSetPlayHand={handleSetPlayHand}
               onImageDeal={() => setImageDealOpen(true)}
-              onScreenshotDeal={handleScreenshotDeal}
+              onScreenshotDeal={onScreenshotDeal}
               onCustomDeal={() => setCustomDealOpen(true)}
               onDeal={handleDeal}
               onHandCardClick={handleHandCardClick}
@@ -2702,7 +2335,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
               onPlayCardClick={handlePlayCardClick}
               onSetPlayHand={handleSetPlayHand}
               onImageDeal={() => setImageDealOpen(true)}
-              onScreenshotDeal={handleScreenshotDeal}
+              onScreenshotDeal={onScreenshotDeal}
               onCustomDeal={() => setCustomDealOpen(true)}
               onDeal={handleDeal}
               onHandCardClick={handleHandCardClick}
