@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Box, Typography, Paper, Divider, Button, ToggleButtonGroup, ToggleButton, useTheme, Chip } from '@mui/material'
+import { Box, Typography, Paper, Divider, Button, ToggleButtonGroup, ToggleButton, useTheme, Chip, Collapse, IconButton } from '@mui/material'
+import { KeyboardArrowDown, KeyboardArrowRight } from '@mui/icons-material'
 import { getSuitColor } from '../constants/suits'
 import { PANEL_LAYOUT } from '../styles/constants'
 
@@ -74,7 +75,8 @@ function PlayDetailPanel({
   positionRoles,
   onSave,
   canSave,
-    reviewCursor,
+  imageOpeningLead,
+  reviewCursor,
   onReviewPrev,
   onReviewNext,
   onRewindToTrick,
@@ -82,6 +84,7 @@ function PlayDetailPanel({
 }) {
   const [selectedRecord, setSelectedRecord] = useState(null)
   const [viewMode, setViewMode] = useState('output')
+  const [collapsed, setCollapsed] = useState(false)
   const prevIsPausedRef = useRef(isPaused)
 
   // 恢复继续时清除选中记录
@@ -174,7 +177,7 @@ function PlayDetailPanel({
 
     // 输出模式：显示 fullOutput 中所有有效字段（排除内部/已渲染的）
     const SKIP_KEYS = ['mcts_stats', 'tiered_phase', 'tiered_dd_fallback', 'tiered_mcts_fallback', 'validation_warning']
-    const FIELD_COLORS = ['#e65100', 'text.primary', '#2e7d32', '#1976d2', '#6a1b9a', '#1565c0']
+    const FIELD_COLORS = ['#e65100', 'text.primary', '#2e7d32', '#1976d2', '#37474f', '#1565c0']
     const fields = Object.keys(fullOutput)
       .filter(k => !SKIP_KEYS.includes(k) && fullOutput[k] != null && fullOutput[k] !== '')
       .map((k, i) => ({
@@ -206,7 +209,7 @@ function PlayDetailPanel({
             </Typography>
           </Typography>
           {(record.used_engine || '') === 'perfect' ? (
-            <Typography variant="caption" sx={{ color: '#6a1b9a', fontSize: '0.7rem', fontWeight: 500 }}>
+            <Typography variant="caption" sx={{ color: '#37474f', fontSize: '0.7rem', fontWeight: 500 }}>
               DD·完美
             </Typography>
           ) : (record.used_engine || '') === 'dd' ? (
@@ -217,13 +220,26 @@ function PlayDetailPanel({
             <Typography variant="caption" sx={{ color: '#2e7d32', fontSize: '0.7rem', fontWeight: 500 }}>
               MCTS
             </Typography>
+          ) : record.used_engine === 'alphamu' ? (
+            <Typography variant="caption" sx={{ color: '#7b1fa2', fontSize: '0.7rem', fontWeight: 500 }}>
+              αμ
+            </Typography>
           ) : record.used_engine === 'tiered' ? (
             <Typography variant="caption" sx={{ color: '#e65100', fontSize: '0.7rem', fontWeight: 500 }}>
               Tiered·{tieredPhaseLabel}
             </Typography>
           ) : record.used_model && (
             <Typography variant="caption" sx={{ color: colorMuted, fontSize: '0.7rem' }}>
-              {record.used_model === 'deepseek-v4-pro' ? 'V4-Pro' : 'V4-Flash'}
+                            {(() => {
+                const MODEL_LABELS = {
+                  'deepseek-v4-flash': 'V4-Flash',
+                  'deepseek-v4-pro': 'V4-Pro',
+                  'doubao-seed-2.1-pro': '豆包 Pro',
+                  'doubao-seed-2.1-turbo': '豆包 Turbo',
+                }
+                const base = (record.used_model || '').replace('::reasoning', '')
+                return MODEL_LABELS[base] || record.used_model
+              })()}
             </Typography>
           )}
           {record.elapsed_ms != null && (
@@ -303,7 +319,7 @@ function PlayDetailPanel({
                 )
                 const maxVal = Math.max(...barValues.map(v => Math.abs(v)), 0.01)
                 const barColors = isAlphaMu
-                  ? ['#6a1b9a', '#9c27b0', '#ce93d8', '#e1bee7', '#f3e5f5']
+                  ? ['#263238', '#37474f', '#546e7a', '#78909c', '#b0bec5']
                   : ['#1976d2', '#42a5f5', '#90caf9', '#bbdefb', '#e3f2fd']
                 return (
                   <Box key="stats" sx={{ mt: 0.75 }}>
@@ -441,7 +457,7 @@ function PlayDetailPanel({
                 : (isDeclarerSide ? (isDark ? 'rgba(99, 102, 241, 0.12)' : '#e3f2fd') : (isDark ? 'rgba(255, 152, 0, 0.1)' : '#fff3e0')),
             borderRadius: 0.5,
             border: isReviewTrick ? '2px solid #ffc107'
-              : isCurrentTrick ? (isDark ? '1px dashed rgba(156, 39, 176, 0.5)' : '1px dashed #9c27b0') : 'none',
+              : isCurrentTrick ? (isDark ? '1px dashed rgba(120, 144, 156, 0.5)' : '1px dashed #546e7a') : 'none',
           }}
         >
           <Typography variant="caption" sx={{ fontWeight: 'bold', fontSize: '0.75rem', minWidth: 35 }}>
@@ -488,9 +504,14 @@ function PlayDetailPanel({
     return (
       <Box sx={{ mt: 1 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
-          <Typography variant="subtitle2" sx={{ fontSize: '0.75rem' }}>
-            出牌记录 ({tricks.length}/13)
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <IconButton size="small" onClick={() => setCollapsed(!collapsed)} sx={{ p: 0 }}>
+              {collapsed ? <KeyboardArrowRight fontSize="small" /> : <KeyboardArrowDown fontSize="small" />}
+            </IconButton>
+            <Typography variant="subtitle2" sx={{ fontSize: '0.75rem' }}>
+              出牌记录 ({tricks.length}/13)
+            </Typography>
+          </Box>
           {reviewCursor != null && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <Button size="small" onClick={onReviewPrev} disabled={reviewCursor === 0}
@@ -511,22 +532,33 @@ function PlayDetailPanel({
             </Box>
           )}
         </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
-            {allTricks.slice(0, 7).map((trick, idx) => renderTrickRow(trick, idx))}
+        <Collapse in={!collapsed}>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+              {allTricks.slice(0, 7).map((trick, idx) => renderTrickRow(trick, idx))}
+            </Box>
+            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+              {allTricks.slice(7).map((trick, idx) => renderTrickRow(trick, idx + 7))}
+            </Box>
           </Box>
-          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
-            {allTricks.slice(7).map((trick, idx) => renderTrickRow(trick, idx + 7))}
-          </Box>
-        </Box>
+        </Collapse>
       </Box>
     )
   }
 
   return (
-    <Paper elevation={3} sx={{ 
+    <Paper elevation={0} sx={{ 
       p: 1, 
-      bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : (isMobile ? '#f5f5f5' : '#e8e8e8'),
+      background: isDark
+        ? 'linear-gradient(135deg, rgba(30, 41, 59, 0.75) 0%, rgba(30, 41, 59, 0.6) 100%)'
+        : 'linear-gradient(135deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.7) 100%)',
+      backdropFilter: 'blur(20px) saturate(180%)',
+      WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+      border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.8)'}`,
+      boxShadow: isDark
+        ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
+        : '0 8px 32px rgba(79, 70, 229, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+      borderRadius: 3,
       minWidth: isMobile ? undefined : PANEL_LAYOUT.minWidth,
       maxWidth: isMobile ? undefined : PANEL_LAYOUT.maxWidth,
       flex: isMobile ? undefined : '1 1 0%',
@@ -537,9 +569,9 @@ function PlayDetailPanel({
       overflow: 'hidden'
     }}>
       {/* 标题栏：打牌详情 + 墩数统计 + 操作按钮在一行 */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5, flexShrink: 0, minHeight: 36, flexWrap: 'wrap' }}>
-        <Typography variant="h6" sx={{ fontSize: '0.95rem', color: isDark ? '#e2e8f0' : undefined }}>打牌详情</Typography>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5, flexShrink: 0, minHeight: 36, flexWrap: 'nowrap', gap: 0.5 }}>
+        <Typography variant="h6" sx={{ fontSize: '0.95rem', color: isDark ? '#e2e8f0' : undefined, flexShrink: 0 }}>打牌详情</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexShrink: 0 }}>
           <Typography component="span" variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
             庄家方 <strong style={{ color: theme.palette.primary.main }}>{declarerTricks}</strong>
           </Typography>
@@ -579,7 +611,7 @@ function PlayDetailPanel({
             </Button>
           )}
         </Box>
-        <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', flexShrink: 0 }}>
           {!isComplete && !playInitiated && (
             <Button variant="outlined" color="success" onClick={onBeginPlay} disabled={aiLoading} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.2 }}>开始</Button>
           )}

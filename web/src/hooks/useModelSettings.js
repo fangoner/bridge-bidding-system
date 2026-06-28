@@ -1,10 +1,13 @@
 import { useState, useCallback, useEffect } from 'react'
-import { setFallbackModel, healthCheck, reloadJF } from '../services/api'
+import { setFallbackModel, getFallbackModel, healthCheck, reloadJF, getParticleSettings, setParticleSettings } from '../services/api'
 import { useGame } from '../context/GameContext'
 
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
 const PLAY_MODEL_KEY = 'bridge_play_model'
 const DD_SAMPLE_COUNT_KEY = 'bridge_dd_sample_count'
+const DD_PARTICLES_KEY = 'bridge_dd_particles'
+const MCTS_PARTICLES_KEY = 'bridge_mcts_particles'
+const ALPHA_MU_PARTICLES_KEY = 'bridge_alpha_mu_particles'
 
 // 解析组合模型值 "model::reasoning" → { model, reasoning }
 export function parseModelValue(value) {
@@ -27,6 +30,17 @@ export function useModelSettings() {
       return 200
     }
   })
+
+  // 从后端获取当前可用的模型列表（只含已配置 endpoint 的）
+  const [availableModels, setAvailableModels] = useState([])
+  const fetchAvailableModels = useCallback(async () => {
+    try {
+      const data = await getFallbackModel()
+      setAvailableModels(data.available_models || [])
+    } catch {
+      // 后端不通时保留上次结果
+    }
+  }, [])
 
   // 同步备用模型到后端
   const syncFallbackModel = useCallback(async () => {
@@ -61,6 +75,56 @@ export function useModelSettings() {
     try { localStorage.setItem(DD_SAMPLE_COUNT_KEY, num) } catch {/* empty */}
   }, [])
 
+  // 粒子数状态（按引擎分别配置，localStorage 持久化）
+  const [ddParticles, setDDParticles] = useState(() => {
+    try { return parseInt(localStorage.getItem(DD_PARTICLES_KEY)) || 200 } catch { return 200 }
+  })
+  const [ddParticlesRange, setDDParticlesRange] = useState({ min: 100, max: 500 })
+  const [mctsParticles, setMCTSParticles] = useState(() => {
+    try { return parseInt(localStorage.getItem(MCTS_PARTICLES_KEY)) || 500 } catch { return 500 }
+  })
+  const [mctsParticlesRange] = useState({ min: 300, max: 1000 })
+  const [alphaMuParticles, setAlphaMuParticles] = useState(() => {
+    try { return parseInt(localStorage.getItem(ALPHA_MU_PARTICLES_KEY)) || 30 } catch { return 30 }
+  })
+  const [alphaMuParticlesRange] = useState({ min: 20, max: 50 })
+
+  const handleParticleChange = useCallback((engine, value) => {
+    const setters = {
+      dd: [setDDParticles, DD_PARTICLES_KEY],
+      mcts: [setMCTSParticles, MCTS_PARTICLES_KEY],
+      alphaMu: [setAlphaMuParticles, ALPHA_MU_PARTICLES_KEY],
+    }
+    const [setter, key] = setters[engine]
+    if (setter) {
+      setter(value)
+      try { localStorage.setItem(key, value) } catch {/* empty */}
+    }
+    // 同步到后端
+    const payload = {}
+    if (engine === 'dd') payload.dd_particles = value
+    if (engine === 'mcts') payload.mcts_particles = value
+    if (engine === 'alphaMu') payload.alpha_mu_particles = value
+    setParticleSettings(payload).catch(() => {})
+  }, [])
+
+  // 启动时同步粒子数范围和当前值到后端
+  useEffect(() => {
+    getParticleSettings().then(data => {
+      if (data) {
+        if (data.dd_min) setDDParticlesRange({ min: data.dd_min, max: data.dd_max })
+        if (data.mcts_min) setMCTSParticlesRange({ min: data.mcts_min, max: data.mcts_max })
+        if (data.alpha_mu_min) setAlphaMuParticlesRange({ min: data.alpha_mu_min, max: data.alpha_mu_max })
+      }
+    }).catch(() => {})
+    // 同步 localStorage 保存的值到后端
+    setParticleSettings({
+      dd_particles: parseInt(localStorage.getItem(DD_PARTICLES_KEY)) || undefined,
+      mcts_particles: parseInt(localStorage.getItem(MCTS_PARTICLES_KEY)) || undefined,
+      alpha_mu_particles: parseInt(localStorage.getItem(ALPHA_MU_PARTICLES_KEY)) || undefined,
+    }).catch(() => {})
+  }, [])
+
   const checkApiStatus = useCallback(async () => {
     try {
       const status = await healthCheck()
@@ -84,10 +148,11 @@ export function useModelSettings() {
     }
   }, [setApiStatus])
 
-  // 初始同步备用模型（API 状态检查由调用方在合适的时机触发）
+  // 初始同步备用模型 & 拉取可用模型列表
   useEffect(() => {
     syncFallbackModel()
-  }, [syncFallbackModel])
+    fetchAvailableModels()
+  }, [syncFallbackModel, fetchAvailableModels])
 
   return {
     ddSampleCount,
@@ -98,6 +163,13 @@ export function useModelSettings() {
     handleReloadJF,
     syncFallbackModel,
     parseModelValue,
+    availableModels,
+    fetchAvailableModels,
+    // 粒子数
+    ddParticles, ddParticlesRange,
+    mctsParticles, mctsParticlesRange,
+    alphaMuParticles, alphaMuParticlesRange,
+    handleParticleChange,
   }
 }
 

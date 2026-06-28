@@ -8,6 +8,7 @@ from bridge.play_engine import PlayEngine
 from llm.prompts import PLAY_COMMON_RULES, PLAY_COMMON_SITUATION, PLAY_DECLARER_PROMPT, PLAY_DEFENDER_PROMPT
 from bridge.mcts import MctsSearch, RandomizedRollout, DDSearch
 from bridge.mcts.constraints import BidConstraint, validate_sample
+from bridge.mcts.bid_constraint_library import extract_constraints_from_bid_history, SYSTEM_JF
 from config import (
     MCTS_ITERATIONS, MCTS_TIME_LIMIT, MCTS_EXPLORATION_CONSTANT,
     ROLLOUT_GREEDY_PROB, MCTS_SEARCH_MODE, DD_NUM_SAMPLES, DD_MIN_SAMPLES, DD_TIME_LIMIT,
@@ -17,9 +18,10 @@ from config import (
     TIERED_ENDGAME_CARDS, TIERED_MIN_SAMPLES, TIERED_OVERRIDE_THRESHOLD,
     TIERED_FUSION_SPREAD, TIERED_CLUSTER_SE, TIERED_TYPICAL_SD,
     TIERED_MCTS_CLUSTER_THRESHOLD,
-    BELIEF_ENABLE,
+    BELIEF_ENABLE, BELIEF_DD_PARTICLES, BELIEF_MCTS_PARTICLES,
     ALPHA_MU_ENABLE, ALPHA_MU_ENDGAME_CARDS, ALPHA_MU_NUM_WORLDS,
     ALPHA_MU_MAX_DEPTH, ALPHA_MU_TIME_LIMIT,
+    BELIEF_ALPHA_MU_PARTICLES,
 )
 
 
@@ -32,6 +34,10 @@ class PlayService:
         self.declarer_plan = ""
         # 防守计划：每个防守者各自维护，key=位置
         self.defender_plans = {}
+        # 粒子数设置（按引擎分别可调）
+        self.dd_particles = BELIEF_DD_PARTICLES
+        self.mcts_particles = BELIEF_MCTS_PARTICLES
+        self.alpha_mu_particles = BELIEF_ALPHA_MU_PARTICLES
         # MCTS搜索器（始终初始化，按需使用）
         self.mcts = MctsSearch(
             iterations=MCTS_ITERATIONS,
@@ -49,12 +55,15 @@ class PlayService:
             use_maximin=DD_MAXIMIN_ENABLE,
         )
         # 信念跟踪器：粒子滤波采样，缓解 strategy fusion 问题
+        # DD 引擎：粒子=样本数，不抽取，全量加权平均
+        # MCTS 引擎：粒子池供 draw，UCT 自带多样性
         if BELIEF_ENABLE:
             from bridge.mcts.belief import BeliefTracker
-            self.belief_tracker = BeliefTracker(self.dd_search.sampler)
+            self.belief_tracker = BeliefTracker(self.dd_search.sampler,
+                                                num_particles=BELIEF_DD_PARTICLES)
             self.dd_search.sampler.set_belief_tracker(self.belief_tracker)
             self.mcts.sampler.set_belief_tracker(
-                BeliefTracker(self.mcts.sampler)
+                BeliefTracker(self.mcts.sampler, num_particles=BELIEF_MCTS_PARTICLES)
             )
         else:
             self.belief_tracker = None
@@ -86,6 +95,7 @@ class PlayService:
         redoubled: bool = False,
         bidding_sequence: str = "未提供",
         bid_history: str = "",
+        bid_meanings: str = "",
     ) -> PlayState:
         from bridge.play_types import Contract
 
@@ -98,11 +108,16 @@ class PlayService:
         self.defender_plans = {}
         # 缓存叫牌约束（供MCTS采样器使用）
         self.bid_history = bid_history
+        self.bid_meanings = bid_meanings  # 叫牌含义文本（复用LLM已分析信息）
         self.bid_constraints = None  # 延迟提取
         # 重置信念跟踪器（清空旧粒子，新局开始）
         if self.belief_tracker is not None:
             self.belief_tracker.particles = []
             self.belief_tracker.weights = []
+        # 同时重置MCTS的信念跟踪器
+        if hasattr(self.mcts.sampler, 'belief_tracker') and self.mcts.sampler.belief_tracker is not None:
+            self.mcts.sampler.belief_tracker.particles = []
+            self.mcts.sampler.belief_tracker.weights = []
 
         return self.engine.initialize(hands, contract, player_roles, bidding_sequence)
     
@@ -226,6 +241,7 @@ class PlayService:
         """LLM打牌（从 get_ai_play 提取，供分层引擎复用）"""
         current_player = state.current_player
         playable_cards = self.engine.get_playable_cards()
+        constraints = self._get_bid_constraints()
 
         if not playable_cards:
             # _select_best_card 需要 playable，此情况不应出现在正常流程中
@@ -378,6 +394,9 @@ class PlayService:
             if validation_warning:
                 reasoning = f"[校验警告] {validation_warning}\n{reasoning}"
                 safe_output["validation_warning"] = validation_warning
+
+            # 注入叫牌约束信息
+            safe_output["叫牌约束"] = self._format_constraints_for_display(constraints)
 
             return {
                 "card": card.to_dict() if card else None,
@@ -697,11 +716,18 @@ class PlayService:
                             dd_card = c
                             break
                     if dd_card:
+                        dd_card, dd_validation = self._validate_and_fallback(
+                            dd_card, playable, state)
                         result["card"] = dd_card.to_dict()
-                        result["reasoning"] = (
+                        reasoning_prefix = (
                             f"[DD否决LLM] LLM选{llm_card_str}({llm_avg:.1f}墩)与DD最优"
                             f"{dd_best_str}({dd_best_avg:.1f}墩)差距{gap:.1f}墩>{TIERED_OVERRIDE_THRESHOLD}，"
-                            f"采用DD选择\n{result.get('reasoning', '')}"
+                            f"采用DD选择"
+                        )
+                        if dd_validation:
+                            reasoning_prefix += f" (规则校验: {dd_validation})"
+                        result["reasoning"] = (
+                            f"{reasoning_prefix}\n{result.get('reasoning', '')}"
                         )
 
         return result
@@ -724,8 +750,180 @@ class PlayService:
 
 仅输出JSON，不要Markdown代码块："""
 
+    def _merge_constraints(self, c1: BidConstraint, c2: BidConstraint) -> BidConstraint:
+        """合并两个约束：硬编码约束优先，LLM约束作为补充，取更严格的限制"""
+        from bridge.mcts.bid_constraint_library import _merge_constraints
+        return _merge_constraints(c1, c2)
+
+    def _format_constraints_for_display(self, constraints: Dict[str, BidConstraint]) -> str:
+        """将约束格式化为前端展示用的可读文本。"""
+        if not constraints:
+            return "无约束（随机采样）"
+        lines = []
+        order = ["南", "西", "北", "东"]
+        for pos in order:
+            c = constraints.get(pos)
+            if c is None:
+                continue
+            parts = [f"{pos}:"]
+            # HCP 范围
+            if c.min_hcp is not None and c.max_hcp is not None:
+                parts.append(f"HCP {c.min_hcp}-{c.max_hcp}")
+            elif c.min_hcp is not None:
+                parts.append(f"HCP ≥{c.min_hcp}")
+            elif c.max_hcp is not None:
+                parts.append(f"HCP ≤{c.max_hcp}")
+            # 均型标记
+            if c.balanced is True:
+                parts.append("均型")
+            elif c.balanced is False:
+                parts.append("非均型")
+            # 花色张数约束（suit_min/suit_max/exact_suit 合并显示）
+            suit_info = []
+            all_suits = set(list(c.suit_min.keys()) + list(c.suit_max.keys()) + list(c.exact_suit.keys()))
+            for s in ["♠", "♥", "♦", "♣"]:
+                if s in c.exact_suit:
+                    suit_info.append(f"{s}={c.exact_suit[s]}")
+                elif s in c.suit_min and s in c.suit_max:
+                    suit_info.append(f"{s}{c.suit_min[s]}-{c.suit_max[s]}")
+                elif s in c.suit_min:
+                    suit_info.append(f"{s}≥{c.suit_min[s]}")
+                elif s in c.suit_max:
+                    suit_info.append(f"{s}≤{c.suit_max[s]}")
+            if suit_info:
+                parts.append(" ".join(suit_info))
+            # 控制数
+            if c.min_controls is not None:
+                parts.append(f"≥{c.min_controls}控")
+            # 特定牌
+            if c.specific_cards:
+                sc = ", ".join(f"{s}{r}" for s, r in c.specific_cards)
+                parts.append(f"必持:{sc}")
+            # 来源
+            src = c.inference_source or ""
+            if "convention" in src:
+                parts.append("[约定]")
+            elif "negative" in src:
+                parts.append("[否定推断]")
+            elif "conservation" in src:
+                parts.append("[HCP守恒]")
+            lines.append(" ".join(parts))
+        return "\n".join(lines) if lines else "无约束（随机采样）"
+
+    def _parse_constraints_from_meanings(self, meanings_text: str) -> Dict[str, BidConstraint]:
+        """从叫牌含义文本中解析约束信息（复用叫牌阶段LLM已输出信息，无需二次LLM调用）。
+
+        含义文本格式示例：
+            (南)1NT: 15-17HCP均型，无5张高花
+            (北)2♥: 雅各比转移叫，5+张♠，0+HCP
+
+        Returns:
+            {position: BidConstraint}
+        """
+        import re
+        constraints: Dict[str, BidConstraint] = {}
+
+        # 逐行解析
+        for line in meanings_text.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+
+            # 提取位置: (南)1NT: ...
+            m = re.match(r'\(([南西北东])\)([^:：]+)[：:]\s*(.+)', line)
+            if not m:
+                continue
+            pos = m.group(1)
+            bid = m.group(2).strip()
+            meaning = m.group(3).strip()
+
+            # 跳过 pass
+            if bid.lower() in ('pass', '不叫'):
+                continue
+
+            c = BidConstraint(position=pos, inference_source="meaning_parsed")
+
+            # 解析 HCP 范围: "15-17HCP"、"12+HCP"、"0-16HCP"、"≤7HCP"
+            hcp_patterns = [
+                (r'(\d+)\s*-\s*(\d+)\s*HCP', lambda m: (int(m.group(1)), int(m.group(2)))),
+                (r'HCP\s*(\d+)\s*-\s*(\d+)', lambda m: (int(m.group(1)), int(m.group(2)))),
+                (r'(\d+)\+\s*HCP', lambda m: (int(m.group(1)), None)),
+                (r'HCP\s*≥\s*(\d+)', lambda m: (int(m.group(1)), None)),
+                (r'≤\s*(\d+)\s*HCP', lambda m: (None, int(m.group(1)))),
+                (r'(\d+)\s*HCP', lambda m: (int(m.group(1)), int(m.group(1)))),
+            ]
+            for pat, fn in hcp_patterns:
+                hm = re.search(pat, meaning)
+                if hm:
+                    mn, mx = fn(hm)
+                    c.min_hcp = mn
+                    c.max_hcp = mx
+                    break
+
+            # 解析均型/非均型
+            if re.search(r'均[型衡]', meaning):
+                c.balanced = True
+            elif re.search(r'非均[型衡]|不均[型衡]', meaning):
+                c.balanced = False
+
+            # 解析花色张数: "5+张♠"、"♠≥5"、"♥≤4"、"♣3-5张"
+            suit_map = {'♠': '♠', '♥': '♥', '♦': '♦', '♣': '♣',
+                        'S': '♠', 'H': '♥', 'D': '♦', 'C': '♣'}
+            # 张数≥: "5+张♠"、"♠≥5"、"5张+♠"
+            for sm in re.finditer(r'(\d+)\+?\s*张\s*([♠♥♦♣])', meaning):
+                cnt = int(sm.group(1))
+                suit = sm.group(2)
+                c.suit_min[suit] = max(c.suit_min.get(suit, 0), cnt)
+            for sm in re.finditer(r'([♠♥♦♣])\s*≥\s*(\d+)', meaning):
+                suit = sm.group(1)
+                cnt = int(sm.group(2))
+                c.suit_min[suit] = max(c.suit_min.get(suit, 0), cnt)
+            # ≤张数: "♥≤4"
+            for sm in re.finditer(r'([♠♥♦♣])\s*≤\s*(\d+)', meaning):
+                suit = sm.group(1)
+                cnt = int(sm.group(2))
+                c.suit_max[suit] = min(c.suit_max.get(suit, 13), cnt)
+            # 精确张数: "♠=6"
+            for sm in re.finditer(r'([♠♥♦♣])\s*=\s*(\d+)', meaning):
+                suit = sm.group(1)
+                cnt = int(sm.group(2))
+                c.exact_suit[suit] = cnt
+
+            # 同位置多叫品：与已有约束合并而非覆盖
+            if pos in constraints:
+                constraints[pos] = self._merge_constraints(constraints[pos], c)
+            else:
+                constraints[pos] = c
+
+        # 后处理：解析否定表达式（"无N张X" → suit_max = N-1）
+        for line in meanings_text.split('\n'):
+            m = re.match(r'\(([南西北东])\)([^:：]+)[：:]\s*(.+)', line.strip())
+            if not m:
+                continue
+            pos = m.group(1)
+            meaning = m.group(3).strip()
+            # "无5张高花" → ♠≤4, ♥≤4
+            for nm in re.finditer(r'无\s*(\d+)\s*张\s*高花', meaning):
+                cnt = int(nm.group(1))
+                if pos in constraints:
+                    for s in ('♠', '♥'):
+                        constraints[pos].suit_max[s] = min(constraints[pos].suit_max.get(s, 13), cnt - 1)
+            # "无单缺" → 均型
+            if re.search(r'无单缺|无单张|无缺门', meaning):
+                if pos in constraints:
+                    constraints[pos].balanced = True
+
+        return constraints
+
+    def _apply_constraints(self, constraints: Dict[str, BidConstraint], sampler=None) -> None:
+        """将约束应用到采样器和信念跟踪器"""
+        target_sampler = sampler or self.dd_search.sampler
+        target_sampler.set_constraints(constraints)
+        if target_sampler.belief_tracker is not None:
+            target_sampler.belief_tracker.set_constraints(constraints)
+
     def _get_bid_constraints(self) -> Dict[str, BidConstraint]:
-        """从叫牌含义历史中提取约束（LLM调用，结果缓存）"""
+        """从叫牌历史中提取约束：优先硬编码标准叫品表，LLM提取作为补充，结果缓存"""
         if self.bid_constraints is not None:
             return self.bid_constraints
 
@@ -733,47 +931,78 @@ class PlayService:
             self.bid_constraints = {}
             return self.bid_constraints
 
+        # Step 1: 先用硬编码约束库提取确定性约束
+        # 规则：提供了叫牌历史 → 按JF约定处理；无叫牌历史 → 返回空约束（普通随机/自然）
+        hard_constraints = {}
         try:
-            prompt = self.BID_CONSTRAINT_PROMPT.format(bid_history=self.bid_history)
-            print(f"[DD] 调用LLM提取约束, bid_history长度={len(self.bid_history)}, 内容={self.bid_history[:200]}")
-            result = self.llm_client.chat_json(system_prompt=prompt, temperature=0, max_tokens=1024)
-            print(f"[DD] LLM约束结果: {result}")
-
-            POS_NAME_MAP = {
-                "南": "南", "西": "西", "北": "北", "东": "东",
-                "south": "南", "west": "西", "north": "北", "east": "东",
-                "s": "南", "w": "西", "n": "北", "e": "东",
-            }
-            constraints = {}
-            for pos, data in result.get("constraints", result).items():
-                pos_cn = POS_NAME_MAP.get(pos.lower() if isinstance(pos, str) else pos)
-                if pos_cn is None:
-                    continue
-                c = BidConstraint(
-                    position=pos_cn,
-                    min_hcp=data.get("min_hcp"),
-                    max_hcp=data.get("max_hcp"),
-                    balanced=data.get("balanced"),
-                    suit_min={},
-                )
-                for suit in ("♠", "♥", "♦", "♣"):
-                    key = {"♠": "spades_min", "♥": "hearts_min",
-                           "♦": "diamonds_min", "♣": "clubs_min"}[suit]
-                    val = data.get(key)
-                    if val is not None and isinstance(val, (int, float)):
-                        c.suit_min[suit] = int(val)
-                constraints[pos_cn] = c
-
-            print(f"[DD] 解析后约束: {constraints}")
-
-            self.bid_constraints = constraints
-            return constraints
+            hard_constraints = extract_constraints_from_bid_history(self.bid_history, system=SYSTEM_JF)
+            print(f"[DD] 硬编码约束提取(JF体系): { {p: f'HCP{c.min_hcp}-{c.max_hcp}[{c.inference_source}]' for p, c in hard_constraints.items()} }")
         except Exception as e:
-            import traceback
-            print(f"[MCTS] 约束提取失败: {e}，回退到无约束采样")
-            traceback.print_exc()
-            self.bid_constraints = {}
-            return {}
+            print(f"[DD] 硬编码约束提取失败: {e}")
+            hard_constraints = {}
+
+        # Step 2: 从叫牌含义文本中提取约束（复用叫牌阶段LLM已分析的信息）
+        constraints = dict(hard_constraints)
+        meanings_text = getattr(self, 'bid_meanings', '') or ''
+
+        if meanings_text.strip():
+            try:
+                meaning_constraints = self._parse_constraints_from_meanings(meanings_text)
+                for pos_cn, mc in meaning_constraints.items():
+                    if pos_cn in constraints:
+                        constraints[pos_cn] = self._merge_constraints(constraints[pos_cn], mc)
+                    else:
+                        constraints[pos_cn] = mc
+                print(f"[DD] 含义文本解析补充约束: { {p: f'HCP{c.min_hcp}-{c.max_hcp}' for p, c in meaning_constraints.items()} }")
+            except Exception as e:
+                print(f"[DD] 含义文本解析失败: {e}")
+
+        # Step 3: 如果约束仍不完整，用LLM补充
+        if not constraints:
+            try:
+                prompt = self.BID_CONSTRAINT_PROMPT.format(bid_history=self.bid_history)
+                print(f"[DD] 调用LLM补充提取约束...")
+                result = self.llm_client.chat_json(system_prompt=prompt, temperature=0, max_tokens=1024)
+
+                POS_NAME_MAP = {
+                    "南": "南", "西": "西", "北": "北", "东": "东",
+                    "south": "南", "west": "西", "north": "北", "east": "东",
+                    "s": "南", "w": "西", "n": "北", "e": "东",
+                }
+                for pos, data in result.get("constraints", result).items():
+                    pos_cn = POS_NAME_MAP.get(pos.lower() if isinstance(pos, str) else pos)
+                    if pos_cn is None:
+                        continue
+                    c = BidConstraint(
+                        position=pos_cn,
+                        min_hcp=data.get("min_hcp"),
+                        max_hcp=data.get("max_hcp"),
+                        balanced=data.get("balanced"),
+                        suit_min={},
+                    )
+                    for suit in ("♠", "♥", "♦", "♣"):
+                        key = {"♠": "spades_min", "♥": "hearts_min",
+                               "♦": "diamonds_min", "♣": "clubs_min"}[suit]
+                        val = data.get(key)
+                        if val is not None and isinstance(val, (int, float)):
+                            c.suit_min[suit] = int(val)
+
+                    if pos_cn in constraints:
+                        constraints[pos_cn] = self._merge_constraints(constraints[pos_cn], c)
+                    else:
+                        constraints[pos_cn] = c
+
+                print(f"[DD] 最终合并约束: { {p: f'HCP{c.min_hcp}-{c.max_hcp}, suits={dict(c.suit_min)}' for p, c in constraints.items()} }")
+            except Exception as e:
+                import traceback
+                print(f"[MCTS] LLM约束补充提取失败: {e}，使用纯硬编码约束")
+                traceback.print_exc()
+            self.bid_constraints = hard_constraints
+            return hard_constraints
+
+        # 一二层已产出约束，缓存并返回
+        self.bid_constraints = constraints
+        return constraints
 
     def _alpha_mu_play(self, state: PlayState) -> Dict[str, Any]:
         """αμ 搜索打牌：残局多步前瞻，解决 strategy fusion。
@@ -787,7 +1016,12 @@ class PlayService:
 
         constraints = self._get_bid_constraints()
         if constraints:
-            self.dd_search.sampler.set_constraints(constraints)
+            self._apply_constraints(constraints)
+
+        # αμ 使用专用粒子数（残局世界少但精，30 足够）
+        bt = getattr(self.dd_search.sampler, 'belief_tracker', None)
+        if bt is not None:
+            bt.num_particles = self.alpha_mu_particles
 
         try:
             result = self.alpha_mu_search.search(state)
@@ -795,10 +1029,12 @@ class PlayService:
             if card is None:
                 # αμ 失败，回退 DD
                 return self._dd_play(state)
+            full_output = result.get("full_output", {})
+            full_output["叫牌约束"] = self._format_constraints_for_display(constraints)
             return {
                 "card": card.to_dict() if hasattr(card, "to_dict") else None,
                 "reasoning": result.get("reasoning", ""),
-                "full_output": result.get("full_output", {}),
+                "full_output": full_output,
                 "prompt": "[αμ] no prompt",
             }
         except Exception as e:
@@ -839,7 +1075,12 @@ class PlayService:
         # 创建临时搜索器（复用 dd_search 的 sampler + 约束）
         constraints = self._get_bid_constraints()
         if constraints:
-            self.dd_search.sampler.set_constraints(constraints)
+            self._apply_constraints(constraints)
+
+        # 粒子池 ≥ 需求数，不浪费
+        bt = getattr(self.dd_search.sampler, 'belief_tracker', None)
+        if bt is not None:
+            bt.num_particles = max(self.alpha_mu_particles, n_worlds)
 
         search = AlphaMuSearch(
             sampler=self.dd_search.sampler,
@@ -854,10 +1095,12 @@ class PlayService:
             card = result.get("card")
             if card is None:
                 return self._dd_play(state)
+            full_output = result.get("full_output", {})
+            full_output["叫牌约束"] = self._format_constraints_for_display(constraints)
             return {
                 "card": card.to_dict() if hasattr(card, "to_dict") else None,
                 "reasoning": result.get("reasoning", ""),
-                "full_output": result.get("full_output", {}),
+                "full_output": full_output,
                 "prompt": "[αμ-full] no prompt",
             }
         except Exception as e:
@@ -869,9 +1112,14 @@ class PlayService:
         constraints = self._get_bid_constraints()
         if constraints:
             print(f"[DD] 约束已应用: {len(constraints)}家, { {p: f'HCP[{c.min_hcp}-{c.max_hcp}] suits={c.suit_min}' for p, c in constraints.items()} }")
-            self.dd_search.sampler.set_constraints(constraints)
+            self._apply_constraints(constraints)
         else:
             print(f"[DD] 无约束 (bid_history={'空' if not self.bid_history else repr(self.bid_history[:80])})")
+
+        # DD 使用专用粒子数（全量加权，200=200 world solve_board）
+        bt = getattr(self.dd_search.sampler, 'belief_tracker', None)
+        if bt is not None:
+            bt.num_particles = self.dd_particles
 
         # 允许请求级覆盖采样数
         if dd_samples is not None:
@@ -883,10 +1131,12 @@ class PlayService:
             if card is None:
                 playable = self.engine.get_playable_cards()
                 card = self._select_best_card(playable, state)
+            full_output = result.get("full_output", {})
+            full_output["叫牌约束"] = self._format_constraints_for_display(constraints)
             return {
                 "card": card.to_dict() if card else None,
                 "reasoning": result.get("reasoning", ""),
-                "full_output": result.get("full_output", {}),
+                "full_output": full_output,
                 "prompt": "[DD] no prompt",
             }
         except Exception as e:
@@ -901,16 +1151,19 @@ class PlayService:
 
     def _perfect_play(self, state: PlayState) -> Dict[str, Any]:
         """完美DD打牌（全知双明手，无采样，一次 solve_board 得所有候选精确分）"""
+        constraints = self._get_bid_constraints()
         try:
             result = self.dd_search.search_perfect(state)
             card = result.get("card")
             if card is None:
                 playable = self.engine.get_playable_cards()
                 card = self._select_best_card(playable, state)
+            full_output = result.get("full_output", {})
+            full_output["叫牌约束"] = self._format_constraints_for_display(constraints)
             return {
                 "card": card.to_dict() if card else None,
                 "reasoning": result.get("reasoning", ""),
-                "full_output": result.get("full_output", {}),
+                "full_output": full_output,
                 "prompt": "[DD·完美] no prompt",
             }
         except Exception as e:
@@ -928,7 +1181,12 @@ class PlayService:
         # 首次调用时提取叫牌约束
         constraints = self._get_bid_constraints()
         if constraints:
-            self.mcts.sampler.set_constraints(constraints)
+            self._apply_constraints(constraints, self.mcts.sampler)
+
+        # MCTS 使用专用粒子数（draw池，500 保证多样性）
+        bt = getattr(self.mcts.sampler, 'belief_tracker', None)
+        if bt is not None:
+            bt.num_particles = self.mcts_particles
 
         try:
             result = self.mcts.search(state)
@@ -936,10 +1194,12 @@ class PlayService:
             if card is None:
                 playable = self.engine.get_playable_cards()
                 card = self._select_best_card(playable, state)
+            full_output = result.get("full_output", {})
+            full_output["叫牌约束"] = self._format_constraints_for_display(constraints)
             return {
                 "card": card.to_dict() if card else None,
                 "reasoning": result.get("reasoning", ""),
-                "full_output": result.get("full_output", {}),
+                "full_output": full_output,
                 "prompt": "[MCTS] no prompt",
             }
         except Exception as e:
@@ -1103,38 +1363,55 @@ class PlayService:
                                 state: PlayState) -> Tuple[Card, str]:
         """LLM 输出校验 + 回退。
 
-        校验 LLM 推荐的牌是否合法且合理，违规时回退到 _select_best_card。
+        校验 LLM 推荐的牌是否合法且合理。
+        - critical/error 级别：强制替换为规则推荐牌
+        - warning 级别：仅记录警告，使用LLM原选择
+        - info/通过：正常使用
 
         Returns:
             (最终选定的牌, 校验警告消息)
-            校验通过时警告消息为空字符串
         """
         try:
-            from bridge.mcts.llm_validator import validate_llm_play
+            from bridge.mcts.llm_validator import validate_llm_play, suggest_rule_based_play
             validation = validate_llm_play(card, playable, state)
 
             if validation.valid:
                 return card, ""
 
-            # 校验失败，回退到规则化选牌
-            fallback_card = self._select_best_card(playable, state)
-            warning = (f"LLM推荐{card}校验失败({validation.severity}): "
-                       f"{validation.violation}，回退到{fallback_card}")
-            print(f"[校验] {warning}")
-            return fallback_card, warning
+            severity = validation.severity
+            warning = f"[规则校验:{severity}] {validation.violation}"
+
+            if severity in ("critical", "error"):
+                # 严重错误，必须纠正
+                if validation.suggested_card and any(c == validation.suggested_card for c in playable):
+                    fallback_card = validation.suggested_card
+                else:
+                    fallback_card = suggest_rule_based_play(playable, state)
+                msg = f"LLM推荐{card}触发{severity}级规则: {validation.violation}，自动纠正为{fallback_card}"
+                print(f"[校验] {msg}")
+                return fallback_card, msg
+            else:
+                # warning 级别，仅警告但使用原选择（可能是战术性选择）
+                print(f"[校验] {warning} (保留LLM选择{card})")
+                return card, warning
         except Exception as e:
-            # 校验器异常不阻塞主流程
+            import traceback
             print(f"[校验] 校验器异常: {e}")
+            traceback.print_exc()
             return card, ""
 
     def _select_best_card(self, playable: List[Card], state: PlayState) -> Card:
-        if len(playable) == 1:
-            return playable[0]
-        
-        if state.current_trick.cards:
-            lead_suit = state.current_trick.get_lead_suit()
-            same_suit = [c for c in playable if c.suit == lead_suit]
-            if same_suit:
-                return min(same_suit, key=lambda c: c.rank_value)
-        
-        return min(playable, key=lambda c: (c.suit_order, c.rank_value))
+        """基于规则的选牌，用于LLM不可用时的回退。"""
+        try:
+            from bridge.mcts.llm_validator import suggest_rule_based_play
+            return suggest_rule_based_play(playable, state)
+        except Exception:
+            # 降级为简单最小牌策略
+            if len(playable) == 1:
+                return playable[0]
+            if state.current_trick.cards:
+                lead_suit = state.current_trick.get_lead_suit()
+                same_suit = [c for c in playable if c.suit == lead_suit]
+                if same_suit:
+                    return min(same_suit, key=lambda c: c.rank_value)
+            return min(playable, key=lambda c: (c.suit_order, c.rank_value))

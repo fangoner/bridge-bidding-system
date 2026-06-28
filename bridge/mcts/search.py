@@ -64,7 +64,13 @@ class MctsSearch:
             {"card": Card, "reasoning": str, "full_output": dict}
         """
         perspective = state.current_player
-        playable = state.get_playable_cards(perspective)
+        # 明手不做决策：如果当前轮到明手出牌，搜索视角改为庄家（庄家替明手决策）
+        declarer = state.contract.declarer
+        dummy = state.dummy
+        actual_turn = state.current_player
+        if perspective == dummy:
+            perspective = declarer
+        playable = state.get_playable_cards(actual_turn)
 
         if len(playable) == 1:
             return {
@@ -73,8 +79,6 @@ class MctsSearch:
                 "full_output": {"推荐出牌": str(playable[0])},
             }
 
-        declarer = state.contract.declarer
-        dummy = state.dummy
         trump = state.contract.suit
 
         # 计算剩余未知牌张数（用于自适应迭代）
@@ -94,7 +98,7 @@ class MctsSearch:
         trick_state = get_current_trick_state(state)
 
         root = MctsNode(
-            position=perspective,
+            position=actual_turn,
             trick_cards=tuple(trick_state["cards"]),
             trick_leader=trick_state["leader"],
             trump=trump,
@@ -103,6 +107,10 @@ class MctsSearch:
             declarer_tricks=state.declarer_tricks,
             defender_tricks=state.defender_tricks,
         )
+
+        # 信念跟踪器：在搜索循环前生成加权粒子集
+        if self.sampler.belief_tracker is not None:
+            self.sampler.belief_tracker.prepare(state, perspective)
 
         start_time = time.time()
         iteration = 0

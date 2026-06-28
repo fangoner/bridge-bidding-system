@@ -1,5 +1,53 @@
 # 开发日志
 
+## 2026-06-29
+
+### PIMC 采样质量重构：信念粒子层架构重设计
+
+**背景**:
+原有的 60 粒子 + 有放回 draw 模式存在三大缺陷：(1) DD 100 次采样仅~50 个唯一世界，浪费一半 solve_board；(2) 粒子数与引擎需求不匹配（DD 需要多样本、αμ 需要克制）；(3) 叫牌约束可视化缺失，无法诊断采样质量。
+
+**改进**:
+
+#### 1. 引擎独立粒子数 (`config.py`, `play_service.py`)
+- DD: 200 粒子 (100-500)，全量遍历不抽取，加权平均选牌
+- MCTS: 500 粒子 (300-1000)，加权 draw 池，UCT 自带多样性
+- αμ: 30 粒子 (20-50)，possible worlds 全量，N×M DDS 昂贵
+- Tiered: 中盘 DD(200) + 残局 αμ(30)，各阶段独立设置
+- 前端设置面板：引擎下拉框旁按需显示对应粒子滑块
+
+#### 2. DD 不抽取模式 (`dd_search.py`)
+- 重构采样循环：`draw()` 有放回 → `get_all_particles()` 全量遍历
+- 权重开根号平滑（`w^0.5`）防止极端粒子一家独大
+- 选牌从等权平均改为加权平均
+- 新增 `_dd_eval_one_world()` 独立函数，代码清晰
+
+#### 3. rank_bonus 削弱 (`dd_search.py`)
+- `/50` → `/200`，K vs 2 差距从 0.22 墩降到 0.055 墩
+- 修复防守方 K 被 rank_bonus 惩罚导致误选小牌的 bug
+- 原则：平局裁决作用范围 ≤ 统计噪声 (0.5×SE)
+
+#### 4. 叫牌约束三层架构 + 可视化 (`play_service.py`, `sampler.py`)
+- 第一层：硬编码约束库（`bid_constraint_library.py`，正则匹配）
+- 第二层：含义文本解析（`_parse_constraints_from_meanings()`，复用叫牌阶段 LLM 输出）
+- 第三层：LLM 补充（仅前两层为空时触发，不额外消耗 API）
+- 六引擎全部注入 `full_output["叫牌约束"]`，前端自动展示
+
+#### 5. 前端改进
+- **设置面板**: 粒子滑块按引擎显示，移除冗余"采样数"输入框，布局 nowrap 保证三列同行
+- **打牌面板**: 出牌记录可折叠 (Collapse)，AI 输出始终可见；αμ 引擎标签显示 "αμ" 而非 "V4-Flash"
+- **约束同步**: `bid_history` 改用 `seqStr`，`bid_meanings` 新增传递词牌含义文本
+
+**修复的 Bug**:
+- `_get_bid_constraints()` 返回 `None`（一二层产出约束后缺 return）
+- `_alphamu_full_play` 未设置粒子数，共用 DD 的 200 粒子池
+- `_mcts_play` 未显式设置粒子数（CLI 场景缺少 API 同步）
+- `BELIEF_ALPHA_MU_PARTICLES` 漏导入
+- 双层 Collapse 导致折叠按钮不可见
+- SettingsPanel `flexWrap: wrap` 导致发牌设置区换行
+
+**关键文件**: `dd_search.py`, `play_service.py`, `belief.py`, `config.py`, `SettingsPanel.jsx`, `PlayDetailPanel.jsx`, `useModelSettings.js`
+
 ## 2026-06-20
 
 ### 打牌引擎大师级优化（优先级 1-7 全套实施）

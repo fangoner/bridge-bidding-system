@@ -48,6 +48,7 @@ import useBridgeRecords from './hooks/useBridgeRecords'
 import useModelSettings from './hooks/useModelSettings'
 import useDealing from './hooks/useDealing'
 import { getPartnerPosition, BRIDGE_POSITIONS } from './utils/position'
+import { formatElapsedTime } from './utils/biddingUtils'
 import './App.css'
 import { GameProvider, useGame } from './context/GameContext'
 import { BiddingProvider, useBidding } from './context/BiddingContext'
@@ -62,6 +63,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const isLoadingRecordRef = useRef(false) // 用于标记是否正在加载历史记录（不触发保存）
   const draftRestoredRef = useRef(false) // 防止重复恢复草稿
   const draftSaveTimerRef = useRef(null) // debounce 叫牌草稿自动保存
+  const lastBidTimeRef = useRef(null) // 上一条叫牌记录完成的时间戳，用于计算单次耗时
+  const biddingStartTimeRef = useRef(null) // 同步存储叫牌开始时间，避免 React state 异步问题
+  const aiCallStartRef = useRef(null) // AI 调用开始时间，用于准确计算单次 AI 耗时
   // ── Game 域状态（迁入 GameContext）──
   const {
     hands, setHands,
@@ -267,11 +271,16 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const {
     ddSampleCount,
     handleDDSampleCountChange,
+    ddParticles, ddParticlesRange,
+    mctsParticles, mctsParticlesRange,
+    alphaMuParticles, alphaMuParticlesRange,
+    handleParticleChange,
     handleFallbackModelChange,
     handlePlayModelChange,
     checkApiStatus,
     handleReloadJF,
     parseModelValue,
+    availableModels,
   } = useModelSettings()
 
   // 检查API状态 + 加载历史记录
@@ -301,6 +310,32 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       ...rest,
       hand: _h,
     }))
+  }
+
+  // 生成叫牌时间戳：累计时间 (单次耗时)
+  // individualMs: 单次耗时毫秒，AI 调用在 await 后直接传入，避免 React 渲染延迟
+  const makeBidTimestamp = (individualMs = null) => {
+    const now = Date.now()
+    const start = biddingStartTimeRef.current
+    if (!start) {
+      console.warn('[makeBidTimestamp] biddingStartTimeRef is falsy, state=', biddingStartTime)
+    }
+    const effectiveStart = start || biddingStartTime || now
+    const cumulative = formatElapsedTime(now - effectiveStart)
+    let individual = ''
+    // 只有非首个叫品才显示单次耗时（首个叫品没有上一条可参照）
+    if (lastBidTimeRef.current) {
+      if (individualMs !== null) {
+        // AI 调用：用传入的精确耗时
+        individual = individualMs >= 1000 ? `${Math.round(individualMs / 1000)}s` : `${individualMs}ms`
+      } else {
+        // 人类叫牌：距上一条记录的时间差
+        const ms = now - lastBidTimeRef.current
+        individual = ms >= 1000 ? `${Math.round(ms / 1000)}s` : `${ms}ms`
+      }
+    }
+    lastBidTimeRef.current = now
+    return individual ? `${cumulative} (+${individual})` : cumulative
   }
 
 
@@ -620,11 +655,13 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       setBiddingSequence([])
       setCurrentBidder(dealer)
       markBiddingStarted()
+      biddingStartTimeRef.current = Date.now() // 同步记录，避免 React state 延迟
       setAiBiddingHistory([])
       setStopBidding(false)
       setPassedAIPositions(new Set())
       setBiddingTotalTime(null)
       setError(null)
+      lastBidTimeRef.current = null
       // 重置回退历史并保存初始快照
       const initialSnapshot = {
         biddingSequence: [],
@@ -644,6 +681,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     setHistoryIndex(-1)
     setLoadedPlayRecord(null)
     setCurrentRecordId(null)
+    lastBidTimeRef.current = null
   }
 
   // 清除所有手牌已迁入 useDealing hook
@@ -724,7 +762,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           hand: hands[currentBidder],
           biddingSequence: biddingStr,
           result: { bid: bid, meaning: customBidMeaning.trim() },
-          timestamp: new Date().toLocaleTimeString()
+          timestamp: makeBidTimestamp()
         }])
         setCustomBidMeaning('') // 清空输入框
       } else {
@@ -742,7 +780,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
               meaning: result.meaning,
               full_output: result.full_output
             },
-            timestamp: new Date().toLocaleTimeString()
+            timestamp: makeBidTimestamp()
           }])
         } catch (err) {
           console.error('获取叫品含义失败:', err)
@@ -755,7 +793,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
               meaning: '获取叫品含义失败',
               full_output: {}
             },
-            timestamp: new Date().toLocaleTimeString()
+            timestamp: makeBidTimestamp()
           }])
         } finally {
           setCurrentBiddingPosition(null)
@@ -919,7 +957,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         hand: hands[currentBidder],
         biddingSequence: biddingSequence.map(b => `(${b.position})${b.bid}`).join('-'),
         result: { bid: 'pass', meaning: '搭档已相继pass，不再参与叫牌' },
-        timestamp: new Date().toLocaleTimeString()
+        timestamp: makeBidTimestamp()
       }])
       addBid('pass')
       return
@@ -943,7 +981,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       
       // 传递数组，后端处理格式
       const bm = parseModelValue(fallbackModel)
+      const aiCallStart = Date.now()
       const result = await aiBid(currentHand, biddingSequence, currentBidder, dealSystem, bidHistory, useFallback, bm.model, 'deepseek', bm.reasoning)
+      const aiCallElapsed = Date.now() - aiCallStart
       
       // 更新useFallback状态
       if (result.use_fallback !== undefined) {
@@ -958,9 +998,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         hand: currentHand,
         biddingSequence: biddingStr,
         result: result,
-        timestamp: new Date().toLocaleTimeString()
+        timestamp: makeBidTimestamp(aiCallElapsed)
       }])
-      
+
       // 添加AI叫牌
       addBid(result.bid)
     } catch (err) {
@@ -1291,8 +1331,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           const contract = savedState.contract
           let biddingStr = null
           let meaningLines = ''
+          let seqStr = ''
           if (biddingSequence.length > 0) {
-            const seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
+            seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
             meaningLines = aiBiddingHistory
               .filter(r => r.result?.meaning)
               .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
@@ -1309,6 +1350,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
             contract.doubled || contract.isDouble || false,
             contract.redoubled || contract.isRedouble || false,
             biddingStr,
+            seqStr,
             meaningLines
           )
           if (initResult.success) {
@@ -1385,8 +1427,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       const contract = savedState.contract
       let biddingStr = null
       let meaningLines = ''
+      let seqStr = ''
       if (biddingSequence.length > 0) {
-        const seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
+        seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
         meaningLines = aiBiddingHistory
           .filter(r => r.result?.meaning)
           .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
@@ -1403,7 +1446,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         contract.doubled || contract.isDouble || false,
         contract.redoubled || contract.isRedouble || false,
         biddingStr,
-        meaningLines
+        seqStr
       )
       if (!initResult.success) {
         console.error('重打初始化失败:', initResult.error)
@@ -1419,26 +1462,54 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           }
         }
       }
+      let lastReplayState = null
       for (const { position, card } of cardsToReplay) {
-        try { await playCard(position, card) } catch (e) { console.warn('重放出牌失败:', position, card, e) }
+        try {
+          const replayResult = await playCard(position, card)
+          if (replayResult?.success) lastReplayState = replayResult.state
+        } catch (e) { console.warn('重放出牌失败:', position, card, e) }
       }
-      // 裁剪 aiPlayHistory
-      const totalCardsReplayed = cardsToReplay.length
-      const trimmedHistory = (loadedPlayRecord.aiPlayHistory || []).slice(0, totalCardsReplayed)
-      // 构建截断后的 playState
-      const truncatedState = {
-        ...savedState,
-        tricks: (savedState.tricks || []).slice(0, targetTrick),
-        current_trick: { cards: [], leader: null, trump: savedState.contract?.suit || null },
-        current_player: null,
-        phase: targetTrick === 0 ? 'lead' : 'playing',
-        declarer_tricks: (savedState.tricks || []).slice(0, targetTrick)
-          .filter(t => t.winner === savedState.contract?.declarer || t.winner === savedState.dummy).length,
-        defender_tricks: (savedState.tricks || []).slice(0, targetTrick)
-          .filter(t => t.winner && t.winner !== savedState.contract?.declarer && t.winner !== savedState.dummy).length,
+      // 裁剪 aiPlayHistory：按 trick 边界匹配，而非简单按卡片数
+      // aiPlayHistory 只记录 AI 决策，非 AI 位置无对应条目
+      let trimmedHistory = []
+      if (loadedPlayRecord.aiPlayHistory?.length > 0) {
+        const aiPositions = new Set(
+          Object.entries(loadedPlayRecord.position_roles || positionRoles)
+            .filter(([, role]) => role === 'ai')
+            .map(([pos]) => pos)
+        )
+        let historyIdx = 0
+        for (let i = 0; i < targetTrick && i < (savedState.tricks || []).length; i++) {
+          for (const [pos] of (savedState.tricks[i].cards || [])) {
+            if (aiPositions.has(pos) && historyIdx < loadedPlayRecord.aiPlayHistory.length) {
+              trimmedHistory.push(loadedPlayRecord.aiPlayHistory[historyIdx])
+              historyIdx++
+            }
+          }
+        }
       }
+      // 构建截断后的 playState（使用后端回放后的真实状态，保证 hands/current_trick 等正确）
+      const truncatedState = lastReplayState
+        ? {
+            ...lastReplayState,
+            tricks: (savedState.tricks || []).slice(0, targetTrick),
+            current_trick: { cards: [], leader: null, trump: savedState.contract?.suit || null },
+            phase: targetTrick === 0 ? 'lead' : 'playing',
+          }
+        : {
+            ...savedState,
+            tricks: (savedState.tricks || []).slice(0, targetTrick),
+            current_trick: { cards: [], leader: null, trump: savedState.contract?.suit || null },
+            current_player: null,
+            phase: targetTrick === 0 ? 'lead' : 'playing',
+            declarer_tricks: (savedState.tricks || []).slice(0, targetTrick)
+              .filter(t => t.winner === savedState.contract?.declarer || t.winner === savedState.dummy).length,
+            defender_tricks: (savedState.tricks || []).slice(0, targetTrick)
+              .filter(t => t.winner && t.winner !== savedState.contract?.declarer && t.winner !== savedState.dummy).length,
+          }
       setPlayState(truncatedState)
       setAiPlayHistory(trimmedHistory)
+      setLastCompletedTrick(null)
       setShowPlayPanel(true)
       setIsPlayPaused(true)
       setPlayInitiated(true)
@@ -1462,11 +1533,13 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     setShowPlayedCards(true)
     prevTricksCountRef.current = 0
     setLastCompletedTrick(null)
+    setReviewCursor(null)
 
     let biddingStr = null
     let meaningLines = ''
+    let seqStr = ''
     if (biddingSeq.length > 0) {
-      const seqStr = biddingSeq.map(b => `(${b.position})${b.bid}`).join('-')
+      seqStr = biddingSeq.map(b => `(${b.position})${b.bid}`).join('-')
       meaningLines = aiHistory
         .filter(r => r.result?.meaning)
         .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
@@ -1502,6 +1575,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         contract.isDouble || false,
         contract.isRedouble || false,
         biddingStr,
+        seqStr,
         meaningLines
       )
 
@@ -1645,7 +1719,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           used_model: result.used_model,
           used_engine: result.used_engine,
           elapsed_ms: result.elapsed_ms,
-          timestamp: new Date().toLocaleTimeString(),
+          timestamp: makeBidTimestamp(),
         }
         setAiPlayHistory(prev => [...prev, aiRecord])
         setPlayStarted(true) // AI出牌后标记打牌已开始，按钮变为暂停
@@ -1670,6 +1744,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     setLastCompletedTrick(null)
     setShowDoubleDummy(false)
     setSelectedPlayRecord(null)
+    setReviewCursor(null)
   }
 
   // 将 "S5"/"HK" 等卡片字符串转换为 API 所需的 {suit, rank} 格式
@@ -2156,12 +2231,17 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         handlePlayEngineChange={handlePlayEngineChange}
         ddSampleCount={ddSampleCount}
         handleDDSampleCountChange={handleDDSampleCountChange}
+        ddParticles={ddParticles} ddParticlesRange={ddParticlesRange}
+        mctsParticles={mctsParticles} mctsParticlesRange={mctsParticlesRange}
+        alphaMuParticles={alphaMuParticles} alphaMuParticlesRange={alphaMuParticlesRange}
+        handleParticleChange={handleParticleChange}
         dealSystem={dealSystem}
         setDealSystem={setDealSystem}
         dealMode={dealMode}
         setDealMode={setDealMode}
         loading={loading}
         mode={mode}
+        availableModels={availableModels}
       />
 
       {/* 错误提示 */}

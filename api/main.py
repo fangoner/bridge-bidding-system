@@ -40,7 +40,17 @@ from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BI
 from llm.deepseek_client import DeepSeekClient
 from llm.doubao_client import DoubaoVisionClient, DoubaoSeedClient
 from utils.screenshot import BridgeScreenshotCapture, trigger_screenshot_shortcut, read_clipboard_image
-from config import JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM, AI_PROVIDER_DEEPSEEK, AI_PROVIDER_DOUBAO, DEFAULT_AI_PROVIDER, DEFAULT_PLAY_ENGINE
+from config import (
+    JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM,
+    AI_PROVIDER_DEEPSEEK, AI_PROVIDER_DOUBAO, DEFAULT_AI_PROVIDER,
+    DEFAULT_PLAY_ENGINE,
+    ALL_MODELS, ALL_BASE_MODELS, DOUBAO_MODEL_NAMES,
+    is_doubao_model, is_reasoning_model, get_base_model,
+    DOUBAO_MODEL_2_1_PRO, DOUBAO_MODEL_2_1_TURBO,
+    BELIEF_DD_PARTICLES, BELIEF_DD_PARTICLES_MIN, BELIEF_DD_PARTICLES_MAX,
+    BELIEF_MCTS_PARTICLES, BELIEF_MCTS_PARTICLES_MIN, BELIEF_MCTS_PARTICLES_MAX,
+    BELIEF_ALPHA_MU_PARTICLES, BELIEF_ALPHA_MU_PARTICLES_MIN, BELIEF_ALPHA_MU_PARTICLES_MAX,
+)
 
 try:
     from endplay_integration import analyze_all_contracts_endplay
@@ -70,6 +80,28 @@ vision_client = DoubaoVisionClient()
 screenshot_capture = BridgeScreenshotCapture()
 
 current_ai_provider = DEFAULT_AI_PROVIDER
+
+def get_available_models() -> list:
+    """返回当前环境实际可用的模型列表（已配置 endpoint / API Key）"""
+    available = []
+    # DeepSeek 模型：需 API Key
+    if llm_client.is_configured():
+        available.extend(["deepseek-v4-flash", "deepseek-v4-flash::reasoning",
+                          "deepseek-v4-pro", "deepseek-v4-pro::reasoning"])
+    # 豆包模型：需对应 endpoint 已配置
+    for model_name in DOUBAO_MODEL_NAMES:
+        # 保存当前模型，测试每个模型是否有可用 endpoint
+        saved = doubao_client.model
+        doubao_client.set_model(model_name)
+        if doubao_client.endpoint:
+            available.append(model_name)
+        # 也测试 reasoning 版本
+        reasoning_name = f"{model_name}::reasoning"
+        doubao_client.set_model(reasoning_name)
+        if doubao_client.endpoint:
+            available.append(reasoning_name)
+        doubao_client.set_model(saved)  # 恢复
+    return available
 
 def get_llm_client(ai_provider: str = None):
     global current_ai_provider
@@ -270,25 +302,29 @@ async def human_bid(request: HumanBidRequest):
 
 @app.get("/api/fallback-model")
 async def get_fallback_model():
-    """获取当前模型配置"""
+    """获取当前模型配置（仅返回已配置 endopoint 的可用模型）"""
     return {
         "fallback_model": llm_client.model,
-        "available_models": ["deepseek-v4-flash", "deepseek-v4-pro"]
+        "available_models": get_available_models()
     }
 
 
 @app.post("/api/fallback-model", response_model=FallbackModelResponse)
 async def set_fallback_model(request: FallbackModelRequest):
     """设置模型"""
-    valid_models = ["deepseek-v4-flash", "deepseek-v4-pro"]
-    if request.fallback_model not in valid_models:
+    available = get_available_models()
+    if request.fallback_model not in available:
         raise HTTPException(
             status_code=400,
-            detail=f"无效的模型名称。有效选项: {', '.join(valid_models)}"
+            detail=f"模型不可用（未配置 endpoint）。当前可用: {', '.join(available) if available else '(无)'}"
         )
-    
-    llm_client.model = request.fallback_model
-    
+
+    # 如果是豆包模型，切换到 DoubaoSeedClient
+    if is_doubao_model(request.fallback_model):
+        doubao_client.set_model(request.fallback_model)
+    else:
+        llm_client.model = request.fallback_model
+
     return FallbackModelResponse(
         fallback_model=request.fallback_model,
         message=f"模型已设置为: {request.fallback_model}"
@@ -310,8 +346,10 @@ async def get_ai_provider():
     return {
         "ai_provider": current_ai_provider,
         "available_providers": [
-            {"id": AI_PROVIDER_DEEPSEEK, "name": "DeepSeek", "models": ["deepseek-v4-flash", "deepseek-v4-pro"]},
-            {"id": AI_PROVIDER_DOUBAO, "name": "Doubao (豆包)", "models": ["Doubao-Seed-2.0-lite"]}
+            {"id": AI_PROVIDER_DEEPSEEK, "name": "DeepSeek",
+             "models": ["deepseek-v4-flash", "deepseek-v4-pro"]},
+            {"id": AI_PROVIDER_DOUBAO, "name": "Doubao (豆包)",
+             "models": [DOUBAO_MODEL_2_1_PRO, DOUBAO_MODEL_2_1_TURBO]}
         ]
     }
 
@@ -387,26 +425,45 @@ async def bid(request: BidRequest):
         
         hand = SimpleHand(hand_display, hcp, distribution)
         
-        current_llm_client = get_llm_client(request.ai_provider)
-        
+        # 确定使用的模型和客户端
+        target_model = request.fallback_model or ""
+        use_doubao = is_doubao_model(target_model)
+        use_reasoning = request.use_reasoning or is_reasoning_model(target_model)
+        # 豆包需将 ::reasoning 追加到模型名以匹配正确的 endpoint
+        if use_doubao and use_reasoning:
+            target_model = f"{get_base_model(target_model)}::reasoning"
         original_model = None
-        if request.fallback_model and request.ai_provider != AI_PROVIDER_DOUBAO:
-            original_model = current_llm_client.model
-            current_llm_client.model = request.fallback_model
-        
+
+        if use_doubao:
+            current_llm_client = doubao_client
+            current_llm_client.set_model(target_model)
+            if not current_llm_client.is_configured():
+                available = get_available_models()
+                return BidResponse(
+                    bid="pass",
+                    meaning=f"豆包模型 {target_model} 的推理接入点未配置。请在 .env 中设置对应的 endpoint。当前可用模型: {', '.join(available)}",
+                    selection_process="模型未配置",
+                    full_output=None
+                )
+        else:
+            current_llm_client = get_llm_client(request.ai_provider)
+            if target_model:
+                original_model = current_llm_client.model
+                current_llm_client.model = target_model
+
         bidding_service = BiddingService(current_llm_client, jf_retriever)
         bidding_service.use_fallback = request.use_fallback
         bidding_service.set_bid_meanings(request.bid_history if request.bid_history else "")
-        
+
         result = bidding_service.ai_bid(
             hand=hand,
             position=request.position,
             bidding_sequence=bidding_str,
             deal_system=request.deal_system,
             verbose=True,
-            use_reasoning=request.use_reasoning,
+            use_reasoning=use_reasoning,
         )
-        
+
         bid = result.get("选定叫品") or "pass"
         meaning = result.get("叫品含义") or result.get("叫品含义及后续建议") or ""
         if isinstance(meaning, dict):
@@ -414,8 +471,8 @@ async def bid(request: BidRequest):
         selection_process = result.get("叫品筛选过程") or ""
         if isinstance(selection_process, dict):
             selection_process = json.dumps(selection_process, ensure_ascii=False)
-        
-        if original_model:
+
+        if not use_doubao and target_model and original_model:
             current_llm_client.model = original_model
         
         return BidResponse(
@@ -427,7 +484,7 @@ async def bid(request: BidRequest):
         )
     except Exception as e:
         print(f"[ERROR] 叫牌失败: {str(e)}")
-        if original_model:
+        if not use_doubao and target_model and original_model:
             current_llm_client.model = original_model
         return BidResponse(
             bid="pass",
@@ -1227,7 +1284,8 @@ class PlayInitRequest(BaseModel):
     doubled: bool = False
     redoubled: bool = False
     bidding_sequence: Optional[str] = None
-    bid_history: Optional[str] = None  # 叫牌含义历史，用于MCTS约束采样
+    bid_history: Optional[str] = None  # 叫牌序列，用于MCTS约束采样
+    bid_meanings: Optional[str] = None  # 叫牌含义文本，复用LLM已分析信息
 
 
 class PlayInitResponse(BaseModel):
@@ -1254,8 +1312,9 @@ async def play_init(request: PlayInitRequest):
             redoubled=request.redoubled,
             bidding_sequence=request.bidding_sequence or "未提供",
             bid_history=request.bid_history or "",
+            bid_meanings=request.bid_meanings or "",
         )
-        
+
         return PlayInitResponse(
             success=True,
             state=state.to_dict(),
@@ -1431,14 +1490,34 @@ async def ai_play(request: PlayAIRequest):
     """AI出牌"""
     try:
         service = get_play_service()
-        
+
         # 临时切换打牌模型（不影响叫牌模型）
+        pm_raw = request.play_model or ""
+        use_doubao_play = is_doubao_model(pm_raw)
+        use_reasoning = request.use_reasoning or is_reasoning_model(pm_raw)
+        # 豆包需将 ::reasoning 追加到模型名以匹配正确的 endpoint
+        if use_doubao_play and use_reasoning:
+            pm_raw = f"{get_base_model(pm_raw)}::reasoning"
         original_model = None
+        original_play_client = None
         actual_model = llm_client.model
-        if request.play_model and request.play_model in ["deepseek-v4-flash", "deepseek-v4-pro"]:
+
+        if use_doubao_play:
+            doubao_client.set_model(pm_raw)
+            if not doubao_client.is_configured():
+                available = get_available_models()
+                return PlayAIResponse(
+                    success=False,
+                    used_model=pm_raw,
+                    error=f"豆包模型 {pm_raw} 的推理接入点未配置。请在 .env 中设置对应的 endpoint。当前可用: {', '.join(available)}"
+                )
+            original_play_client = service.llm_client
+            service.llm_client = doubao_client
+            actual_model = pm_raw
+        elif pm_raw and pm_raw in ALL_MODELS:
             original_model = llm_client.model
-            llm_client.model = request.play_model
-            actual_model = request.play_model
+            llm_client.model = pm_raw
+            actual_model = pm_raw
         
         try:
             if not service.is_human_turn():
@@ -1452,7 +1531,7 @@ async def ai_play(request: PlayAIRequest):
                               if (use_dd or use_tiered) else None)
                 t0 = time.time()
                 result = await service.get_ai_play(
-                    use_reasoning=request.use_reasoning,
+                    use_reasoning=use_reasoning,
                     use_mcts=use_mcts,
                     use_dd=use_dd,
                     use_tiered=use_tiered,
@@ -1494,8 +1573,10 @@ async def ai_play(request: PlayAIRequest):
                     error="当前是人类玩家回合"
                 )
         finally:
-            # 恢复原始模型
-            if original_model:
+            # 恢复原始模型/客户端
+            if use_doubao_play and original_play_client:
+                service.llm_client = original_play_client
+            elif original_model:
                 llm_client.model = original_model
     except Exception as e:
         print(f"[ERROR] AI出牌失败: {str(e)}")
@@ -1503,7 +1584,7 @@ async def ai_play(request: PlayAIRequest):
         return PlayAIResponse(
             success=False,
             error=f"AI出牌失败: {str(e)}"
-        )
+            )
 
 
 class UpdatePlayerRolesRequest(BaseModel):
@@ -1681,6 +1762,55 @@ async def get_dd_hints():
         import traceback
         traceback.print_exc()
         return {"success": False, "error": str(e)}
+
+
+# ── 粒子数设置 ──
+class ParticleSettingsRequest(BaseModel):
+    dd_particles: Optional[int] = None
+    mcts_particles: Optional[int] = None
+    alpha_mu_particles: Optional[int] = None
+
+
+@app.get("/api/play/particle-settings")
+async def get_particle_settings():
+    """获取当前粒子数设置"""
+    service = get_play_service()
+    return {
+        "dd_particles": getattr(service, 'dd_particles', 200),
+        "dd_min": BELIEF_DD_PARTICLES_MIN,
+        "dd_max": BELIEF_DD_PARTICLES_MAX,
+        "mcts_particles": getattr(service, 'mcts_particles', 500),
+        "mcts_min": BELIEF_MCTS_PARTICLES_MIN,
+        "mcts_max": BELIEF_MCTS_PARTICLES_MAX,
+        "alpha_mu_particles": getattr(service, 'alpha_mu_particles', 30),
+        "alpha_mu_min": BELIEF_ALPHA_MU_PARTICLES_MIN,
+        "alpha_mu_max": BELIEF_ALPHA_MU_PARTICLES_MAX,
+    }
+
+
+@app.post("/api/play/particle-settings")
+async def set_particle_settings(request: ParticleSettingsRequest):
+    """设置粒子数（实时生效，无需重新开局）"""
+    service = get_play_service()
+    updates = {}
+    if request.dd_particles is not None:
+        val = max(BELIEF_DD_PARTICLES_MIN, min(BELIEF_DD_PARTICLES_MAX, request.dd_particles))
+        service.dd_particles = val
+        if service.belief_tracker is not None:
+            service.belief_tracker.num_particles = val
+        updates["dd_particles"] = val
+    if request.mcts_particles is not None:
+        val = max(BELIEF_MCTS_PARTICLES_MIN, min(BELIEF_MCTS_PARTICLES_MAX, request.mcts_particles))
+        service.mcts_particles = val
+        if hasattr(service.mcts.sampler, 'belief_tracker') and service.mcts.sampler.belief_tracker is not None:
+            service.mcts.sampler.belief_tracker.num_particles = val
+        updates["mcts_particles"] = val
+    if request.alpha_mu_particles is not None:
+        val = max(BELIEF_ALPHA_MU_PARTICLES_MIN, min(BELIEF_ALPHA_MU_PARTICLES_MAX, request.alpha_mu_particles))
+        service.alpha_mu_particles = val
+        updates["alpha_mu_particles"] = val
+    return {"success": True, "updates": updates}
+
 
 if __name__ == "__main__":
     import uvicorn

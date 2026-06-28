@@ -11,10 +11,12 @@ DD/MCTS 搜索时按权重抽样，替代均匀随机采样，
 使采样分布更接近真实情况，缓解 strategy fusion 问题。
 """
 
+import math
 import random
 from typing import Dict, List, Set, Tuple, Optional
 
 from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER
+from bridge.mcts.constraints import compute_sample_violation_score
 from config import (
     BELIEF_NUM_PARTICLES, BELIEF_SIGNAL_WEIGHT, BELIEF_SIGNAL_PENALTY,
     BELIEF_SIGNAL_MIN_RANK,
@@ -94,7 +96,12 @@ class BeliefTracker:
         self.num_particles = num_particles
         self.particles: List[Dict[str, List[Card]]] = []
         self.weights: List[float] = []
+        self.constraints = None  # 叫牌约束
         self._last_state_id: Optional[int] = None  # 避免重复 prepare
+
+    def set_constraints(self, constraints):
+        """设置叫牌约束，用于粒子软加权"""
+        self.constraints = constraints
 
     def prepare(self, state: PlayState, perspective: str) -> None:
         """在 DD/MCTS 搜索前生成并加权一组粒子。
@@ -103,6 +110,12 @@ class BeliefTracker:
             state: 当前 PlayState
             perspective: 当前出牌者位置
         """
+        # 缓存检查：如果已出牌数量、当前出牌玩家、搜索视角都没变，直接复用已有粒子
+        played_count = sum(len(t.cards) for t in state.tricks) + len(state.current_trick.cards)
+        state_key = (played_count, state.current_player, perspective)
+        if state_key == self._last_state_id and self.particles:
+            return
+
         # 收集证据
         known_voids = collect_voids(state)
 
@@ -117,13 +130,14 @@ class BeliefTracker:
             signal_evidence = [(p, s, h, "attitude")
                                for p, s, h in collect_signal_evidence(state)]
 
-        # 生成粒子（sampler._sample_once 已强制 void 约束，这里做二次验证 + 信号加权）
+        # 生成粒子（sampler._sample_once 带约束，这里做二次验证 + 信号加权 + 约束软惩罚）
+        # 注意：直接调用 _sample_once，跳过sample()中的硬验证重试（中局剩余牌不满足整手约束，重试无意义，权重会软惩罚）
         self.particles = []
         self.weights = []
         for _ in range(self.num_particles):
             sample = self.sampler._sample_once(state, perspective)
             self.particles.append(sample)
-            w = self._particle_weight(sample, known_voids, signal_evidence)
+            w = self._particle_weight(sample, known_voids, signal_evidence, self.constraints)
             self.weights.append(w)
 
         # 归一化
@@ -135,8 +149,10 @@ class BeliefTracker:
         else:
             self.weights = [w / total for w in self.weights]
 
+        self._last_state_id = state_key
+
     def draw(self) -> Dict[str, List[Card]]:
-        """从粒子集中按权重抽取一个样本。"""
+        """从粒子集中按权重抽取一个样本（MCTS用）。"""
         if not self.particles:
             raise RuntimeError("BeliefTracker.prepare() 未调用")
         idx = random.choices(range(len(self.particles)),
@@ -145,13 +161,30 @@ class BeliefTracker:
         return {pos: [Card(suit=c.suit, rank=c.rank) for c in hand]
                 for pos, hand in self.particles[idx].items()}
 
+    def get_all_particles(self) -> List[Tuple[Dict[str, List[Card]], float]]:
+        """获取全部粒子及其权重（DD / αμ 全量使用，不抽取）。"""
+        if not self.particles:
+            return []
+        result = []
+        for i, particle in enumerate(self.particles):
+            w = self.weights[i] if i < len(self.weights) else 1.0
+            # 权重开根号平滑：避免某个粒子一家独大降低有效样本量
+            w_smooth = w ** 0.5
+            # 深拷贝
+            world = {pos: [Card(suit=c.suit, rank=c.rank) for c in hand]
+                     for pos, hand in particle.items()}
+            result.append((world, w_smooth))
+        return result
+
     def _particle_weight(self, particle: Dict[str, List[Card]],
                          known_voids: Dict[str, Set[str]],
-                         signal_evidence: List[Tuple]) -> float:
+                         signal_evidence: List[Tuple],
+                         constraints=None) -> float:
         """计算单个粒子的权重。
 
         硬证据（void）违反 → 权重 0
         软证据（信号）→ 权重乘以 SIGNAL_WEIGHT 或 SIGNAL_PENALTY
+        叫牌约束违反 → 根据违反程度指数衰减权重
 
         signal_evidence 格式：(position, suit, is_high, signal_type)
         signal_type: "attitude" | "count" | "suit_preference"
@@ -195,6 +228,13 @@ class BeliefTracker:
                 elif not is_high and suit_len <= 3:
                     weight *= (BELIEF_SIGNAL_WEIGHT ** 0.5)
             # suit_preference 信号对单花色长度约束较弱，主要靠 LLM 解读，这里不调整权重
+
+        # ── 叫牌约束软惩罚：违反越多，权重指数衰减 ──
+        if constraints:
+            violation_score = compute_sample_violation_score(particle, constraints)
+            if violation_score > 0:
+                # 指数衰减：每违反1分（约1HCP差距或1张花色差距），权重乘以0.5
+                weight *= math.exp(-violation_score * 0.3)
 
         return weight
 

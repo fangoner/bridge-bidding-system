@@ -220,7 +220,7 @@ export const doubleDummyAnalysis = async (hands) => {
 // ==================== 打牌相关API ====================
 
 // 初始化打牌
-export const playInit = async (hands, contract, declarer, playerRoles = null, doubled = false, redoubled = false, biddingSequence = null, bidHistory = '') => {
+export const playInit = async (hands, contract, declarer, playerRoles = null, doubled = false, redoubled = false, biddingSequence = null, bidHistory = '', bidMeanings = '') => {
   try {
     const response = await api.post('/api/play/init', {
       hands,
@@ -231,6 +231,7 @@ export const playInit = async (hands, contract, declarer, playerRoles = null, do
       redoubled,
       bidding_sequence: biddingSequence,
       bid_history: bidHistory,
+      bid_meanings: bidMeanings,
     });
     return response.data;
   } catch (error) {
@@ -336,6 +337,28 @@ export const getDDHints = async () => {
     return response.data;
   } catch (error) {
     console.error('获取DD提示失败:', error);
+    throw error;
+  }
+};
+
+// 获取粒子数设置
+export const getParticleSettings = async () => {
+  try {
+    const response = await api.get('/api/play/particle-settings');
+    return response.data;
+  } catch (error) {
+    console.error('获取粒子设置失败:', error);
+    throw error;
+  }
+};
+
+// 设置粒子数
+export const setParticleSettings = async (settings) => {
+  try {
+    const response = await api.post('/api/play/particle-settings', settings);
+    return response.data;
+  } catch (error) {
+    console.error('设置粒子数失败:', error);
     throw error;
   }
 };

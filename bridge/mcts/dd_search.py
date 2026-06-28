@@ -77,6 +77,67 @@ def _hands_to_pbn(hands: Dict[str, List[Card]]) -> str:
     return f"N:{' '.join(parts)}"
 
 
+def _dd_eval_one_world(sampled, all_played, trick_cards, trick_leader,
+                       playable, state, perspective, declarer, dummy,
+                       trump, card_scores, weight, sample_idx):
+    """对单个世界运行 solve_board，累加加权分到 card_scores。"""
+    try:
+        # 1. 安全网：移除已出牌
+        for pos, card in all_played:
+            if pos in sampled:
+                sampled[pos] = [c for c in sampled[pos]
+                                if not (c.suit == card.suit and c.rank == card.rank)]
+
+        # 2. 检测重复牌
+        if _has_duplicates(sampled):
+            return
+
+        # 3. 加回当前墩的牌
+        for pos, card in trick_cards:
+            sampled[pos].append(card)
+
+        # 4. PBN → Deal → solve_board
+        pbn = _hands_to_pbn(sampled)
+        deal = Deal(pbn)
+        deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
+        if trick_cards:
+            deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
+            for _pos, card in trick_cards:
+                deal.play(_to_ep(card), from_hand=True)
+        else:
+            deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
+
+        result = solve_board(deal)
+        score_map = {}
+        for ep_card, side_score in result:
+            key = (_DENOM_TO_SUIT.get(ep_card.suit), _RANK_TO_CHAR.get(ep_card.rank))
+            score_map[key] = side_score
+
+        total_played = state.declarer_tricks + state.defender_tricks
+        remaining_tricks = 13 - total_played
+        curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
+        curplayer_is_declarer = curplayer_pos in (declarer, dummy)
+
+        for card in playable:
+            key = (card.suit, card.rank)
+            target_tricks = score_map.get(key, 0)
+            if curplayer_is_declarer:
+                decl_side_tricks = target_tricks
+            else:
+                decl_side_tricks = remaining_tricks - target_tricks
+            total = state.declarer_tricks + decl_side_tricks
+
+            stats = card_scores[str(card)]
+            stats["weighted_sum"] += total * weight
+            stats["total_weight"] += weight
+            stats["scores"].append(total)
+            stats["mn"] = min(stats["mn"], total)
+            stats["mx"] = max(stats["mx"], total)
+
+    except Exception:
+        pass  # 单个世界失败不阻塞整体流程
+
+
 class DDSearch:
 
     def __init__(self, sampler: DealSampler = None, num_samples: int = 100,
@@ -95,7 +156,13 @@ class DDSearch:
 
     def search(self, state: PlayState) -> dict:
         perspective = state.current_player
-        playable = state.get_playable_cards(perspective)
+        actual_turn = state.current_player
+        declarer = state.contract.declarer
+        dummy = state.dummy
+        # 明手不做决策：搜索视角改为庄家
+        if perspective == dummy:
+            perspective = declarer
+        playable = state.get_playable_cards(actual_turn)
 
         if len(playable) == 1:
             return {
@@ -104,8 +171,6 @@ class DDSearch:
                 "full_output": {"推荐出牌": str(playable[0])},
             }
 
-        declarer = state.contract.declarer
-        dummy = state.dummy
         trump = state.contract.suit
         is_declarer_side = perspective in (declarer, dummy)
 
@@ -123,9 +188,9 @@ class DDSearch:
         adaptive_samples = int(self.min_samples + (self.num_samples - self.min_samples) * ratio)
         adaptive_samples = max(self.min_samples, min(self.num_samples, adaptive_samples))
 
-        card_scores = {str(c): [] for c in playable}
-        start_time = time.time()
-        samples_done = 0
+        card_scores = {str(c): {"weighted_sum": 0.0, "total_weight": 0.0,
+                                  "scores": [], "mn": float("inf"), "mx": -float("inf")}
+                       for c in playable}
 
         # 当前墩信息（补回手牌 + 写入 Deal 当前墩）
         trick_state = get_current_trick_state(state)
@@ -138,132 +203,42 @@ class DDSearch:
             all_played.extend(trick.cards)
         all_played.extend(trick_cards)
 
-        # 信念跟踪器：在采样循环前生成加权粒子集
-        # sampler.sample() 会自动从粒子集按权重抽样
+        # 信念跟踪器：准备加权粒子集
         belief_stats = None
+        particles = None  # [(world, weight), ...]
         if self.sampler.belief_tracker is not None:
             self.sampler.belief_tracker.prepare(state, perspective)
             belief_stats = self.sampler.belief_tracker.stats()
+            particles = self.sampler.belief_tracker.get_all_particles()
+            print(f"[DD] 信念粒子全量模式: {len(particles)} 粒子, "
+                  f"active={belief_stats.get('active_particles','?')}")
 
-        while samples_done < adaptive_samples:
-            if time.time() - start_time > self.time_limit:
-                break
+        start_time = time.time()
+        samples_done = 0
 
-            sampled = self.sampler.sample(state, perspective)
-            samples_done += 1
-
-            try:
-                # 1. 安全网：只从打出牌的位置移除已出牌（不跨位置移除，避免重复牌污染其他手牌）
-                for pos, card in all_played:
-                    if pos in sampled:
-                        sampled[pos] = [c for c in sampled[pos] if not (c.suit == card.suit and c.rank == card.rank)]
-
-                # 1.5 验证：检测采样手牌中是否有重复牌，有则跳过
-                if _has_duplicates(sampled):
-                    if samples_done <= 3:
-                        with open(_DEBUG_LOG, "a", encoding="utf-8") as f:
-                            f.write(f"\n--- sample {samples_done} SKIPPED (duplicates in sampled hands) ---\n")
-                            for p in ["北", "东", "南", "西"]:
-                                cs = sampled.get(p, [])
-                                f.write(f"  sampled[{p}]({len(cs)}): {sorted(str(c) for c in cs)}\n")
-                    continue
-
-                # 2. 只加回当前墩的牌（已完成墩的牌不保留），使每个位置均为 13-已完成墩出牌 张
-                for pos, card in trick_cards:
-                    sampled[pos].append(card)
-
-                # 3. PBN → Deal（含当前墩出牌在手，不含已完成墩出牌）
-                pbn = _hands_to_pbn(sampled)
-                deal = Deal(pbn)
-                deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
-
-                # 4. 只重放当前墩（避免重放已完成墩时 curplayer 墩间轮转不一致）
-                if trick_cards:
-                    deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
-                    for _pos, card in trick_cards:
-                        deal.play(_to_ep(card), from_hand=True)
-                else:
-                    deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
-
-                result = solve_board(deal)
-                score_map = {}
-                for ep_card, side_score in result:
-                    key = (_DENOM_TO_SUIT.get(ep_card.suit), _RANK_TO_CHAR.get(ep_card.rank))
-                    score_map[key] = side_score
-
-                total_played = state.declarer_tricks + state.defender_tricks
-                remaining_tricks = 13 - total_played
-
-                # solve_board 返回 deal.curplayer（当前出牌人）所在方的赢墩
-                curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
-                curplayer_is_declarer = curplayer_pos in (declarer, dummy)
-
-                for card in playable:
-                    key = (card.suit, card.rank)
-                    target_tricks = score_map.get(key, 0)
-                    if curplayer_is_declarer:
-                        decl_side_tricks = target_tricks
-                    else:
-                        decl_side_tricks = remaining_tricks - target_tricks
-                    total = state.declarer_tricks + decl_side_tricks
-                    card_scores[str(card)].append(total)
-
-                # DEBUG
-                if samples_done <= 3:
-                    scores = list(score_map.values())
-                    hand_lens = [len(deal.north), len(deal.east), len(deal.south), len(deal.west)]
-                    with open(_DEBUG_LOG, "a", encoding="utf-8") as f:
-                        f.write(f"\n--- sample {samples_done} OK ---\n")
-                        f.write(f"perspective={perspective} is_decl={is_declarer_side} "
-                                f"curplayer={deal.curplayer} curplayer_is_decl={curplayer_is_declarer} "
-                                f"decl_done={state.declarer_tricks} def_done={state.defender_tricks} "
-                                f"remaining={remaining_tricks} "
-                                f"trump={deal.trump} first={deal.first}\n")
-                        f.write(f"deal hand_lens(N/E/S/W): {hand_lens}  playable={len(playable)}\n")
-                        f.write(f"PBN: {pbn}\n")
-                        f.write(f"solve_board: {len(scores)} results "
-                                f"min={min(scores)} max={max(scores)} mean={sum(scores)/len(scores):.1f}"
-                                f" ({curplayer_pos} side tricks)\n")
-                        for card in playable[:5]:
-                            k = (card.suit, card.rank)
-                            target = score_map.get(k, -999)
-                            dt = target if curplayer_is_declarer else remaining_tricks - target if target != -999 else -999
-                            t = card_scores[str(card)][-1]
-                            f.write(f"  {card}: target={target} decl_side={dt} -> total={t}\n")
-
-            except Exception as e:
-                with open(_DEBUG_LOG, "a", encoding="utf-8") as f:
-                    f.write(f"\n--- sample {samples_done} ERROR: {e} ---\n")
-                    # 真实 state.hands
-                    for p in ["北", "东", "南", "西"]:
-                        sh = state.hands.get(p, [])
-                        f.write(f"  state.hands[{p}]({len(sh)}): {sorted(str(c) for c in sh)}\n")
-                    f.write(f"  --- sampled ---\n")
-                    for p in ["北", "东", "南", "西"]:
-                        cs = sampled.get(p, [])
-                        f.write(f"  sampled[{p}]({len(cs)}): {sorted(str(c) for c in cs)}\n")
-                    f.write(f"  PBN: {pbn}\n")
-                    f.write(f"  all_played: {[(pos, str(c)) for pos, c in all_played]}\n")
-                    f.write(f"  declarer={declarer} dummy={dummy} perspective={perspective} phase={state.phase}\n")
-                    import traceback
-                    f.write(traceback.format_exc())
-                print(f"[DD] sample {samples_done} ERROR: {e}")
-
-        # DEBUG success
-        if samples_done == 1 and card_scores:
-            first_key = list(card_scores.keys())[0]
-            print(f"[DD] sample 1 OK: card_scores example {first_key} = {card_scores[first_key][:3]}...")
-        elif samples_done > 0 and not any(card_scores.values()):
-            print(f"[DD] WARNING: {samples_done} samples but all scores empty!")
-
-        # 信念跟踪器统计
-        if belief_stats and belief_stats.get("prepared"):
-            active = belief_stats["active_particles"]
-            total = belief_stats["num_particles"]
-            filtered = belief_stats["void_filtered"]
-            print(f"[DD] 信念跟踪: {active}/{total} 粒子有效, {filtered} 被 void 过滤")
+        # 若信念粒子可用，遍历全部粒子（每个粒子唯一，无重复）
+        if particles:
+            for world, weight in particles:
+                if time.time() - start_time > self.time_limit:
+                    break
+                samples_done += 1
+                _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
+                                   playable, state, perspective, declarer, dummy,
+                                   trump, card_scores, weight, samples_done)
+        else:
+            # 回退：sampler.sample() 直接生成（即纯约束采样，等权）
+            while samples_done < adaptive_samples:
+                if time.time() - start_time > self.time_limit:
+                    break
+                sampled = self.sampler.sample(state, perspective)
+                samples_done += 1
+                _dd_eval_one_world(sampled, all_played, trick_cards, trick_leader,
+                                   playable, state, perspective, declarer, dummy,
+                                   trump, card_scores, 1.0, samples_done)
 
         elapsed = time.time() - start_time
+        print(f"[DD] 全量模式完成: {samples_done} 世界, {elapsed:.1f}s"
+              f"{' (信念加权)' if particles else ' (纯约束等权)'}")
 
         best_card = None
         best_score = -float("inf")
@@ -271,23 +246,25 @@ class DDSearch:
         use_maximin = getattr(self, 'use_maximin', True)
 
         for card in playable:
-            scores = card_scores[str(card)]
-            avg = sum(scores) / len(scores) if scores else 0.0
-            mn = min(scores) if scores else 0
-            mx = max(scores) if scores else 0
+            stats = card_scores[str(card)]
+            scores = stats["scores"]
+            w_sum = stats["weighted_sum"]
+            w_total = stats["total_weight"]
+            # 加权平均（纯约束模式下所有 weight=1.0，退化为普通平均）
+            w_avg = w_sum / w_total if w_total > 0 else 0.0
+            mn = stats["mn"] if stats["mn"] != float("inf") else 0
+            mx = stats["mx"] if stats["mx"] != -float("inf") else 0
             child_stats.append({
                 "card": str(card),
                 "samples": len(scores),
-                "avg_tricks": round(avg, 2),
+                "avg_tricks": round(w_avg, 2),
                 "min_tricks": mn,
                 "max_tricks": mx,
             })
 
-            rank_bonus = RANK_ORDER.get(card.rank, 0) / 50.0
+            rank_bonus = (RANK_ORDER.get(card.rank, 0) / 200.0)
 
             if use_maximin:
-                # Maximin: 混合 avg 和 min，偏好低方差安全牌
-                # 权重取决于合约状态（领先→保守，落后→冒险）
                 from config import DD_REGRET_BASE
                 declarer_tricks = state.declarer_tricks
                 defender_tricks = state.defender_tricks
@@ -300,20 +277,19 @@ class DDSearch:
                     tricks_to_beat = 14 - tricks_needed
                     margin = defender_tricks + remaining - tricks_to_beat
 
-                # margin>0: 领先, margin<0: 落后, margin=0: 持平
                 if margin > 1:
-                    regret_weight = DD_REGRET_BASE          # 领先→保守(高min权重)
+                    regret_weight = DD_REGRET_BASE
                 elif margin == 1:
-                    regret_weight = DD_REGRET_BASE * 0.7    # 微领先→偏保守
+                    regret_weight = DD_REGRET_BASE * 0.7
                 elif margin == 0:
-                    regret_weight = DD_REGRET_BASE * 0.4    # 持平→中性
+                    regret_weight = DD_REGRET_BASE * 0.4
                 else:
-                    regret_weight = 0.0                      # 落后→纯avg冒险
+                    regret_weight = 0.0
 
-                blended = (1 - regret_weight) * avg + regret_weight * mn
+                blended = (1 - regret_weight) * w_avg + regret_weight * mn
                 score = (blended + rank_bonus) if is_declarer_side else -(blended + rank_bonus)
             else:
-                score = (avg + rank_bonus) if is_declarer_side else -(avg + rank_bonus)
+                score = (w_avg + rank_bonus) if is_declarer_side else -(w_avg + rank_bonus)
 
             if score > best_score:
                 best_score = score
@@ -548,7 +524,7 @@ class DDSearch:
                 "min_tricks": mn,
                 "max_tricks": mx,
             })
-            rank_bonus = RANK_ORDER.get(card.rank, 0) / 50.0
+            rank_bonus = (RANK_ORDER.get(card.rank, 0) / 200.0)
             # 残局枚举同样适用 maximin（精确分布下 min 更可靠）
             if getattr(self, 'use_maximin', True):
                 from config import DD_REGRET_BASE
@@ -619,7 +595,13 @@ class DDSearch:
             raise RuntimeError("endplay 库不可用，无法运行完美DD搜索")
 
         perspective = state.current_player
-        playable = state.get_playable_cards(perspective)
+        actual_turn = state.current_player
+        declarer = state.contract.declarer
+        dummy = state.dummy
+        # 明手不做决策：搜索视角改为庄家
+        if perspective == dummy:
+            perspective = declarer
+        playable = state.get_playable_cards(actual_turn)
 
         if len(playable) == 1:
             return {
@@ -628,8 +610,6 @@ class DDSearch:
                 "full_output": {"推荐出牌": str(playable[0])},
             }
 
-        declarer = state.contract.declarer
-        dummy = state.dummy
         trump = state.contract.suit
         is_declarer_side = perspective in (declarer, dummy)
 
@@ -693,7 +673,7 @@ class DDSearch:
                 "min_tricks": total,
                 "max_tricks": total,
             })
-            rank_bonus = RANK_ORDER.get(card.rank, 0) / 50.0
+            rank_bonus = (RANK_ORDER.get(card.rank, 0) / 200.0)
             score = (total + rank_bonus) if is_declarer_side else -(total + rank_bonus)
             if score > best_score:
                 best_score = score

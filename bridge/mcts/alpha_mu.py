@@ -61,14 +61,20 @@ from bridge.mcts.dd_search import (
 
 class OutcomeVector:
     """长度 N 的布尔向量。每元素 = 1（our_side 达成目标）或 0（未达成）。
-    useful_mask[i]=False 表示该 world 已 impossible，比较时跳过。"""
+    useful_mask[i]=False 表示该 world 已 impossible，比较时跳过。
 
-    __slots__ = ("values", "useful_mask")
+    附加 tricks_list：每个 world 下我方实际赢墩数，用于成功率相同时的 tie-break
+    （宕牌时选少宕的，铁成时选超墩多的）。"""
 
-    def __init__(self, values: List[int], useful_mask: List[bool] = None):
+    __slots__ = ("values", "useful_mask", "tricks_list")
+
+    def __init__(self, values: List[int], useful_mask: List[bool] = None,
+                 tricks_list: List[int] = None):
         self.values = list(values)
         n = len(self.values)
         self.useful_mask = list(useful_mask) if useful_mask is not None else [True] * n
+        # tricks_list[i] = 该 world 下我方总赢墩数（用于 tie-break）
+        self.tricks_list = list(tricks_list) if tricks_list is not None else [0] * n
 
     def __len__(self) -> int:
         return len(self.values)
@@ -93,6 +99,20 @@ class OutcomeVector:
     def count_success(self) -> int:
         """成功 world 的数量。"""
         return sum(1 for v, m in zip(self.values, self.useful_mask) if m and v == 1)
+
+    def avg_tricks(self) -> float:
+        """我方平均赢墩数（tie-break 用）。"""
+        useful_tricks = [t for t, m in zip(self.tricks_list, self.useful_mask) if m]
+        if not useful_tricks:
+            return 0.0
+        return sum(useful_tricks) / len(useful_tricks)
+
+    def min_tricks(self) -> int:
+        """我方最差赢墩数（tie-break 用，maximin 风格）。"""
+        useful_tricks = [t for t, m in zip(self.tricks_list, self.useful_mask) if m]
+        if not useful_tricks:
+            return 0
+        return min(useful_tricks)
 
     def dominates(self, other: "OutcomeVector") -> bool:
         """self 是否支配 other。"""
@@ -122,7 +142,8 @@ class OutcomeVector:
         won = self.count_success()
         total = sum(1 for m in self.useful_mask if m)
         s = "".join("x" if not m else str(v) for v, m in zip(self.values, self.useful_mask))
-        return f"OV[{s}]({won}/{total}={self.success_rate():.2f})"
+        avg_t = self.avg_tricks()
+        return f"OV[{s}]({won}/{total}={self.success_rate():.2f}, avg_tricks={avg_t:.1f})"
 
 
 class ParetoFront:
@@ -223,33 +244,36 @@ class AlphaMuSearch:
         self._is_our_side_declarer: bool = True
 
     def search(self, state: PlayState) -> dict:
-        self._start_time = time.time()
         self._nodes_searched = 0
         self._dds_calls = 0
         self._err_stats = {k: 0 for k in self._err_stats}
         self._err_samples = {}
 
         perspective = state.current_player
+        actual_turn = state.current_player
         declarer = state.contract.declarer
         dummy = state.dummy
+        # 明手不做决策：搜索视角改为庄家
+        if perspective == dummy:
+            perspective = declarer
         trump = state.contract.suit
         tricks_needed = state.contract.tricks_needed
 
         import os
         _debug_path = os.path.join(os.path.dirname(__file__), "..", "..", "alpha_mu_debug.log")
         with open(_debug_path, "w", encoding="utf-8") as _f:
-            _f.write(f"[αμ ROOT] perspective={perspective}, declarer={declarer}, dummy={dummy}\n")
+            _f.write(f"[αμ ROOT] perspective={perspective}, actual_turn={actual_turn}, declarer={declarer}, dummy={dummy}\n")
             _f.write(f"decl_tricks={state.declarer_tricks}, def_tricks={state.defender_tricks}\n")
             _f.write(f"hand_sizes={ {p: len(h) for p, h in state.hands.items()} }\n")
             _f.write(f"current_trick_cards={len(state.current_trick.cards)}\n")
             for p in ["北", "东", "南", "西"]:
                 _f.write(f"  {p}: {[str(c) for c in state.hands.get(p, [])]}\n")
-        print(f"[αμ] perspective={perspective}, declarer={declarer}, dummy={dummy}, "
+        print(f"[αμ] perspective={perspective}, actual_turn={actual_turn}, declarer={declarer}, dummy={dummy}, "
               f"decl_tricks={state.declarer_tricks}, def_tricks={state.defender_tricks}, "
               f"hand_sizes={ {p: len(h) for p, h in state.hands.items()} }, "
               f"current_trick_cards={len(state.current_trick.cards)}")
 
-        playable = state.get_playable_cards(perspective)
+        playable = state.get_playable_cards(actual_turn)
         if len(playable) == 1:
             return {
                 "card": playable[0],
@@ -270,6 +294,9 @@ class AlphaMuSearch:
                 continue
         if not worlds:
             raise RuntimeError("αμ: 无法生成 possible worlds")
+
+        # 开始计时（粒子/worlds准备完成后才开始算搜索时间）
+        self._start_time = time.time()
 
         # 诊断
         has_constraints = bool(getattr(self.sampler, 'constraints', None))
@@ -299,7 +326,7 @@ class AlphaMuSearch:
                 break
             front = self._search_recursive(
                 state, worlds, world_decl_tricks, world_def_tricks,
-                move, perspective, depth=0,
+                move, actual_turn, depth=0,
                 declarer=declarer, dummy=dummy, trump=trump,
                 tricks_needed=tricks_needed, our_side=our_side,
             )
@@ -315,31 +342,41 @@ class AlphaMuSearch:
         # ── 3. 根节点选牌：Maximin ──
         move_scores: List[dict] = []
         best_move = None
-        best_key = (-1, -1.0)  # (worst, success_rate)
+        # 选牌优先级：
+        # 1. worst (Maximin 保底成功率)
+        # 2. success_rate (平均成功率)
+        # 3. min_tricks (最差情况下的赢墩数 — 宕牌时少宕/铁成时超墩)
+        # 4. avg_tricks (平均赢墩数)
+        # 5. rank_bonus (同等级牌的 tie-break)
+        best_key = (-1, -1.0, -1, -1.0, 0.0)
 
         for move, front in move_fronts:
             mv = front.maximin_vector()
             worst = mv.worst() if mv else 0
             rate = mv.success_rate() if mv else 0.0
+            min_t = mv.min_tricks() if mv else 0
+            avg_t = mv.avg_tricks() if mv else 0.0
             bonus = self._rank_bonus(move)
-            # display_score: 转换为庄家赢墩的预期成功率（与 DD 引擎一致）
-            display_score = rate
 
             move_scores.append({
                 "card": str(move),
                 "success_rate": round(rate, 3),
                 "worst": worst,
+                "min_tricks": min_t,
+                "avg_tricks": round(avg_t, 2),
                 "success_count": mv.count_success() if mv else 0,
                 "total_useful": sum(1 for m in mv.useful_mask if m) if mv else 0,
                 "front_size": len(front),
                 "best_vector": repr(mv) if mv else "∅",
             })
-            key = (worst, rate + bonus)
+            key = (worst, rate, min_t, avg_t, bonus)
             if key > best_key:
                 best_key = key
                 best_move = move
 
-        move_scores.sort(key=lambda s: (s["worst"], s["success_rate"]), reverse=True)
+        move_scores.sort(
+            key=lambda s: (s["worst"], s["success_rate"], s["min_tricks"], s["avg_tricks"]),
+            reverse=True)
 
         elapsed = time.time() - self._start_time
         top_str = ", ".join(
@@ -539,6 +576,7 @@ class AlphaMuSearch:
 
         result_vector = [0] * n
         useful_mask = [True] * n
+        tricks_list = [0] * n
 
         for w_idx, (hands, ns_info) in enumerate(next_states):
             if ns_info.get("impossible"):
@@ -556,7 +594,8 @@ class AlphaMuSearch:
                 continue
 
             # Min 想最小化 our_side 成功（0 = Min 胜）
-            best_for_min = 1  # 初始最差：our_side 成功
+            best_for_min = 1.0  # 初始最差：our_side 成功
+            best_min_tricks = 13  # 初始最差：我方赢最多
             for min_move in candidate_moves:
                 if self._time_up():
                     break
@@ -592,13 +631,20 @@ class AlphaMuSearch:
                 )
                 # Min 最小化 our_side 成功
                 our_success = child_front.best_score()
+                child_mv = child_front.maximin_vector()
+                child_avg_tricks = child_mv.avg_tricks() if child_mv else 0.0
                 if our_success < best_for_min:
                     best_for_min = our_success
-                    if best_for_min == 0:
+                    best_min_tricks = child_avg_tricks
+                    if best_for_min == 0 and best_min_tricks <= 0:
                         break
+                elif our_success == best_for_min and child_avg_tricks < best_min_tricks:
+                    # 成功率相同时，Min 选择我方赢墩最少的
+                    best_min_tricks = child_avg_tricks
             result_vector[w_idx] = int(best_for_min)
+            tricks_list[w_idx] = int(round(best_min_tricks))
 
-        return ParetoFront([OutcomeVector(result_vector, useful_mask)])
+        return ParetoFront([OutcomeVector(result_vector, useful_mask, tricks_list)])
 
     @staticmethod
     def _worlds_consistent(next_states) -> tuple:
@@ -642,9 +688,11 @@ class AlphaMuSearch:
         trump: str,
         tricks_needed: int,
     ) -> ParetoFront:
-        """Min 节点 DDS 直接评估（回退路径）。布尔版：Min 选使 our_side 失败(0)的 move。"""
+        """Min 节点 DDS 直接评估（回退路径）。布尔版：Min 选使 our_side 失败(0)的 move。
+        保存实际赢墩数用于 tie-break。"""
         result_vector = [0] * n
         useful_mask = [True] * n
+        tricks_list = [0] * n
 
         for w_idx, (hands, ns_info) in enumerate(next_states):
             if ns_info.get("impossible"):
@@ -662,6 +710,7 @@ class AlphaMuSearch:
                 continue
 
             best_for_min = 1  # 初始：our_side 成功
+            best_min_tricks = 13  # Min 想最小化我方赢墩，初始设最大
             for min_move in candidate_moves:
                 if self._time_up():
                     break
@@ -675,11 +724,16 @@ class AlphaMuSearch:
                 success = 1 if our_tricks >= self._goal else 0
                 if success < best_for_min:
                     best_for_min = success
-                    if best_for_min == 0:
+                    best_min_tricks = our_tricks
+                    if best_for_min == 0 and best_min_tricks == 0:
                         break
+                elif success == best_for_min and our_tricks < best_min_tricks:
+                    # 成功率相同时，Min 选择我方赢墩最少的
+                    best_min_tricks = our_tricks
             result_vector[w_idx] = best_for_min
+            tricks_list[w_idx] = best_min_tricks
 
-        return ParetoFront([OutcomeVector(result_vector, useful_mask)])
+        return ParetoFront([OutcomeVector(result_vector, useful_mask, tricks_list)])
 
     def _evaluate_leaf(
         self,
@@ -690,7 +744,8 @@ class AlphaMuSearch:
         trump: str,
         tricks_needed: int,
     ) -> ParetoFront:
-        """叶子节点：对每个 world 调 DDS，转为布尔成功/失败。"""
+        """叶子节点：对每个 world 调 DDS，转为布尔成功/失败。
+        同时保存每个 world 的实际赢墩数用于 tie-break。"""
         useful_count = sum(1 for _, ns_info in next_states
                           if not ns_info.get("impossible"))
         if useful_count == 0:
@@ -699,6 +754,7 @@ class AlphaMuSearch:
 
         result_vector = [0] * n
         useful_mask = [True] * n
+        tricks_list = [0] * n  # 每个 world 下我方总赢墩数
 
         for w_idx, (hands, ns_info) in enumerate(next_states):
             if ns_info.get("impossible"):
@@ -712,8 +768,9 @@ class AlphaMuSearch:
                 hands, ns_info, declarer, dummy, trump, tricks_needed)
             our_tricks = decl_tricks if self._is_our_side_declarer else (13 - decl_tricks)
             result_vector[w_idx] = 1 if our_tricks >= self._goal else 0
+            tricks_list[w_idx] = our_tricks
 
-        return ParetoFront([OutcomeVector(result_vector, useful_mask)])
+        return ParetoFront([OutcomeVector(result_vector, useful_mask, tricks_list)])
 
     # ── DDS 辅助 ──
 
