@@ -110,6 +110,7 @@ function CardTablePanel({
   })
   return (
     <Paper elevation={0} sx={{
+      m: 0,
       p: 1,
       background: isDark
         ? 'linear-gradient(135deg, rgba(30, 41, 59, 0.75) 0%, rgba(30, 41, 59, 0.6) 100%)'
@@ -123,12 +124,12 @@ function CardTablePanel({
       borderRadius: 3,
       display: 'flex',
       flexDirection: 'column',
-      flex: isMobile ? undefined : '1 1 0%',
-      minWidth: isMobile ? undefined : PANEL_LAYOUT.minWidth,
-      maxWidth: isMobile ? undefined : PANEL_LAYOUT.maxWidth,
-      width: isMobile ? '100%' : undefined,
-      height: isMobile ? 'auto' : `${PANEL_LAYOUT.height}px`,
-      overflow: 'hidden'
+      width: isMobile ? '100%' : '640px',
+      overflow: 'hidden',
+      height: '640px',
+      minHeight: '640px',
+      flexShrink: 0,
+      boxSizing: 'border-box'
     }}>
       <Box sx={{
         display: 'flex',
@@ -136,8 +137,9 @@ function CardTablePanel({
         alignItems: 'center',
         mb: 0.5,
         flexShrink: 0,
-        minHeight: 40,
+        height: 44,
         flexWrap: isMobile ? 'wrap' : 'nowrap',
+        overflow: 'hidden',
         gap: isMobile ? 0.5 : 0,
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
@@ -317,9 +319,8 @@ function CardTablePanel({
       </Box>
       <Box sx={{
         display: 'flex',
-        alignItems: 'center',
         justifyContent: 'center',
-        flex: isMobile ? 1 : '1 1 auto',
+        flex: 1,
         minHeight: 0,
         overflow: 'hidden',
       }}>

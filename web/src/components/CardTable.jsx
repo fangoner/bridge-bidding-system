@@ -119,7 +119,19 @@ function CardTable({
   }
   const textMuted = theme.palette.text.secondary
   const textPrimary = theme.palette.text.primary
-  const handBoxSize = isMobile ? 'calc((100vw - 12px) * 0.42)' : 160
+  // 统一间距（信息条↔中心面板=HAND_GAP，信息条↔手牌=INNER_GAP，四方向一致）
+  const HAND_GAP = 8    // 信息条到中心面板的距离（四方向统一）
+  const INNER_GAP = 0   // 信息条到手牌的间距
+
+  // NS手牌容器
+  const nsHandWidth = isMobile ? 'calc((100vw - 12px) * 0.88)' : 380
+  const nsHandHeight = isMobile ? 'auto' : 'auto'
+  // EW旋转手牌：布局盒(ewLayoutW x ewLayoutH)；内部(ewInnerW x ewInnerH)旋转90°
+  // EW布局盒尺寸=旋转后视觉尺寸，确保信息条对齐
+  const ewInnerW = 360  // 内部手牌宽度→旋转后=视觉高度
+  const ewInnerH = 92   // 内部手牌高度→旋转后=视觉宽度
+  const ewLayoutW = ewInnerH  // 布局宽度=视觉宽度（与内层高一致）
+  const ewLayoutH = ewInnerW  // 布局高度=视觉高度（与内层宽一致）
   const biddingTableWidth = isMobile ? 'calc((100vw - 12px) * 0.5)' : 160
   const centerBoxSize = isMobile ? 120 : 220
 
@@ -770,73 +782,47 @@ function CardTable({
         )}
         
         <Box sx={{
-          bgcolor: isDark ? '#1e293b' : '#fbfbf8',
-          borderRadius: 2,
-          p: isMobile ? 0.5 : 1,
-          width: handBoxSize,
-          height: handBoxSize,
+          bgcolor: 'transparent',
+          borderRadius: 0,
+          p: 0,
+          width: sxProps?.width || nsHandWidth,
+          height: sxProps?.height || nsHandHeight,
+          maxWidth: sxProps?.maxWidth || 'none',
+          maxHeight: sxProps?.maxHeight || 'none',
           flexShrink: 0,
-          boxShadow: isDark
-            ? '0 3px 10px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.25)'
-            : '0 3px 10px rgba(0,0,0,0.15), 0 1px 2px rgba(0,0,0,0.08)',
+          boxShadow: 'none',
           display: 'flex',
           flexDirection: 'column',
-          border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.06)',
+          alignItems: 'center',
+          border: 'none',
+          gap: 0,
           transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
           ...(currentTurnPos === position && {
             boxShadow: `0 0 0 2px ${theme.palette.primary.main}, 0 4px 14px rgba(0,0,0,0.2)`,
           }),
         }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
-            <Typography 
-              variant="subtitle2" 
-              sx={{ 
-                fontWeight: declarer === position ? 700 : 600, 
-                fontSize: '0.85rem',
-                color: declarer === position ? theme.palette.error.main : 'inherit',
-                cursor: onDealerChange && (!biddingStarted || stopBidding) && !showPlayPanel && !readonlyMode ? 'pointer' : 'default',
-                transition: 'color 0.2s',
-                '&:hover': onDealerChange && (!biddingStarted || stopBidding) && !showPlayPanel && !readonlyMode ? { color: 'primary.main' } : {}
-              }}
-              onClick={() => onDealerChange && (!biddingStarted || stopBidding) && !showPlayPanel && !readonlyMode && onDealerChange(position)}
-            >
-              {position}家
-              {dealer === position && ' *'}
-              {hasHandData && hand && hand.hcp !== undefined && !showInput && ` (${hand.hcp})`}
-            </Typography>
-            {onPositionRoleChange && (
-              <ToggleButton
-                value="check"
-                selected={positionRoles[position] === 'human'}
-                disabled={
-                  (showPlayPanel && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading))
-                  || readonlyMode
-                  || (!showPlayPanel && biddingStarted && !hasHand(position))
-                }
-                onChange={() => {
-                  onPositionRoleChange(position, positionRoles[position] === 'human' ? 'ai' : 'human')
-                }}
-                size="small"
-                sx={{
-                  height: 22,
-                  px: 0.8,
-                  py: 0,
-                  fontSize: '0.7rem',
-                  fontWeight: 600,
-                  borderRadius: 1,
-                  minWidth: 36,
-                  border: 'none',
-                  bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.12)' : 'action.hover',
-                  color: 'text.primary',
-                  '&:hover': {
-                    bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.2)' : 'action.selected',
-                  },
-                }}
-              >
-                {positionRoles[position] === 'human' ? '人类' : modelLabel(showPlayPanel ? playModel : fallbackModel)}
-              </ToggleButton>
-            )}
-          </Box>
+          {/* 信息栏（靠中心一侧）：infoSide='top'=在手牌上方, 'bottom'=在手牌下方 */}
+          {sxProps?.infoSide === 'top' && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: `${INNER_GAP}px`, flexShrink: 0,
+              bgcolor: isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.7)',
+              backdropFilter: 'blur(4px)', borderRadius: 1, px: 0.8, py: 0.2,
+            }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, fontSize: '0.75rem', color: isDark ? '#e2e8f0' : '#333' }}>
+                {position}{dealer === position ? '*' : ''}
+                {hasHandData && hand?.hcp !== undefined && !showInput ? ` ${hand.hcp}点` : ''}
+              </Typography>
+              {onPositionRoleChange && (
+                <ToggleButton value="check" size="small"
+                  selected={positionRoles[position] === 'human'}
+                  disabled={(showPlayPanel && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading)) || readonlyMode || (!showPlayPanel && biddingStarted && !hasHand(position))}
+                  onChange={() => onPositionRoleChange(position, positionRoles[position] === 'human' ? 'ai' : 'human')}
+                  sx={{ height: 18, px: 0.6, fontSize: '0.65rem', fontWeight: 600, borderRadius: 1, minWidth: 30, border: 'none',
+                    bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.15)' : 'action.hover', color: 'text.primary',
+                  }}
+                >{positionRoles[position] === 'human' ? '人类' : modelLabel(showPlayPanel ? playModel : fallbackModel)}</ToggleButton>
+              )}
+            </Box>
+          )}
           
           {/* 明手首攻前无手牌 → 显示未知 */}
           {showPlayPanel && playState && position === playState.dummy && playState.phase === 'lead' && !hasHand(position) ? (
@@ -935,6 +921,28 @@ function CardTable({
               />
             </Box>
           )}
+          {/* 信息栏（靠中心一侧）：infoSide='bottom'=在手牌下方 */}
+          {(!sxProps?.infoSide || sxProps.infoSide === 'bottom') && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: `${INNER_GAP}px`, flexShrink: 0,
+              bgcolor: isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.7)',
+              backdropFilter: 'blur(4px)', borderRadius: 1, px: 0.8, py: 0.2,
+            }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, fontSize: '0.75rem', color: isDark ? '#e2e8f0' : '#333' }}>
+                {position}{dealer === position ? '*' : ''}
+                {hasHandData && hand?.hcp !== undefined && !showInput ? ` ${hand.hcp}点` : ''}
+              </Typography>
+              {onPositionRoleChange && (
+                <ToggleButton value="check" size="small"
+                  selected={positionRoles[position] === 'human'}
+                  disabled={(showPlayPanel && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading)) || readonlyMode || (!showPlayPanel && biddingStarted && !hasHand(position))}
+                  onChange={() => onPositionRoleChange(position, positionRoles[position] === 'human' ? 'ai' : 'human')}
+                  sx={{ height: 18, px: 0.6, fontSize: '0.65rem', fontWeight: 600, borderRadius: 1, minWidth: 30, border: 'none',
+                    bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.15)' : 'action.hover', color: 'text.primary',
+                  }}
+                >{positionRoles[position] === 'human' ? '人类' : modelLabel(showPlayPanel ? playModel : fallbackModel)}</ToggleButton>
+              )}
+            </Box>
+          )}
         </Box>
       </Box>
     );
@@ -945,16 +953,17 @@ function CardTable({
       display: 'flex',
       flexDirection: 'column',
       alignItems: isMobile ? 'stretch' : 'center',
-      justifyContent: 'center',
-      padding: isMobile ? 0.5 : 1,
+      justifyContent: 'space-between',
+      p: '8px',
       background: scheme.table.background,
       borderRadius: 2,
       boxShadow: 0,
+      border: '2px dashed red',
       flex: 1,
       maxWidth: '100%',
       maxHeight: '100%',
       position: 'relative',
-      overflow: 'hidden',
+      overflow: 'visible',
     }}>
       {/* 模拟实战清空按钮：任何阶段可见可点击（叫牌/打牌均可） */}
       {!readonlyMode && onSimulatedReset && gameMode !== 'pair' && (
@@ -1101,16 +1110,16 @@ function CardTable({
       {isMobile ? (
         <>
           <Box sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
-            {renderHandWithStatus(north, '北', { mb: '12px' })}
+            {renderHandWithStatus(north, '北', { width: '88vw', height: 'auto', maxWidth: '100%', mb: '6px', infoSide: 'bottom' })}
           </Box>
-          
-          <Box sx={{ display: 'flex', gap: '4px', width: '100%', mb: '12px', justifyContent: 'center' }}>
-            {renderHandWithStatus(west, '西')}
-            {renderHandWithStatus(east, '东')}
+
+          <Box sx={{ display: 'flex', gap: '12px', width: '100%', mb: '6px', justifyContent: 'center' }}>
+            {renderHandWithStatus(west, '西', { width: '43vw', height: 'auto', maxWidth: '100%', infoSide: 'bottom' })}
+            {renderHandWithStatus(east, '东', { width: '43vw', height: 'auto', maxWidth: '100%', infoSide: 'bottom' })}
           </Box>
-          
+
           <Box sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
-            {renderHandWithStatus(south, '南', { mb: '12px' })}
+            {renderHandWithStatus(south, '南', { width: '88vw', height: 'auto', maxWidth: '100%', mb: '6px', infoSide: 'top' })}
           </Box>
           
           <Box className="table-center" sx={{ width: '100%', display: 'flex', justifyContent: isMobile ? 'flex-start' : 'center' }}>
@@ -1119,6 +1128,8 @@ function CardTable({
               minWidth: biddingTableWidth,
               flexShrink: 0,
               minHeight: 80,
+              maxHeight: 'none',
+              p: 0,
               border: scheme.table.centerBorder,
               borderRadius: 2,
               display: 'flex',
@@ -1137,22 +1148,34 @@ function CardTable({
         </>
       ) : (
         <>
-          {renderHandWithStatus(north, '北', { mb: 0 })}
+          {renderHandWithStatus(north, '北', { width: nsHandWidth, height: nsHandHeight, maxWidth: '100%', infoSide: 'bottom' })}
 
           <Box className="middle-row" sx={{
             display: 'flex',
-            justifyContent: 'center',
+            justifyContent: 'space-between',
             alignItems: 'center',
             width: '100%',
-            maxWidth: 800,
-            gap: '8px',
+            maxWidth: 1000,
           }}>
-            {renderHandWithStatus(west, '西')}
+            {/* 西家：旋转90度竖直显示 */}
+            <Box sx={{
+              width: ewLayoutW, height: ewLayoutH,
+              flexShrink: 0, overflow: 'visible', position: 'relative',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Box sx={{
+                transform: 'rotate(90deg)', transformOrigin: 'center center',
+                width: ewInnerW, height: ewInnerH,
+              }}>
+                {renderHandWithStatus(west, '西', { width: ewInnerW, height: ewInnerH, maxWidth: 'none', infoSide: 'top' })}
+              </Box>
+            </Box>
 
             <Box className="table-center">
               <Box className="table-border" sx={{
                 width: centerBoxSize,
                 height: centerBoxSize,
+                maxHeight: 'none',
                 border: scheme.table.centerBorder,
                 borderRadius: 2,
                 display: 'flex',
@@ -1162,17 +1185,29 @@ function CardTable({
                 backdropFilter: scheme.table.centerBackdrop,
                 WebkitBackdropFilter: scheme.table.centerBackdrop,
                 boxShadow: scheme.table.centerShadow,
-                padding: 1,
+                p: 0,
                 overflowY: 'auto',
               }}>
               {renderCenterContent()}
               </Box>
             </Box>
 
-            {renderHandWithStatus(east, '东')}
+            {/* 东家：旋转-90度竖直显示（数字朝左=向中心） */}
+            <Box sx={{
+              width: ewLayoutW, height: ewLayoutH,
+              flexShrink: 0, overflow: 'visible', position: 'relative',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Box sx={{
+                transform: 'rotate(-90deg)', transformOrigin: 'center center',
+                width: ewInnerW, height: ewInnerH,
+              }}>
+                {renderHandWithStatus(east, '东', { width: ewInnerW, height: ewInnerH, maxWidth: 'none', infoSide: 'top' })}
+              </Box>
+            </Box>
           </Box>
 
-          {renderHandWithStatus(south, '南', { mt: 0 })}
+          {renderHandWithStatus(south, '南', { width: nsHandWidth, height: nsHandHeight, maxWidth: '100%', infoSide: 'top' })}
         </>
       )}
 

@@ -19,7 +19,7 @@ function BiddingDetailPanel({
   stopBidding,
   outputFormats,
   isBiddingCompleteFn,
-  height = '680px',
+  height = '640px',
   onStartPlay,
   playLoading,
   // 叫牌按钮相关
@@ -283,8 +283,9 @@ function BiddingDetailPanel({
   )
 
   return (
-    <Paper elevation={0} sx={{ 
-      p: isMobile ? 0.5 : 1, 
+    <Paper elevation={0} sx={{
+      m: 0,
+      p: isMobile ? 0.5 : 1,
       background: isDark
         ? 'linear-gradient(135deg, rgba(30, 41, 59, 0.75) 0%, rgba(30, 41, 59, 0.6) 100%)'
         : 'linear-gradient(135deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.7) 100%)',
@@ -295,18 +296,17 @@ function BiddingDetailPanel({
         ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
         : '0 8px 32px rgba(79, 70, 229, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
       borderRadius: 3,
-      display: 'flex', 
-      flexDirection: 'column', 
-      flex: isMobile ? undefined : '1 1 0%',
-      minWidth: isMobile ? undefined : PANEL_LAYOUT.minWidth,
-      maxWidth: isMobile ? undefined : PANEL_LAYOUT.maxWidth,
-      width: isMobile ? '100%' : undefined,
-      height: isMobile ? '400px' : `${PANEL_LAYOUT.height}px`,
+      display: 'flex',
+      flexDirection: 'column',
+      width: isMobile ? '100%' : '640px',
+      height: '640px',
+      minHeight: '640px',
+      flexShrink: 0,
       minHeight: isMobile ? '400px' : undefined,
       overflow: isMobile ? undefined : 'hidden',
       boxSizing: 'border-box'
     }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5, flexShrink: 0, minHeight: 40, flexWrap: 'wrap', gap: 0.5 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5, flexShrink: 0, height: 44, flexWrap: 'wrap', gap: 0.5, overflow: 'hidden' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, fontSize: '1rem' }}>
             叫牌细节
@@ -368,13 +368,13 @@ function BiddingDetailPanel({
         </Box>
       </Box>
 
-      <Box sx={{ flex: 1, overflow: 'hidden', p: 1, background: bgPanel, borderRadius: 2, border: borderLine, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ flex: 1, overflow: 'hidden', p: 1, background: isDark ? 'radial-gradient(ellipse at center, #1a2f22 0%, #0d1f15 50%, #06120d 100%)' : 'radial-gradient(ellipse at center, #3d7a58 0%, #25563b 40%, #1a3d28 100%)', borderRadius: 2, border: '2px dashed yellow', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {detailTab === 'jf' ? (
-          <Box sx={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+          <Box sx={{ flex: 1, overflow: 'auto', minHeight: 0, p: 1 }}>
             {renderJFPanel()}
           </Box>
         ) : (
-          <Box sx={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+          <Box sx={{ flex: 1, overflow: 'auto', minHeight: 0, p: 1 }}>
             {renderBiddingDetails()}
             {renderOutputFormats()}
           </Box>

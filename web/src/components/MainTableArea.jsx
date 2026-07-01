@@ -1,4 +1,5 @@
 import Box from '@mui/material/Box'
+import { PANEL_LAYOUT } from '../styles/constants'
 import CardTablePanel from './CardTablePanel'
 import BiddingDetailPanel from './BiddingDetailPanel'
 import PlayDetailPanel from './PlayDetailPanel'
@@ -59,7 +60,7 @@ export default function MainTableArea({
   return (
     <Box sx={isMobile
       ? { display: 'flex', flexDirection: 'column', gap: 2 }
-      : { display: 'flex', gap: 2, mb: 2, justifyContent: 'center' }
+      : { display: 'flex', gap: 2, mb: 2, justifyContent: 'center', m: 0 }
     }>
       <CardTablePanel
         isMobile={isMobile}

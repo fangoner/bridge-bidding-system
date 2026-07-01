@@ -612,8 +612,9 @@ function PlayDetailPanel({
   }
 
   return (
-    <Paper elevation={0} sx={{ 
-      p: 1, 
+    <Paper elevation={0} sx={{
+      m: 0,
+      p: 1,
       background: isDark
         ? 'linear-gradient(135deg, rgba(30, 41, 59, 0.75) 0%, rgba(30, 41, 59, 0.6) 100%)'
         : 'linear-gradient(135deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.7) 100%)',
@@ -624,17 +625,17 @@ function PlayDetailPanel({
         ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
         : '0 8px 32px rgba(79, 70, 229, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
       borderRadius: 3,
-      minWidth: isMobile ? undefined : PANEL_LAYOUT.minWidth,
-      maxWidth: isMobile ? undefined : PANEL_LAYOUT.maxWidth,
-      flex: isMobile ? undefined : '1 1 0%',
-      width: isMobile ? '100%' : undefined,
-      height: `${PANEL_LAYOUT.height}px`,
+      width: isMobile ? '100%' : '640px',
+      height: '640px',
+      minHeight: '640px',
+      flexShrink: 0,
       display: 'flex',
       flexDirection: 'column',
-      overflow: 'hidden'
+      overflow: 'hidden',
+      boxSizing: 'border-box'
     }}>
       {/* 标题栏：打牌详情 + 墩数统计 + 操作按钮在一行 */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5, flexShrink: 0, minHeight: 36, flexWrap: 'nowrap', gap: 0.5 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5, flexShrink: 0, height: 44, flexWrap: 'nowrap', gap: 0.5, overflow: 'hidden' }}>
         <Typography variant="h6" sx={{ fontSize: '0.95rem', color: isDark ? '#e2e8f0' : undefined, flexShrink: 0 }}>打牌详情</Typography>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexShrink: 0 }}>
           <Typography component="span" variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
@@ -694,7 +695,7 @@ function PlayDetailPanel({
         </Box>
       </Box>
 
-      <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: isDark ? 'rgba(255,255,255,0.04)' : '#fafafa', borderRadius: 2, border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd', minHeight: 0, p: 1 }}>
+      <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: isDark ? 'radial-gradient(ellipse at center, #1a2f22 0%, #0d1f15 50%, #06120d 100%)' : 'radial-gradient(ellipse at center, #3d7a58 0%, #25563b 40%, #1a3d28 100%)', borderRadius: 2, border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd', minHeight: 0, p: 1 }}>
 
         <Box sx={{ flex: 2, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
           {renderAIOutput()}
