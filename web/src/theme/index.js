@@ -1,25 +1,24 @@
 import { createTheme, alpha } from '@mui/material/styles'
 
-// ── "Midnight Sapphire" palette ──────────────────────────────────────────────
 const modernColors = {
   primary: {
-    main: '#5b5fe3',      // warmer sapphire (was #6366f1)
-    light: '#818cf8',
-    dark: '#4c51bf',
+    main: '#4f46e5',
+    light: '#6366f1',
+    dark: '#4338ca',
     contrastText: '#ffffff',
   },
   secondary: {
-    main: '#d9469a',      // softer rose (was #ec4899)
-    light: '#f472b6',
-    dark: '#be2d7d',
+    main: '#f59e0b',
+    light: '#fbbf24',
+    dark: '#d97706',
     contrastText: '#ffffff',
   },
   suits: {
     spades: '#1e293b',
-    hearts: '#ef4444',
-    diamonds: '#f59e0b',  // amber for better distinction from hearts
-    clubs: '#22c55e',
-    notrump: '#8b5cf6',
+    hearts: '#dc2626',
+    diamonds: '#ea580c',
+    clubs: '#16a34a',
+    notrump: '#475569',
   },
   error: {
     main: '#ef4444',
@@ -46,20 +45,20 @@ const modernColors = {
     contrastText: '#ffffff',
   },
   background: {
-    default: '#e2e7ed',   // cool light gray
-    paper: '#f2f4f7',     // slightly off-white
-    table: '#0f172a',
+    default: '#f8fafc',
+    paper: '#ffffff',
+    table: '#0c4a3e',
   },
   text: {
-    primary: '#1e293b',
-    secondary: '#64748b',
+    primary: '#0f172a',
+    secondary: '#475569',
     disabled: '#94a3b8',
   },
-  divider: '#ccd5e0',
+  divider: '#e2e8f0',
   grey: {
-    50: '#f2f4f7',
-    100: '#e8ecf1',
-    200: '#dce2eb',
+    50: '#f8fafc',
+    100: '#f1f5f9',
+    200: '#e2e8f0',
     300: '#cbd5e1',
     400: '#94a3b8',
     500: '#64748b',
@@ -70,19 +69,30 @@ const modernColors = {
   },
 }
 
-// ── Dark-mode overrides ──────────────────────────────────────────────────────
 const darkColors = {
+  primary: {
+    main: '#818cf8',
+    light: '#a5b4fc',
+    dark: '#6366f1',
+    contrastText: '#ffffff',
+  },
+  secondary: {
+    main: '#fbbf24',
+    light: '#fcd34d',
+    dark: '#f59e0b',
+    contrastText: '#1e293b',
+  },
   background: {
-    default: '#0b1120',   // deeper night (was #0f172a)
-    paper: '#111827',     // darker card surface (was #1e293b)
-    table: '#020617',
+    default: '#0f172a',
+    paper: '#1e293b',
+    table: '#032b24',
   },
   text: {
-    primary: '#e2e8f0',
+    primary: '#f1f5f9',
     secondary: '#94a3b8',
     disabled: '#64748b',
   },
-  divider: '#1e293b',
+  divider: '#334155',
   grey: {
     50: '#0f172a',
     100: '#1e293b',
@@ -97,43 +107,55 @@ const darkColors = {
   },
 }
 
-// ── Glass surface presets ────────────────────────────────────────────────────
 function glass(isDark) {
   return {
     strong: {
       background: isDark
-        ? 'linear-gradient(135deg, rgba(17, 24, 39, 0.65) 0%, rgba(17, 24, 39, 0.55) 100%)'
-        : 'linear-gradient(135deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.45) 100%)',
+        ? 'linear-gradient(135deg, rgba(30, 41, 59, 0.75) 0%, rgba(30, 41, 59, 0.6) 100%)'
+        : 'linear-gradient(135deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.7) 100%)',
       backdropFilter: 'blur(24px) saturate(180%)',
-      border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'}`,
+      WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+      border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.8)'}`,
       boxShadow: isDark
-        ? '0 8px 32px rgba(0, 0, 0, 0.4)'
-        : '0 8px 32px rgba(0, 0, 0, 0.06)',
+        ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
+        : '0 8px 32px rgba(79, 70, 229, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
     },
     medium: {
       background: isDark
-        ? 'rgba(17, 24, 39, 0.5)'
-        : 'rgba(255, 255, 255, 0.5)',
+        ? 'linear-gradient(135deg, rgba(30, 41, 59, 0.65) 0%, rgba(30, 41, 59, 0.5) 100%)'
+        : 'linear-gradient(135deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.65) 100%)',
       backdropFilter: 'blur(20px) saturate(170%)',
-      border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.06)'}`,
+      WebkitBackdropFilter: 'blur(20px) saturate(170%)',
+      border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.7)'}`,
       boxShadow: isDark
         ? '0 4px 16px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.04)'
-        : '0 4px 16px rgba(91, 95, 227, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.7)',
+        : '0 4px 20px rgba(79, 70, 229, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
     },
     weak: {
       background: isDark
-        ? 'rgba(17, 24, 39, 0.3)'
-        : 'rgba(255, 255, 255, 0.35)',
+        ? 'linear-gradient(135deg, rgba(30, 41, 59, 0.5) 0%, rgba(30, 41, 59, 0.35) 100%)'
+        : 'linear-gradient(135deg, rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 0.55) 100%)',
       backdropFilter: 'blur(14px) saturate(140%)',
-      border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.04)'}`,
+      WebkitBackdropFilter: 'blur(14px) saturate(140%)',
+      border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(255, 255, 255, 0.6)'}`,
+      boxShadow: isDark
+        ? '0 2px 8px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.03)'
+        : '0 2px 12px rgba(79, 70, 229, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.8)',
     },
   }
 }
 
-// ── Theme factory ────────────────────────────────────────────────────────────
 function createAppTheme(mode = 'light') {
   const isDark = mode === 'dark'
-  const colors = isDark ? { ...modernColors, ...darkColors } : modernColors
+  const baseColors = isDark ? { ...modernColors, ...darkColors } : { ...modernColors }
+  if (isDark) {
+    baseColors.suits = { ...modernColors.suits }
+    baseColors.error = modernColors.error
+    baseColors.warning = modernColors.warning
+    baseColors.info = modernColors.info
+    baseColors.success = modernColors.success
+  }
+  const colors = baseColors
   const glassPresets = glass(isDark)
   const textColor = colors.text.primary
   const textSecondary = colors.text.secondary
@@ -153,29 +175,33 @@ function createAppTheme(mode = 'light') {
       mode,
     },
     typography: {
-      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", Roboto, sans-serif',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", Roboto, "Helvetica Neue", Arial, sans-serif',
       h1: {
         fontSize: '2.5rem',
         fontWeight: 700,
-        letterSpacing: '-0.02em',
+        letterSpacing: '-0.025em',
         color: textColor,
+        lineHeight: 1.2,
       },
       h2: {
         fontSize: '2rem',
         fontWeight: 700,
-        letterSpacing: '-0.01em',
+        letterSpacing: '-0.02em',
         color: textColor,
+        lineHeight: 1.25,
       },
       h3: {
         fontSize: '1.5rem',
-        fontWeight: 600,
-        letterSpacing: '-0.01em',
+        fontWeight: 700,
+        letterSpacing: '-0.015em',
         color: textColor,
+        lineHeight: 1.3,
       },
       h4: {
         fontSize: '1.25rem',
         fontWeight: 600,
         color: textColor,
+        letterSpacing: '-0.01em',
       },
       h5: {
         fontSize: '1.125rem',
@@ -200,64 +226,70 @@ function createAppTheme(mode = 'light') {
       body1: {
         fontSize: '1rem',
         color: textColor,
+        lineHeight: 1.6,
       },
       body2: {
         fontSize: '0.875rem',
         color: textSecondary,
+        lineHeight: 1.6,
       },
       button: {
         fontWeight: 600,
         textTransform: 'none',
+        letterSpacing: '0.01em',
+      },
+      caption: {
+        fontSize: '0.75rem',
+        color: textSecondary,
       },
     },
     shape: {
       borderRadius: 12,
     },
-    // Coloured shadows for depth instead of flat black
     shadows: [
       'none',
-      isDark ? '0 1px 2px 0 rgba(0,0,0,0.3)'          : '0 1px 2px 0 rgba(91,95,227,0.04)',
-      isDark ? '0 1px 3px 0 rgba(0,0,0,0.4)'           : '0 1px 3px 0 rgba(91,95,227,0.06)',
-      isDark ? '0 4px 6px -1px rgba(0,0,0,0.4)'        : '0 4px 6px -1px rgba(91,95,227,0.06)',
-      isDark ? '0 10px 15px -3px rgba(0,0,0,0.5)'      : '0 10px 15px -3px rgba(91,95,227,0.07)',
-      isDark ? '0 20px 25px -5px rgba(0,0,0,0.5)'      : '0 20px 25px -5px rgba(91,95,227,0.08)',
-      isDark ? '0 25px 50px -12px rgba(0,0,0,0.6)'     : '0 25px 50px -12px rgba(91,95,227,0.10)',
-      ...Array(19).fill(isDark ? '0 25px 50px -12px rgba(0,0,0,0.6)' : '0 25px 50px -12px rgba(91,95,227,0.10)'),
+      isDark ? '0 1px 2px 0 rgba(0,0,0,0.3)' : '0 1px 3px 0 rgba(0,0,0,0.04), 0 1px 2px -1px rgba(0,0,0,0.04)',
+      isDark ? '0 1px 3px 0 rgba(0,0,0,0.4)' : '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -2px rgba(0,0,0,0.04)',
+      isDark ? '0 4px 6px -1px rgba(0,0,0,0.4)' : '0 6px 12px -2px rgba(79,70,229,0.07), 0 3px 6px -3px rgba(0,0,0,0.05)',
+      isDark ? '0 10px 15px -3px rgba(0,0,0,0.5)' : '0 10px 20px -3px rgba(79,70,229,0.08), 0 4px 8px -4px rgba(0,0,0,0.05)',
+      isDark ? '0 20px 25px -5px rgba(0,0,0,0.5)' : '0 20px 30px -5px rgba(79,70,229,0.09), 0 8px 12px -6px rgba(0,0,0,0.05)',
+      isDark ? '0 25px 50px -12px rgba(0,0,0,0.6)' : '0 25px 40px -12px rgba(79,70,229,0.1), 0 12px 20px -8px rgba(0,0,0,0.06)',
+      ...Array(19).fill(isDark ? '0 25px 50px -12px rgba(0,0,0,0.6)' : '0 25px 40px -12px rgba(79,70,229,0.1), 0 12px 20px -8px rgba(0,0,0,0.06)'),
     ],
     components: {
-      // ── Page background ────────────────────────────────────────────────
       MuiCssBaseline: {
         styleOverrides: {
           body: {
             background: isDark
-              ? 'radial-gradient(ellipse at 50% 30%, #1a2030 0%, #0a0f14 100%)'
-              : 'radial-gradient(rgba(0,0,0,0.03) 1px, transparent 1px), radial-gradient(ellipse at 50% 30%, #eef1f5 0%, #dce2e9 60%, #d0d7e0 100%)',
-            backgroundSize: isDark ? '100% 100%' : '20px 20px, 100% 100%',
+              ? 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 25%, #0f172a 50%, #1c1917 75%, #0c1a14 100%)'
+              : 'linear-gradient(135deg, #eef2ff 0%, #e0e7ff 20%, #faf5ff 40%, #fff7ed 60%, #ecfdf5 80%, #f0f9ff 100%)',
             backgroundAttachment: 'fixed',
             minHeight: '100vh',
           },
         },
       },
 
-      // ── Button ─────────────────────────────────────────────────────────
       MuiButton: {
         styleOverrides: {
           root: {
             borderRadius: 10,
             fontWeight: 600,
-            padding: '10px 20px',
+            padding: '8px 20px',
             transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+            textTransform: 'none',
+          },
+          contained: {
+            boxShadow: isDark
+              ? '0 4px 14px 0 rgba(129, 140, 248, 0.3)'
+              : '0 4px 14px 0 rgba(79, 70, 229, 0.25)',
             '&:hover': {
+              boxShadow: isDark
+                ? '0 6px 20px 0 rgba(129, 140, 248, 0.4)'
+                : '0 6px 20px 0 rgba(79, 70, 229, 0.35)',
               transform: 'translateY(-1px)',
             },
             '&:active': {
-              transform: 'scale(0.98)',
-            },
-          },
-          contained: {
-            boxShadow: `0 4px 14px 0 ${alpha(colors.primary.main, 0.25)}`,
-            '&:hover': {
-              boxShadow: `0 6px 20px 0 ${alpha(colors.primary.main, 0.35)}`,
+              transform: 'translateY(0)',
             },
           },
           containedPrimary: {
@@ -268,47 +300,63 @@ function createAppTheme(mode = 'light') {
           },
           containedSecondary: {
             background: `linear-gradient(135deg, ${colors.secondary.main} 0%, ${colors.secondary.light} 100%)`,
-            boxShadow: `0 4px 14px 0 ${alpha(colors.secondary.main, 0.25)}`,
+            color: isDark ? '#1e293b' : '#ffffff',
+            boxShadow: isDark
+              ? '0 4px 14px 0 rgba(251, 191, 36, 0.3)'
+              : '0 4px 14px 0 rgba(245, 158, 11, 0.25)',
             '&:hover': {
               background: `linear-gradient(135deg, ${colors.secondary.dark} 0%, ${colors.secondary.main} 100%)`,
-              boxShadow: `0 6px 20px 0 ${alpha(colors.secondary.main, 0.35)}`,
+              boxShadow: isDark
+                ? '0 6px 20px 0 rgba(251, 191, 36, 0.4)'
+                : '0 6px 20px 0 rgba(245, 158, 11, 0.35)',
             },
           },
           outlined: {
-            borderWidth: 2,
+            borderWidth: 1.5,
+            borderColor: colors.divider,
             '&:hover': {
-              borderWidth: 2,
+              borderWidth: 1.5,
+              borderColor: colors.primary.main,
+              backgroundColor: alpha(colors.primary.main, 0.04),
             },
           },
           outlinedPrimary: {
-            borderColor: colors.primary.main,
+            borderColor: alpha(colors.primary.main, 0.5),
             '&:hover': {
-              backgroundColor: alpha(colors.primary.main, 0.08),
-              borderColor: colors.primary.dark,
+              backgroundColor: alpha(colors.primary.main, 0.06),
+              borderColor: colors.primary.main,
+            },
+          },
+          text: {
+            '&:hover': {
+              backgroundColor: alpha(colors.primary.main, 0.06),
             },
           },
         },
       },
 
-      // ── Paper — strong frosted glass ───────────────────────────────────
       MuiPaper: {
         styleOverrides: {
           root: {
-            borderRadius: 16,
-            backgroundImage: 'none',
-            backgroundColor: glassPresets.strong.background,
-            backdropFilter: glassPresets.strong.backdropFilter,
-            border: glassPresets.strong.border,
+            borderRadius: 12,
+            background: glassPresets.medium.background,
+            backdropFilter: glassPresets.medium.backdropFilter,
+            WebkitBackdropFilter: glassPresets.medium.WebkitBackdropFilter,
+            border: glassPresets.medium.border,
+            boxShadow: glassPresets.medium.boxShadow,
+          },
+          elevation0: {
+            boxShadow: 'none',
           },
           elevation1: {
             boxShadow: isDark
-              ? '0 4px 6px -1px rgba(0,0,0,0.2), 0 2px 4px -2px rgba(0,0,0,0.2)'
-              : '0 4px 6px -1px rgba(91,95,227,0.04), 0 2px 4px -2px rgba(91,95,227,0.04)',
+              ? '0 1px 3px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.15)'
+              : '0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03)',
           },
           elevation2: {
             boxShadow: isDark
-              ? '0 10px 15px -3px rgba(0,0,0,0.3), 0 4px 6px -4px rgba(0,0,0,0.3)'
-              : '0 10px 15px -3px rgba(91,95,227,0.05), 0 4px 6px -4px rgba(91,95,227,0.05)',
+              ? '0 4px 6px rgba(0,0,0,0.25), 0 2px 4px rgba(0,0,0,0.15)'
+              : '0 4px 8px rgba(79,70,229,0.05), 0 2px 4px rgba(0,0,0,0.04)',
           },
           elevation3: {
             boxShadow: glassPresets.strong.boxShadow,
@@ -316,41 +364,67 @@ function createAppTheme(mode = 'light') {
         },
       },
 
-      // ── Card — glass + hover lift ──────────────────────────────────────
       MuiCard: {
         styleOverrides: {
           root: {
-            borderRadius: 16,
-            backgroundColor: glassPresets.medium.background,
+            borderRadius: 12,
+            background: glassPresets.medium.background,
             backdropFilter: glassPresets.medium.backdropFilter,
+            WebkitBackdropFilter: glassPresets.medium.WebkitBackdropFilter,
             border: glassPresets.medium.border,
             boxShadow: glassPresets.medium.boxShadow,
             transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
             '&:hover': {
               boxShadow: isDark
-                ? '0 20px 25px -5px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06)'
-                : '0 20px 25px -5px rgba(91,95,227,0.1), inset 0 1px 0 rgba(255,255,255,0.9)',
+                ? '0 20px 30px -10px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06)'
+                : '0 20px 30px -10px rgba(79,70,229,0.1), inset 0 1px 0 rgba(255,255,255,0.9)',
               transform: 'translateY(-2px)',
-              border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.8)'}`,
+              borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(79,70,229,0.12)',
             },
           },
         },
       },
 
-      // ── AppBar — glass instead of gradient ─────────────────────────────
+      MuiCardContent: {
+        styleOverrides: {
+          root: {
+            padding: 20,
+            '&:last-child': {
+              paddingBottom: 20,
+            },
+          },
+        },
+      },
+
       MuiAppBar: {
         styleOverrides: {
           root: {
             background: glassPresets.strong.background,
             backdropFilter: glassPresets.strong.backdropFilter,
-            boxShadow: glassPresets.strong.boxShadow,
-            borderBottom: `2px solid transparent`,
-            borderImage: `linear-gradient(90deg, ${colors.primary.main} 0%, ${colors.secondary.main} 100%) 1`,
+            WebkitBackdropFilter: glassPresets.strong.WebkitBackdropFilter,
+            boxShadow: isDark
+              ? '0 1px 0 rgba(255,255,255,0.05), 0 4px 20px rgba(0,0,0,0.2)'
+              : '0 1px 0 rgba(0,0,0,0.04), 0 4px 20px rgba(79,70,229,0.05)',
+            borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.8)'}`,
+          },
+          colorPrimary: {
+            backgroundColor: 'transparent',
+            color: textColor,
           },
         },
       },
 
-      // ── Alert ──────────────────────────────────────────────────────────
+      MuiToolbar: {
+        styleOverrides: {
+          root: {
+            minHeight: '56px !important',
+            '@media (min-width: 600px)': {
+              minHeight: '60px !important',
+            },
+          },
+        },
+      },
+
       MuiAlert: {
         styleOverrides: {
           root: {
@@ -358,63 +432,66 @@ function createAppTheme(mode = 'light') {
             fontWeight: 500,
           },
           standardSuccess: {
-            backgroundColor: alpha(colors.success.main, isDark ? 0.15 : 0.1),
+            backgroundColor: isDark ? alpha(colors.success.main, 0.12) : alpha(colors.success.main, 0.08),
             color: isDark ? colors.success.light : colors.success.dark,
             border: `1px solid ${alpha(colors.success.main, 0.2)}`,
           },
           standardError: {
-            backgroundColor: alpha(colors.error.main, isDark ? 0.15 : 0.1),
+            backgroundColor: isDark ? alpha(colors.error.main, 0.12) : alpha(colors.error.main, 0.08),
             color: isDark ? colors.error.light : colors.error.dark,
             border: `1px solid ${alpha(colors.error.main, 0.2)}`,
           },
           standardWarning: {
-            backgroundColor: alpha(colors.warning.main, isDark ? 0.15 : 0.1),
+            backgroundColor: isDark ? alpha(colors.warning.main, 0.12) : alpha(colors.warning.main, 0.08),
             color: isDark ? colors.warning.light : colors.warning.dark,
             border: `1px solid ${alpha(colors.warning.main, 0.2)}`,
           },
           standardInfo: {
-            backgroundColor: alpha(colors.info.main, isDark ? 0.15 : 0.1),
+            backgroundColor: isDark ? alpha(colors.info.main, 0.12) : alpha(colors.info.main, 0.08),
             color: isDark ? colors.info.light : colors.info.dark,
             border: `1px solid ${alpha(colors.info.main, 0.2)}`,
           },
         },
       },
 
-      // ── Chip ───────────────────────────────────────────────────────────
       MuiChip: {
         styleOverrides: {
           root: {
             borderRadius: 8,
             fontWeight: 500,
+            height: 28,
           },
           colorPrimary: {
             background: `linear-gradient(135deg, ${colors.primary.main} 0%, ${colors.primary.light} 100%)`,
           },
           colorSecondary: {
             background: `linear-gradient(135deg, ${colors.secondary.main} 0%, ${colors.secondary.light} 100%)`,
+            color: isDark ? '#1e293b' : '#ffffff',
+          },
+          outlined: {
+            borderColor: alpha(colors.primary.main, 0.3),
           },
         },
       },
 
-      // ── TextField ──────────────────────────────────────────────────────
       MuiTextField: {
         styleOverrides: {
           root: {
             '& .MuiOutlinedInput-root': {
               borderRadius: 10,
               transition: 'all 0.2s ease',
-              '&:hover': {
-                boxShadow: `0 0 0 2px ${alpha(colors.primary.main, 0.1)}`,
+              backgroundColor: isDark ? alpha('#000000', 0.1) : alpha('#ffffff', 0.5),
+              '&:hover .MuiOutlinedInput-notchedOutline': {
+                borderColor: alpha(colors.primary.main, 0.4),
               },
               '&.Mui-focused': {
-                boxShadow: `0 0 0 3px ${alpha(colors.primary.main, 0.15)}`,
+                backgroundColor: isDark ? alpha('#000000', 0.15) : alpha('#ffffff', 0.8),
               },
             },
           },
         },
       },
 
-      // ── Select ─────────────────────────────────────────────────────────
       MuiSelect: {
         styleOverrides: {
           root: {
@@ -423,15 +500,23 @@ function createAppTheme(mode = 'light') {
         },
       },
 
-      // ── Tabs ───────────────────────────────────────────────────────────
       MuiTab: {
         styleOverrides: {
           root: {
             fontWeight: 600,
             textTransform: 'none',
-            borderRadius: '8px 8px 0 0',
+            borderRadius: '10px 10px 0 0',
+            minHeight: 44,
+            padding: '6px 16px',
+            transition: 'all 0.2s ease',
             '&.Mui-selected': {
-              background: alpha(colors.primary.main, 0.1),
+              background: isDark
+                ? alpha(colors.primary.main, 0.15)
+                : alpha(colors.primary.main, 0.08),
+              color: colors.primary.main,
+            },
+            '&:hover:not(.Mui-selected)': {
+              backgroundColor: isDark ? alpha('#ffffff', 0.04) : alpha('#000000', 0.03),
             },
           },
         },
@@ -441,43 +526,42 @@ function createAppTheme(mode = 'light') {
           indicator: {
             height: 3,
             borderRadius: '3px 3px 0 0',
-            background: `linear-gradient(90deg, ${colors.primary.main} 0%, ${colors.secondary.main} 100%)`,
+            background: `linear-gradient(90deg, ${colors.primary.main} 0%, ${colors.primary.light} 100%)`,
           },
         },
       },
 
-      // ── Switch ─────────────────────────────────────────────────────────
       MuiSwitch: {
         styleOverrides: {
           root: {
-            width: 52,
-            height: 30,
+            width: 48,
+            height: 28,
             padding: 0,
           },
           switchBase: {
-            padding: 3,
+            padding: 4,
             '&.Mui-checked': {
-              transform: 'translateX(22px)',
+              transform: 'translateX(20px)',
+              color: '#ffffff',
               '& + .MuiSwitch-track': {
-                backgroundColor: colors.primary.main,
+                background: `linear-gradient(135deg, ${colors.primary.main} 0%, ${colors.primary.light} 100%)`,
                 opacity: 1,
               },
             },
           },
           thumb: {
-            width: 24,
-            height: 24,
-            boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+            width: 20,
+            height: 20,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
           },
           track: {
-            borderRadius: 15,
+            borderRadius: 14,
             backgroundColor: isDark ? colors.grey[600] : colors.grey[300],
             opacity: 1,
           },
         },
       },
 
-      // ── Checkbox / Radio ───────────────────────────────────────────────
       MuiCheckbox: {
         styleOverrides: {
           root: {
@@ -497,44 +581,55 @@ function createAppTheme(mode = 'light') {
         },
       },
 
-      // ── FAB ────────────────────────────────────────────────────────────
       MuiFab: {
         styleOverrides: {
           root: {
-            boxShadow: `0 4px 14px 0 ${alpha(colors.primary.main, 0.3)}`,
+            boxShadow: isDark
+              ? '0 4px 14px 0 rgba(129, 140, 248, 0.3)'
+              : '0 4px 14px 0 rgba(79, 70, 229, 0.3)',
+            '&:hover': {
+              boxShadow: isDark
+                ? '0 6px 20px 0 rgba(129, 140, 248, 0.4)'
+                : '0 6px 20px 0 rgba(79, 70, 229, 0.4)',
+            },
           },
           primary: {
             background: `linear-gradient(135deg, ${colors.primary.main} 0%, ${colors.primary.light} 100%)`,
           },
           secondary: {
             background: `linear-gradient(135deg, ${colors.secondary.main} 0%, ${colors.secondary.light} 100%)`,
-            boxShadow: `0 4px 14px 0 ${alpha(colors.secondary.main, 0.3)}`,
+            boxShadow: isDark
+              ? '0 4px 14px 0 rgba(251, 191, 36, 0.3)'
+              : '0 4px 14px 0 rgba(245, 158, 11, 0.3)',
           },
         },
       },
 
-      // ── Tooltip — frosted glass ────────────────────────────────────────
       MuiTooltip: {
         styleOverrides: {
           tooltip: {
             borderRadius: 8,
-            backgroundColor: glassPresets.medium.background,
-            backdropFilter: glassPresets.medium.backdropFilter,
-            border: glassPresets.medium.border,
-            color: colors.text.primary,
+            backgroundColor: isDark ? alpha('#1e293b', 0.95) : alpha('#1e293b', 0.92),
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            color: '#f8fafc',
             fontSize: '0.8125rem',
-            boxShadow: glassPresets.medium.boxShadow,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            padding: '6px 12px',
+          },
+          arrow: {
+            color: isDark ? alpha('#1e293b', 0.95) : alpha('#1e293b', 0.92),
           },
         },
       },
 
-      // ── Dialog — glass + blurred backdrop ──────────────────────────────
       MuiDialog: {
         styleOverrides: {
           paper: {
-            borderRadius: 20,
-            backgroundColor: glassPresets.strong.background,
+            borderRadius: 16,
+            background: glassPresets.strong.background,
             backdropFilter: glassPresets.strong.backdropFilter,
+            WebkitBackdropFilter: glassPresets.strong.WebkitBackdropFilter,
             border: glassPresets.strong.border,
             boxShadow: glassPresets.strong.boxShadow,
           },
@@ -543,8 +638,9 @@ function createAppTheme(mode = 'light') {
       MuiBackdrop: {
         styleOverrides: {
           root: {
-            backdropFilter: 'blur(4px)',
-            backgroundColor: isDark ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.2)',
+            backdropFilter: 'blur(6px)',
+            WebkitBackdropFilter: 'blur(6px)',
+            backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(15,23,42,0.2)',
           },
         },
       },
@@ -554,19 +650,35 @@ function createAppTheme(mode = 'light') {
           root: {
             fontSize: '1.25rem',
             fontWeight: 700,
+            padding: '20px 24px 12px',
+          },
+        },
+      },
+      MuiDialogContent: {
+        styleOverrides: {
+          root: {
+            padding: '8px 24px 20px',
+          },
+        },
+      },
+      MuiDialogActions: {
+        styleOverrides: {
+          root: {
+            padding: '12px 24px 20px',
           },
         },
       },
 
-      // ── Progress ───────────────────────────────────────────────────────
       MuiLinearProgress: {
         styleOverrides: {
           root: {
-            borderRadius: 4,
-            height: 8,
+            borderRadius: 6,
+            height: 6,
+            backgroundColor: isDark ? alpha('#ffffff', 0.08) : alpha('#000000', 0.06),
           },
           bar: {
-            background: `linear-gradient(90deg, ${colors.primary.main} 0%, ${colors.secondary.main} 100%)`,
+            borderRadius: 6,
+            background: `linear-gradient(90deg, ${colors.primary.main} 0%, ${colors.primary.light} 100%)`,
           },
         },
       },
@@ -578,16 +690,15 @@ function createAppTheme(mode = 'light') {
         },
       },
 
-      // ── Avatar ─────────────────────────────────────────────────────────
       MuiAvatar: {
         styleOverrides: {
           root: {
-            background: `linear-gradient(135deg, ${colors.primary.main} 0%, ${colors.secondary.main} 100%)`,
+            background: `linear-gradient(135deg, ${colors.primary.main} 0%, ${colors.primary.light} 100%)`,
+            fontWeight: 600,
           },
         },
       },
 
-      // ── Badge ──────────────────────────────────────────────────────────
       MuiBadge: {
         styleOverrides: {
           badge: {
@@ -596,41 +707,112 @@ function createAppTheme(mode = 'light') {
         },
       },
 
-      // ── Divider — dark-mode-aware ──────────────────────────────────────
       MuiDivider: {
         styleOverrides: {
           root: {
-            borderColor: isDark ? alpha('#ffffff', 0.12) : undefined,
+            borderColor: isDark ? alpha('#ffffff', 0.08) : colors.divider,
           },
         },
       },
 
-      // ── InputLabel (dark-mode focus colour) ────────────────────────────
       MuiInputLabel: {
         styleOverrides: {
-          root: isDark ? {
+          root: {
             '&.Mui-focused': {
-              color: colors.primary.light,
+              color: colors.primary.main,
             },
-          } : undefined,
+          },
         },
       },
 
-      // ── OutlinedInput (dark-mode border) ───────────────────────────────
       MuiOutlinedInput: {
         styleOverrides: {
-          root: isDark ? {
+          root: {
             '& .MuiOutlinedInput-notchedOutline': {
-              borderColor: alpha('#ffffff', 0.23),
+              borderColor: isDark ? alpha('#ffffff', 0.15) : colors.divider,
+              transition: 'border-color 0.2s ease',
             },
-          } : undefined,
+            '&:hover .MuiOutlinedInput-notchedOutline': {
+              borderColor: isDark ? alpha('#ffffff', 0.25) : colors.grey[400],
+            },
+            '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+              borderColor: colors.primary.main,
+              borderWidth: 2,
+            },
+          },
+        },
+      },
+
+      MuiTable: {
+        styleOverrides: {
+          root: {
+            borderRadius: 12,
+            overflow: 'hidden',
+          },
+        },
+      },
+      MuiTableCell: {
+        styleOverrides: {
+          root: {
+            borderBottom: `1px solid ${isDark ? alpha('#ffffff', 0.06) : colors.divider}`,
+            padding: '12px 16px',
+          },
+          head: {
+            fontWeight: 600,
+            backgroundColor: isDark ? alpha('#ffffff', 0.02) : alpha('#000000', 0.01),
+            color: textSecondary,
+          },
+        },
+      },
+
+      MuiIconButton: {
+        styleOverrides: {
+          root: {
+            borderRadius: 10,
+            transition: 'all 0.2s ease',
+            '&:hover': {
+              backgroundColor: isDark ? alpha('#ffffff', 0.08) : alpha(colors.primary.main, 0.06),
+            },
+          },
+        },
+      },
+
+      MuiMenu: {
+        styleOverrides: {
+          paper: {
+            borderRadius: 12,
+            marginTop: 4,
+            background: glassPresets.strong.background,
+            backdropFilter: glassPresets.strong.backdropFilter,
+            WebkitBackdropFilter: glassPresets.strong.WebkitBackdropFilter,
+            border: glassPresets.strong.border,
+            boxShadow: isDark
+              ? '0 12px 32px rgba(0,0,0,0.4)'
+              : '0 12px 32px rgba(79,70,229,0.12)',
+          },
+        },
+      },
+      MuiMenuItem: {
+        styleOverrides: {
+          root: {
+            borderRadius: 8,
+            margin: '2px 6px',
+            minHeight: 40,
+            '&:hover': {
+              backgroundColor: isDark ? alpha('#ffffff', 0.06) : alpha(colors.primary.main, 0.06),
+            },
+            '&.Mui-selected': {
+              backgroundColor: isDark ? alpha(colors.primary.main, 0.15) : alpha(colors.primary.main, 0.1),
+              '&:hover': {
+                backgroundColor: isDark ? alpha(colors.primary.main, 0.2) : alpha(colors.primary.main, 0.14),
+              },
+            },
+          },
         },
       },
     },
   })
 
-  // Attach suits & glass presets directly to the theme so components can
-  // access them via useTheme() → theme.suits / theme.glass
   theme.suits = colors.suits
   theme.glass = glassPresets
 

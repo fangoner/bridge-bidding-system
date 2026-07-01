@@ -30,7 +30,6 @@ from llm.deepseek_client import DeepSeekClient
 from llm.doubao_client import DoubaoVisionClient
 from config import JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM, SHOW_FULL_LLM_OUTPUT, OUTPUT_MODE_GRAPHIC, OUTPUT_MODE_COMPACT, OUTPUT_MODE_DEEP_FINESSE, OUTPUT_MODE_ALL, DEFAULT_OUTPUT_MODE, MAIN_PROMPT_TEMPERATURE, FALLBACK_PROMPT_TEMPERATURE
 from utils.history import HistoryManager
-from utils.screenshot import BridgeScreenshotCapture
 
 # 导入 endplay 集成模块
 try:
@@ -66,8 +65,7 @@ class BiddingGame:
         self.llm_client = DeepSeekClient(model=self.model)
         self.vision_client = DoubaoVisionClient()
         self.history_manager = HistoryManager()
-        self.screenshot_capture = BridgeScreenshotCapture()
-        
+
         self.bidding_service = BiddingService(self.llm_client, self.jf_retriever)
         
         self.current_bidder: Position = Position.SOUTH
@@ -676,7 +674,6 @@ def select_deal_and_start(game: BiddingGame):
     print("1. 自动发牌")
     print("2. 输入自定义牌局")
     print("3. 从图片读取牌局")
-    print("4. 从Edge浏览器截屏")
     print("0. 返回")
     choice = input("请选择: ").strip()
     
@@ -700,8 +697,6 @@ def select_deal_and_start(game: BiddingGame):
         input_custom_deal(game)
     elif choice == "3":
         read_cards_from_image(game)
-    elif choice == "4":
-        capture_from_edge(game)
     elif choice == "0":
         return
 
@@ -1205,76 +1200,6 @@ def validate_hands(hands: Dict[Position, Hand]) -> List[str]:
             errors.append(f"{suit_names[suit]}牌张数错误: 应为13张，实际{count}张")
     
     return errors
-
-
-def capture_from_edge(game: BiddingGame):
-    print("\n正在截屏...")
-    result = game.screenshot_capture.capture_and_analyze("edge")
-    
-    if "error" in result:
-        print(f"错误: {result['error']}")
-        if "screenshot_path" in result:
-            print(f"截屏已保存: {result['screenshot_path']}")
-        return
-    
-    print("\n识别结果:")
-    
-    hands = {}
-    for pos in ["南", "西", "北", "东"]:
-        hand = result.get(f"{pos}家手牌")
-        if hand and hand != "null":
-            hands[pos] = hand
-            print(f"  {pos}: {hand}")
-    
-    bidding = result.get("叫牌序列")
-    if bidding and bidding != "null":
-        if isinstance(bidding, list):
-            formatted_bids = []
-            for item in bidding:
-                if ":" in item:
-                    pos, bid = item.split(":", 1)
-                    formatted_bids.append(f"（{pos}）{bid}")
-                else:
-                    formatted_bids.append(item)
-            print(f"\n叫牌序列: {'-'.join(formatted_bids)}-")
-        else:
-            print(f"\n叫牌序列: {bidding}")
-    
-    contract = result.get("当前定约")
-    if contract and contract != "null":
-        print(f"当前定约: {contract}")
-    
-    page_type = result.get("页面类型", "未知")
-    print(f"\n页面类型: {page_type}")
-    
-    if hands:
-        confirm = input("\n是否加载识别的手牌？(y/n): ").strip().lower()
-        if confirm == 'y':
-            loaded = False
-            for pos_name, en_pos in [("南", Position.SOUTH), ("西", Position.WEST), ("北", Position.NORTH), ("东", Position.EAST)]:
-                hand_str = hands.get(pos_name)
-                if hand_str:
-                    try:
-                        hand_str_clean = hand_str.replace("♠", " ").replace("♥", " ").replace("♦", " ").replace("♣", " ")
-                        hand_str_clean = convert_10_to_T(hand_str_clean)
-                        game.hands[en_pos] = parse_hand_string(hand_str_clean)
-                        loaded = True
-                    except Exception as e:
-                        print(f"{pos_name}家手牌解析失败: {e}")
-            
-            if loaded:
-                if len(game.hands) == 4:
-                    errors = validate_hands(game.hands)
-                    if errors:
-                        print("\n⚠️ 牌张校验错误:")
-                        for err in errors:
-                            print(f"  - {err}")
-                    
-                    game.reset_bidding()
-                    print("\n牌局已加载")
-                    game.display_hands()
-                else:
-                    print(f"\n部分手牌加载成功，共{len(game.hands)}家")
 
 
 def read_cards_from_image(game: BiddingGame):

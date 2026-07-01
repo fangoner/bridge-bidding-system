@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。v1.39新增截屏/图片识别导入牌局（Doubao Vision API）、定约/首攻确认对话框、研究模式、花色主题感知系统。v1.40 Tiered分层引擎重做（DD替代MCTS中盘）、新增Perfect DD全知引擎和人类DD提示功能。v1.41打牌引擎大师级优化：αμ搜索解决PIMC缺陷、信念跟踪粒子滤波、防守信号模型、LLM校验层、三信号关键决策检测、首攻DD+LLM融合、MCTS根节点选牌修复。
+本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。v1.39新增截屏/图片识别导入牌局（Doubao Vision API）、定约/首攻确认对话框、研究模式、花色主题感知系统。v1.40 Tiered分层引擎重做（DD替代MCTS中盘）、新增Perfect DD全知引擎和人类DD提示功能。v1.41打牌引擎大师级优化：αμ搜索解决PIMC缺陷、信念跟踪粒子滤波、防守信号模型、LLM校验层、三信号关键决策检测、首攻DD+LLM融合、MCTS根节点选牌修复。v1.42 αμ超时快速DD回退、记录服务器端备份、提示词RKCB规则强化（对方问叫拦截+将牌判定+5NT后续）、打牌返回叫牌按钮、手牌面板LLM模型显示。v1.43 按牌复盘替代按墩复盘（52张逐张回退）、DD Hint预录到trick数据（出牌时自动计算并存入）、复盘时DD hint标记（最优绿色/非最优橙色）、出牌记录按牌高亮/灰化。
 
 ## 功能模块
 
@@ -126,10 +126,17 @@
 - 查看、删除、加载历史牌局
 - 编辑备注
 
+### 7b. 前端记录管理 (`web/src/hooks/useBridgeRecords.js`, v1.42)
+- `localStorage` key: `bridge_records`，最多100条，支持新旧格式迁移
+- **服务器端自动备份** (`api/main.py`): `POST/GET /api/records/backup` → `bridge_records_backup.json`（去重最多200条）
+- 前端每次增删改操作后 debounce 2s 自动 POST 同步到服务器；loadRecords 时若 localStorage 为空自动从服务器 GET 恢复
+- 导出/导入: JSON 格式（`bridge_records_YYYY-MM-DD.json`），导入时按手牌+叫牌序列去重
+- 记录结构: `{id, timestamp, type: 'full'|'bidding_only'|'play_only', board, bidding, play, note}`
+
 ### 8. 截屏模块 (`utils/screenshot.py`)
-- Edge浏览器窗口截屏
-- 全屏截屏
-- 豆包API识别牌局信息
+- `trigger_screenshot_shortcut()`: 模拟 Win+Shift+S 系统截屏快捷键
+- `read_clipboard_image()`: 从剪贴板读取截屏图片
+- 豆包 Vision API 识别牌局信息（`api/main.py` 中调用）
 
 ### 9. 输出格式模块 (`bridge/output_format.py`) - v1.4新增
 - 程序化生成三种输出格式，无需AI调用
@@ -191,6 +198,9 @@
   - Min 节点（防守方）：每个 world 独立选最小化 Max 的 move（假设完美信息）
   - 叶子节点：DDS `solve_board` 评估每个 world
   - 触发条件：`ALPHA_MU_ENDGAME_CARDS`=8, `ALPHA_MU_NUM_WORLDS`=20, `ALPHA_MU_MAX_DEPTH`=4, `ALPHA_MU_TIME_LIMIT`=8.0s
+  - **候选牌排序** (v1.41+): 将牌 rank 升序 → 副牌 rank 降序，小将牌优先评估避免超时截断用于将吃的牌
+  - **自适应 worlds** (`play_service.py:_alphamu_full_play`): worlds 随牌数减少线性放大（13→base, 12→2×base, ... 4→10×base, cap 100），>12张牌 60s 超时
+  - **快速 DD 回退** (2026-06-30): 当 `_time_up()` 截断候选牌时，对剩余牌执行 `_evaluate_leaf()`（单层 DD 叶节点评估），跳过递归搜索。Mark `quick: True`，选牌时完整 αμ 搜索优先于快速评估。推理输出 `⚡` 标记。每张剩余牌仅需 N_worlds 次 DDS（vs 完整递归的 N×depth×branching 次），快 5-10 倍
 - **信念状态跟踪** (`bridge/mcts/belief.py`, v1.41新增):
   - 粒子滤波器，维护 `BELIEF_NUM_PARTICLES`=60 个加权粒子（possible worlds）
   - 通过 void 约束（某家某花色已无牌）和防守信号更新粒子权重
@@ -574,7 +584,6 @@ python main.py
 1. 自动发牌
 2. 输入自定义牌局
 3. 从图片读取牌局
-4. 从Edge浏览器截屏
 0. 返回
 ```
 

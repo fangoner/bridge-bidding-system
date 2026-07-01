@@ -1057,20 +1057,23 @@ class PlayService:
         perspective = state.current_player
         cards = len(state.hands.get(perspective, []))
 
-        # ── 自适应参数（N=100 全线覆盖）──
-        # 非递归 Min（Min→DDS），N×M×m 线性可控
+        # ── 自适应 worlds：基数=用户设置，随牌数减少线性放大，上限 100 ──
+        # 13张→base, 12→2×base, ... 4张→10×base (cap 100)
+        base_worlds = ALPHA_MU_NUM_WORLDS
+        n_worlds = min(100, base_worlds * max(1, 14 - cards))
+        max_depth = 1
         if cards <= 4:
-            n_worlds, max_depth, time_lim, dds_budget = 100, 1, 8.0, 5000
+            time_lim, dds_budget = 8.0, 5000
         elif cards <= 6:
-            n_worlds, max_depth, time_lim, dds_budget = 100, 1, 12.0, 8000
+            time_lim, dds_budget = 12.0, 8000
         elif cards <= 8:
-            n_worlds, max_depth, time_lim, dds_budget = 100, 1, 15.0, 10000
+            time_lim, dds_budget = 15.0, 10000
         elif cards <= 10:
-            n_worlds, max_depth, time_lim, dds_budget = 80, 1, 20.0, 15000
+            time_lim, dds_budget = 20.0, 15000
         elif cards <= 12:
-            n_worlds, max_depth, time_lim, dds_budget = 60, 1, 25.0, 18000
+            time_lim, dds_budget = 25.0, 18000
         else:
-            n_worlds, max_depth, time_lim, dds_budget = 50, 1, 30.0, 20000
+            time_lim, dds_budget = 60.0, 20000
 
         # 创建临时搜索器（复用 dd_search 的 sampler + 约束）
         constraints = self._get_bid_constraints()

@@ -64,7 +64,6 @@ export function useDealing({ clearBiddingDraft }) {
     setUseFallback,
     setReadonlyMode,
     setImageOpeningLead,
-    setDirectPlayContractInfo,
   } = useGame()
 
   const {
@@ -91,6 +90,7 @@ export function useDealing({ clearBiddingDraft }) {
     setLastCompletedTrick,
     setPlayStarted,
     setPlayInitiated,
+    setDirectPlayContractInfo,
   } = usePlay()
 
   const screenshotCancelledRef = useRef(false)
@@ -217,7 +217,7 @@ export function useDealing({ clearBiddingDraft }) {
       setHands, setDealer, setBiddingSequence, setCurrentBidder, resetGameState])
 
   // 4. 截屏识别牌局
-  const handleScreenshotDeal = useCallback(async ({ showSettings = false, setShowSettings = null } = {}) => {
+  const handleScreenshotDeal = useCallback(async ({ setShowSettings = null } = {}) => {
     if (loading) return
     if (setShowSettings) setShowSettings(false)
     setLoading(true)

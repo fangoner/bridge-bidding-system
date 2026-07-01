@@ -8,8 +8,6 @@ import base64
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from llm.doubao_client import DoubaoVisionClient, VISION_PROMPT
-
 
 SCREENSHOT_DIR = Path(__file__).parent.parent / "screenshots"
 
@@ -25,9 +23,8 @@ def trigger_screenshot_shortcut() -> bool:
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-# 方法1: 尝试直接启动截图工具
+# 尝试直接启动截图工具
 try {
-    # Windows 10/11 使用 ms-screenclip:
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = "ms-screenclip:"
     $psi.UseShellExecute = $true
@@ -37,7 +34,7 @@ try {
     return
 } catch {}
 
-# 方法2: 如果上面失败，尝试 SendKeys
+# 备用: SendKeys
 try {
     [System.Windows.Forms.SendKeys]::SendWait("+(%){s}")
     Write-Output "TRIGGERED"
@@ -53,9 +50,7 @@ try {
             timeout=5
         )
         if "LAUNCHED" in result.stdout or "TRIGGERED" in result.stdout:
-            print(f"截屏已触发: {result.stdout.strip()}")
             return True
-        print(f"截屏触发失败: {result.stdout} {result.stderr}")
         return False
     except Exception as e:
         print(f"触发截屏快捷键失败: {e}")
@@ -91,295 +86,17 @@ try {
             timeout=10
         )
         output = result.stdout.strip()
-        
+
         if output == "NO_IMAGE":
-            print("剪贴板中没有图片")
             return None
         elif output.startswith("ERROR"):
             print(f"读取剪贴板失败: {output}")
             return None
         elif output and len(output) > 100:
             image_data = base64.b64decode(output)
-            print(f"从剪贴板读取图片成功，大小: {len(image_data)} bytes")
             return (image_data, "png")
-        
-        print(f"剪贴板读取结果异常: {output[:100] if output else 'empty'}")
+
         return None
     except Exception as e:
         print(f"读取剪贴板异常: {e}")
         return None
-
-
-def capture_edge_window() -> Optional[str]:
-    ensure_screenshot_dir()
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    screenshot_path = SCREENSHOT_DIR / f"edge_capture_{timestamp}.png"
-    
-    try:
-        import mss
-        
-        with mss.mss() as sct:
-            monitors = sct.monitors
-            print(f"检测到显示器: {monitors}")
-            
-            if len(monitors) >= 3:
-                second_monitor = monitors[2]
-                print(f"截取第二屏幕: {second_monitor}")
-                
-                screenshot = sct.grab(second_monitor)
-                
-                from PIL import Image
-                img = Image.frombytes('RGB', screenshot.size, screenshot.rgb)
-                img.save(str(screenshot_path))
-                
-                print(f"截屏图像大小: {img.size}")
-                print(f"截屏已保存: {screenshot_path}")
-                
-                if screenshot_path.exists():
-                    return str(screenshot_path)
-            else:
-                print("只有一个屏幕，切换到Edge窗口...")
-                
-                import ctypes
-                user32 = ctypes.windll.user32
-                
-                class RECT(ctypes.Structure):
-                    _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long), 
-                               ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
-                
-                EnumWindowsProc = ctypes.WINFUNCTYPE(
-                    ctypes.c_bool,
-                    ctypes.c_void_p,
-                    ctypes.c_void_p
-                )
-                
-                target_hwnd = None
-                target_title = None
-                
-                def enum_callback(hwnd, lParam):
-                    nonlocal target_hwnd, target_title
-                    length = user32.GetWindowTextLengthW(hwnd)
-                    if length == 0:
-                        return True
-                    
-                    buffer = ctypes.create_unicode_buffer(length + 1)
-                    user32.GetWindowTextW(hwnd, buffer, length + 1)
-                    title = buffer.value
-                    title_lower = title.lower()
-                    
-                    if 'trae' in title_lower or 'visual studio' in title_lower or 'pycharm' in title_lower:
-                        return True
-                    
-                    if ('microsoft edge' in title_lower or 'edge beta' in title_lower or 
-                        'edge dev' in title_lower or 'chrome' in title_lower or
-                        'bridge' in title_lower or 'bbo' in title_lower or '桥牌' in title_lower or
-                        '桥友' in title_lower):
-                        target_hwnd = hwnd
-                        target_title = title
-                        return False
-                    
-                    return True
-                
-                user32.EnumWindows(EnumWindowsProc(enum_callback), 0)
-                
-                if target_hwnd:
-                    print(f"找到窗口: {target_title}")
-                    
-                    SW_MAXIMIZE = 3
-                    user32.ShowWindow(target_hwnd, SW_MAXIMIZE)
-                    user32.SetForegroundWindow(target_hwnd)
-                    
-                    print("已最大化窗口，等待1秒...")
-                    time.sleep(1)
-                    
-                    screenshot = sct.grab(sct.monitors[1])
-                    
-                    from PIL import Image
-                    img = Image.frombytes('RGB', screenshot.size, screenshot.rgb)
-                    img.save(str(screenshot_path))
-                    
-                    print(f"截屏图像大小: {img.size}")
-                    print(f"截屏已保存: {screenshot_path}")
-                    
-                    if screenshot_path.exists():
-                        return str(screenshot_path)
-                else:
-                    print("未找到浏览器窗口")
-                    
-    except Exception as e:
-        print(f"截屏失败: {e}")
-        import traceback
-        traceback.print_exc()
-    
-    return None
-
-
-def capture_all_screens():
-    try:
-        import mss
-        with mss.mss() as sct:
-            monitors = sct.monitors
-            if len(monitors) > 1:
-                all_monitors = {
-                    "left": min(m["left"] for m in monitors[1:]),
-                    "top": min(m["top"] for m in monitors[1:]),
-                    "width": sum(m["width"] for m in monitors[1:]),
-                    "height": max(m["height"] for m in monitors[1:]),
-                }
-                screenshot = sct.grab(all_monitors)
-                from PIL import Image
-                return Image.frombytes('RGB', screenshot.size, screenshot.rgb)
-            else:
-                screenshot = sct.grab(sct.monitors[1])
-                from PIL import Image
-                return Image.frombytes('RGB', screenshot.size, screenshot.rgb)
-    except ImportError:
-        pass
-    
-    try:
-        import pyautogui
-        import tkinter as tk
-        root = tk.Tk()
-        screen_width = root.winfo_screenwidth()
-        screen_height = root.winfo_screenheight()
-        root.destroy()
-        
-        return pyautogui.screenshot(region=(0, 0, screen_width, screen_height))
-    except Exception as e:
-        print(f"截屏失败: {e}")
-        return None
-
-
-def capture_fullscreen_powershell(screenshot_path: Path) -> Optional[str]:
-    ps_script = f'''
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-
-$bitmap = New-Object System.Drawing.Bitmap([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width, [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height)
-$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-$graphics.CopyFromScreen([System.Drawing.Point]::Empty, [System.Drawing.Point]::Empty, $bitmap.Size)
-$bitmap.Save("{screenshot_path}", [System.Drawing.Imaging.ImageFormat]::Png)
-$graphics.Dispose()
-$bitmap.Dispose()
-Write-Output "SUCCESS"
-'''
-    
-    try:
-        result = subprocess.run(
-            ["powershell", "-Command", ps_script],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        
-        if "SUCCESS" in result.stdout and screenshot_path.exists():
-            return str(screenshot_path)
-        
-        print(f"截屏失败: {result.stderr}")
-        return None
-        
-    except Exception as e:
-        print(f"截屏异常: {e}")
-        return None
-
-
-def capture_active_window() -> Optional[str]:
-    ensure_screenshot_dir()
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    screenshot_path = SCREENSHOT_DIR / f"active_window_{timestamp}.png"
-    
-    try:
-        screenshot = capture_all_screens()
-        if screenshot:
-            screenshot.save(str(screenshot_path))
-            if screenshot_path.exists():
-                return str(screenshot_path)
-        return None
-    except Exception as e:
-        print(f"截屏异常: {e}")
-        return capture_fullscreen_powershell(screenshot_path)
-
-
-class BridgeScreenshotCapture:
-    def __init__(self):
-        self.vision_client = DoubaoVisionClient()
-    
-    def capture_and_analyze(self, capture_type: str = "fullscreen") -> Dict[str, Any]:
-        if capture_type == "edge":
-            screenshot_path = capture_edge_window()
-        elif capture_type == "fullscreen":
-            screenshot_path = capture_active_window()
-        else:
-            screenshot_path = capture_active_window()
-        
-        if not screenshot_path:
-            return {"error": "截屏失败"}
-        
-        print(f"截屏已保存: {screenshot_path}")
-        
-        if not self.vision_client.is_configured():
-            return {
-                "error": "豆包API未配置",
-                "screenshot_path": screenshot_path
-            }
-        
-        print("正在识别牌局信息...")
-        result = self._analyze_screenshot(screenshot_path)
-        result["screenshot_path"] = screenshot_path
-        
-        return result
-    
-    def _analyze_screenshot(self, screenshot_path: str) -> Dict[str, Any]:
-        try:
-            with open(screenshot_path, "rb") as f:
-                image_data = base64.b64encode(f.read()).decode("utf-8")
-            
-            response = self.vision_client.client.chat.completions.create(
-                model=self.vision_client.endpoint,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": VISION_PROMPT
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{image_data}"
-                                }
-                            }
-                        ]
-                    }
-                ],
-                temperature=0
-            )
-            
-            result_text = response.choices[0].message.content
-            
-            import json
-            try:
-                if "```json" in result_text:
-                    json_match = result_text.split("```json")[1].split("```")[0]
-                elif "```" in result_text:
-                    json_match = result_text.split("```")[1].split("```")[0]
-                else:
-                    json_match = result_text
-                
-                return json.loads(json_match.strip())
-            except json.JSONDecodeError:
-                return {"raw_response": result_text, "error": "JSON解析失败"}
-                
-        except Exception as e:
-            return {"error": str(e)}
-    
-    def analyze_existing_image(self, image_path: str) -> Dict[str, Any]:
-        if not os.path.exists(image_path):
-            return {"error": f"图片文件不存在: {image_path}"}
-        
-        if not self.vision_client.is_configured():
-            return {"error": "豆包API未配置"}
-        
-        print(f"正在分析图片: {image_path}")
-        return self._analyze_screenshot(image_path)

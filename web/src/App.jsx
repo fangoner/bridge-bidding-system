@@ -820,25 +820,35 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       const isNextHumanTeam = humanPair.includes(nextBidder)
       
       if (isHumanTeam !== isNextHumanTeam) {
-        // 下一个是对方阵营，自动pass
+        // 下一个是对方阵营，自动pass — 记录到 aiBiddingHistory
         const passBid = {
           position: nextBidder,
           bid: 'pass'
         }
         newSequence.push(passBid)
-        
+        const passBiddingStr = newSequence.map(b => `(${b.position})${b.bid}`).join('-')
+        const autoPassRecord = {
+          position: nextBidder,
+          hand: hands[nextBidder],
+          biddingSequence: passBiddingStr,
+          result: { bid: 'pass', meaning: '双人模式对方自动pass' },
+          timestamp: makeBidTimestamp()
+        }
+        const updatedHistory = [...aiBiddingHistory, autoPassRecord]
+        setAiBiddingHistory(updatedHistory)
+
         // 继续计算下一个
         const nextNextIndex = (nextIndex + 1) % 4
         const nextNextBidder = BRIDGE_POSITIONS[nextNextIndex]
-        
+
         setBiddingSequence(newSequence)
         setCurrentBidder(nextNextBidder)
-        
+
         // 保存叫牌快照（双人模式自动pass）
         const snapshotPair = {
           biddingSequence: newSequence,
           currentBidder: nextNextBidder,
-          aiBiddingHistory: [...aiBiddingHistory],
+          aiBiddingHistory: [...updatedHistory],
         }
         const newHistoryPair = historyIndex >= 0 
           ? biddingHistory.slice(0, historyIndex + 1) 
@@ -1005,7 +1015,15 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       addBid(result.bid)
     } catch (err) {
       console.error('AI叫牌失败:', err)
-      // 出错时默认pass
+      // 出错时默认pass，同时记录到aiBiddingHistory
+      const errBiddingStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-') + (biddingSequence.length > 0 ? '-' : '')
+      setAiBiddingHistory(prev => [...prev, {
+        position: currentBidder,
+        hand: hands[currentBidder],
+        biddingSequence: errBiddingStr,
+        result: { bid: 'pass', meaning: `AI叫牌异常: ${err.message || err}` },
+        timestamp: makeBidTimestamp()
+      }])
       addBid('pass')
     } finally {
       setAiThinking(false)
@@ -1390,9 +1408,10 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       setIsPlayPaused(true)
       setPlayInitiated(true)
       setPlayStarted(true)
-      // 已完成记录 → 进入复盘模式
+      // 已完成记录 → 进入复盘模式，停在最后一张牌
       if (savedState.phase === 'complete') {
-        setReviewCursor(0)
+        const totalCards = (savedState.tricks || []).reduce((s, t) => s + (t.cards?.length || 0), 0)
+        setReviewCursor(Math.max(0, totalCards - 1))
       }
       return
     }
@@ -1417,10 +1436,19 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     return
   }
 
-  const handleRewindToTrick = async (targetTrick) => {
-    // targetTrick: 从第几墩开始重打 (0=第1墩, 即从头开始)
+  const handleRewindToTrick = async (targetCardIdx) => {
+    // targetCardIdx: 从第几张牌开始重打 (0=第1张, 即从头开始)
     const savedState = loadedPlayRecord?.playState
     if (!savedState?.contract) return
+    // 将牌序号转换为墩序号：找到 targetCardIdx 所属的墩，回退到该墩开头
+    let targetTrick = 0
+    let accum = 0
+    for (let i = 0; i < (savedState.tricks || []).length; i++) {
+      const trickLen = (savedState.tricks[i].cards || []).length
+      if (targetCardIdx < accum + trickLen) { targetTrick = i; break }
+      accum += trickLen
+      targetTrick = i + 1
+    }
     setPlayLoading(true)
     setError(null)
     try {
@@ -1875,6 +1903,24 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     }
   }
 
+  // 返回叫牌界面（放弃打牌过程和数据）
+  const handleBackToBidding = () => {
+    if (!window.confirm('确定要返回叫牌界面吗？\n\n当前的打牌过程和数据将被丢弃，但叫牌序列和手牌会保留。')) {
+      return
+    }
+    setPlayState(null)
+    setAiPlayHistory([])
+    setShowPlayPanel(false)
+    setIsPlayPaused(false)
+    setPlayInitiated(false)
+    setPlayStarted(false)
+    setLoadedPlayRecord(null)
+    setSelectedPlayRecord(null)
+    setReviewCursor(null)
+    setLastCompletedTrick(null)
+    console.log('[Play] 已返回叫牌界面，打牌数据已清除')
+  }
+
   // 重新打牌（保持当前牌局和叫牌，重置打牌状态并重新初始化）
   const handleResetPlay = async () => {
     let contract = getFinalContract()
@@ -2016,10 +2062,13 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       setSelectedPlayRecord(null)
     }
 
-    // 打牌完成，自动保存完整记录
+    // 打牌完成，自动保存完整记录 + 自动进入复盘模式
     if (phase === 'complete' && prevTricksCount < 13) {
       console.log('[自动保存] 打牌完成 phase=complete, 准备保存完整记录');
       saveCompletePlayRecord()
+      // 新完成的打牌停在最后一张牌
+      const totalCards = (playState.tricks || []).reduce((s, t) => s + (t.cards?.length || 0), 0)
+      setReviewCursor(Math.max(0, totalCards - 1))
     }
 
     prevTricksCountRef.current = currentTricksCount
@@ -2331,13 +2380,14 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           onUndoPlay={handleUndoPlay}
           onSavePlay={handleSaveProgress}
           canSavePlay={playCanSave}
+          onBackToBidding={handleBackToBidding}
           onReviewPrev={() => setReviewCursor(c => Math.max(0, (c || 0) - 1))}
           onReviewNext={() => setReviewCursor(c => {
-            const total = (playState?.tricks?.length || 0)
-            return Math.min(total - 1, (c || 0) + 1)
+            const totalCards = (playState?.tricks || []).reduce((s, t) => s + (t.cards?.length || 0), 0)
+              + (playState?.current_trick?.cards?.length || 0)
+            return Math.min(totalCards - 1, (c || 0) + 1)
           })}
           onRewindToTrick={handleRewindToTrick}
-          onStartReview={() => setReviewCursor(0)}
         />
       )}
 

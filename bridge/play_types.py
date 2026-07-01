@@ -159,6 +159,7 @@ class Trick:
     is_ai_cards: List[bool] = field(default_factory=list)
     ai_reasons: List[Optional[str]] = field(default_factory=list)
     ai_risks: List[Optional[str]] = field(default_factory=list)
+    dd_hints: List[Optional[dict]] = field(default_factory=list)
     
     def add_card(self, position: str, card: Card, is_ai: bool = False, reason: str = None, risk: str = None):
         if not self.cards:
@@ -215,6 +216,7 @@ class Trick:
             "is_ai_cards": self.is_ai_cards,
             "ai_reasons": self.ai_reasons,
             "ai_risks": self.ai_risks,
+            "dd_hints": self.dd_hints,
             "leader": self.leader,
             "trump": self.trump,
             "winner": self.winner(),
@@ -337,6 +339,8 @@ class PlayState:
             self.current_trick.is_ai_cards.pop()
             self.current_trick.ai_reasons.pop()
             self.current_trick.ai_risks.pop()
+            if self.current_trick.dd_hints:
+                self.current_trick.dd_hints.pop()
             if not self.current_trick.cards:
                 self.current_trick.leader = None
             

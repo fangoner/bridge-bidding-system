@@ -136,6 +136,6 @@ BELIEF_SIGNAL_MIN_RANK = 8      # ≥此值（8=8）视为高牌信号（欢迎�
 # αμ 搜索参数（残局多步前瞻，解决 strategy fusion）
 ALPHA_MU_ENABLE = True            # 是否启用 αμ 搜索
 ALPHA_MU_ENDGAME_CARDS = 8        # 每手剩余牌数≤此值时启用 αμ（残局）
-ALPHA_MU_NUM_WORLDS = 30          # possible worlds 数量（= BELIEF_ALPHA_MU_PARTICLES）
+ALPHA_MU_NUM_WORLDS = 20          # possible worlds 数量
 ALPHA_MU_MAX_DEPTH = 4            # 最大搜索深度（Max moves 数）
 ALPHA_MU_TIME_LIMIT = 8.0         # 时间限制（秒）

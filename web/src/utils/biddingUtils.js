@@ -99,6 +99,24 @@ export function isBiddingComplete(sequenceStr) {
 }
 
 /**
+ * 格式化经过时间为 MM:SS 或 HH:MM:SS
+ * @param {number} elapsedMs - 经过的毫秒数
+ * @returns {string}
+ */
+export function formatElapsedTime(elapsedMs) {
+  if (!elapsedMs || elapsedMs < 0) return '00:00'
+  const totalSec = Math.floor(elapsedMs / 1000)
+  const hours = Math.floor(totalSec / 3600)
+  const minutes = Math.floor((totalSec % 3600) / 60)
+  const seconds = totalSec % 60
+  const pad = (n) => String(n).padStart(2, '0')
+  if (hours > 0) {
+    return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
+  }
+  return `${pad(minutes)}:${pad(seconds)}`
+}
+
+/**
  * 获取下一个叫牌位置
  * @param {string} sequenceStr - 叫牌序列字符串
  * @param {string} dealer - 发牌人 (南/西/北/东)

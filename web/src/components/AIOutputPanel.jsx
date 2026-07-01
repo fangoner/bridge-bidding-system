@@ -67,12 +67,19 @@ function AIOutputPanel({
   // ── Empty state ──────────────────────────────────────────────────────
   if (aiBiddingHistory.length === 0) {
     return (
-      <Paper elevation={3} sx={{
+      <Paper elevation={0} sx={{
         p: 2,
         display: 'flex',
         flexDirection: 'column',
         width: '600px',
         height: '700px',
+        background: theme.palette.mode === 'dark'
+          ? 'linear-gradient(135deg, rgba(30, 41, 59, 0.75) 0%, rgba(30, 41, 59, 0.6) 100%)'
+          : 'linear-gradient(135deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.7) 100%)',
+        backdropFilter: 'blur(20px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+        border: `1px solid ${theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.8)'}`,
+        borderRadius: 3,
       }}>
         <Typography variant="h6" gutterBottom>
           叫牌细节
@@ -87,12 +94,19 @@ function AIOutputPanel({
   }
 
   return (
-    <Paper elevation={3} sx={{
+    <Paper elevation={0} sx={{
       p: 2,
       display: 'flex',
       flexDirection: 'column',
       width: '600px',
       height: '700px',
+      background: theme.palette.mode === 'dark'
+        ? 'linear-gradient(135deg, rgba(30, 41, 59, 0.75) 0%, rgba(30, 41, 59, 0.6) 100%)'
+        : 'linear-gradient(135deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.7) 100%)',
+      backdropFilter: 'blur(20px) saturate(180%)',
+      WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+      border: `1px solid ${theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.8)'}`,
+      borderRadius: 3,
     }}>
       {/* ── Header ─────────────────────────────────────────────────── */}
       <Box sx={{

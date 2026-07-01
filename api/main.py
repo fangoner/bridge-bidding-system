@@ -7,6 +7,7 @@
 import sys
 import os
 import re
+import json
 import time
 import hashlib
 import traceback
@@ -39,7 +40,7 @@ from knowledge.loader import JFLoader, JFRetriever
 from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT
 from llm.deepseek_client import DeepSeekClient
 from llm.doubao_client import DoubaoVisionClient, DoubaoSeedClient
-from utils.screenshot import BridgeScreenshotCapture, trigger_screenshot_shortcut, read_clipboard_image
+from utils.screenshot import trigger_screenshot_shortcut, read_clipboard_image
 from config import (
     JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM,
     AI_PROVIDER_DEEPSEEK, AI_PROVIDER_DOUBAO, DEFAULT_AI_PROVIDER,
@@ -77,7 +78,6 @@ jf_retriever = JFRetriever(jf_segments)
 llm_client = DeepSeekClient()
 doubao_client = DoubaoSeedClient()
 vision_client = DoubaoVisionClient()
-screenshot_capture = BridgeScreenshotCapture()
 
 current_ai_provider = DEFAULT_AI_PROVIDER
 
@@ -1355,23 +1355,26 @@ async def play_card(request: PlayCardRequest):
     """出牌"""
     try:
         service = get_play_service()
-        
+
         state_before = service.get_state()
         tricks_before = len(state_before.tricks) if state_before else 0
-        
+
         card = Card(suit=request.card["suit"], rank=request.card["rank"])
         success, message = service.play_card(request.position, card)
-        
+
         state = service.get_state()
         trick_winner = None
         trick_complete = False
-        
+
         # 检查是否刚完成一墩（墩数增加了）
         tricks_after = len(state.tricks) if state else 0
         if tricks_after > tricks_before and state:
             trick_winner = state.current_player  # 新一墩的首攻者就是上一墩的赢家
             trick_complete = True
-        
+
+        # 记录DD提示到trick
+        _record_dd_hint(service, state_before, state, tricks_before)
+
         result = None
         is_complete = service.is_complete()
         if is_complete:
@@ -1530,6 +1533,9 @@ async def ai_play(request: PlayAIRequest):
                 dd_samples = (request.dd_sample_count
                               if (use_dd or use_tiered) else None)
                 t0 = time.time()
+                # 记录DD提示所需的出牌前状态
+                state_before = service.get_state()
+                tricks_before = len(state_before.tricks) if state_before else 0
                 result = await service.get_ai_play(
                     use_reasoning=use_reasoning,
                     use_mcts=use_mcts,
@@ -1545,6 +1551,9 @@ async def ai_play(request: PlayAIRequest):
                     current_player = service.get_current_player()
                     reason = result.get("reasoning", "")
                     success, message = service.play_card(current_player, card, is_ai=True, reason=reason)
+                    # 记录DD提示
+                    state_after = service.get_state()
+                    _record_dd_hint(service, state_before, state_after, tricks_before)
                     
                     return PlayAIResponse(
                         success=success,
@@ -1664,29 +1673,28 @@ async def get_play_state():
         )
 
 
-@app.get("/api/play/dd-hints")
-async def get_dd_hints():
-    """获取当前人类玩家可选牌的完美DD结果提示（基于剩余手牌）"""
+def _compute_dd_hints_for_state(service, state) -> dict:
+    """共享DD提示计算：给定打牌状态，返回当前玩家可出牌的DD评估。
+
+    Returns:
+        hints dict like {"♠A": "+2", "♣K": "=", "♥5": "-1"}
+        如果无法计算（endplay不可用、手牌不完整等），返回空dict
+    """
+    from bridge.mcts.dd_search import ENDPLAY_AVAILABLE
+    if not ENDPLAY_AVAILABLE:
+        return {}
+
     try:
-        service = get_play_service()
-        state = service.get_state()
-        if not state:
-            return {"success": False, "error": "打牌未初始化"}
-
-        from bridge.mcts.dd_search import ENDPLAY_AVAILABLE
-        if not ENDPLAY_AVAILABLE:
-            return {"success": False, "error": "endplay库不可用"}
-
         from endplay import Deal
         from endplay.dds import solve_board
-        from endplay.types import Card as EpCard, Denom, Player
-        from bridge.mcts.dd_search import _hands_to_pbn, _to_ep, _DENOM_TO_SUIT, _RANK_TO_CHAR, RANK_ORDER
+        from endplay.types import Denom, Player
+        from bridge.mcts.dd_search import _hands_to_pbn, _to_ep, _DENOM_TO_SUIT, _RANK_TO_CHAR
         from bridge.mcts.state_utils import get_current_trick_state, POSITION_TO_PLAYER, PLAYER_TO_POSITION, SUIT_TO_DENOM
 
         perspective = state.current_player
         playable = service.get_playable_cards()
         if len(playable) <= 1:
-            return {"success": True, "hints": {}}
+            return {}
 
         declarer = state.contract.declarer
         dummy = state.dummy
@@ -1699,14 +1707,12 @@ async def get_dd_hints():
         total_played = state.declarer_tricks + state.defender_tricks
         remaining_tricks = 13 - total_played
 
-        # 模拟实战中人类位置手牌为空，无法做有意义的DD提示
         has_incomplete_hands = any(
             not state.hands.get(pos) for pos in ["北", "东", "南", "西"]
         )
         if has_incomplete_hands:
-            return {"success": True, "hints": {}}
+            return {}
 
-        # 正常模式：所有手牌已知，直接用 state.hands 构建 deal
         hands = {}
         for pos in ["北", "东", "南", "西"]:
             hands[pos] = list(state.hands.get(pos, []))
@@ -1757,6 +1763,40 @@ async def get_dd_hints():
             else:
                 hints[card_str] = str(delta)
 
+        return hints
+    except Exception:
+        return {}
+
+
+def _record_dd_hint(service, state_before, state_after, tricks_before):
+    """出牌后录入DD提示：计算出牌前状态的DD评估，追加到对应trick的dd_hints列表。"""
+    if not state_before or not state_after:
+        return
+    try:
+        hints = _compute_dd_hints_for_state(service, state_before)
+        if not hints:
+            return
+        tricks_after = len(state_after.tricks) if state_after else 0
+        trick_complete = tricks_after > tricks_before
+        if trick_complete and state_after.tricks:
+            target_trick = state_after.tricks[-1]
+        else:
+            target_trick = state_after.current_trick
+        target_trick.dd_hints.append(hints)
+    except Exception:
+        pass
+
+
+@app.get("/api/play/dd-hints")
+async def get_dd_hints():
+    """获取当前人类玩家可选牌的完美DD结果提示（基于剩余手牌）"""
+    try:
+        service = get_play_service()
+        state = service.get_state()
+        if not state:
+            return {"success": False, "error": "打牌未初始化"}
+
+        hints = _compute_dd_hints_for_state(service, state)
         return {"success": True, "hints": hints}
     except Exception as e:
         import traceback
@@ -1810,6 +1850,51 @@ async def set_particle_settings(request: ParticleSettingsRequest):
         service.alpha_mu_particles = val
         updates["alpha_mu_particles"] = val
     return {"success": True, "updates": updates}
+
+
+# ── 记录自动备份 ──
+
+RECORDS_BACKUP_FILE = Path(__file__).parent.parent / "bridge_records_backup.json"
+RECORDS_BACKUP_MAX = 200  # 服务器端保留最多 200 条
+
+
+class RecordsBackupRequest(BaseModel):
+    records: List[dict]
+
+
+@app.get("/api/records/backup")
+async def get_records_backup():
+    """获取服务器端备份的记录（前端 localStorage 丢失时恢复用）"""
+    try:
+        if RECORDS_BACKUP_FILE.exists():
+            with open(RECORDS_BACKUP_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return {"success": True, "records": data}
+        return {"success": True, "records": []}
+    except Exception as e:
+        return {"success": False, "error": str(e), "records": []}
+
+
+@app.post("/api/records/backup")
+async def save_records_backup(request: RecordsBackupRequest):
+    """保存记录到服务器端备份文件"""
+    try:
+        records = request.records
+        # 去重：基于 id
+        seen = set()
+        unique = []
+        for r in records:
+            rid = r.get("id", "")
+            if rid and rid not in seen:
+                seen.add(rid)
+                unique.append(r)
+        unique = unique[:RECORDS_BACKUP_MAX]
+
+        with open(RECORDS_BACKUP_FILE, "w", encoding="utf-8") as f:
+            json.dump(unique, f, ensure_ascii=False, indent=2)
+        return {"success": True, "count": len(unique)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"备份失败: {e}")
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ export function PlayProvider({ children }) {
   const [playStarted, setPlayStarted] = useState(false)
   const [playInitiated, setPlayInitiated] = useState(false)
   const [loadedPlayRecord, setLoadedPlayRecord] = useState(null)
-  const [reviewCursor, setReviewCursor] = useState(null) // null=非复盘, 0=第1墩
+  const [reviewCursor, setReviewCursor] = useState(null) // null=非复盘, 0~51=第N张牌
 
   // ── DD 提示（牌桌 Tooltip）──
   const [showDDHints, setShowDDHints] = useState(() => {

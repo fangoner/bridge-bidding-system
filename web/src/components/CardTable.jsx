@@ -6,10 +6,30 @@ import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted'
 
 import GridOnIcon from '@mui/icons-material/GridOn'
 import HandDisplay from './HandDisplay';
-import { getSuitColor } from '../constants/suits';
+import { getCardSuitColor } from '../constants/suits';
 import DoubleDummyTable from './DoubleDummyTable';
 import { isHumanPosition, hasAnyHuman, getHumanPositions, BRIDGE_POSITIONS } from '../utils/position';
-import { colorSchemes } from '../theme/colorSchemes';
+import { useGame } from '../context/GameContext';
+
+const MODEL_LABELS = {
+  'deepseek-v4-flash': 'DSF',
+  'deepseek-v4-pro': 'DSP',
+  'doubao-seed-2.1-pro': 'DBP',
+  'doubao-seed-2.1-turbo': 'DBT',
+}
+
+function modelVer(modelId) {
+  const m = modelId.match(/v?(\d+(?:\.\d+)?)/)
+  return m ? m[1] : ''
+}
+
+function modelLabel(modelId) {
+  const abbr = MODEL_LABELS[modelId] || modelId.replace(/^deepseek-v4-/, 'DS').substring(0, 4)
+  const ver = modelVer(modelId)
+  return ver ? `${abbr} ${ver}` : abbr
+}
+
+// 牌桌默认配色 — 森林绿茵
 
 function CardTable({
   hands,
@@ -64,6 +84,7 @@ function CardTable({
   reviewCursor,
   reviewTrick,
 }) {
+  const { fallbackModel, playModel } = useGame()
   const [handInputs, setHandInputs] = useState({
     '南': '',
     '北': '',
@@ -110,9 +131,12 @@ function CardTable({
   const west = hands['西'];
 
   const defaultScheme = {
-    ...colorSchemes.classicGreen,
     table: {
-      ...colorSchemes.classicGreen.table,
+      background: 'radial-gradient(ellipse at center, #3d7a58 0%, #25563b 40%, #1a3d28 100%)',
+      border: '3px solid rgba(255, 255, 255, 0.12)',
+      centerBg: 'rgba(255, 255, 255, 0.45)',
+      centerBackdrop: 'blur(16px) saturate(160%)',
+      centerBorder: '1px solid rgba(255, 255, 255, 0.25)',
       centerShadow: 'inset 0 2px 12px rgba(0,0,0,0.25), 0 4px 20px rgba(0,0,0,0.2)',
     },
   }
@@ -560,17 +584,44 @@ function CardTable({
     const isComplete = phase === 'complete'
     const isReview = reviewCursor != null
 
+    // 复盘模式：计算游标所在的墩序号和墩内牌序号
+    let reviewTrickNum = 1
+    let reviewCardInTrick = 1
+    let displayTrickGlobalStart = 0  // displayTrick第一张牌之前的累计牌数
+    if (isReview && playState?.tricks) {
+      let accum = 0
+      for (let i = 0; i < playState.tricks.length; i++) {
+        const tlen = playState.tricks[i].cards?.length || 0
+        if (reviewCursor < accum + tlen) {
+          reviewTrickNum = i + 1
+          reviewCardInTrick = reviewCursor - accum + 1
+          displayTrickGlobalStart = accum
+          break
+        }
+        accum += tlen
+        reviewTrickNum = i + 2  // 游标在最后一墩之后（不应出现）
+      }
+    }
+
     // 复盘模式：显示 reviewTrick；否则优先当前墩，再 lastCompletedTrick
     const displayTrick = isReview && reviewTrick
       ? reviewTrick
       : (current_trick?.cards && current_trick.cards.length > 0)
         ? current_trick
         : lastCompletedTrick ? lastCompletedTrick : current_trick
-    
+
     const getCardAtPosition = (position) => {
       if (!displayTrick?.cards) return null
       const cardEntry = displayTrick.cards.find(([pos]) => pos === position)
       return cardEntry ? cardEntry[1] : null
+    }
+
+    // 判断某张牌（以position标识）是否在复盘游标之后
+    const isCardAfterCursor = (position) => {
+      if (!isReview || !displayTrick?.cards) return false
+      const cardIdx = displayTrick.cards.findIndex(([pos]) => pos === position)
+      if (cardIdx < 0) return false
+      return displayTrickGlobalStart + cardIdx > reviewCursor
     }
     
     const getLastTrickWinner = () => {
@@ -604,7 +655,8 @@ function CardTable({
         )
       }
 
-      const color = getSuitColor(card.suit, isDark)
+      const color = getCardSuitColor(card.suit)
+      const afterCursor = isCardAfterCursor(position)
 
       return (
         <Box
@@ -615,7 +667,8 @@ function CardTable({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            bgcolor: '#fbfbf8',
+            bgcolor: afterCursor ? '#e0e0e0' : '#fbfbf8',
+            opacity: afterCursor ? 0.4 : 1,
             border: '1px solid rgba(0,0,0,0.08)',
             borderRadius: '6px',
             boxShadow: '0 2px 6px rgba(0,0,0,0.22)',
@@ -654,8 +707,8 @@ function CardTable({
             {aiLoading ? (
               <CircularProgress size={22} sx={{ color: 'rgba(255,255,255,0.8)' }} />
             ) : isReview ? (
-              <Typography sx={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#ffc107', textAlign: 'center' }}>
-                第{reviewCursor + 1}墩
+              <Typography sx={{ fontSize: '0.7rem', fontWeight: 'bold', color: '#ffc107', textAlign: 'center', lineHeight: 1.2 }}>
+                第{reviewTrickNum}墩<br/>第{reviewCardInTrick}张
               </Typography>
             ) : (displayTrick?.cards?.length === 4 && getLastTrickWinner()) ? (
               <Typography sx={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#ffeb3b' }}>
@@ -780,7 +833,7 @@ function CardTable({
                   },
                 }}
               >
-                {positionRoles[position] === 'human' ? '人类' : 'AI'}
+                {positionRoles[position] === 'human' ? '人类' : modelLabel(showPlayPanel ? playModel : fallbackModel)}
               </ToggleButton>
             )}
           </Box>

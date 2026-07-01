@@ -1,5 +1,5 @@
 import React from 'react'
-import { Box, Typography, useTheme, Tooltip } from '@mui/material'
+import { Box, Typography, useTheme } from '@mui/material'
 import { styled } from '@mui/material/styles'
 import { getSuitColor } from '../constants/suits'
 
@@ -28,11 +28,15 @@ const HandTitle = styled(Typography)(({ theme }) => ({
 
 const SuitLine = styled(Box)({
   fontSize: '0.98rem',
-  lineHeight: 1.3,
+  lineHeight: 1.2,
   whiteSpace: 'nowrap',
   display: 'flex',
   alignItems: 'center',
   gap: '4px',
+  paddingBottom: '5px',
+  '&:last-child': {
+    paddingBottom: 0,
+  },
 });
 
 const SuitSymbol = styled('span')({
@@ -122,7 +126,11 @@ function HandDisplay({
             outlineOffset: '2px',
             borderRadius: '2px',
             px: '2px',
+            mb: '1px',
             transform: isSelected ? 'scale(1.2)' : undefined,
+            position: 'relative',
+            display: 'inline-flex',
+            alignItems: 'baseline',
             '&:hover': canClick ? {
               transform: isSelected ? 'scale(1.3)' : 'scale(1.3)',
               textShadow: '0 0 8px currentColor',
@@ -130,15 +138,27 @@ function HandDisplay({
           }}
         >
           {rank}
+          {hint && (
+            <Box
+              component="sub"
+              sx={{
+                position: 'absolute',
+                bottom: '-7px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                fontSize: '0.55rem',
+                fontWeight: 800,
+                lineHeight: 1,
+                color: 'primary.main',
+                pointerEvents: 'none',
+                zIndex: 2,
+              }}
+            >
+              {hint}
+            </Box>
+          )}
         </Box>
       )
-      if (hint) {
-        return (
-          <Tooltip key={i} title={hint} arrow placement="top" enterDelay={200}>
-            {el}
-          </Tooltip>
-        )
-      }
       return el
     })
   }

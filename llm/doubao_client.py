@@ -2,14 +2,54 @@ import json
 import base64
 import time
 import io
+import re
 from typing import Optional, Dict, Any
+
+# ── JSON 清理：豆包模型可能返回含未转义控制字符的 JSON ──
+def _sanitize_json(text):
+    """转义 JSON 字符串值内的控制字符（\\n \\r \\t 等）。
+
+    豆包 Seed 模型的 response_format 实现有时不转义字符串值内的换行符，
+    导致 Python 的 json.loads() 报 "Invalid control character" 错误。
+    此函数用状态机追踪引号内/外，安全替换控制字符。
+    """
+    result = []
+    in_string = False
+    escape_next = False
+    for ch in text:
+        if escape_next:
+            result.append(ch)
+            escape_next = False
+            continue
+        if ch == '\\':
+            result.append(ch)
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            result.append(ch)
+            continue
+        if in_string:
+            if ch == '\n':
+                result.append('\\n')
+            elif ch == '\r':
+                result.append('\\r')
+            elif ch == '\t':
+                result.append('\\t')
+            elif ord(ch) < 0x20:
+                result.append(f'\\u{ord(ch):04x}')
+            else:
+                result.append(ch)
+        else:
+            result.append(ch)
+    return ''.join(result)
 from openai import OpenAI
 
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import DOUBAO_API_KEY, DOUBAO_BASE_URL, DOUBAO_VISION_ENDPOINT, DOUBAO_SEED_ENDPOINT
+from config import DOUBAO_API_KEY, DOUBAO_BASE_URL, DOUBAO_VISION_ENDPOINT
 
 # 视觉识别最大图片尺寸（长边像素），超过会等比缩放
 VISION_MAX_IMAGE_SIZE = 1920
@@ -239,84 +279,231 @@ class DoubaoVisionClient:
         return hands
 
 
+# ── 豆包模型名 → endpoint 映射 ──
+# 通过 .env 中的 DOUBAO_SEED_2_1_PRO_CHAT_ENDPOINT
+# / DOUBAO_SEED_2_1_PRO_REASONING_ENDPOINT 配置各模型的推理接入点 ID
+def _build_doubao_endpoint_map():
+    from config import (
+        DOUBAO_SEED_2_1_PRO_CHAT_ENDPOINT,
+        DOUBAO_SEED_2_1_PRO_REASONING_ENDPOINT,
+        DOUBAO_SEED_2_1_TURBO_CHAT_ENDPOINT,
+        DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT,
+        DOUBAO_MODEL_2_1_PRO,
+        DOUBAO_MODEL_2_1_TURBO,
+    )
+    m = {}
+    if DOUBAO_SEED_2_1_PRO_CHAT_ENDPOINT:
+        m[DOUBAO_MODEL_2_1_PRO] = DOUBAO_SEED_2_1_PRO_CHAT_ENDPOINT
+    if DOUBAO_SEED_2_1_PRO_REASONING_ENDPOINT:
+        m[f"{DOUBAO_MODEL_2_1_PRO}::reasoning"] = DOUBAO_SEED_2_1_PRO_REASONING_ENDPOINT
+    if DOUBAO_SEED_2_1_TURBO_CHAT_ENDPOINT:
+        m[DOUBAO_MODEL_2_1_TURBO] = DOUBAO_SEED_2_1_TURBO_CHAT_ENDPOINT
+    if DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT:
+        m[f"{DOUBAO_MODEL_2_1_TURBO}::reasoning"] = DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT
+    return m
+
+
 class DoubaoSeedClient:
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, endpoint: Optional[str] = None):
+    """豆包 Seed 系列 API 客户端。
+
+    支持多个模型（通过 endpoint 映射），兼容 DeepSeekClient 的 self.model 接口。
+    模型名称如 ``doubao-seed-2.1-pro``、``doubao-seed-2.1-pro::reasoning``。
+    """
+
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None,
+                 endpoint: Optional[str] = None, model: Optional[str] = None):
         self.api_key = api_key or DOUBAO_API_KEY
         self.base_url = base_url or DOUBAO_BASE_URL
-        self.endpoint = endpoint or DOUBAO_SEED_ENDPOINT
+        self._endpoint_map = _build_doubao_endpoint_map()
         self.client = None
-        
+
+        # 模型名 → endpoint 解析
+        if model:
+            self.model = model
+        elif endpoint:
+            # 向后兼容：根据 endpoint 反查模型名
+            self.model = None
+            for m, ep in self._endpoint_map.items():
+                if ep == endpoint:
+                    self.model = m
+                    break
+            if self.model is None:
+                self.model = ""
+        else:
+            self.model = ""
+
         if self.api_key:
             self.client = OpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url
             )
-    
+
+    # ── endpoint 解析 ──
+    @property
+    def endpoint(self) -> str:
+        """当前模型对应的推理接入点 ID"""
+        base = self.model.replace("::reasoning", "")
+        # 先按精确模型名匹配，再按 base 匹配
+        if self.model in self._endpoint_map:
+            return self._endpoint_map[self.model]
+        if base in self._endpoint_map:
+            return self._endpoint_map[base]
+        return ""
+
+    # ── 思考模式 ──
+    @property
+    def is_reasoning(self) -> bool:
+        return "::reasoning" in (self.model or "")
+
+    def _thinking_body(self, thinking: Optional[bool] = None) -> dict:
+        """构建 thinking extra_body；None 表示根据模型名自动判断"""
+        if thinking is None:
+            thinking = self.is_reasoning
+        return {"thinking": {"type": "enabled" if thinking else "disabled"}}
+
+    def _get_timeout(self, thinking: bool) -> float:
+        """根据模型返回合理超时（豆包推理版需要更长）"""
+        return 120.0 if thinking else 30.0
+
     def is_configured(self) -> bool:
-        return self.client is not None and self.endpoint and self.endpoint != ""
-    
-    def chat(self, system_prompt: str, user_prompt: str = "", temperature: float = 0.7) -> str:
+        return self.client is not None and bool(self.endpoint)
+
+    def set_model(self, model_name: str):
+        """切换模型（同时更新 endpoint）"""
+        self.model = model_name
+
+    def chat(self, system_prompt: str, user_prompt: str = "",
+             temperature: float = 0.7, model: str = None,
+             thinking: bool = None) -> str:
         if not self.client:
             raise ValueError("Doubao API Key未配置，请设置环境变量 DOUBAO_API_KEY")
-        
         if not self.endpoint:
-            raise ValueError("Doubao Seed Endpoint未配置，请设置环境变量 DOUBAO_SEED_ENDPOINT")
-        
-        messages = [{"role": "system", "content": system_prompt}]
-        if user_prompt:
-            messages.append({"role": "user", "content": user_prompt})
-        
-        response = self.client.chat.completions.create(
-            model=self.endpoint,
-            messages=messages,
-            temperature=temperature
+            raise ValueError(f"Doubao Seed Endpoint未配置（模型: {self.model}），"
+                             "请在 .env 中设置对应的推理接入点 ID")
+
+        use_model = model or self.model
+        ep = self._endpoint_map.get(
+            use_model,
+            self._endpoint_map.get(use_model.replace("::reasoning", ""), self.endpoint)
         )
-        
-        return response.choices[0].message.content
-    
-    def chat_json(self, system_prompt: str, user_prompt: str = "", temperature: float = 0.7) -> Dict[str, Any]:
-        if not self.client:
-            raise ValueError("Doubao API Key未配置，请设置环境变量 DOUBAO_API_KEY")
-        
-        if not self.endpoint:
-            raise ValueError("Doubao Seed Endpoint未配置，请设置环境变量 DOUBAO_SEED_ENDPOINT")
-        
+
         messages = [{"role": "system", "content": system_prompt}]
         if user_prompt:
             messages.append({"role": "user", "content": user_prompt})
-        
+
+        _thinking = thinking if thinking is not None else self.is_reasoning
+        extra_kwargs = {"extra_body": self._thinking_body(_thinking)}
+
+        response = self.client.chat.completions.create(
+            model=ep,
+            messages=messages,
+            temperature=temperature,
+            timeout=self._get_timeout(_thinking),
+            **extra_kwargs
+        )
+        return response.choices[0].message.content
+
+    def chat_json(self, system_prompt: str, user_prompt: str = "",
+                  temperature: float = 0.7, schema: Dict = None,
+                  model: str = None, max_tokens: int = None,
+                  thinking: bool = None) -> Dict[str, Any]:
+        if not self.client:
+            raise ValueError("Doubao API Key未配置，请设置环境变量 DOUBAO_API_KEY")
+        if not self.endpoint:
+            raise ValueError(f"Doubao Seed Endpoint未配置（模型: {self.model}），"
+                             "请在 .env 中设置对应的推理接入点 ID")
+
+        _thinking = thinking if thinking is not None else self.is_reasoning
+        if max_tokens is None:
+            max_tokens = 8192 if _thinking else 4096  # 非思考也提到 4096，避免豆包啰嗦输出截断
+
+        use_model = model or self.model
+        ep = self._endpoint_map.get(
+            use_model,
+            self._endpoint_map.get(use_model.replace("::reasoning", ""), self.endpoint)
+        )
+
+        messages = [{"role": "system", "content": system_prompt}]
+        if user_prompt:
+            messages.append({"role": "user", "content": user_prompt})
+
+        extra_kwargs = {"extra_body": self._thinking_body(_thinking)}
+
+        last_error = None
+        for attempt in range(2):
+            try:
+                t0 = time.time()
+                response = self.client.chat.completions.create(
+                    model=ep,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout=self._get_timeout(_thinking),
+                    response_format={"type": "json_object"},
+                    **extra_kwargs
+                )
+                content = response.choices[0].message.content
+                print(f"[Doubao] chat_json OK in {time.time()-t0:.1f}s, chars={len(content)}, finish={response.choices[0].finish_reason}")
+                return json.loads(_sanitize_json(content))
+            except json.JSONDecodeError as e:
+                last_error = f"JSONDecodeError: {e}"
+                print(f"[Doubao] chat_json attempt {attempt+1} JSON decode failed: {e}")
+                if attempt == 0:
+                    time.sleep(1)
+            except KeyError as e:
+                last_error = f"KeyError: {e}"
+                print(f"[Doubao] chat_json attempt {attempt+1} KeyError: {e}")
+                if attempt == 0:
+                    time.sleep(1)
+            except Exception as e:
+                last_error = f"API Error: {e}"
+                print(f"[Doubao] chat_json attempt {attempt+1} API error: {e}")
+                if attempt == 0:
+                    time.sleep(1)
+
+        # JSON 模式失败，回退到普通 chat 再提取 JSON
+        print(f"[Doubao] chat_json falling back to chat() — last_error={last_error}")
+        response_text = self.chat(system_prompt, user_prompt, temperature,
+                                  model=use_model, thinking=_thinking)
+        # 尝试提取 JSON：移除 BOM、找 { } 边界
+        text = response_text.strip().lstrip('﻿')
+        # 先清理控制字符
+        text = _sanitize_json(text)
         try:
-            response = self.client.chat.completions.create(
-                model=self.endpoint,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=8192
-            )
-            content = response.choices[0].message.content
-            return json.loads(content)
+            # 尝试直接解析
+            return json.loads(text)
         except json.JSONDecodeError:
             pass
-        except Exception as e:
-            pass
-        
-        response_text = self.chat(system_prompt, user_prompt, temperature)
-        
-        try:
-            json_match = response_text
-            if "```json" in response_text:
-                json_match = response_text.split("```json")[1].split("```")[0]
-            elif "```" in response_text:
-                json_match = response_text.split("```")[1].split("```")[0]
-            
-            return json.loads(json_match.strip())
-        except json.JSONDecodeError:
-            return {"raw_response": response_text, "error": "JSON解析失败"}
-    
-    def chat_bidding(self, system_prompt: str, temperature: float = 0.7) -> Dict[str, Any]:
-        return self.chat_json(system_prompt, "", temperature)
-    
-    def chat_bidding_fallback(self, system_prompt: str, temperature: float = 0.7) -> Dict[str, Any]:
-        return self.chat_json(system_prompt, "", temperature)
-    
-    def chat_human_bid(self, system_prompt: str, temperature: float = 0) -> Dict[str, Any]:
-        return self.chat_json(system_prompt, "", temperature)
+        # 尝试从 markdown 代码块提取
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0].strip()
+        # 尝试找第一个 { 到最后一个 }
+        start = text.find('{')
+        end = text.rfind('}')
+        if start >= 0 and end > start:
+            try:
+                return json.loads(text[start:end+1])
+            except json.JSONDecodeError:
+                pass
+        print(f"[Doubao] chat_json fallback also failed, returning raw. text[:200]={response_text[:200]}")
+        return {"raw_response": response_text, "error": "JSON解析失败"}
+
+    def chat_bidding(self, system_prompt: str, temperature: float = 0.7,
+                     model: str = None, thinking: bool = False) -> Dict[str, Any]:
+        return self.chat_json(system_prompt, "", temperature, model=model, thinking=thinking)
+
+    def chat_bidding_fallback(self, system_prompt: str, temperature: float = 0.7,
+                              model: str = None, thinking: bool = False) -> Dict[str, Any]:
+        return self.chat_json(system_prompt, "", temperature, model=model, thinking=thinking)
+
+    def chat_human_bid(self, system_prompt: str, temperature: float = 0,
+                       model: str = None, thinking: bool = False) -> Dict[str, Any]:
+        return self.chat_json(system_prompt, "", temperature, model=model, thinking=thinking)
+
+    def chat_play(self, system_prompt: str, temperature: float = 0.7,
+                  model: str = None, thinking: bool = False) -> Dict[str, Any]:
+        max_tokens = 8192 if (thinking or self.is_reasoning) else 1024
+        return self.chat_json(system_prompt, "", temperature, model=model,
+                              max_tokens=max_tokens, thinking=thinking)

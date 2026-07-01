@@ -80,7 +80,7 @@ function PlayDetailPanel({
   onReviewPrev,
   onReviewNext,
   onRewindToTrick,
-  onStartReview,
+  onBackToBidding,
 }) {
   const [selectedRecord, setSelectedRecord] = useState(null)
   const [viewMode, setViewMode] = useState('output')
@@ -411,17 +411,48 @@ function PlayDetailPanel({
     // 合并已完成的墩和当前墩进行中的牌
     const currentTrick = playState?.current_trick
     const currentTrickCards = currentTrick?.cards || []
-    
+
     // 构建完整的出牌列表：已完成墩 + 当前墩（进行中）
     const allTricks = [...tricks]
     if (currentTrickCards.length > 0) {
-      // 当前墩未完成，构造一个"进行中"的墩对象
       allTricks.push({
-        cards: currentTrickCards,
+        cards: currentTrickCards.map(([pos, card]) => [pos, card]),
         leader: currentTrick?.leader,
-        winner: null, // 未完成，无赢家
+        winner: null,
+        is_ai_cards: currentTrick?.is_ai_cards || [],
+        ai_reasons: currentTrick?.ai_reasons || [],
+        ai_risks: currentTrick?.ai_risks || [],
+        dd_hints: currentTrick?.dd_hints || [],
         isCurrentTrick: true,
       })
+    }
+
+    // 总牌数
+    const totalCards = allTricks.reduce((s, t) => s + (t.cards?.length || 0), 0)
+
+    // 每墩第一张牌的全局序号
+    const trickStartIndices = []
+    let accum = 0
+    for (const t of allTricks) {
+      trickStartIndices.push(accum)
+      accum += t.cards?.length || 0
+    }
+
+    // 获取DD hint中某张牌的delta
+    const getCardDelta = (ddHint, card) => {
+      if (!ddHint) return null
+      return ddHint[card.suit + card.rank] || null
+    }
+
+    // 获取DD hint中最优delta（庄家方视角取最大值）
+    const getBestDelta = (ddHint) => {
+      if (!ddHint) return null
+      const deltas = Object.values(ddHint).map(v => {
+        if (v === '=') return 0
+        return parseInt(v, 10) || 0
+      })
+      if (deltas.length === 0) return null
+      return Math.max(...deltas)
     }
 
     if (allTricks.length === 0) return null
@@ -438,8 +469,8 @@ function PlayDetailPanel({
 
     const renderTrickRow = (trick, idx) => {
       const isCurrentTrick = trick.isCurrentTrick
-      const isReviewTrick = reviewCursor != null && idx === reviewCursor
       const isDeclarerSide = !isCurrentTrick && (trick.winner === contract?.declarer || trick.winner === dummy)
+      const globalStartIdx = trickStartIndices[idx]
 
       return (
         <Box
@@ -450,26 +481,37 @@ function PlayDetailPanel({
             gap: 0.5,
             py: 0.25,
             px: 0.5,
-            bgcolor: isReviewTrick
-              ? (isDark ? 'rgba(255, 193, 7, 0.25)' : '#fff8e1')
-              : isCurrentTrick
-                ? (isDark ? 'rgba(156, 39, 176, 0.15)' : '#f3e5f5')
-                : (isDeclarerSide ? (isDark ? 'rgba(99, 102, 241, 0.12)' : '#e3f2fd') : (isDark ? 'rgba(255, 152, 0, 0.1)' : '#fff3e0')),
+            bgcolor: isCurrentTrick
+              ? (isDark ? 'rgba(156, 39, 176, 0.15)' : '#f3e5f5')
+              : (isDeclarerSide ? (isDark ? 'rgba(99, 102, 241, 0.12)' : '#e3f2fd') : (isDark ? 'rgba(255, 152, 0, 0.1)' : '#fff3e0')),
             borderRadius: 0.5,
-            border: isReviewTrick ? '2px solid #ffc107'
-              : isCurrentTrick ? (isDark ? '1px dashed rgba(120, 144, 156, 0.5)' : '1px dashed #546e7a') : 'none',
+            border: isCurrentTrick ? (isDark ? '1px dashed rgba(120, 144, 156, 0.5)' : '1px dashed #546e7a') : 'none',
           }}
         >
           <Typography variant="caption" sx={{ fontWeight: 'bold', fontSize: '0.75rem', minWidth: 35 }}>
             {isCurrentTrick ? `${idx + 1}:...` : `${idx + 1}:${trick.winner || '?'}`}
           </Typography>
-          <Box sx={{ display: 'flex', gap: 0.25 }}>
+          <Box sx={{ display: 'flex', gap: 0.25, flexWrap: 'wrap' }}>
             {trick.cards && trick.cards.map(([pos, card], cardIdx) => {
+              const globalCardIdx = globalStartIdx + cardIdx
+              const isBeforeCursor = reviewCursor != null && globalCardIdx < reviewCursor
+              const isAtCursor = reviewCursor != null && globalCardIdx === reviewCursor
+              const isAfterCursor = reviewCursor != null && globalCardIdx > reviewCursor
+              const isGrayed = isAfterCursor
+
               const color = getSuitColor(card.suit, isDark)
               const aiRecord = getAIRecordForCard(pos, card)
               const isSelected = selectedRecord === aiRecord
               const canClick = !!aiRecord
-              
+
+              // DD hint 标签
+              const ddHint = trick.dd_hints?.[cardIdx]
+              const cardDelta = getCardDelta(ddHint, card)
+              const bestDelta = getBestDelta(ddHint)
+              const cardDeltaNum = cardDelta === '=' ? 0 : (cardDelta ? parseInt(cardDelta, 10) : null)
+              const bestDeltaNum = bestDelta
+              const isBest = cardDeltaNum !== null && bestDeltaNum !== null && cardDeltaNum >= bestDeltaNum
+
               return (
                 <Box
                   key={cardIdx}
@@ -483,16 +525,39 @@ function PlayDetailPanel({
                     display: 'flex',
                     alignItems: 'center',
                     gap: 0.1,
-                    bgcolor: isSelected ? (isDark ? 'rgba(25, 118, 210, 0.3)' : '#bbdefb') : (isDark ? 'rgba(255,255,255,0.08)' : 'white'),
+                    bgcolor: isAtCursor
+                      ? (isDark ? 'rgba(255, 193, 7, 0.35)' : '#fff8e1')
+                      : isSelected ? (isDark ? 'rgba(25, 118, 210, 0.3)' : '#bbdefb')
+                      : (isDark ? 'rgba(255,255,255,0.08)' : 'white'),
                     px: 0.25,
                     borderRadius: 0.25,
-                    border: isSelected ? '1px solid #1976d2' : (isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid #ddd'),
+                    border: isAtCursor
+                      ? '2px solid #ffc107'
+                      : isSelected ? '1px solid #1976d2'
+                      : (isDark ? '1px solid rgba(255,255,255,0.12)' : '1px solid #ddd'),
                     cursor: canClick ? 'pointer' : 'default',
-                    '&:hover': canClick ? { bgcolor: isDark ? 'rgba(255,255,255,0.15)' : '#e3f2fd' } : {}
+                    opacity: isGrayed ? 0.3 : 1,
+                    filter: isGrayed ? 'grayscale(0.5)' : 'none',
+                    '&:hover': canClick ? { bgcolor: isDark ? 'rgba(255,255,255,0.15)' : '#e3f2fd' } : {},
+                    transition: 'opacity 0.2s, filter 0.2s',
                   }}
                 >
                   <Typography variant="caption" sx={{ color: isDark ? '#94a3b8' : '#666', fontSize: '0.7rem' }}>{pos}:</Typography>
                   <Typography sx={{ color, fontSize: '0.75rem', fontWeight: 500 }}>{card.suit}{card.rank}</Typography>
+                  {cardDelta && (
+                    <Chip
+                      size="small"
+                      label={cardDelta}
+                      sx={{
+                        fontSize: '0.55rem',
+                        height: 14,
+                        ml: 0.25,
+                        bgcolor: isBest ? (isDark ? 'rgba(76,175,80,0.3)' : '#c8e6c9') : (isDark ? 'rgba(255,152,0,0.3)' : '#ffe0b2'),
+                        color: isBest ? '#2e7d32' : '#e65100',
+                        '& .MuiChip-label': { px: 0.25 },
+                      }}
+                    />
+                  )}
                 </Box>
               )
             })}
@@ -516,11 +581,11 @@ function PlayDetailPanel({
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <Button size="small" onClick={onReviewPrev} disabled={reviewCursor === 0}
                 sx={{ fontSize: '0.7rem', minWidth: 24, py: 0 }}>◀</Button>
-              <Typography variant="caption" sx={{ fontSize: '0.75rem', fontWeight: 600, minWidth: 50, textAlign: 'center' }}>
-                第{reviewCursor + 1}/{playState?.tricks?.length || '?'}墩
+              <Typography variant="caption" sx={{ fontSize: '0.75rem', fontWeight: 600, minWidth: 60, textAlign: 'center' }}>
+                第{reviewCursor + 1}/{totalCards || '?'}张
               </Typography>
               <Button size="small" onClick={onReviewNext}
-                disabled={reviewCursor >= (playState?.tricks?.length || 0) - 1}
+                disabled={reviewCursor >= totalCards - 1}
                 sx={{ fontSize: '0.7rem', minWidth: 24, py: 0 }}>▶</Button>
               {onRewindToTrick && (
                 <Button size="small" color="warning" variant="outlined"
@@ -603,13 +668,6 @@ function PlayDetailPanel({
               />
             </>
           )}
-          {isComplete && reviewCursor == null && onStartReview && (
-            <Button size="small" variant="contained" color="warning"
-              onClick={onStartReview}
-              sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.1, height: 22 }}>
-              复盘
-            </Button>
-          )}
         </Box>
         <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', flexShrink: 0 }}>
           {!isComplete && !playInitiated && (
@@ -629,6 +687,9 @@ function PlayDetailPanel({
           )}
           {onResetPlay && (
             <Button variant="outlined" color="error" size="small" onClick={onResetPlay} disabled={aiLoading} sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 56, py: 0.2 }}>重新打牌</Button>
+          )}
+          {onBackToBidding && (
+            <Button variant="outlined" size="small" onClick={onBackToBidding} disabled={aiLoading} sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 56, py: 0.2, color: isDark ? '#94a3b8' : '#666', borderColor: isDark ? '#475569' : '#ccc' }}>返回叫牌</Button>
           )}
         </Box>
       </Box>

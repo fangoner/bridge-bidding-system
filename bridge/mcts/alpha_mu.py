@@ -273,7 +273,16 @@ class AlphaMuSearch:
               f"hand_sizes={ {p: len(h) for p, h in state.hands.items()} }, "
               f"current_trick_cards={len(state.current_trick.cards)}")
 
-        playable = state.get_playable_cards(actual_turn)
+        playable_raw = state.get_playable_cards(actual_turn)
+        # ── 排序：将牌优先，确保小将牌不会因超时排到末尾被截断 ──
+        # 将牌：rank升序（小将牌先评估，它们是"将吃"的主力）
+        # 副牌：rank降序（大牌先评估）
+        trump_cards = [c for c in playable_raw if c.suit == trump]
+        side_cards = [c for c in playable_raw if c.suit != trump]
+        trump_cards.sort(key=lambda c: c.rank_value)
+        side_cards.sort(key=lambda c: c.rank_value, reverse=True)
+        playable = trump_cards + side_cards
+
         if len(playable) == 1:
             return {
                 "card": playable[0],
@@ -321,8 +330,46 @@ class AlphaMuSearch:
         world_def_tricks = [state.defender_tricks] * n_worlds
 
         move_fronts: List[Tuple[Card, ParetoFront]] = []
-        for move in playable:
+        quick_evals: List[Tuple[Card, ParetoFront]] = []  # 超时后快速 DD 评估
+        quick_fallback_used = False
+        for i, move in enumerate(playable):
             if self._time_up():
+                # ── 超时：剩余牌快速 DD 叶节点评估 ──
+                quick_fallback_used = True
+                remaining = playable[i:]
+                trick_state = get_current_trick_state(state)
+                for quick_move in remaining:
+                    # 将 quick_move 应用到每个 world 生成 next_states
+                    quick_next_states: List[Tuple[Dict[str, List[Card]], dict]] = []
+                    for w_idx, world in enumerate(worlds):
+                        if world is None:
+                            quick_next_states.append((None, {"impossible": True}))
+                            continue
+                        hands = {pos: [Card(suit=c.suit, rank=c.rank) for c in cards]
+                                 for pos, cards in world.items()}
+                        if quick_move not in hands.get(actual_turn, []):
+                            quick_next_states.append((None, {"impossible": True}))
+                            continue
+                        from bridge.mcts.state_utils import apply_play_to_state
+                        new_hands, new_current, new_trick, decl_t, def_t, td = \
+                            apply_play_to_state(
+                                hands, actual_turn, quick_move, trick_state,
+                                world_decl_tricks[w_idx], world_def_tricks[w_idx],
+                                trump, declarer, dummy,
+                            )
+                        quick_next_states.append((new_hands, {
+                            "new_current": new_current,
+                            "new_trick": new_trick,
+                            "decl_tricks": decl_t,
+                            "def_tricks": def_t,
+                            "trick_done": td,
+                            "impossible": False,
+                        }))
+                    quick_front = self._evaluate_leaf(
+                        quick_next_states, n_worlds,
+                        declarer, dummy, trump, tricks_needed,
+                    )
+                    quick_evals.append((quick_move, quick_front))
                 break
             front = self._search_recursive(
                 state, worlds, world_decl_tricks, world_def_tricks,
@@ -332,7 +379,10 @@ class AlphaMuSearch:
             )
             move_fronts.append((move, front))
 
-        if not move_fronts:
+        # 合并完整搜索和快速评估
+        all_move_fronts = move_fronts + quick_evals
+
+        if not all_move_fronts:
             return {
                 "card": playable[0],
                 "reasoning": "αμ: 超时回退",
@@ -348,15 +398,19 @@ class AlphaMuSearch:
         # 3. min_tricks (最差情况下的赢墩数 — 宕牌时少宕/铁成时超墩)
         # 4. avg_tricks (平均赢墩数)
         # 5. rank_bonus (同等级牌的 tie-break)
-        best_key = (-1, -1.0, -1, -1.0, 0.0)
+        # 6. is_quick (完整 αμ 搜索优先于快速 DD 评估)
+        best_key = (-1, -1.0, -1, -1.0, 0.0, 1)
 
-        for move, front in move_fronts:
+        quick_move_names = {str(m) for m, _ in quick_evals}
+
+        for move, front in all_move_fronts:
             mv = front.maximin_vector()
             worst = mv.worst() if mv else 0
             rate = mv.success_rate() if mv else 0.0
             min_t = mv.min_tricks() if mv else 0
             avg_t = mv.avg_tricks() if mv else 0.0
             bonus = self._rank_bonus(move)
+            is_quick = 1 if str(move) in quick_move_names else 0  # 0=完整搜索优先
 
             move_scores.append({
                 "card": str(move),
@@ -368,25 +422,29 @@ class AlphaMuSearch:
                 "total_useful": sum(1 for m in mv.useful_mask if m) if mv else 0,
                 "front_size": len(front),
                 "best_vector": repr(mv) if mv else "∅",
+                "quick": bool(is_quick),
             })
-            key = (worst, rate, min_t, avg_t, bonus)
+            key = (worst, rate, min_t, avg_t, bonus, is_quick)
             if key > best_key:
                 best_key = key
                 best_move = move
 
         move_scores.sort(
-            key=lambda s: (s["worst"], s["success_rate"], s["min_tricks"], s["avg_tricks"]),
+            key=lambda s: (s["worst"], s["success_rate"], s["min_tricks"],
+                           s["avg_tricks"], 0 if s.get("quick") else 1),
             reverse=True)
 
         elapsed = time.time() - self._start_time
         top_str = ", ".join(
             f"{s['card']}({s['success_rate']:.0%})"
+            f"{'⚡' if s.get('quick') else ''}"
             for s in move_scores[:5]
         )
+        quick_note = f", {len(quick_evals)} quick-DD" if quick_fallback_used else ""
         reasoning = (
             f"αμ搜索: {n_worlds} worlds, depth≤{self.max_depth}, "
             f"{self._nodes_searched} nodes, {self._dds_calls} DDS calls, "
-            f"{elapsed:.1f}s. Top: {top_str}"
+            f"{elapsed:.1f}s{quick_note}. Top: {top_str}"
         )
 
         err_diag = " | ".join(
@@ -412,6 +470,7 @@ class AlphaMuSearch:
                     "num_worlds": n_worlds,
                     "nodes_searched": self._nodes_searched,
                     "algorithm": "alpha_mu",
+                    "quick_fallback": quick_fallback_used,
                     "err_stats": dict(self._err_stats),
                     "err_samples": dict(self._err_samples),
                 },

@@ -34,6 +34,7 @@ function BiddingDetailPanel({
   canSave,
   aiThinking,
   readonlyMode = false,
+  fallbackModel,
 }) {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
@@ -101,6 +102,15 @@ function BiddingDetailPanel({
       <Box sx={{ p: 2, background: isDark ? 'rgba(30, 41, 59, 0.7)' : 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
         <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 'bold', color: '#1976d2' }}>
           {record.timestamp} - {record.position}家
+          {positionRoles?.[record.position] === 'ai' && fallbackModel && (
+            <Typography component="span" variant="caption" sx={{
+              ml: 1, px: 0.8, py: 0.2, borderRadius: 1,
+              bgcolor: 'action.hover', color: 'text.secondary',
+              fontSize: '0.65rem', fontWeight: 500, verticalAlign: 'middle',
+            }}>
+              {fallbackModel}
+            </Typography>
+          )}
         </Typography>
         <Typography variant="body2" sx={{ mt: 1 }}>
           <strong>手牌:</strong> {record.hand?.display || '未知'}
@@ -109,9 +119,12 @@ function BiddingDetailPanel({
           <strong>叫牌序列:</strong> {record.biddingSequence || '空（开叫位置）'}
         </Typography>
         
-        {/* 动态渲染 fullOutput 所有字段 */}
+        {/* 动态渲染 fullOutput 所有字段（跳过下方已单独显示的） */}
         {Object.keys(fullOutput).length > 0 ? (
-          Object.entries(fullOutput).map(([key, value]) => {
+          Object.entries(fullOutput).filter(([key]) => ![
+            '选定叫品', '叫品含义', '叫品筛选过程',
+            '完整叫牌序列', '当前叫牌序列', '自己pass次数',
+          ].includes(key)).map(([key, value]) => {
             if (value == null || value === '') return null
             const isLongText = typeof value === 'string' && value.length > 60
             const isObject = typeof value === 'object'
@@ -142,6 +155,10 @@ function BiddingDetailPanel({
               </Typography>
             )
           })
+        ) : positionRoles?.[record.position] === 'ai' ? (
+          <Typography variant="body2" sx={{ mt: 1, color: colorMuted }}>
+            （LLM 已处理，无额外结构化输出）
+          </Typography>
         ) : (
           <Typography variant="body2" sx={{ mt: 1, color: colorMuted, fontStyle: 'italic' }}>
             无结构化字段（该叫品未调用 LLM 或匹配自 JF 约定）
@@ -266,9 +283,18 @@ function BiddingDetailPanel({
   )
 
   return (
-    <Paper elevation={3} sx={{ 
+    <Paper elevation={0} sx={{ 
       p: isMobile ? 0.5 : 1, 
-      bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : (isMobile ? '#f5f5f5' : '#e8e8e8'), 
+      background: isDark
+        ? 'linear-gradient(135deg, rgba(30, 41, 59, 0.75) 0%, rgba(30, 41, 59, 0.6) 100%)'
+        : 'linear-gradient(135deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.7) 100%)',
+      backdropFilter: 'blur(20px) saturate(180%)',
+      WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+      border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.8)'}`,
+      boxShadow: isDark
+        ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
+        : '0 8px 32px rgba(79, 70, 229, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+      borderRadius: 3,
       display: 'flex', 
       flexDirection: 'column', 
       flex: isMobile ? undefined : '1 1 0%',

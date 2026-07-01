@@ -51,10 +51,10 @@ export default function MainTableArea({
   onUndoPlay,
   onSavePlay,
   canSavePlay,
+  onBackToBidding,
   onReviewPrev,
   onReviewNext,
   onRewindToTrick,
-  onStartReview,
 }) {
   return (
     <Box sx={isMobile
@@ -106,10 +106,10 @@ export default function MainTableArea({
         onUndoPlay={onUndoPlay}
         onSavePlay={onSavePlay}
         canSavePlay={canSavePlay}
+        onBackToBidding={onBackToBidding}
         onReviewPrev={onReviewPrev}
         onReviewNext={onReviewNext}
         onRewindToTrick={onRewindToTrick}
-        onStartReview={onStartReview}
       />
     </Box>
   )
@@ -136,10 +136,10 @@ function RightPanelSwitcher({
   onUndoPlay,
   onSavePlay,
   canSavePlay,
+  onBackToBidding,
   onReviewPrev,
   onReviewNext,
   onRewindToTrick,
-  onStartReview,
 }) {
   const {
     hands,
@@ -148,6 +148,8 @@ function RightPanelSwitcher({
     gameMode,
     readonlyMode,
     aiThinking,
+    imageOpeningLead,
+    fallbackModel,
   } = useGame()
 
   const {
@@ -171,7 +173,6 @@ function RightPanelSwitcher({
     playInitiated,
     loadedPlayRecord,
     selectedPlayRecord, setSelectedPlayRecord,
-    imageOpeningLead,
     reviewCursor,
     showPlayPanel,
     playLoading,
@@ -205,8 +206,8 @@ function RightPanelSwitcher({
         reviewCursor={reviewCursor}
         onReviewPrev={onReviewPrev}
         onReviewNext={onReviewNext}
+        onBackToBidding={onBackToBidding}
         onRewindToTrick={onRewindToTrick}
-        onStartReview={onStartReview}
       />
     )
   }
@@ -242,6 +243,7 @@ function RightPanelSwitcher({
         canSave={canSaveBiddingProgress}
         aiThinking={aiThinking}
         readonlyMode={readonlyMode}
+        fallbackModel={fallbackModel}
       />
     )
   }

@@ -1,5 +1,88 @@
 # 开发日志
 
+## 2026-07-02
+
+### 复盘改为按牌回退 + DD Hint 预录
+
+- **后端** (`bridge/play_types.py`): Trick 新增 `dd_hints` 字段（`List[Optional[dict]]`），与 cards 平行存储每张牌打出时的 DD 全量评估；`to_dict()` 序列化包含 dd_hints；`undo_last_card()` 撤销时同步 pop
+- **后端** (`api/main.py`): 提取 `_compute_dd_hints_for_state()` 共享函数供复用；新增 `_record_dd_hint()` 在每次出牌前计算 DD 评估并录入 trick；`POST /api/play/card` 和 `POST /api/play/ai-play` 均自动录入
+- **前端** (`PlayContext.jsx`): `reviewCursor` 语义从墩序号(0~12)改为牌序号(0~51)
+- **前端** (`CardTablePanel.jsx`): 新增 `allPlayedCards` 全局牌序列 + 按牌序号查找 `reviewTrick` 派生逻辑
+- **前端** (`PlayDetailPanel.jsx`): 出牌记录改为按牌渲染：游标前正常、游标位置黄色高亮、游标后灰化（opacity 0.3 + grayscale）；导航显示"第N/52张"；每牌旁 DD hint Chip（最优=绿色，非最优=橙色）；移除独立的"复盘"按钮
+- **前端** (`CardTable.jsx`): 中心标签"第N墩·第M张"；复盘墩中游标之后的牌灰化
+- **前端** (`App.jsx`): `handleRewindToTrick` 参数改为 cardIdx（内部转 trickIdx）；onReviewNext 边界改用总牌数；初始 reviewCursor 统一为最后一张牌
+- **前端** (`MainTableArea.jsx`): 移除 onStartReview prop 传递链路
+- 打牌完成后直接显示复盘箭头和"从此重打"按钮，无需额外点击
+- DD hint 随 trick 数据存入记录/备份，导入时自动恢复
+
+## 2026-07-01
+
+### 记录服务器端自动备份
+
+- **后端** (`api/main.py`): 新增 `POST/GET /api/records/backup` 端点，记录保存到 `bridge_records_backup.json`（去重，最多200条）
+- **前端** (`useBridgeRecords.js`): 每次增删改操作后 debounce 2s 自动同步到服务器；`loadRecords` 时若 localStorage 为空自动从服务器恢复
+- 解决浏览器 localStorage 被清除后记录全部丢失的问题
+
+### 打牌界面"返回叫牌"按钮
+
+- `PlayDetailPanel.jsx`: 新增"返回叫牌"按钮（标题栏右侧），点击确认后清除打牌数据，回到叫牌界面，保留手牌和叫牌序列
+- `App.jsx`: 新增 `handleBackToBidding` 函数
+- `MainTableArea.jsx`: 传递回调
+
+### RKCB 对方问叫不得答叫 + 将牌判定修复
+
+- **HUMAN_BID_PROMPT** (`llm/prompts.py`): 新增"关键规则"节 — 对方问叫不得答叫、将牌只能来自我方叫品（带示例）、5NT后续叫品规则（6阶将牌=止叫不显示将牌K）
+- **BIDDING_FALLBACK_PROMPT**: 关键张计算新增前置检查（对方问叫→立即停止）；第一步将牌判定明确排除对方花色；配合花色规则禁止使用对方叫品；5NT后续规则
+- 修复了两个典型错误：(1) 东家错误答叫北家的4NT问叫 (2) 将牌误判为对手的♠而非我方的♣ (3) 6♣误解为边花K而非止叫
+
+### 手牌面板显示当前LLM模型
+
+- `CardTable.jsx`: 手牌位置角色切换按钮处，"AI"替换为当前模型缩写+版本号
+- 映射: `deepseek-v4-flash`→`DSF 4`, `deepseek-v4-pro`→`DSP 4`, `doubao-seed-2.1-pro`→`DBP 2.1`, `doubao-seed-2.1-turbo`→`DBT 2.1`
+- 叫牌阶段显示 fallbackModel，打牌阶段显示 playModel
+
+### Pass 叫品记录遗漏修复
+
+- `App.jsx`: AI异常回退pass (catch块) 和双人模式对方自动pass 两处漏写 `aiBiddingHistory`，导致下拉框和简单显示中缺失
+
+## 2026-06-30
+
+### αμ 候选牌超时截断修复（两轮）
+
+**背景**:
+αμ 搜索在 13 张牌场景下，候选牌列表无序 + 超时不足导致末尾候选牌被批量截断。首轮修复了排序和自适应参数，但超时截断仍会丢弃剩余候选牌。
+
+**第一轮修复**（已在工作区）:
+
+#### 候选牌排序 (`bridge/mcts/alpha_mu.py`)
+- 将牌按 rank 升序（小将牌先评估，用于将吃决策）
+- 副牌按 rank 降序（大牌先评估）
+- 确保重要候选牌优先被评估，超时时丢的是末尾小牌
+
+#### 自适应 worlds + 超时 (`bridge/play_service.py`)
+- worlds 随牌数减少线性放大：13张→base, 12→2×base, ... 4→10×base (cap 100)
+- `ALPHA_MU_NUM_WORLDS` 从 30 降到 20（`config.py`）
+- >12 张牌时间上限从 30s 提升到 60s
+
+**第二轮修复**（今日完成）:
+
+#### 超时快速 DD 回退 (`bridge/mcts/alpha_mu.py`)
+- **核心改动**：当 `_time_up()` 触发截断时，对剩余候选牌执行快速 DD 叶节点评估（`_evaluate_leaf`），而非直接丢弃
+- 快速评估跳过递归搜索（Max→Min→...），只做单层 DD 求解
+- 速度：每张剩余牌 ~N_worlds 次 DDS（vs 完整递归的 N×depth×branching 次），快 5-10 倍
+- 快速评估结果标记 `quick: True`，选牌时完整 αμ 搜索优先（同分时 `is_quick=0 > is_quick=1`）
+- 推理输出标注 `⚡` 和快速评估数量（如 "1 quick-DD"）
+
+**测试验证**:
+- 简单场景（单花色）：12/12 全评估，0.9s完成
+- 复杂场景（缺门+多花色）：3s 限制下 13/13 全评估（1 张 quick-DD），之前丢失 2 张
+- 测试文件：`tests/debug_timeout_check.py`、`tests/debug_timeout_complex.py`
+
+**待后续研究**:
+- 极端复杂局面（DDS 30ms/次）60s 仍可能不足，但快速回退确保所有候选至少得到叶节点评估
+- `_build_child_state` 浅拷贝风险（出现 "Wrong number of remaining cards" 但未稳定复现）
+- 可能的方向：按 DDS 平均耗时自适应调整 timeout、残局求解器替代 DDS
+
 ## 2026-06-29
 
 ### PIMC 采样质量重构：信念粒子层架构重设计

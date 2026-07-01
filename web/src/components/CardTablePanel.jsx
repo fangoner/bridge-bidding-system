@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, Button, IconButton, Tooltip, useTheme } from '@mui/material'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
@@ -75,8 +76,32 @@ function CardTablePanel({
     reviewCursor,
   } = usePlay()
 
-  // 复盘游标对应的墩（派生）
-  const reviewTrick = reviewCursor != null && playState?.tricks ? playState.tricks[reviewCursor] : null
+  // 构建全局牌序列（每张牌一个对象，含 globalIdx / trick / cardInTrick）
+  const allPlayedCards = useMemo(() => {
+    if (!playState) return []
+    const cards = []
+    let idx = 0
+    for (const t of (playState.tricks || [])) {
+      for (let ci = 0; ci < (t.cards || []).length; ci++) {
+        cards.push({ globalIdx: idx++, trick: t, cardInTrick: ci })
+      }
+    }
+    for (let ci = 0; ci < (playState.current_trick?.cards || []).length; ci++) {
+      cards.push({ globalIdx: idx++, trick: null, cardInTrick: ci })
+    }
+    return cards
+  }, [playState?.tricks, playState?.current_trick?.cards])
+
+  // 复盘游标对应的墩（按牌序号查找所属trick）
+  const reviewTrick = useMemo(() => {
+    if (reviewCursor == null || !playState?.tricks) return null
+    let accum = 0
+    for (const t of playState.tricks) {
+      if (reviewCursor < accum + (t.cards?.length || 0)) return t
+      accum += t.cards?.length || 0
+    }
+    return null
+  }, [reviewCursor, playState?.tricks])
 
   // 检测是否四家手牌齐全（模拟实战牌不全时隐藏小房子/DD相关功能）
   const allHandsComplete = ['南','北','东','西'].every(p => {
@@ -84,9 +109,18 @@ function CardTablePanel({
     return h && (h.spades || h.hearts || h.diamonds || h.clubs)
   })
   return (
-    <Paper elevation={3} sx={{
+    <Paper elevation={0} sx={{
       p: 1,
-      bgcolor: isDark ? 'rgba(30, 41, 59, 0.9)' : (isMobile ? '#f5f5f5' : '#e8e8e8'),
+      background: isDark
+        ? 'linear-gradient(135deg, rgba(30, 41, 59, 0.75) 0%, rgba(30, 41, 59, 0.6) 100%)'
+        : 'linear-gradient(135deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.7) 100%)',
+      backdropFilter: 'blur(20px) saturate(180%)',
+      WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+      border: `1px solid ${isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255, 255, 255, 0.8)'}`,
+      boxShadow: isDark
+        ? '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
+        : '0 8px 32px rgba(79, 70, 229, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+      borderRadius: 3,
       display: 'flex',
       flexDirection: 'column',
       flex: isMobile ? undefined : '1 1 0%',

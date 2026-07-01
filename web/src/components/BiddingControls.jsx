@@ -28,7 +28,7 @@ const getBidColor = (bid, theme) => {
       return { color: '#cbd5e1', bgColor: 'rgba(148,163,184,0.12)', borderColor: 'rgba(148,163,184,0.2)' };
     }
     if (suit === 'T') {
-      return { color: '#c4b5fd', bgColor: 'rgba(139,92,246,0.15)', borderColor: 'rgba(139,92,246,0.25)' };
+      return { color: '#b0bec5', bgColor: 'rgba(144,164,174,0.15)', borderColor: 'rgba(144,164,174,0.25)' };
     }
     if (bid === 'X') {
       return { color: '#fca5a5', bgColor: 'rgba(239,68,68,0.15)', borderColor: 'rgba(239,68,68,0.3)' };
@@ -50,7 +50,7 @@ const getBidColor = (bid, theme) => {
     return { color: '#1e293b', bgColor: '#f1f5f9', borderColor: '#94a3b8' };
   }
   if (suit === 'T') {
-    return { color: '#7c3aed', bgColor: '#f5f3ff', borderColor: '#a78bfa' };
+    return { color: '#455a64', bgColor: '#eceff1', borderColor: '#90a4ae' };
   }
   if (bid === 'X') {
     return { color: '#dc2626', bgColor: '#fef2f2', borderColor: '#fca5a5' };
