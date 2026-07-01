@@ -323,6 +323,7 @@ function CardTablePanel({
         flex: 1,
         minHeight: 0,
         overflow: 'hidden',
+        height: '100%',
       }}>
         <CardTable
           hands={hands}

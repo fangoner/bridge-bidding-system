@@ -124,12 +124,12 @@ function CardTable({
   const INNER_GAP = 0   // 信息条到手牌的间距
 
   // NS手牌容器
-  const nsHandWidth = isMobile ? 'calc((100vw - 12px) * 0.88)' : 380
+  const nsHandWidth = isMobile ? 'calc((100vw - 12px) * 0.88)' : 400
   const nsHandHeight = isMobile ? 'auto' : 'auto'
   // EW旋转手牌：布局盒(ewLayoutW x ewLayoutH)；内部(ewInnerW x ewInnerH)旋转90°
   // EW布局盒尺寸=旋转后视觉尺寸，确保信息条对齐
-  const ewInnerW = 360  // 内部手牌宽度→旋转后=视觉高度
-  const ewInnerH = 92   // 内部手牌高度→旋转后=视觉宽度
+  const ewInnerW = 410  // 内部手牌宽度→旋转后=视觉高度
+  const ewInnerH = 96   // 内部手牌高度→旋转后=视觉宽度
   const ewLayoutW = ewInnerH  // 布局宽度=视觉宽度（与内层高一致）
   const ewLayoutH = ewInnerW  // 布局高度=视觉高度（与内层宽一致）
   const biddingTableWidth = isMobile ? 'calc((100vw - 12px) * 0.5)' : 160
@@ -741,6 +741,35 @@ function CardTable({
     )
   };
 
+  const InfoBar = ({ position, sx }) => {
+    const hand = hands?.[position]
+    const hasHandData = hand && (hand.spades || hand.hearts || hand.diamonds || hand.clubs)
+    const showInput = !readonlyMode && !showPlayPanel && isAIPosition(position) && !hasHandData && (!biddingStarted || stopBidding)
+    return (
+      <Box sx={{
+        display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0,
+        bgcolor: isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.7)',
+        backdropFilter: 'blur(4px)', borderRadius: 1, px: 0.8, py: 0.2,
+        ...sx,
+      }}>
+        <Typography variant="caption" sx={{ fontWeight: 700, fontSize: '0.75rem', color: isDark ? '#e2e8f0' : '#333' }}>
+          {position}{dealer === position ? '*' : ''}
+          {hasHandData && hand?.hcp !== undefined && !showInput ? ` ${hand.hcp}点` : ''}
+        </Typography>
+        {onPositionRoleChange && (
+          <ToggleButton value="check" size="small"
+            selected={positionRoles[position] === 'human'}
+            disabled={(showPlayPanel && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading)) || readonlyMode || (!showPlayPanel && biddingStarted && !hasHand(position))}
+            onChange={() => onPositionRoleChange(position, positionRoles[position] === 'human' ? 'ai' : 'human')}
+            sx={{ height: 18, px: 0.6, fontSize: '0.65rem', fontWeight: 600, borderRadius: 1, minWidth: 30, border: 'none',
+              bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.15)' : 'action.hover', color: 'text.primary',
+            }}
+          >{positionRoles[position] === 'human' ? '人类' : modelLabel(showPlayPanel ? playModel : fallbackModel)}</ToggleButton>
+        )}
+      </Box>
+    )
+  }
+
   const renderHandWithStatus = (hand, position, sxProps) => {
     const isCurrentlyBidding = currentBiddingPosition === position;
     const currentTurnPos = showPlayPanel ? playState?.current_player : currentBiddingPosition;
@@ -783,26 +812,27 @@ function CardTable({
         
         <Box sx={{
           bgcolor: 'transparent',
-          borderRadius: 0,
           p: 0,
+          m: 0,
+          overflow: 'hidden',
           width: sxProps?.width || nsHandWidth,
           height: sxProps?.height || nsHandHeight,
           maxWidth: sxProps?.maxWidth || 'none',
-          maxHeight: sxProps?.maxHeight || 'none',
           flexShrink: 0,
           boxShadow: 'none',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           border: 'none',
+          borderRadius: 0,
           gap: 0,
           transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
           ...(currentTurnPos === position && {
             boxShadow: `0 0 0 2px ${theme.palette.primary.main}, 0 4px 14px rgba(0,0,0,0.2)`,
           }),
         }}>
-          {/* 信息栏（靠中心一侧）：infoSide='top'=在手牌上方, 'bottom'=在手牌下方 */}
-          {sxProps?.infoSide === 'top' && (
+          {/* 信息栏：可通过 noInfo 隐藏 */}
+          {!sxProps?.noInfo && sxProps?.infoSide === 'top' && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: `${INNER_GAP}px`, flexShrink: 0,
               bgcolor: isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.7)',
               backdropFilter: 'blur(4px)', borderRadius: 1, px: 0.8, py: 0.2,
@@ -922,7 +952,7 @@ function CardTable({
             </Box>
           )}
           {/* 信息栏（靠中心一侧）：infoSide='bottom'=在手牌下方 */}
-          {(!sxProps?.infoSide || sxProps.infoSide === 'bottom') && (
+          {!sxProps?.noInfo && (!sxProps?.infoSide || sxProps.infoSide === 'bottom') && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: `${INNER_GAP}px`, flexShrink: 0,
               bgcolor: isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.7)',
               backdropFilter: 'blur(4px)', borderRadius: 1, px: 0.8, py: 0.2,
@@ -954,16 +984,16 @@ function CardTable({
       flexDirection: 'column',
       alignItems: isMobile ? 'stretch' : 'center',
       justifyContent: 'space-between',
-      p: '8px',
+      p: '12px',
+      m: 0,
       background: scheme.table.background,
       borderRadius: 2,
-      boxShadow: 0,
-      border: '2px dashed red',
-      flex: 1,
+      boxShadow: 'none',
+      width: '100%',
+      height: '100%',
       maxWidth: '100%',
-      maxHeight: '100%',
       position: 'relative',
-      overflow: 'visible',
+      overflow: 'hidden',
     }}>
       {/* 模拟实战清空按钮：任何阶段可见可点击（叫牌/打牌均可） */}
       {!readonlyMode && onSimulatedReset && gameMode !== 'pair' && (
@@ -1148,7 +1178,7 @@ function CardTable({
         </>
       ) : (
         <>
-          {renderHandWithStatus(north, '北', { width: nsHandWidth, height: nsHandHeight, maxWidth: '100%', infoSide: 'bottom' })}
+          {renderHandWithStatus(north, '北', { width: nsHandWidth, height: 'auto', maxWidth: '100%', noInfo: true })}
 
           <Box className="middle-row" sx={{
             display: 'flex',
@@ -1157,57 +1187,54 @@ function CardTable({
             width: '100%',
             maxWidth: 1000,
           }}>
-            {/* 西家：旋转90度竖直显示 */}
             <Box sx={{
               width: ewLayoutW, height: ewLayoutH,
-              flexShrink: 0, overflow: 'visible', position: 'relative',
+              flexShrink: 0, overflow: 'visible',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              <Box sx={{
-                transform: 'rotate(90deg)', transformOrigin: 'center center',
-                width: ewInnerW, height: ewInnerH,
-              }}>
-                {renderHandWithStatus(west, '西', { width: ewInnerW, height: ewInnerH, maxWidth: 'none', infoSide: 'top' })}
+              <Box sx={{ transform: 'rotate(90deg)', transformOrigin: 'center center' }}>
+                {renderHandWithStatus(west, '西', { width: ewInnerW, height: 'auto', maxWidth: 'none', noInfo: true })}
               </Box>
             </Box>
 
-            <Box className="table-center">
-              <Box className="table-border" sx={{
-                width: centerBoxSize,
-                height: centerBoxSize,
-                maxHeight: 'none',
-                border: scheme.table.centerBorder,
-                borderRadius: 2,
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'flex-start',
-                background: scheme.table.centerBg,
-                backdropFilter: scheme.table.centerBackdrop,
-                WebkitBackdropFilter: scheme.table.centerBackdrop,
-                boxShadow: scheme.table.centerShadow,
-                p: 0,
-                overflowY: 'auto',
-              }}>
-              {renderCenterContent()}
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
+              <InfoBar position="北" sx={{ mb: '-1px' }} />
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+                <InfoBar position="西" sx={{ mr: '-1px', transform: 'rotate(90deg)', whiteSpace: 'nowrap' }} />
+                <Box sx={{
+                  width: centerBoxSize,
+                  height: centerBoxSize,
+                  border: scheme.table.centerBorder,
+                  borderRadius: 2,
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'flex-start',
+                  background: scheme.table.centerBg,
+                  backdropFilter: scheme.table.centerBackdrop,
+                  WebkitBackdropFilter: scheme.table.centerBackdrop,
+                  boxShadow: scheme.table.centerShadow,
+                  p: 0,
+                  overflowY: 'auto',
+                }}>
+                {renderCenterContent()}
+                </Box>
+                <InfoBar position="东" sx={{ ml: '-1px', transform: 'rotate(-90deg)', whiteSpace: 'nowrap' }} />
               </Box>
+              <InfoBar position="南" sx={{ mt: '-1px' }} />
             </Box>
 
-            {/* 东家：旋转-90度竖直显示（数字朝左=向中心） */}
             <Box sx={{
               width: ewLayoutW, height: ewLayoutH,
-              flexShrink: 0, overflow: 'visible', position: 'relative',
+              flexShrink: 0, overflow: 'visible',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              <Box sx={{
-                transform: 'rotate(-90deg)', transformOrigin: 'center center',
-                width: ewInnerW, height: ewInnerH,
-              }}>
-                {renderHandWithStatus(east, '东', { width: ewInnerW, height: ewInnerH, maxWidth: 'none', infoSide: 'top' })}
+              <Box sx={{ transform: 'rotate(-90deg)', transformOrigin: 'center center' }}>
+                {renderHandWithStatus(east, '东', { width: ewInnerW, height: 'auto', maxWidth: 'none', noInfo: true })}
               </Box>
             </Box>
           </Box>
 
-          {renderHandWithStatus(south, '南', { width: nsHandWidth, height: nsHandHeight, maxWidth: '100%', infoSide: 'top' })}
+          {renderHandWithStatus(south, '南', { width: nsHandWidth, height: 'auto', maxWidth: '100%', noInfo: true })}
         </>
       )}
 

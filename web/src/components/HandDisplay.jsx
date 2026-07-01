@@ -51,7 +51,7 @@ const SUIT_ORDER = ['spades', 'hearts', 'diamonds', 'clubs']
 
 // ── 自适应参数 ──
 const MAX_CARD_WIDTH = 72
-const MIN_CARD_WIDTH = 46
+const MIN_CARD_WIDTH = 52
 const CARD_ASPECT = 1.42   // 宽:高 ≈ 1:1.42 (桥牌比例)
 const BASE_OVERLAP = 0.25  // 基础重叠比例
 
@@ -257,7 +257,8 @@ function HandDisplay({
                 sx={{
                   position: 'absolute',
                   left: offsetLeft,
-                  bottom: 0,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
                   zIndex: isSelected ? 10 : i + 1,
                 }}
               >
