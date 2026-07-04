@@ -1,5 +1,32 @@
 # 开发日志
 
+## 2026-07-03
+
+### 手牌布局4层容器结构重构 + 输入框/"未知"控件独立渲染
+
+**背景**: 东西家手牌旋转后溢出容器（向下偏移13.65px），且手牌输入框在renderHandWithStatus内嵌渲染导致东西家布局复杂、白天模式字体看不清。通过调试4层容器结构定位根因，并将输入框和"未知"控件独立渲染。
+
+**改进**:
+- **东西家手牌旋转溢出修复** (`HandDisplay.jsx#L244`): 手牌Box旋转90°后视觉范围向下偏移 `(cardHeight - cardWidth) / 2 = 13.65px`，通过 `top: offset - (cardHeight - cardWidth) / 2` 向上补偿，使手牌视觉范围与第4层layout box对齐
+- **手牌输入框独立渲染** (`CardTable.jsx`): 新增 `renderIndependentHandInput(position)` 函数，四家用绝对定位独立渲染（西: `left:0,top:50%,translateY(-50%)`；东: `right:0`；北: `top:0,left:50%,translateX(-50%)`；南: `bottom:0`），距桌面边框30px（通过card-table-container的padding），TextField固定宽度120px，renderHandWithStatus内showInput/showPlayHandInput分支留空
+- **"未知"控件独立渲染** (`CardTable.jsx`): 新增 `renderIndependentUnknown(position)` 函数，人类位置无手牌时显示"未知"，位于InfoBar顶部边缘与桌面边缘正中间（`top: calc(25% - 71px)` 等，用 `translate(-50%, -50%)` 中心定位），固定尺寸90×46px，字体1.4rem加粗，白天模式 `color: '#1a1a1a'` + 半透明白底增强可读性
+- **renderHandWithStatus简化**: 删除内嵌的南北家输入框代码（约70行），showInput/showPlayHandInput和"未知"分支统一留空，由独立控件渲染
+- **输入框白天模式可读性**: TextField输入文字 `color: '#1a1a1a'`，helperText `rgba(0,0,0,0.85)`，背景纯白底，边框 `rgba(0,0,0,0.23)`
+- **调试边框清理**: 第1层（4家位置定位容器）和第2层（renderHandWithStatus根Box）的调试边框已清理为 `border: 'none'`
+
+**修改文件**: `web/src/components/CardTable.jsx`, `web/src/components/HandDisplay.jsx`
+
+**测试验证**: 刷新页面确认东西家手牌不再溢出容器，四家输入框独立渲染且距桌面边框30px，"未知"控件在InfoBar与桌边正中间且四家尺寸一致，白天模式字体清晰可读
+
+### 4层容器结构说明（调试成果）
+
+- **第1层**（位置定位容器，CardTable.jsx）: `position: absolute` + `fit-content`，四家紧贴桌面四边
+- **第2层**（renderHandWithStatus根Box）: `position: relative` + `display: flex`，状态管理（信息栏/AI输入框/未知/手牌切换）
+- **第3层**（HandDisplay根Box）: `width/height: auto`，组件边界
+- **第4层**（renderCards手牌排列Box）: `position: relative` + 固定尺寸，手牌绝对定位排列
+
+**关键认识**: `fit-content` 只计算layout尺寸，不计算 `position: absolute` 子元素或 `transform` 后的视觉溢出。东西家牌因 `top: offset - 13.65px` 视觉上向上溢出第4层layout box，但layout尺寸不变。
+
 ## 2026-07-02
 
 ### 复盘改为按牌回退 + DD Hint 预录

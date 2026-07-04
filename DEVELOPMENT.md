@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。v1.39新增截屏/图片识别导入牌局（Doubao Vision API）、定约/首攻确认对话框、研究模式、花色主题感知系统。v1.40 Tiered分层引擎重做（DD替代MCTS中盘）、新增Perfect DD全知引擎和人类DD提示功能。v1.41打牌引擎大师级优化：αμ搜索解决PIMC缺陷、信念跟踪粒子滤波、防守信号模型、LLM校验层、三信号关键决策检测、首攻DD+LLM融合、MCTS根节点选牌修复。v1.42 αμ超时快速DD回退、记录服务器端备份、提示词RKCB规则强化（对方问叫拦截+将牌判定+5NT后续）、打牌返回叫牌按钮、手牌面板LLM模型显示。v1.43 按牌复盘替代按墩复盘（52张逐张回退）、DD Hint预录到trick数据（出牌时自动计算并存入）、复盘时DD hint标记（最优绿色/非最优橙色）、出牌记录按牌高亮/灰化。
+本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。v1.39新增截屏/图片识别导入牌局（Doubao Vision API）、定约/首攻确认对话框、研究模式、花色主题感知系统。v1.40 Tiered分层引擎重做（DD替代MCTS中盘）、新增Perfect DD全知引擎和人类DD提示功能。v1.41打牌引擎大师级优化：αμ搜索解决PIMC缺陷、信念跟踪粒子滤波、防守信号模型、LLM校验层、三信号关键决策检测、首攻DD+LLM融合、MCTS根节点选牌修复。v1.42 αμ超时快速DD回退、记录服务器端备份、提示词RKCB规则强化（对方问叫拦截+将牌判定+5NT后续）、打牌返回叫牌按钮、手牌面板LLM模型显示。v1.43 按牌复盘替代按墩复盘（52张逐张回退）、DD Hint预录到trick数据（出牌时自动计算并存入）、复盘时DD hint标记（最优绿色/非最优橙色）、出牌记录按牌高亮/灰化。v1.44 手牌布局4层容器结构重构：东西家旋转溢出修复、手牌输入框和"未知"控件独立渲染、白天模式字体可读性增强。
 
 ## 功能模块
 
@@ -715,7 +715,17 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 
 ## 版本历史
 
-### v1.41 (当前版本)
+### v1.44 (当前版本)
+- **手牌布局4层容器结构重构**
+  - **东西家手牌旋转溢出修复** — 手牌Box旋转90°后视觉范围向下偏移 `(cardHeight - cardWidth) / 2 = 13.65px`，通过 `top: offset - (cardHeight - cardWidth) / 2` 向上补偿（`HandDisplay.jsx#L244`）
+  - **手牌输入框独立渲染** — 新增 `renderIndependentHandInput(position)` 函数，四家用绝对定位独立渲染，距桌面边框30px（通过card-table-container的padding），TextField固定宽度120px，renderHandWithStatus内showInput/showPlayHandInput分支留空
+  - **"未知"控件独立渲染** — 新增 `renderIndependentUnknown(position)` 函数，人类位置无手牌时显示"未知"，位于InfoBar顶部边缘与桌面边缘正中间（`top: calc(25% - 71px)` 等，用 `translate(-50%, -50%)` 中心定位），固定尺寸90×46px，字体1.4rem加粗
+  - **renderHandWithStatus简化** — 删除内嵌的南北家输入框代码（约70行），showInput/showPlayHandInput和"未知"分支统一留空
+  - **白天模式字体可读性增强** — TextField输入文字 `color: '#1a1a1a'`，helperText `rgba(0,0,0,0.85)`，背景纯白底
+  - **4层容器结构** — 第1层位置定位（`fit-content`）→ 第2层状态管理（`renderHandWithStatus`）→ 第3层组件边界（`HandDisplay`根Box）→ 第4层手牌排列（`renderCards`）
+  - 修改文件: `web/src/components/CardTable.jsx`, `web/src/components/HandDisplay.jsx`
+
+### v1.41
 - **打牌引擎大师级优化（优先级 1-7 全套实施）**
   - **优先级 1：三信号关键决策检测** — 重写 `_is_critical_decision`，融合 Strategy Fusion 信号（min-max 跨度≥3墩）、集群信号（#1-#2 距离>2.0×SE）、样本不足信号（<30样本），任一触发即升级 LLM
   - **优先级 2：MCTS 根节点选牌 + rollout 策略强化** — 修复根节点选牌逻辑（访问次数+胜率综合排序），`ROLLOUT_GREEDY_PROB`=0.80 启发式主导

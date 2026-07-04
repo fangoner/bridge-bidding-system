@@ -695,7 +695,7 @@ function PlayDetailPanel({
         </Box>
       </Box>
 
-      <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: isDark ? 'radial-gradient(ellipse at center, #1a2f22 0%, #0d1f15 50%, #06120d 100%)' : 'radial-gradient(ellipse at center, #3d7a58 0%, #25563b 40%, #1a3d28 100%)', borderRadius: 2, border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd', minHeight: 0, p: 1 }}>
+      <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: isDark ? 'rgba(255,255,255,0.04)' : '#fafafa', borderRadius: 2, border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd', minHeight: 0, p: 1 }}>
 
         <Box sx={{ flex: 2, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
           {renderAIOutput()}

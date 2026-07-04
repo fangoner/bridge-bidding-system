@@ -1,19 +1,6 @@
-import React, { useMemo, useRef, useEffect, useState } from 'react'
+import React, { useMemo } from 'react'
 import { Box, Typography, useTheme } from '@mui/material'
 import { styled } from '@mui/material/styles'
-
-const HandCard = styled(Box, {
-  shouldForwardProp: (prop) => !['isActive', 'isHuman', 'isPartner'].includes(prop),
-})(({ theme }) => ({
-  borderRadius: 0,
-  padding: 0,
-  width: '100%',
-  height: '100%',
-  fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", Roboto, sans-serif',
-  fontWeight: 600,
-  transition: 'all 0.25s ease',
-  color: theme.palette.mode === 'dark' ? '#f5f5f5' : '#1a1a1a',
-}));
 
 const HandTitle = styled(Typography)(({ theme }) => ({
   fontWeight: 700,
@@ -65,11 +52,11 @@ function PlayingCard({
   // 统一比例：牌宽=size，牌高=size*1.42（正常竖向扑克牌）
   const cardW = size
   const cardH = size * CARD_ASPECT
-  const fontSize = Math.max(8, cardW * 0.32)
-  const smallFont = Math.max(5.5, cardW * 0.18)
+  const fontSize = Math.max(8, cardW * 0.40)
+  const smallFont = Math.max(5.5, cardW * 0.22)
 
   const isVertical = orientation === 'vertical'
-  const hoverTransform = 'translateY(-14px)'
+  const hoverTransform = 'translateY(-15px)'
 
   return (
     <Box
@@ -92,17 +79,10 @@ function PlayingCard({
             ? '0 1px 2px rgba(0,0,0,0.06)'
             : '0 2px 5px rgba(0,0,0,0.14), 0 1px 2px rgba(0,0,0,0.06)',
         cursor: isPlayable ? 'pointer' : 'default',
-        opacity: isPlayed ? 0.45 : (!isPlayable ? 0.45 : 1),
-        filter: isPlayed ? 'grayscale(0.6)' : (!isPlayable ? 'grayscale(0.3)' : 'none'),
-        transform: isSelected ? hoverTransform : 'none',
+        opacity: 1,
+        filter: isPlayed ? 'grayscale(1)' : 'none',
+        transform: 'none',
         transformOrigin: 'center center',
-        transition: 'transform 0.15s ease, box-shadow 0.15s ease, border 0.15s ease',
-        zIndex: isSelected ? 999 : 1,
-        '&:hover': isPlayable ? {
-          transform: hoverTransform,
-          boxShadow: '0 6px 18px rgba(0,0,0,0.22), 0 2px 4px rgba(0,0,0,0.1)',
-          zIndex: 999,
-        } : {},
         ...style,
       }}
     >
@@ -133,19 +113,20 @@ function PlayingCard({
         <Typography sx={{ fontSize: Math.max(4, smallFont * 0.75), color, lineHeight: 1 }}>{suit}</Typography>
       </Box>
 
-      {/* DD hint 小标签 */}
+      {/* DD hint 小标签：统一放牌面本地左下角（rank+suit 在左上角，对侧边缘；四家旋转后均落在可见 peek 内） */}
       {hint && (
         <Box sx={{
-          position: 'absolute', bottom: -3, left: '50%', transform: 'translateX(-50%)',
+          position: 'absolute',
+          bottom: 2, left: 2,
           bgcolor: hint === '=' || hint.startsWith('+') ? '#c8e6c9' : '#ffcdd2',
           color: hint === '=' || hint.startsWith('+') ? '#2e7d32' : '#c62828',
-          fontSize: `${Math.max(5, cardW * 0.15)}rem`,
+          fontSize: `${Math.max(8, cardW * 0.14)}px`,
           fontWeight: 800,
-          px: 0.2, borderRadius: 2,
+          px: 0.3, borderRadius: 2,
           lineHeight: 1.1,
           whiteSpace: 'nowrap',
-          zIndex: 2,
-          border: '1px solid rgba(0,0,0,0.1)',
+          zIndex: 4,
+          border: '1px solid rgba(0,0,0,0.15)',
         }}>
           {hint}
         </Box>
@@ -172,28 +153,14 @@ function HandDisplay({
   selectedCardKey = null,
   orientation = 'horizontal', // 'horizontal' | 'vertical'
   popDirection = 'auto', // 'auto' | 'left' | 'right' 纵向时的弹出方向
+  enableHover = false, // 是否启用悬停弹出效果
 }) {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
-  const containerRef = useRef(null)
-  const [containerSize, setContainerSize] = useState(0)
-
-  useEffect(() => {
-    if (containerRef.current) {
-      const obs = new ResizeObserver(entries => {
-        for (const entry of entries) {
-          // 横向用宽度，纵向用高度作为可用空间
-          if (orientation === 'vertical') {
-            setContainerSize(entry.contentRect.height)
-          } else {
-            setContainerSize(entry.contentRect.width)
-          }
-        }
-      })
-      obs.observe(containerRef.current)
-      return () => obs.disconnect()
-    }
-  }, [orientation])
+  const isVertical = orientation === 'vertical'
+  const alignItems = isVertical
+    ? (popDirection === 'left' ? 'flex-end' : 'flex-start')
+    : 'center'
 
   const hasCards = hand && (hand.spades || hand.hearts || hand.diamonds || hand.clubs)
 
@@ -227,7 +194,6 @@ function HandDisplay({
   const renderCards = () => {
     if (allCards.length === 0) return null
 
-    const isVertical = orientation === 'vertical'
     const stepUnit = cardWidth
 
     const cardHeight = cardWidth * CARD_ASPECT
@@ -235,31 +201,16 @@ function HandDisplay({
       ? cardWidth + (allCards.length - 1) * cardWidth * (1 - overlapRatio)
       : totalFanLength
 
-    // 纵向模式下水平对齐：西家靠左，东家靠右
-    const alignItems = isVertical
-      ? (popDirection === 'left' ? 'flex-end' : 'flex-start')
-      : 'center'
-
     return (
-      <Box ref={containerRef} sx={{
+      <Box sx={{
         display: 'flex',
-        justifyContent: 'center',
-        alignItems,
         flexDirection: isVertical ? 'column' : 'row',
-        width: '100%',
-        height: '100%',
         position: 'relative',
+        width: isVertical ? cardHeight : totalFanLength,
+        height: isVertical ? totalLength : cardHeight,
         overflow: 'visible',
+        flexShrink: 0,
       }}>
-        <Box sx={{
-          display: 'flex',
-          flexDirection: isVertical ? 'column' : 'row',
-          position: 'relative',
-          width: isVertical ? cardHeight : totalFanLength,
-          height: isVertical ? totalLength : cardHeight,
-          overflow: 'visible',
-          flexShrink: 0,
-        }}>
           {allCards.map((card, i) => {
             const isPlayed = playedCards && playedCards.has(card.cardKey)
             const isPlayable = !playableSet || playableSet.has(card.cardKey)
@@ -275,57 +226,93 @@ function HandDisplay({
               ? (isSelected ? 999 : total - i)
               : (isSelected ? 999 : i + 1)
 
-            // 弹出方向：都向中心
-            // 西家(right)：向右 → translateX(14px)
-            // 东家(left)：向左 → translateX(-14px)
-            const hoverDx = popDirection === 'left' ? -14 : 14
+            // 弹出方向：都向中心 15px
+            const hoverDx = popDirection === 'left' ? -15 : 15
 
             const rotateDeg = popDirection === 'left' ? -90 : 90
 
+            const canHover = enableHover && isPlayable
+            const showHint = enableHover && hint && isPlayable
+            // 旋转后牌视觉宽度 = cardHeight，外层宽度 = cardWidth
+            // hint距视觉牌边缘的偏移 = (cardHeight - cardWidth) / 2 + 间距
+            const hintOffset = cardWidth * (CARD_ASPECT - 1) / 2 + 6
             return (
               <Box
                 key={card.cardKey}
                 sx={{
                   position: 'absolute',
                   left: isVertical ? '50%' : offset,
-                  top: isVertical ? offset : '50%',
+                  top: isVertical ? offset - (cardHeight - cardWidth) / 2 : 0,
                   transform: isVertical
-                    ? `translateX(-50%) rotate(${rotateDeg}deg)`
-                    : 'translateY(-50%)',
-                  transformOrigin: 'center center',
+                    ? 'translateX(-50%)'
+                    : 'none',
                   zIndex: zIdx,
-                  '&:hover': isPlayable ? {
-                    transform: isVertical
-                      ? `translateX(-50%) rotate(${rotateDeg}deg) translateX(${hoverDx}px)`
-                      : `translateY(-50%) translateY(-14px)`,
-                    zIndex: 999,
-                  } : {},
-                  transition: 'transform 0.15s ease',
                 }}
               >
-                <PlayingCard
-                  suit={card.suit}
-                  rank={card.rank}
-                  color={color}
-                  size={cardWidth}
-                  isSelected={isSelected}
-                  isPlayable={clickable ? isPlayable : true}
-                  isPlayed={!!isPlayed}
-                  onClick={clickable && onCardClick ? () => onCardClick(card.suit, card.rank) : undefined}
-                  hint={hint}
-                  orientation={orientation}
-                  popDirection={popDirection}
-                />
+                <Box
+                  sx={{
+                    transform: isVertical ? `rotate(${rotateDeg}deg)` : 'none',
+                    transition: 'transform 0.15s ease',
+                    '&:hover': canHover ? {
+                      transform: isVertical
+                        ? `translateX(${hoverDx}px) rotate(${rotateDeg}deg)`
+                        : 'translateY(-15px)',
+                    } : {},
+                  }}
+                >
+                  <PlayingCard
+                    suit={card.suit}
+                    rank={card.rank}
+                    color={color}
+                    size={cardWidth}
+                    isSelected={isSelected}
+                    isPlayable={clickable ? isPlayable : true}
+                    isPlayed={!!isPlayed}
+                    onClick={clickable && onCardClick ? () => onCardClick(card.suit, card.rank) : undefined}
+                    orientation={orientation}
+                    popDirection={popDirection}
+                  />
+                  {/* DD hint 标签 - 牌面本地左下角（rank+suit 在左上角，对侧边缘；随牌旋转） */}
+                  {showHint && (
+                    <Box sx={{
+                      position: 'absolute',
+                      bottom: 2, left: 2,
+                      color: hint === '=' || hint.startsWith('+') ? '#2e7d32' : '#c62828',
+                      fontSize: `${Math.max(7, cardWidth * 0.16)}px`,
+                      fontWeight: 800,
+                      lineHeight: 1,
+                      whiteSpace: 'nowrap',
+                      zIndex: 10,
+                      pointerEvents: 'none',
+                      textShadow: '0 0 2px #fff, 0 0 2px #fff, 0 1px 1px rgba(0,0,0,0.3)',
+                    }}>
+                      {hint}
+                    </Box>
+                  )}
+                </Box>
               </Box>
             )
           })}
         </Box>
-      </Box>
     )
   }
 
   return (
-    <HandCard isActive={isActive} isHuman={isHuman} isPartner={isPartner}>
+    <Box sx={{
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'flex-start',
+      alignItems,
+      width: 'auto',
+      height: 'auto',
+      overflow: 'visible',
+      p: 0, m: 0,
+      borderRadius: 0,
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", Roboto, sans-serif',
+      fontWeight: 600,
+      transition: 'all 0.25s ease',
+      color: isDark ? '#f5f5f5' : '#1a1a1a',
+    }}>
       {!hideTitle && (
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
           <HandTitle>
@@ -347,7 +334,7 @@ function HandDisplay({
           </Typography>
         </HiddenHand>
       )}
-    </HandCard>
+    </Box>
   );
 }
 

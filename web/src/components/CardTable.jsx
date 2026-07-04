@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import { Box, Button, Chip, CircularProgress, TextField, ToggleButton, ToggleButtonGroup, Typography, IconButton, Tooltip, useTheme, useMediaQuery, alpha } from '@mui/material';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
 import BorderColorIcon from '@mui/icons-material/BorderColor'
@@ -98,6 +99,7 @@ function CardTable({
     '西': ''
   })
   const [selectedBidLevel, setSelectedBidLevel] = useState(null)
+  const [bidBoxPos, setBidBoxPos] = useState({ left: 0, top: 0, ready: false }) // Portal fixed位置
   const [mobileSelectedCard, setMobileSelectedCard] = useState(null) // 手机端双击出牌
   const [manualCardInput, setManualCardInput] = useState({}) // {position: string} 手动出牌输入
   // 出牌人变化时清除手机端选中
@@ -136,6 +138,26 @@ function CardTable({
   const infoBarHeight = 24 // 信息条估计高度（旋转后视觉宽度）
   const biddingTableWidth = isMobile ? 'calc((100vw - 12px) * 0.5)' : 160
   const centerBoxSize = isMobile ? 120 : 220
+
+  // 叫牌面板初始定位
+  useEffect(() => {
+    if (bidBoxPos.ready) return
+    const t = setTimeout(() => {
+      const center = document.querySelector('.card-table-container')
+      if (center) {
+        const rect = center.getBoundingClientRect()
+        setBidBoxPos({
+          left: rect.left + rect.width / 2 - 100,
+          top: rect.top + rect.height / 2 + centerBoxSize / 2 + 20,
+          ready: true,
+        })
+      } else {
+        setBidBoxPos(p => ({ ...p, ready: true }))
+      }
+    }, 100)
+    return () => clearTimeout(t)
+  }, [bidBoxPos.ready, centerBoxSize])
+
   // Grid间距：手牌区到中心区的统一间距
   const GRID_GAP = isMobile ? 6 : 4
 
@@ -749,6 +771,7 @@ function CardTable({
     const hand = hands?.[position]
     const hasHandData = hand && (hand.spades || hand.hearts || hand.diamonds || hand.clubs)
     const showInput = !readonlyMode && !showPlayPanel && isAIPosition(position) && !hasHandData && (!biddingStarted || stopBidding)
+    const isCurrentlyBidding = currentBiddingPosition === position
     return (
       <Box sx={{
         display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0,
@@ -756,7 +779,16 @@ function CardTable({
         backdropFilter: 'blur(4px)', borderRadius: 1, px: 0.8, py: 0.2,
         ...sx,
       }}>
-        <Typography variant="caption" sx={{ fontWeight: 700, fontSize: '0.75rem', color: isDark ? '#e2e8f0' : '#333' }}>
+        {isCurrentlyBidding && (
+          <CircularProgress size={12} sx={{ color: '#e53935' }} />
+        )}
+        <Typography variant="caption"
+          onClick={(!readonlyMode && !showPlayPanel && onDealerChange) ? () => onDealerChange(position) : undefined}
+          sx={{
+            fontWeight: 700, fontSize: '0.75rem', color: isDark ? '#e2e8f0' : '#333',
+            cursor: (!readonlyMode && !showPlayPanel && onDealerChange) ? 'pointer' : 'default',
+            userSelect: 'none',
+          }}>
           {position}{dealer === position ? '*' : ''}
           {hasHandData && hand?.hcp !== undefined && !showInput ? ` ${hand.hcp}点` : ''}
         </Typography>
@@ -770,6 +802,143 @@ function CardTable({
             }}
           >{positionRoles[position] === 'human' ? '人类' : modelLabel(showPlayPanel ? playModel : fallbackModel)}</ToggleButton>
         )}
+      </Box>
+    )
+  }
+
+  // 独立手牌输入框（四家通用，绝对定位，距桌面边框30px）
+  const renderIndependentHandInput = (position) => {
+    const isAI = isAIPosition(position)
+    const hasHandData = hasHand(position)
+    const showInput = !readonlyMode && !showPlayPanel && isAI && !hasHandData && (!biddingStarted || stopBidding)
+    const manualPlayedCount = showPlayPanel ? getManualPlayedCards(position).length : 0
+    const showPlayHandInput = !readonlyMode && showPlayPanel && playState
+      && (!playState.hands?.[position] || playState.hands[position].length === 0)
+      && manualPlayedCount === 0
+      && !(position === playState.dummy && playState.phase === 'lead')
+      && (isAI || position === playState.dummy)
+
+    if (!showInput && !showPlayHandInput) return null
+
+    // 四家定位：东西垂直居中，南北水平居中
+    let positionStyle = {}
+    if (position === '西') {
+      positionStyle = { left: 0, top: '50%', transform: 'translateY(-50%)' }
+    } else if (position === '东') {
+      positionStyle = { right: 0, top: '50%', transform: 'translateY(-50%)' }
+    } else if (position === '北') {
+      positionStyle = { top: 0, left: '50%', transform: 'translateX(-50%)' }
+    } else if (position === '南') {
+      positionStyle = { bottom: 0, left: '50%', transform: 'translateX(-50%)' }
+    }
+
+    const helperText = showInput
+      ? 'AKQJ T98 T87 654（用-缺门）'
+      : `输入${position}家手牌（13张）`
+
+    return (
+      <Box sx={{
+        position: 'absolute',
+        ...positionStyle,
+        zIndex: 100,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+      }}>
+        <TextField
+          size="small"
+          value={handInputs[position]}
+          onChange={(e) => handleHandInputChange(position, e.target.value)}
+          error={!!inputErrors[position]}
+          helperText={inputErrors[position] || helperText}
+          sx={{
+            width: '120px',
+            bgcolor: isDark ? 'rgba(255,255,255,0.05)' : '#ffffff',
+            borderRadius: 1,
+            '& .MuiInputBase-input': {
+              fontSize: '0.75rem',
+              padding: '4px',
+              color: isDark ? '#f5f5f5' : '#1a1a1a',
+            },
+            '& .MuiFormHelperText-root': {
+              fontSize: '0.6rem',
+              margin: '2px 0 0 0',
+              color: isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.85)',
+            },
+            '& .MuiOutlinedInput-root': {
+              '& fieldset': { borderColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.23)' },
+              '&:hover fieldset': { borderColor: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.5)' },
+            },
+          }}
+        />
+        <Button
+          size="small"
+          variant="contained"
+          sx={{ mt: 0.5, fontSize: '0.7rem', py: 0.3 }}
+          onClick={() => showInput ? handleHandInputSubmit(position) : handleAIHandSubmit(position)}
+          disabled={!handInputs[position].trim()}
+        >
+          确认
+        </Button>
+      </Box>
+    )
+  }
+
+  // 独立"未知"控件（人类位置无手牌时显示，位于InfoBar与桌面边缘正中间）
+  const renderIndependentUnknown = (position) => {
+    const isHuman = positionRoles && positionRoles[position] === 'human'
+    const hasHandData = hasHand(position)
+    const manualPlayedCount = showPlayPanel ? getManualPlayedCards(position).length : 0
+    const handKnownInPlay = showPlayPanel && playState?.hands?.[position]?.length > 0
+    // 明手首攻前无手牌有单独的[未知]显示，此处跳过避免重复
+    const isDummyLeadUnknown = showPlayPanel && playState && position === playState.dummy && playState.phase === 'lead' && !hasHand(position)
+
+    if (!isHuman || hasHandData || handKnownInPlay || manualPlayedCount > 0 || isDummyLeadUnknown) return null
+
+    // InfoBar顶部边缘距桌面边缘：50% - (centerBoxSize/2 + HAND_GAP + infoBarHeight) = 50% - 142px
+    // "未知"中心放在InfoBar顶部边缘与桌面边缘的正中间：25% - 71px
+    // 用 translate(-50%, -50%) 让中心点定位
+    let positionStyle = {}
+    if (position === '西') {
+      positionStyle = { left: 'calc(25% - 71px)', top: '50%', transform: 'translate(-50%, -50%)' }
+    } else if (position === '东') {
+      positionStyle = { left: 'calc(75% + 71px)', top: '50%', transform: 'translate(-50%, -50%)' }
+    } else if (position === '北') {
+      positionStyle = { top: 'calc(25% - 71px)', left: '50%', transform: 'translate(-50%, -50%)' }
+    } else if (position === '南') {
+      positionStyle = { top: 'calc(75% + 71px)', left: '50%', transform: 'translate(-50%, -50%)' }
+    }
+
+    return (
+      <Box sx={{
+        position: 'absolute',
+        ...positionStyle,
+        zIndex: 100,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}>
+        <Typography sx={{
+          fontSize: '1.4rem',
+          fontWeight: 700,
+          color: isDark ? '#f5f5f5' : '#1a1a1a',
+          bgcolor: isDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.85)',
+          backdropFilter: 'blur(6px)',
+          borderRadius: 1,
+          px: 1.5,
+          py: 0.5,
+          border: isDark ? '1px solid rgba(255,255,255,0.15)' : '1px solid rgba(0,0,0,0.1)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '90px',
+          height: '46px',
+          boxSizing: 'border-box',
+          whiteSpace: 'nowrap',
+          lineHeight: 1,
+        }}>
+          未知
+        </Typography>
       </Box>
     )
   }
@@ -796,47 +965,26 @@ function CardTable({
     const playedCardsSet = (showPlayedCards && showPlayPanel && playState) ? getPlayedCardsSet() : null
     
     return (
-      <Box sx={{ ...sxProps, position: 'relative' }}>
-        {isCurrentlyBidding && (
-          <Box sx={{
-            position: 'absolute',
-            top: 10,
-            right: 8,
-            zIndex: 100,
-            bgcolor: 'rgba(0, 0, 0, 0.45)',
-            backdropFilter: 'blur(6px)',
-            borderRadius: '50%',
-            p: 0.5,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '1px solid rgba(255,255,255,0.12)',
-          }}>
-            <CircularProgress size={14} sx={{ color: '#ffeb3b' }} />
-          </Box>
-        )}
-        
-        <Box sx={{
-          bgcolor: 'transparent',
-          p: 0,
-          m: 0,
-          overflow: 'visible',
-          width: sxProps?.width || nsHandWidth,
-          height: sxProps?.height || nsHandHeight,
-          maxWidth: sxProps?.maxWidth || 'none',
-          flexShrink: 0,
-          boxShadow: 'none',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          border: 'none',
-          borderRadius: 0,
-          gap: 0,
-          transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-          ...(currentTurnPos === position && {
-            boxShadow: `0 0 0 2px ${theme.palette.primary.main}, 0 4px 14px rgba(0,0,0,0.2)`,
-          }),
-        }}>
+      <Box sx={{
+        ...sxProps,
+        position: 'relative',
+        bgcolor: 'transparent',
+        p: 0,
+        m: 0,
+        overflow: 'visible',
+        width: sxProps?.width || nsHandWidth,
+        height: sxProps?.height || nsHandHeight,
+        maxWidth: sxProps?.maxWidth || 'none',
+        flexShrink: 0,
+        boxShadow: 'none',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        border: 'none',
+        borderRadius: 0,
+        gap: 0,
+        transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+      }}>
           {/* 信息栏：可通过 noInfo 隐藏 */}
           {!sxProps?.noInfo && sxProps?.infoSide === 'top' && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: `${INNER_GAP}px`, flexShrink: 0,
@@ -865,70 +1013,13 @@ function CardTable({
             <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Typography variant="body2" sx={{ color: '#94a3b8', fontSize: '0.8rem' }}>[未知]</Typography>
             </Box>
-          ) : showInput ? (
-            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
-              <TextField
-                size="small"
-                value={handInputs[position]}
-                onChange={(e) => handleHandInputChange(position, e.target.value)}
-                error={!!inputErrors[position]}
-                helperText={inputErrors[position] || 'AKQJ T98 T87 654（13张，用 - 表示缺门）'}
-                fullWidth
-                multiline
-                maxRows={2}
-                sx={{ 
-                  '& .MuiInputBase-input': { fontSize: '0.75rem', padding: '4px' },
-                  '& .MuiFormHelperText-root': { fontSize: '0.6rem', margin: '2px 0 0 0' }
-                }}
-              />
-              <Button 
-                size="small" 
-                variant="contained" 
-                sx={{ mt: 0.5, fontSize: '0.7rem', py: 0.3 }}
-                onClick={() => handleHandInputSubmit(position)}
-                disabled={!handInputs[position].trim()}
-              >
-                确认
-              </Button>
-            </Box>
-          ) : showPlayHandInput ? (
-            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-              <TextField
-                size="small"
-                value={handInputs[position]}
-                onChange={(e) => handleHandInputChange(position, e.target.value)}
-                error={!!inputErrors[position]}
-                helperText={inputErrors[position] || `输入${position}家手牌（13张，如 AKQJ T98 T87 654）`}
-                fullWidth
-                multiline
-                maxRows={2}
-                sx={{ 
-                  '& .MuiInputBase-input': { fontSize: '0.75rem', padding: '4px' },
-                  '& .MuiFormHelperText-root': { fontSize: '0.6rem', margin: '2px 0 0 0' }
-                }}
-              />
-              <Button 
-                size="small" 
-                variant="contained" 
-                sx={{ mt: 0.5, fontSize: '0.7rem', py: 0.3 }}
-                onClick={() => handleAIHandSubmit(position)}
-                disabled={!handInputs[position].trim()}
-              >
-                确认
-              </Button>
-            </Box>
+          ) : (showInput || showPlayHandInput) ? (
+            /* 输入框由独立控件 renderIndependentHandInput 渲染，此处留空 */
+            <Box sx={{ flex: 1 }} />
           ) : isHuman && !hasHandData && !handKnownInPlay && manualPlayedCount === 0 ? (
-            <Box sx={{ 
-              flex: 1,
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center', 
-              color: 'text.secondary'
-            }}>
-              <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>未知</Typography>
-            </Box>
+            /* "未知"由独立控件 renderIndependentUnknown 渲染，此处留空 */
+            <Box sx={{ flex: 1 }} />
           ) : (
-            <Box sx={{ flex: 1 }}>
               <HandDisplay
                 hand={displayHand}
                 position={position}
@@ -956,8 +1047,8 @@ function CardTable({
                 cardHints={cardHints}
                 orientation={orientation}
                 popDirection={popDirection}
+                enableHover={showPlayPanel && playState?.current_player === position && !!onHandCardClick}
               />
-            </Box>
           )}
           {/* 信息栏（靠中心一侧）：infoSide='bottom'=在手牌下方 */}
           {!sxProps?.noInfo && (!sxProps?.infoSide || sxProps.infoSide === 'bottom') && (
@@ -982,7 +1073,6 @@ function CardTable({
             </Box>
           )}
         </Box>
-      </Box>
     );
   };
 
@@ -1001,7 +1091,7 @@ function CardTable({
       height: '100%',
       maxWidth: '100%',
       position: 'relative',
-      overflow: 'hidden',
+      overflow: 'visible',
       boxSizing: 'border-box',
       }}>
       {/* 模拟实战清空按钮：任何阶段可见可点击（叫牌/打牌均可） */}
@@ -1038,80 +1128,85 @@ function CardTable({
           right: 8,
           zIndex: 10,
           display: 'flex',
-          alignItems: 'center',
-          gap: 1,
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: 0.5,
         }}>
-          {biddingTotalTime !== null && !showPlayPanel && (
-            <Box sx={{
-              bgcolor: 'rgba(0, 0, 0, 0.6)',
-              color: 'white',
-              px: 1.5,
-              py: 0.5,
-              borderRadius: 1,
-              fontSize: '0.85rem',
-              fontWeight: 'medium',
-            }}>
-              ⏱ {Math.floor(biddingTotalTime / 60)}:{(biddingTotalTime % 60).toString().padStart(2, '0')}
-            </Box>
-          )}
-          {!readonlyMode && onClearAllHands && !showPlayPanel && (
-            <Tooltip title="清除牌局" arrow slotProps={{
-              tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
-              arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
-            }}>
-              <IconButton
-                size="small"
-                onClick={onClearAllHands}
-                sx={iconBtnStyle}
-              >
-                <DeleteSweepIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          )}
-          {!readonlyMode && onEditHands && !showPlayPanel && (
-            <Tooltip title="修正手牌" arrow slotProps={{
-              tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
-              arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
-            }}>
-              <IconButton
-                size="small"
-                onClick={onEditHands}
-                sx={iconBtnStyle}
-              >
-                <BorderColorIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          )}
-          {!readonlyMode && onEditBidding && !showPlayPanel && (
-            <Tooltip title="编辑叫牌" arrow slotProps={{
-              tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
-              arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
-            }}>
-              <IconButton
-                size="small"
-                onClick={onEditBidding}
-                sx={iconBtnStyle}
-              >
-                <FormatListBulletedIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          )}
-          {handleAnalyzeContract && outputFormats && !showPlayPanel && (
-            <Tooltip title="检验定约 (Deep Finesse)" arrow slotProps={{
-              tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
-              arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
-            }}>
-              <IconButton
-                size="small"
-                onClick={handleAnalyzeContract}
-                disabled={analyzeLoading}
-                sx={iconBtnStyle}
-              >
-                {analyzeLoading ? <CircularProgress size={16} sx={{ color: 'white' }} /> : <GridOnIcon fontSize="small" />}
-              </IconButton>
-            </Tooltip>
-          )}
-          {outputFormatsLoading && <CircularProgress size={20} sx={{ color: 'white' }} />}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'flex-end' }}>
+            {biddingTotalTime !== null && !showPlayPanel && (
+              <Box sx={{
+                bgcolor: 'rgba(0, 0, 0, 0.6)',
+                color: 'white',
+                px: 1.5,
+                py: 0.5,
+                borderRadius: 1,
+                fontSize: '0.85rem',
+                fontWeight: 'medium',
+              }}>
+                ⏱ {Math.floor(biddingTotalTime / 60)}:{(biddingTotalTime % 60).toString().padStart(2, '0')}
+              </Box>
+            )}
+            {!readonlyMode && onClearAllHands && !showPlayPanel && (
+              <Tooltip title="清除牌局" arrow slotProps={{
+                tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
+                arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
+              }}>
+                <IconButton
+                  size="small"
+                  onClick={onClearAllHands}
+                  sx={iconBtnStyle}
+                >
+                  <DeleteSweepIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+            {!readonlyMode && onEditHands && !showPlayPanel && (
+              <Tooltip title="修正手牌" arrow slotProps={{
+                tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
+                arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
+              }}>
+                <IconButton
+                  size="small"
+                  onClick={onEditHands}
+                  sx={iconBtnStyle}
+                >
+                  <BorderColorIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'flex-end' }}>
+            {!readonlyMode && onEditBidding && !showPlayPanel && (
+              <Tooltip title="编辑叫牌" arrow slotProps={{
+                tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
+                arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
+              }}>
+                <IconButton
+                  size="small"
+                  onClick={onEditBidding}
+                  sx={iconBtnStyle}
+                >
+                  <FormatListBulletedIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+            {handleAnalyzeContract && outputFormats && !showPlayPanel && (
+              <Tooltip title="检验定约 (Deep Finesse)" arrow slotProps={{
+                tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
+                arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
+              }}>
+                <IconButton
+                  size="small"
+                  onClick={handleAnalyzeContract}
+                  disabled={analyzeLoading}
+                  sx={iconBtnStyle}
+                >
+                  {analyzeLoading ? <CircularProgress size={16} sx={{ color: 'white' }} /> : <GridOnIcon fontSize="small" />}
+                </IconButton>
+              </Tooltip>
+            )}
+            {outputFormatsLoading && <CircularProgress size={20} sx={{ color: 'white' }} />}
+          </Box>
         </Box>
       )}
 
@@ -1123,19 +1218,23 @@ function CardTable({
           right: 8,
           zIndex: 10,
           display: 'flex',
+          flexDirection: 'column',
           gap: 0.5,
+          alignItems: 'flex-end',
         }}>
-          <Chip
-            label={`${playState.contract.level || '?'}${playState.contract.suit || 'NT'}${playState.contract.redoubled ? 'XX' : playState.contract.doubled ? 'X' : ''}`}
-            size="small"
-            sx={{ fontSize: '0.7rem', bgcolor: 'rgba(255,255,255,0.92)', color: '#1565c0', fontWeight: 700 }}
-          />
-          <Chip
-            label={`庄家: ${playState.contract.declarer || '?'}`}
-            variant="outlined"
-            size="small"
-            sx={{ fontSize: '0.7rem', bgcolor: 'rgba(255,255,255,0.88)', color: '#333' }}
-          />
+          <Box sx={{ display: 'flex', gap: 0.5 }}>
+            <Chip
+              label={`${playState.contract.level || '?'}${playState.contract.suit || 'NT'}${playState.contract.redoubled ? 'XX' : playState.contract.doubled ? 'X' : ''}`}
+              size="small"
+              sx={{ fontSize: '0.7rem', bgcolor: 'rgba(255,255,255,0.92)', color: '#1565c0', fontWeight: 700 }}
+            />
+            <Chip
+              label={`庄家: ${playState.contract.declarer || '?'}`}
+              variant="outlined"
+              size="small"
+              sx={{ fontSize: '0.7rem', bgcolor: 'rgba(255,255,255,0.88)', color: '#333' }}
+            />
+          </Box>
           {imageOpeningLead && (
             <Chip
               label={`首攻: ${imageOpeningLead}`}
@@ -1268,13 +1367,12 @@ function CardTable({
             top: 0,
             left: '50%',
             transform: 'translateX(-50%)',
-            width: '100%',
-            maxWidth: nsHandWidth,
-            display: 'flex',
-            justifyContent: 'center',
+            width: 'fit-content',
+            height: 'fit-content',
             zIndex: 10,
+            border: 'none',
           }}>
-            {renderHandWithStatus(north, '北', { width: '100%', height: 'auto', maxWidth: '100%', noInfo: true, orientation: 'horizontal' })}
+            {renderHandWithStatus(north, '北', { width: 'auto', height: 'auto', maxWidth: 'none', noInfo: true, orientation: 'horizontal' })}
           </Box>
 
           {/* 南家手牌：距底20px（外层padding已20px + 内部相对定位bottom=0 = 总20px），横向居中 */}
@@ -1283,57 +1381,72 @@ function CardTable({
             bottom: 0,
             left: '50%',
             transform: 'translateX(-50%)',
-            width: '100%',
-            maxWidth: nsHandWidth,
-            display: 'flex',
-            justifyContent: 'center',
+            width: 'fit-content',
+            height: 'fit-content',
             zIndex: 10,
+            border: 'none',
           }}>
-            {renderHandWithStatus(south, '南', { width: '100%', height: 'auto', maxWidth: '100%', noInfo: true, orientation: 'horizontal' })}
+            {renderHandWithStatus(south, '南', { width: 'auto', height: 'auto', maxWidth: 'none', noInfo: true, orientation: 'horizontal' })}
           </Box>
 
-          {/* 西家手牌：距左0（外层padding已20px），上下各留20px确保不溢出，牌自适应大小 */}
+          {/* 西家手牌：距左0（外层padding已20px），垂直居中，尺寸适配手牌 */}
           <Box sx={{
             position: 'absolute',
             left: 0,
-            top: 0,
-            bottom: 0,
-            width: ewColW,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: 'fit-content',
+            height: 'fit-content',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 10,
             overflow: 'visible',
+            border: 'none',
           }}>
-            {renderHandWithStatus(west, '西', { width: ewColW, height: '100%', maxWidth: 'none', noInfo: true, orientation: 'vertical', popDirection: 'right' })}
+            {renderHandWithStatus(west, '西', { width: 'auto', height: 'auto', maxWidth: 'none', noInfo: true, orientation: 'vertical', popDirection: 'right' })}
           </Box>
 
-          {/* 东家手牌：距右0（外层padding已20px），上下各留20px确保不溢出，牌自适应大小 */}
+          {/* 东家手牌：距右0（外层padding已20px），垂直居中，尺寸适配手牌 */}
           <Box sx={{
             position: 'absolute',
             right: 0,
-            top: 0,
-            bottom: 0,
-            width: ewColW,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: 'fit-content',
+            height: 'fit-content',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 10,
             overflow: 'visible',
+            border: 'none',
           }}>
-            {renderHandWithStatus(east, '东', { width: ewColW, height: '100%', maxWidth: 'none', noInfo: true, orientation: 'vertical', popDirection: 'left' })}
+            {renderHandWithStatus(east, '东', { width: 'auto', height: 'auto', maxWidth: 'none', noInfo: true, orientation: 'vertical', popDirection: 'left' })}
           </Box>
+
+          {/* 东西家独立手牌输入框：绝对定位，垂直居中，距桌面边框30px */}
+          {renderIndependentHandInput('西')}
+          {renderIndependentHandInput('东')}
+          {/* 南北家独立手牌输入框：绝对定位，水平居中，距桌面边框30px */}
+          {renderIndependentHandInput('北')}
+          {renderIndependentHandInput('南')}
+          {/* 四家独立"未知"控件：人类位置无手牌时显示 */}
+          {renderIndependentUnknown('北')}
+          {renderIndependentUnknown('南')}
+          {renderIndependentUnknown('西')}
+          {renderIndependentUnknown('东')}
         </Box>
       )}
 
-      {/* 人类回合浮动叫牌面板（右下角） */}
+      {/* 人类回合浮动叫牌面板 — Portal到body，全浏览器拖动 */}
       {!showPlayPanel && !showDoubleDummy && hasAnyHuman(positionRoles) && biddingStarted && (() => {
         const humanTurn = isHumanPosition(positionRoles, currentBidder)
         const biddingComplete = isBiddingCompleteFn ? isBiddingCompleteFn() : false
         if (!humanTurn || biddingComplete) return null
+        if (!bidBoxPos.ready) return null // 等初始定位完成
         const suits = ['C', 'D', 'H', 'S', 'NT']
         const suitOrder = { C: 0, D: 1, H: 2, S: 3, NT: 4 }
-        // 找到最后一个实质性叫品，确定最低合法叫品
         const seq = biddingSequence || []
         const lastRealBid = [...seq].reverse().find(b => b.bid !== 'pass')
         let minLevel = 1, minSuitIdx = -1
@@ -1345,13 +1458,11 @@ function CardTable({
             minSuitIdx = suitOrder[m[2]] ?? -1
           }
         }
-        // 每个阶数是否可用
         const levelAvailable = (l) => {
           if (l > minLevel) return true
-          if (l === minLevel && minSuitIdx < 4) return true // 同阶还有更高花色
+          if (l === minLevel && minSuitIdx < 4) return true
           return false
         }
-        // 每个花色在给定阶数下是否可用
         const suitAvailable = (l, s) => {
           if (l > minLevel) return true
           if (l === minLevel) return suitOrder[s] > minSuitIdx
@@ -1386,20 +1497,45 @@ function CardTable({
             '&:hover': disabled ? {} : { filter: 'brightness(0.9)', border: `1px solid ${getBidColor(bid, false).c}` },
           }
         }
-        // 使用外层 state 追踪选中的阶数（hooks 必须在顶层调用）
-        return (
+
+        const box = (
           <Box sx={{
-            position: 'absolute',
-            bottom: isMobile ? 8 : '5%',
-            right: isMobile ? 8 : '3%',
-            zIndex: 10,
+            position: 'fixed',
+            left: bidBoxPos.left,
+            top: bidBoxPos.top,
+            zIndex: 9999,
             bgcolor: isDark ? 'rgba(17,24,39,0.88)' : 'rgba(255,255,255,0.88)',
             backdropFilter: 'blur(12px)', borderRadius: 2, p: 0.75,
             border: '1px solid', borderColor: 'divider',
             boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
             display: 'flex', flexDirection: 'column', gap: '4px',
             width: isMobile ? 130 : 200,
-          }}>
+            cursor: 'move',
+            userSelect: 'none',
+          }}
+            onMouseDown={(e) => {
+              if (e.target.tagName === 'BUTTON') return
+              e.stopPropagation()
+              // 记录拖拽起点
+              const startX = e.clientX
+              const startY = e.clientY
+              const startLeft = bidBoxPos.left
+              const startTop = bidBoxPos.top
+              const handleMove = (ev) => {
+                setBidBoxPos(p => ({
+                  ...p,
+                  left: startLeft + ev.clientX - startX,
+                  top: startTop + ev.clientY - startY,
+                }))
+              }
+              const handleUp = () => {
+                window.removeEventListener('mousemove', handleMove)
+                window.removeEventListener('mouseup', handleUp)
+              }
+              window.addEventListener('mousemove', handleMove)
+              window.addEventListener('mouseup', handleUp)
+            }}
+          >
             {/* 阶数选择：桌面一行，手机两行 */}
             {isMobile ? (
               <>
@@ -1449,7 +1585,7 @@ function CardTable({
                 })}
               </Box>
             )}
-            {/* 行2: 花色选择 — 固定高度防止布局跳动 */}
+            {/* 行2: 花色选择 */}
             <Box sx={{ display: 'flex', gap: '3px', minHeight: 28 }}>
               {suits.map(s => {
                 const lvl = selectedBidLevel || 1
@@ -1475,7 +1611,8 @@ function CardTable({
               ))}
             </Box>
           </Box>
-        )
+        );
+        return ReactDOM.createPortal(box, document.body);
       })()}
 
       {/* 人类无手牌时手动输入出牌 */}

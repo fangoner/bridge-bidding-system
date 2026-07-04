@@ -275,7 +275,7 @@ function CardTablePanel({
               sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem', color: studyMode ? '#e65100' : undefined, fontWeight: studyMode ? 700 : undefined }, mr: 0, height: 24 }}
             />
           )}
-          {!showPlayPanel && (
+          {!showPlayPanel && mode !== 'simulated' && (
           <Box sx={{ display: 'flex', gap: 0.5, ml: 1, borderLeft: '1px solid', borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)', pl: 1 }}>
             <Button
               variant="contained"

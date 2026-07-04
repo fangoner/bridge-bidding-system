@@ -368,7 +368,7 @@ function BiddingDetailPanel({
         </Box>
       </Box>
 
-      <Box sx={{ flex: 1, overflow: 'hidden', p: 1, background: isDark ? 'radial-gradient(ellipse at center, #1a2f22 0%, #0d1f15 50%, #06120d 100%)' : 'radial-gradient(ellipse at center, #3d7a58 0%, #25563b 40%, #1a3d28 100%)', borderRadius: 2, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ flex: 1, overflow: 'hidden', p: 1, background: bgPanel, borderRadius: 2, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {detailTab === 'jf' ? (
           <Box sx={{ flex: 1, overflow: 'auto', minHeight: 0, p: 1 }}>
             {renderJFPanel()}
