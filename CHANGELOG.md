@@ -1,5 +1,82 @@
 # 开发日志
 
+## 2026-07-05
+
+### DD引擎性能优化全套修复（约束缩减 + 软硬约束区分 + 批量求解）
+
+**背景**: 之前P0/P1/P2优化方案引入了多个bug：DD引擎0ms不执行（NameError）、300粒子首张牌卡住（HCP预算9800次重试）、prepare阶段16秒慢（300次降级到 `_distribute_biased`）、`hcp_conservation` 硬约束矛盾导致fallback。用户多次拒绝降级方案，要求从根本逻辑上修正约束处理。
+
+**改进**:
+
+#### 1. 中局约束扣减法（替代比例缩减）
+- **问题**: 之前用 `ratio = target/13` 比例缩减 HCP/min_controls/suit_min，物理意义错误——假设HCP均匀分布在13张牌中，但HCP实际集中在A/K/Q/J上
+- **修复** (`sampler.py#L1425-L1486`): 改为按已出牌扣减
+  - `min_hcp = max(0, 初始min - 已出HCP)`
+  - `max_hcp = max(初始max - 已出HCP, min_hcp)`
+  - `min_controls = max(0, 初始min - 已出控制数)`
+  - `suit_min = max(0, 初始suit_min - 该花色已出张数)`
+  - `exact_suit = max(0, 初始exact - 该花色已出张数)`
+  - `suit_max = max(0, 初始suit_max - 该花色已出张数)`
+- **物理意义**: 初始约束 = 已出部分 + 剩余部分 → 剩余约束 = 初始约束 - 已出部分
+
+#### 2. 软硬约束区分（HCP预算硬可行性检查）
+- **问题**: `negative_inference`（pass→≤7HCP）和 `hcp_conservation`（点力守恒推断）的 max_hcp 被当作硬约束参与 `_allocate_hcp_budget` 可行性检查，导致 `sum_max < pool_hcp` 误判为不可行，所有粒子降级到 `_distribute_biased`（每次50ms × 300 = 15秒）
+- **修复** (`sampler.py#L1069-L1091`):
+  ```python
+  _SOFT_SOURCES = {"negative_inference", "hcp_conservation"}
+  is_soft = bool(c and c.inference_source in _SOFT_SOURCES)
+  mn = c.min_hcp if c and c.min_hcp is not None and not is_soft else 0
+  if c and c.max_hcp is not None and not is_soft:
+      mx = c.max_hcp
+  else:
+      mx = 37
+  ```
+- **原理**: 软推断信息由 `compute_sample_violation_score` 软加权处理（违反约束→粒子权重降低，但不丢弃），只有明确叫牌承诺（hard_coded/meaning_parsed/convention）才参与硬可行性检查
+
+#### 3. solve_all_boards 批量求解（替代串行 solve_board）
+- **问题**: 串行 `solve_board` 600粒子耗时 1.3-10秒，p99 80ms，max 106ms；自写 ThreadPoolExecutor 并行会导致 Windows 堆损坏崩溃（0xC0000409）
+- **诊断过程**:
+  1. 先尝试 `ThreadPoolExecutor` 并行 → 进程崩溃（endplay dds C库非线程安全）
+  2. 改用 endplay 官方 `solve_all_boards` 批量API → IndexError
+  3. 加诊断日志打印失败Deal的PBN → 发现单个 `solve_board` 都OK
+  4. 二分查找数量临界点 → **C库硬限制 `MAXNOOFBOARDS=200`**
+- **修复** (`dd_search.py#L259-L387`):
+  - 新增 `_build_deal_for_world` 提取Deal构建逻辑
+  - 新增 `_solve_batch` 分批调用 `solve_all_boards`，每批 ≤ 200
+  - 失败时打印PBN诊断信息，该批降级到串行
+- **效果**（600粒子）:
+  - 串行: avg 2-17ms, max 41-106ms, total 1.3-10s
+  - 批量: avg 0.3-4.3ms, max 0.4-4.9ms, total 0.2-2.6s
+  - **提升 5-30倍**
+
+#### 4. 其他调整
+- `DD_TIME_LIMIT`: 15s → 30s（允许首攻冷启动完整跑完）
+- `BELIEF_DD_PARTICLES_MAX`: 1500 → 2000（批量模式下30s预算可承载）
+- 移除自写 ThreadPoolExecutor 并行代码（Windows崩溃根因）
+- 新增 `[DD_STATS] mode=BATCH/SERIAL` 日志区分批量/串行模式
+- 新增 `[BATCH]` / `[BATCH_FAIL]` 批量求解诊断日志
+
+**修改文件**: `bridge/mcts/sampler.py`, `bridge/mcts/dd_search.py`, `config.py`
+
+**测试验证**:
+- 600粒子全批量模式（batches_ok=3, fallback=0）
+- prepare时间从16s降到0.5-1.4s
+- 总出牌时间从14.9s降到0.5-2.8s（提升5-30倍）
+- HCP_BUDGET_FAIL 从14条降到0条（软硬约束区分有效）
+- 无 BATCH_FAIL，无崩溃
+
+### 历史问题修复记录（本日）
+
+| 问题 | 根因 | 修复 |
+|------|------|------|
+| DD引擎0ms不执行 | P0引用 `state.tricks` 但函数无state参数 → NameError | 添加 `played_set` 参数 |
+| JF约定无法加载 | DD PBN错误"Sum 3 is not four"导致请求堆积超时 | 重启后端 |
+| 300粒子首张牌卡住 | HCP预算9800次重试（负推断max_hcp过严） | 软硬约束区分 |
+| prepare 16秒慢 | 300次降级到 `_distribute_biased` | 软硬约束区分 |
+| P1-parallel崩溃 | endplay dds C库非线程安全，Windows堆损坏 | 移除并行，用 solve_all_boards |
+| solve_all_boards IndexError | C库 MAXNOOFBOARDS=200 硬限制 | 分批 ≤ 200 |
+| 中局约束矛盾 | 比例缩减物理意义错误 | 改为按已出牌扣减 |
+
 ## 2026-07-03
 
 ### 手牌布局4层容器结构重构 + 输入框/"未知"控件独立渲染

@@ -8,11 +8,11 @@ export const SUIT_SYMBOLS = {
 }
 
 // 统一花色颜色（唯一数据源）
-// 亮色模式
+// 亮色模式（♥红、♦紫，高对比区分两种红色花色）
 const LIGHT_SUIT_COLORS = {
   '♠': '#1e293b',
   '♥': '#dc2626',
-  '♦': '#dc2626',
+  '♦': '#7c3aed',
   '♣': '#1e293b',
 }
 
@@ -20,7 +20,7 @@ const LIGHT_SUIT_COLORS = {
 const DARK_SUIT_COLORS = {
   '♠': '#e2e8f0',
   '♥': '#f87171',
-  '♦': '#f87171',
+  '♦': '#a78bfa',
   '♣': '#e2e8f0',
 }
 
@@ -28,7 +28,7 @@ const DARK_SUIT_COLORS = {
 const DARK_CARD_SUIT_COLORS = {
   '♠': '#1e293b',
   '♥': '#dc2626',
-  '♦': '#dc2626',
+  '♦': '#7c3aed',
   '♣': '#1e293b',
 }
 

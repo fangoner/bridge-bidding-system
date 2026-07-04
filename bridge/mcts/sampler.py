@@ -20,6 +20,37 @@ MAX_CONSTRAINT_RETRIES = 200  # 有约束时最多重试次数（提高约束命
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _DEBUG_LOG = os.path.join(_BASE_DIR, "dd_debug.log")
 
+# 聚合计时器（_distribute_global_constrained 三步耗时统计，prepare 结束时输出）
+_DIST_STATS = {"shape_t": 0.0, "hcp_t": 0.0, "assign_t": 0.0,
+               "shape_calls": 0, "hcp_calls": 0, "assign_calls": 0,
+               "shape_retries": 0, "hcp_retries": 0,
+               "fallback_count": 0, "shape_cache_hits": 0}
+
+# Shape 池缓存：同一 PlayState 下 N 个粒子复用 shape 模板，避免重复随机重试
+# key = (unknown_positions tuple, targets tuple, pool_signature)
+# value = list of shape dicts (候选模板)
+_SHAPE_POOL = {}
+_SHAPE_POOL_MAX = 20  # 每个键最多缓存20个候选shape
+_SHAPE_POOL_TARGET = 10  # 首次生成时尝试产出10个候选
+
+def reset_dist_stats():
+    for k in _DIST_STATS:
+        _DIST_STATS[k] = 0
+    # 同时清空shape池（新PlayState或新prepare周期）
+    _SHAPE_POOL.clear()
+
+def dump_dist_stats():
+    """输出聚合计时到日志，只写1行"""
+    s = _DIST_STATS
+    if s["shape_calls"] == 0 and s["hcp_calls"] == 0 and s["assign_calls"] == 0:
+        return
+    with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+        _f.write(f"[DIST] shape={s['shape_t']:.2f}s/{s['shape_calls']}calls/{s['shape_retries']}retries "
+                 f"cache_hits={s['shape_cache_hits']} "
+                 f"hcp={s['hcp_t']:.2f}s/{s['hcp_calls']}calls/{s['hcp_retries']}retries "
+                 f"assign={s['assign_t']:.2f}s/{s['assign_calls']}calls "
+                 f"fallback={s['fallback_count']}\n")
+
 
 class DealSampler:
     """从当前玩家视角采样未知手牌分布。
@@ -189,11 +220,23 @@ class DealSampler:
             for c in cards:
                 assigned.add((c.suit, c.rank))
         played_set = set()
+        # 按位置统计已出牌的 HCP、控制数、各花色张数（用于约束扣减：初始约束 = 已出 + 剩余）
+        played_hcp_per_pos = {p: 0 for p in POSITION_ORDER}
+        played_controls_per_pos = {p: 0 for p in POSITION_ORDER}
+        played_suit_per_pos = {p: {"♠": 0, "♥": 0, "♦": 0, "♣": 0} for p in POSITION_ORDER}
         for trick in state.tricks:
-            for _, c in trick.cards:
+            for pos, c in trick.cards:
                 played_set.add((c.suit, c.rank))
-        for _, c in state.current_trick.cards:
+                played_hcp_per_pos[pos] = played_hcp_per_pos.get(pos, 0) + HCP_MAP.get(c.rank, 0)
+                played_controls_per_pos[pos] = played_controls_per_pos.get(pos, 0) + CONTROL_MAP.get(c.rank, 0)
+                if pos in played_suit_per_pos:
+                    played_suit_per_pos[pos][c.suit] = played_suit_per_pos[pos].get(c.suit, 0) + 1
+        for pos, c in state.current_trick.cards:
             played_set.add((c.suit, c.rank))
+            played_hcp_per_pos[pos] = played_hcp_per_pos.get(pos, 0) + HCP_MAP.get(c.rank, 0)
+            played_controls_per_pos[pos] = played_controls_per_pos.get(pos, 0) + CONTROL_MAP.get(c.rank, 0)
+            if pos in played_suit_per_pos:
+                played_suit_per_pos[pos][c.suit] = played_suit_per_pos[pos].get(c.suit, 0) + 1
         unknown_pool = [c for c in ALL_CARDS
                         if (c.suit, c.rank) not in assigned
                         and (c.suit, c.rank) not in played_set]
@@ -203,7 +246,7 @@ class DealSampler:
         known_voids = collect_voids(state)
 
         if self.constraints:
-            _distribute_global_constrained(result, unknown_pool, remaining_counts, self.constraints, known_voids)
+            _distribute_global_constrained(result, unknown_pool, remaining_counts, self.constraints, known_voids, played_set, played_hcp_per_pos, played_controls_per_pos, played_suit_per_pos)
         else:
             random.shuffle(unknown_pool)
             idx = 0
@@ -764,28 +807,46 @@ def _generate_valid_shape_distribution(
     pool: List[Card] = None,
 ) -> Optional[Dict[str, Dict[str, int]]]:
     """生成合法的牌型分布：shape[pos][suit] = 张数
-    
+
     约束满足：
     - 每家总张数 = target_counts[pos]
     - 每花色总张数 = pool中该花色的张数
     - 每个位置满足suit_min/suit_max/exact_suit约束
     - 如果constraint.balanced=True，满足均型牌型（无单张/缺门/6+张套）
-    
+
     返回：{pos: {suit: count}} 或 None 如果生成失败
     """
-    max_attempts = 200
-    
+    max_attempts = 60
+
+    # 失败原因计数器（仅诊断用）
+    _fail_reasons = {"step3": 0, "step4": 0, "total_mismatch": 0, "feasibility1": 0,
+                     "feasibility2": 0, "no_candidates": 0, "final_validation": 0}
+
     # 计算牌池中每个花色实际有多少张
     suit_total = {s: 13 for s in SUITS}
     if pool is not None:
         suit_total = {s: 0 for s in SUITS}
         for c in pool:
             suit_total[c.suit] += 1
-    
+
+    # 预计算每家的 suit_max（含均型约束的 5 张上限）
+    effective_max = {}
+    for pos in positions:
+        c = constraints.get(pos)
+        em = {}
+        for s in SUITS:
+            mx = 13
+            if c and s in c.suit_max:
+                mx = c.suit_max[s]
+            if c and c.balanced:
+                mx = min(mx, 5)
+            em[s] = mx
+        effective_max[pos] = em
+
     for _ in range(max_attempts):
         shape = {pos: {s: 0 for s in SUITS} for pos in positions}
         valid = True
-        
+
         # Step 1: 先填充exact_suit精确张数约束
         for pos in positions:
             c = constraints.get(pos)
@@ -793,7 +854,7 @@ def _generate_valid_shape_distribution(
                 continue
             for suit, exact_len in c.exact_suit.items():
                 shape[pos][suit] = exact_len
-        
+
         # Step 2: 填充suit_min最低张数约束
         for pos in positions:
             c = constraints.get(pos)
@@ -802,7 +863,7 @@ def _generate_valid_shape_distribution(
             for suit, min_len in c.suit_min.items():
                 if shape[pos][suit] < min_len:
                     shape[pos][suit] = min_len
-        
+
         # Step 3: 验证每家当前总数不超过目标数
         for pos in positions:
             total = sum(shape[pos].values())
@@ -810,8 +871,9 @@ def _generate_valid_shape_distribution(
                 valid = False
                 break
         if not valid:
+            _fail_reasons["step3"] += 1
             continue
-        
+
         # Step 4: 验证每花色当前总数不超过牌池
         for s in SUITS:
             total = sum(shape[pos][s] for pos in positions)
@@ -819,57 +881,123 @@ def _generate_valid_shape_distribution(
                 valid = False
                 break
         if not valid:
+            _fail_reasons["step4"] += 1
             continue
-        
+
         # Step 5: 随机填充剩余张数，保证每花色总数=suit_total[s]，每家总数=target
-        # 计算还需要分配的张数
         remaining_by_pos = {pos: target_counts[pos] - sum(shape[pos].values()) for pos in positions}
         remaining_by_suit = {s: suit_total[s] - sum(shape[pos][s] for pos in positions) for s in SUITS}
-        
-        # 检查剩余是否合理
+
         total_remaining = sum(remaining_by_pos.values())
         if total_remaining != sum(remaining_by_suit.values()):
+            _fail_reasons["total_mismatch"] += 1
             continue
         if total_remaining < 0:
+            _fail_reasons["total_mismatch"] += 1
             continue
-        
-        # 逐步随机分配剩余张数
-        possible = True
-        remaining_slots = total_remaining
-        for ___ in range(remaining_slots):
-            # 找候选位置（还需要更多牌，且不超过suit_max）
-            candidates = []
+
+        # 可行性预检：每家剩余需求 ≤ 该家各花色剩余可容纳空间之和
+        feasible = True
+        for pos in positions:
+            if remaining_by_pos[pos] <= 0:
+                continue
+            capacity = 0
+            for s in SUITS:
+                room = effective_max[pos][s] - shape[pos][s]
+                capacity += min(room, remaining_by_suit[s])
+            if capacity < remaining_by_pos[pos]:
+                feasible = False
+                break
+        if not feasible:
+            _fail_reasons["feasibility1"] += 1
+            continue
+
+        # 每花色剩余供给 ≤ 能接收该花色的位置剩余需求之和
+        for s in SUITS:
+            if remaining_by_suit[s] <= 0:
+                continue
+            demand = 0
             for pos in positions:
                 if remaining_by_pos[pos] <= 0:
                     continue
-                c = constraints.get(pos)
+                room = effective_max[pos][s] - shape[pos][s]
+                if room > 0:
+                    demand += min(room, remaining_by_pos[pos])
+            if demand < remaining_by_suit[s]:
+                feasible = False
+                break
+        if not feasible:
+            _fail_reasons["feasibility2"] += 1
+            continue
+
+        # 逐步随机分配剩余张数（约束引导：优先满足suit_min，关键牌强制分配）
+        possible = True
+        remaining_slots = total_remaining
+        # 预计算每家每花色的剩余下限需求（= suit_min - 已分配）
+        remaining_min = {}
+        for pos in positions:
+            c = constraints.get(pos)
+            remaining_min[pos] = {}
+            for s in SUITS:
+                mn = c.suit_min.get(s, 0) if c else 0
+                remaining_min[pos][s] = max(0, mn - shape[pos][s])
+
+        for ___ in range(remaining_slots):
+            # 早期剪枝：检查是否有"必须分配"的强制位置
+            # 若某花色剩余供给 == 某位置该花色剩余下限需求，则强制分配给该位置
+            forced = None
+            for pos in positions:
+                if remaining_by_pos[pos] <= 0:
+                    continue
                 for s in SUITS:
-                    if remaining_by_suit[s] <= 0:
+                    if remaining_min[pos][s] <= 0:
                         continue
-                    # 检查suit_max约束
-                    max_allowed = 13
-                    if c and s in c.suit_max:
-                        max_allowed = c.suit_max[s]
-                    # 如果要求均型，单套不能超过5张
-                    if c and c.balanced and shape[pos][s] >= 5:
-                        max_allowed = 5
-                    if shape[pos][s] >= max_allowed:
+                    if shape[pos][s] >= effective_max[pos][s]:
                         continue
-                    candidates.append((pos, s))
-            
+                    # 该位置还需要 s 至少 remaining_min[pos][s] 张
+                    # 若剩余供给恰好等于需求，或该位置剩余容量==需求，必须立即分配
+                    capacity_left = remaining_by_pos[pos]
+                    supply = remaining_by_suit[s]
+                    if supply == remaining_min[pos][s] or capacity_left == remaining_min[pos][s]:
+                        forced = (pos, s)
+                        break
+                if forced:
+                    break
+
+            if forced:
+                pos, s = forced
+            else:
+                # 普通随机：但优先选择有 suit_min 需求的位置
+                priority_candidates = []
+                other_candidates = []
+                for pos in positions:
+                    if remaining_by_pos[pos] <= 0:
+                        continue
+                    for s in SUITS:
+                        if remaining_by_suit[s] <= 0:
+                            continue
+                        if shape[pos][s] >= effective_max[pos][s]:
+                            continue
+                        if remaining_min[pos][s] > 0:
+                            priority_candidates.append((pos, s))
+                        else:
+                            other_candidates.append((pos, s))
+                candidates = priority_candidates if priority_candidates else other_candidates
             if not candidates:
                 possible = False
+                _fail_reasons["no_candidates"] += 1
                 break
-            
-            # 随机选一个候选，加一张
             pos, s = random.choice(candidates)
+
             shape[pos][s] += 1
             remaining_by_pos[pos] -= 1
             remaining_by_suit[s] -= 1
-        
+            if remaining_min[pos][s] > 0:
+                remaining_min[pos][s] -= 1
+
         if not possible:
-            continue
-        
+            continue  # no_candidates 已在 break 处计数
+
         # Step 6: 最终验证所有约束
         ok = True
         for pos in positions:
@@ -891,18 +1019,30 @@ def _generate_valid_shape_distribution(
                         ok = False
             if c and c.balanced is not None:
                 dist = list(shape[pos].values())
-                is_bal = all(2 <= d <= 5 for d in dist) and not any(d >= 6 for d in dist)
+                # 中局阶段（target<13）放宽balanced下限：只保留上限5张和无6+张套
+                # 因为剩余牌池可能某花色=0，无法满足每花色≥2
+                if target_counts[pos] >= 13:
+                    is_bal = all(2 <= d <= 5 for d in dist) and not any(d >= 6 for d in dist)
+                else:
+                    is_bal = all(d <= 5 for d in dist) and not any(d >= 6 for d in dist)
                 if c.balanced and not is_bal:
                     ok = False
-                if not c.balanced and is_bal:
-                    ok = False
+                # 注意：balanced=False（非均型）不应禁止均型分布，
+                # 该约束语义是"不要求均型"而非"必须非均型"，故移除 is_bal 拒绝逻辑
         for s in SUITS:
             if sum(shape[pos][s] for pos in positions) != suit_total[s]:
                 ok = False
-        
+
         if ok:
             return shape
-    
+        _fail_reasons["final_validation"] += 1
+
+    # 失败统计输出（只写1行）
+    _total_fail = sum(_fail_reasons.values())
+    if _total_fail > 0:
+        with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+            _f.write(f"[SHAPE_FAIL] attempts={max_attempts} reasons={_fail_reasons} "
+                     f"positions={positions} targets={target_counts} suit_total={suit_total}\n")
     return None
 
 
@@ -912,76 +1052,119 @@ def _allocate_hcp_budget(
     pool: List[Card] = None,
 ) -> Optional[Dict[str, int]]:
     """分配HCP预算：给每家分配一个目标HCP值
-    
+
     约束满足：
     - min_hcp[pos] ≤ hcp[pos] ≤ max_hcp[pos]
     - sum(hcp[pos] for unknown pos) = pool中牌的总HCP
-    
+
     返回：{pos: target_hcp} 或 None 如果无法分配
     """
-    max_attempts = 200
-    
+    max_attempts = 40
+
     # 计算牌池中总HCP
     total_hcp = 40
     if pool is not None:
         total_hcp = sum(HCP_MAP.get(c.rank, 0) for c in pool)
-    
+
+    # 预计算每家的 min/max 和目标中值
+    # 软约束（不参与硬可行性检查，由 compute_sample_violation_score 软加权处理）：
+    #   - negative_inference: 负推断（如"pass后≤7"）
+    #   - hcp_conservation: 点力守恒推断（如"对家≤7则本家≥8"）
+    # 只有用明确叫牌承诺（hard_coded/meaning_parsed/convention）的 HCP 约束做硬约束
+    _SOFT_SOURCES = {"negative_inference", "hcp_conservation"}
+    bounds = {}
+    for pos in positions:
+        c = constraints.get(pos)
+        is_soft = bool(c and c.inference_source in _SOFT_SOURCES)
+        # 软推断的 min_hcp 和 max_hcp 都视为软约束，不参与硬可行性检查
+        # 只用明确叫牌承诺（hard_coded/meaning_parsed/convention）做硬约束
+        mn = c.min_hcp if c and c.min_hcp is not None and not is_soft else 0
+        if c and c.max_hcp is not None and not is_soft:
+            mx = c.max_hcp
+        else:
+            mx = 37
+        target = None
+        if c and c.min_hcp_target is not None:
+            target = c.min_hcp_target
+        elif c and c.min_hcp is not None and c.max_hcp is not None:
+            target = (c.min_hcp + c.max_hcp) // 2
+        bounds[pos] = (mn, mx, target)
+
+    # 可行性检查：最小值之和 ≤ total_hcp ≤ 最大值之和
+    # 不可行说明约束互相矛盾（如负推断max过严），返回None让上层降级到 _distribute_biased
+    sum_min = sum(bounds[p][0] for p in positions)
+    sum_max = sum(bounds[p][1] for p in positions)
+    if total_hcp < sum_min or total_hcp > sum_max:
+        return None
+
     for _ in range(max_attempts):
         budgets = {}
+        # 先给每家分配最小值
         remaining = total_hcp
-        
-        # 先给每个位置分配最小值
         for pos in positions:
-            c = constraints.get(pos)
-            mn = c.min_hcp if c and c.min_hcp is not None else 0
-            budgets[pos] = mn
-            remaining -= mn
-        
+            budgets[pos] = bounds[pos][0]
+            remaining -= bounds[pos][0]
+
         if remaining < 0:
             continue
-        
-        # 随机分配剩余点力
-        for ___ in range(remaining):
-            # 找还能加点的位置
-            candidates = []
+
+        # 批量分配剩余 HCP：每家用目标中值作为权重，一次性抽取
+        # 等价于逐点分配但避免了 N 次内层循环（N 可能 20+）
+        if remaining > 0:
+            # 计算每家还能接收多少 HCP
+            room = {pos: bounds[pos][1] - budgets[pos] for pos in positions}
+            # 用目标中值作为权重
+            weights = []
+            pos_list = []
             for pos in positions:
-                c = constraints.get(pos)
-                mx = c.max_hcp if c and c.max_hcp is not None else 37
-                if budgets[pos] < mx:
-                    # 偏好分配给min_hcp_target附近的位置
-                    target = None
-                    if c and c.min_hcp_target is not None:
-                        target = c.min_hcp_target
-                    elif c and c.min_hcp is not None and c.max_hcp is not None:
-                        target = (c.min_hcp + c.max_hcp) // 2
-                    weight = 1
-                    if target is not None:
-                        dist = abs(budgets[pos] + 1 - target)
-                        weight = max(1, 5 - dist)
-                    candidates.extend([pos] * weight)
-            
-            if not candidates:
-                break
-            pos = random.choice(candidates)
-            budgets[pos] += 1
-        
+                if room[pos] <= 0:
+                    continue
+                target = bounds[pos][2]
+                w = 1
+                if target is not None:
+                    w = max(1, 5 - abs(budgets[pos] + room[pos] // 2 - target))
+                # 按权重扩展为多个名额（每个名额代表 1 点 HCP 容量）
+                slots = min(room[pos], max(1, w * 3))
+                weights.extend([pos] * slots)
+                pos_list.append(pos)
+
+            if not weights:
+                # 所有人都已到上限，但还有剩余 HCP → 不可行
+                continue
+
+            # 一次性从 weights 中抽取 remaining 个（不重复抽取同一名额）
+            if remaining <= len(weights):
+                chosen = random.sample(weights, remaining)
+            else:
+                chosen = list(weights)
+                # 不够则补充随机分配
+                extra = remaining - len(chosen)
+                for _ in range(extra):
+                    # 找还有容量的位置
+                    avail = [p for p in positions if budgets[p] + chosen.count(p) < bounds[p][1]]
+                    if not avail:
+                        break
+                    chosen.append(random.choice(avail))
+
+            for pos in chosen:
+                if budgets[pos] < bounds[pos][1]:
+                    budgets[pos] += 1
+
         total = sum(budgets.values())
         if total != total_hcp:
             continue
-        
+
         # 验证所有约束
         ok = True
         for pos in positions:
-            c = constraints.get(pos)
             h = budgets[pos]
-            if c:
-                if c.min_hcp is not None and h < c.min_hcp:
-                    ok = False
-                if c.max_hcp is not None and h > c.max_hcp:
-                    ok = False
+            mn, mx, _ = bounds[pos]
+            if h < mn or h > mx:
+                ok = False
+                break
         if ok:
             return budgets
-    
+
     return None
 
 
@@ -1073,23 +1256,25 @@ def _assign_cards_by_shape_and_hcp(
             needed_hcp[pos] = max(0, needed_hcp[pos] - card_hcp)
     
     # Step 3: 定向局部交换修正HCP误差（智能交换，而不是盲目随机）
-    # 最多进行1000次交换尝试
-    for _fix_round in range(1000):
-        # 检查当前HCP状态
-        current_hcp = {}
+    # 优化：增量HCP维护 + 早停（连续无改善即退出） + 减少上限
+    max_fix_rounds = 200
+    no_improve_count = 0
+    # 初始化增量 HCP（只算一次，后续交换时增量更新）
+    current_hcp = {pos: sum(HCP_MAP.get(c.rank, 0) for c in result[pos]) for pos in positions}
+
+    for _fix_round in range(max_fix_rounds):
+        # 检查 HCP 违规
         hcp_violations = []
         for pos in positions:
             c = constraints.get(pos)
-            cards = result[pos]
-            h = sum(HCP_MAP.get(card.rank, 0) for card in cards)
-            current_hcp[pos] = h
             if not c:
                 continue
+            h = current_hcp[pos]
             if c.min_hcp is not None and h < c.min_hcp:
                 hcp_violations.append((pos, "low", c.min_hcp - h))
             if c.max_hcp is not None and h > c.max_hcp:
                 hcp_violations.append((pos, "high", h - c.max_hcp))
-        
+
         # 同时检查牌型和其他约束
         all_ok = len(hcp_violations) == 0
         if all_ok:
@@ -1098,16 +1283,16 @@ def _assign_cards_by_shape_and_hcp(
                 if c and not DealSampler._check_all_constraints(result[pos], c, target_count=None):
                     all_ok = False
                     break
-        
+
         if all_ok:
             break
-        
+
         # 找出所有HCP不足和HCP超额的位置
         low_positions = [(p, d) for p, t, d in hcp_violations if t == "low"]
         high_positions = [(p, d) for p, t, d in hcp_violations if t == "high"]
-        
+
         swapped = False
-        
+
         # 优先尝试HCP定向交换：从高HCP位置拿大牌换低HCP位置的小牌
         if low_positions and high_positions:
             for low_pos, low_deficit in low_positions:
@@ -1118,31 +1303,25 @@ def _assign_cards_by_shape_and_hcp(
                     high_cards = result[high_pos]
                     low_c = constraints.get(low_pos)
                     high_c = constraints.get(high_pos)
-                    
-                    # 尝试找同花色交换：高HCP方出大牌，低HCP方出小牌
-                    for _try in range(30):
-                        # 从高HCP位置找一张大牌（HCP>0）
+
+                    for _try in range(15):
                         high_choices = [c for c in high_cards if HCP_MAP.get(c.rank, 0) > 0]
                         if not high_choices:
                             break
                         high_card = random.choice(high_choices)
                         h_card_hcp = HCP_MAP.get(high_card.rank, 0)
-                        
-                        # 从低HCP位置找同花色的一张小牌（HCP=0）
+
                         low_choices = [c for c in low_cards if c.suit == high_card.suit and HCP_MAP.get(c.rank, 0) == 0]
                         if not low_choices:
-                            # 允许不同花色交换，但要保证牌型张数不变（跨花色交换张数必须相等——单张换单张没问题）
                             low_choices = [c for c in low_cards if HCP_MAP.get(c.rank, 0) < h_card_hcp]
                         if not low_choices:
                             continue
                         low_card = random.choice(low_choices)
                         l_card_hcp = HCP_MAP.get(low_card.rank, 0)
-                        
-                        # 计算交换后的HCP
+
                         new_low_h = current_hcp[low_pos] - l_card_hcp + h_card_hcp
                         new_high_h = current_hcp[high_pos] - h_card_hcp + l_card_hcp
-                        
-                        # 检查HCP约束改善
+
                         low_ok = True
                         high_ok = True
                         if low_c:
@@ -1155,34 +1334,32 @@ def _assign_cards_by_shape_and_hcp(
                                 high_ok = False
                             if high_c.max_hcp is not None and new_high_h > high_c.max_hcp:
                                 high_ok = False
-                        
-                        # 检查牌型约束（交换后张数不变，牌型自动满足）
-                        # 但要检查specific_cards
+
                         if low_c:
                             for (s, r) in low_c.specific_cards:
-                                if (s == low_card.suit and r == low_card.rank):
-                                    low_ok = False  # 不能把必须持有的牌换出去
-                                if (s == high_card.suit and r == high_card.rank):
-                                    pass  # 换进来没问题
+                                if s == low_card.suit and r == low_card.rank:
+                                    low_ok = False
                         if high_c:
                             for (s, r) in high_c.specific_cards:
-                                if (s == high_card.suit and r == high_card.rank):
-                                    high_ok = False  # 不能把必须持有的牌换出去
-                        
+                                if s == high_card.suit and r == high_card.rank:
+                                    high_ok = False
+
                         if low_ok and high_ok:
-                            # 执行交换
                             result[low_pos] = [c for c in low_cards if c != low_card] + [high_card]
                             result[high_pos] = [c for c in high_cards if c != high_card] + [low_card]
+                            # 增量更新 HCP
+                            current_hcp[low_pos] = new_low_h
+                            current_hcp[high_pos] = new_high_h
                             swapped = True
                             break
                     if swapped:
                         break
                 if swapped:
                     break
-        
+
         # 如果定向交换没成功，做随机交换尝试修复其他约束
         if not swapped:
-            for _try in range(20):
+            for _try in range(10):
                 pos1 = random.choice(positions)
                 pos2 = random.choice(positions)
                 if pos1 == pos2:
@@ -1198,20 +1375,47 @@ def _assign_cards_by_shape_and_hcp(
                 ok1 = DealSampler._check_all_constraints(t1, constraints.get(pos1), target_count=None)
                 ok2 = DealSampler._check_all_constraints(t2, constraints.get(pos2), target_count=None)
                 if ok1 and ok2:
-                    # 检查是否改善了整体HCP误差
-                    old_err = sum(max(0, constraints.get(p).min_hcp - current_hcp[p]) for p in positions if constraints.get(p) and constraints.get(p).min_hcp is not None) + \
-                              sum(max(0, current_hcp[p] - constraints.get(p).max_hcp) for p in positions if constraints.get(p) and constraints.get(p).max_hcp is not None)
-                    new_h = {p: current_hcp[p] for p in positions}
-                    new_h[pos1] = new_h[pos1] - HCP_MAP.get(out1.rank, 0) + HCP_MAP.get(out2.rank, 0)
-                    new_h[pos2] = new_h[pos2] - HCP_MAP.get(out2.rank, 0) + HCP_MAP.get(out1.rank, 0)
-                    new_err = sum(max(0, constraints.get(p).min_hcp - new_h[p]) for p in positions if constraints.get(p) and constraints.get(p).min_hcp is not None) + \
-                              sum(max(0, new_h[p] - constraints.get(p).max_hcp) for p in positions if constraints.get(p) and constraints.get(p).max_hcp is not None)
+                    # 增量计算新 HCP 误差（不重新遍历所有牌）
+                    h1_old = current_hcp[pos1]
+                    h2_old = current_hcp[pos2]
+                    h1_new = h1_old - HCP_MAP.get(out1.rank, 0) + HCP_MAP.get(out2.rank, 0)
+                    h2_new = h2_old - HCP_MAP.get(out2.rank, 0) + HCP_MAP.get(out1.rank, 0)
+
+                    old_err = 0
+                    new_err = 0
+                    for p in positions:
+                        c = constraints.get(p)
+                        if not c:
+                            continue
+                        ho = current_hcp[p]
+                        hn = ho
+                        if p == pos1:
+                            hn = h1_new
+                        elif p == pos2:
+                            hn = h2_new
+                        if c.min_hcp is not None:
+                            old_err += max(0, c.min_hcp - ho)
+                            new_err += max(0, c.min_hcp - hn)
+                        if c.max_hcp is not None:
+                            old_err += max(0, ho - c.max_hcp)
+                            new_err += max(0, hn - c.max_hcp)
+
                     if new_err <= old_err:
                         result[pos1] = t1
                         result[pos2] = t2
+                        current_hcp[pos1] = h1_new
+                        current_hcp[pos2] = h2_new
                         swapped = True
                         break
-    
+
+        # 早停：连续无改善计数
+        if swapped:
+            no_improve_count = 0
+        else:
+            no_improve_count += 1
+            if no_improve_count >= 15:
+                break
+
     return result
 
 
@@ -1221,18 +1425,23 @@ def _distribute_global_constrained(
     remaining_counts: Dict[str, int],
     constraints: Dict[str, BidConstraint],
     known_voids: Dict[str, Set[str]] = None,
+    played_set: Set[Tuple[str, str]] = None,
+    played_hcp_per_pos: Dict[str, int] = None,
+    played_controls_per_pos: Dict[str, int] = None,
+    played_suit_per_pos: Dict[str, Dict[str, int]] = None,
 ) -> None:
     """新的全局约束分配：先分牌型→再分HCP→再分牌张
-    
-    替代原有的_distribute_biased逐位置贪心算法
+
+    替代原有_distribute_biased逐位置贪心算法
     """
     known_voids = known_voids or {}
+    played_set = played_set or set()
     positions = [p for p in POSITION_ORDER]
     unknown_positions = [p for p in positions if p not in result]
-    
+
     if not unknown_positions:
         return
-    
+
     # 把已知牌张计入张数约束
     known_shape = {}
     known_cards_set = set()
@@ -1253,6 +1462,11 @@ def _distribute_global_constrained(
             target_counts[pos] = remaining_counts.get(pos, 13 - sum(known_shape.get(pos, {}).values()))
     
     # 对于未知位置，应用known_voids：如果已知缺门，suit_max[suit] = 0
+    # 同时按剩余张数缩减suit_min/HCP/min_controls（整手13张时的约束在中局应等比缩减）
+    # 已出的specific_cards应过滤掉，避免_assign_cards找不到该牌导致粒子缺牌
+    # 已出牌张集合（用于过滤specific_cards），由调用方传入
+    _played_set = played_set
+
     effective_constraints = {}
     for pos in positions:
         c = constraints.get(pos)
@@ -1263,10 +1477,52 @@ def _distribute_global_constrained(
         c_copy.suit_min = dict(c.suit_min)
         c_copy.suit_max = dict(c.suit_max)
         c_copy.exact_suit = dict(c.exact_suit)
-        c_copy.specific_cards = set(c.specific_cards)
+        c_copy.specific_cards = {sc for sc in c.specific_cards if sc not in _played_set}
         # 应用已知void
         for void_suit in known_voids.get(pos, set()):
             c_copy.suit_max[void_suit] = 0
+        # 未知位置：中局约束缩减
+        if pos not in result:
+            target = target_counts[pos]
+            if target < 13:
+                # 张数约束缩减：按花色分别扣减已出张数（初始约束 = 已出 + 剩余）
+                # 物理意义：南家♠≥5张约束，已出♠3张 → 剩余♠≥2张
+                # 比线性递减 max(0, suit_min-(13-target)) 更准确（不假设均匀分布）
+                _played_suits = (played_suit_per_pos or {}).get(pos, {})
+                for s in list(c_copy.suit_min.keys()):
+                    played_cnt = _played_suits.get(s, 0)
+                    reduced = max(0, c_copy.suit_min[s] - played_cnt)
+                    reduced = min(reduced, target)
+                    c_copy.suit_min[s] = reduced
+                # exact_suit 同样按花色扣减
+                for s in list(c_copy.exact_suit.keys()):
+                    played_cnt = _played_suits.get(s, 0)
+                    reduced = c_copy.exact_suit[s] - played_cnt
+                    if reduced < 0:
+                        # 已出超过初始exact（理论不应发生），删除约束
+                        del c_copy.exact_suit[s]
+                    else:
+                        c_copy.exact_suit[s] = reduced
+                # suit_max 也按花色扣减（如初始♥≤4，已出♥2张 → 剩余♥≤2张）
+                for s in list(c_copy.suit_max.keys()):
+                    played_cnt = _played_suits.get(s, 0)
+                    reduced = c_copy.suit_max[s] - played_cnt
+                    c_copy.suit_max[s] = max(0, reduced)
+                # HCP约束缩减：用已出牌HCP扣减（初始约束 = 已出HCP + 剩余HCP）
+                # 物理意义：初始约束针对13张牌，已出牌HCP已消耗部分预算，
+                # 剩余手牌HCP范围 = [初始min - 已出HCP, 初始max - 已出HCP]
+                # 这比按target/13比例缩减更准确（HCP集中在A/K/Q/J上，非均匀分布）
+                _played_hcp = (played_hcp_per_pos or {}).get(pos, 0)
+                if c_copy.min_hcp is not None:
+                    c_copy.min_hcp = max(0, c_copy.min_hcp - _played_hcp)
+                if c_copy.max_hcp is not None:
+                    new_max = c_copy.max_hcp - _played_hcp
+                    # max不能低于min（已出HCP超过初始max的极端情况）
+                    c_copy.max_hcp = max(new_max, c_copy.min_hcp or 0)
+                # min_controls缩减：控制数是整手属性，同样用已出牌扣减
+                _played_ctrl = (played_controls_per_pos or {}).get(pos, 0)
+                if c_copy.min_controls is not None:
+                    c_copy.min_controls = max(0, c_copy.min_controls - _played_ctrl)
         # 对于已有部分牌的位置，调整suit_min/exact以反映已知张数
         if pos in known_shape:
             for s in SUITS:
@@ -1279,25 +1535,86 @@ def _distribute_global_constrained(
     
     # 未知位置的target_counts是需要从pool中分配的张数
     unknown_targets = {pos: remaining_counts.get(pos, 13) for pos in unknown_positions}
-    
-    # Step 1: 生成未知位置的牌型分布
+
+    # Step 1: 生成未知位置的牌型分布（带 shape 池缓存）
+    # 同一 PlayState 下 N 个粒子共享 shape 候选池，避免重复随机重试
+    import time as _time
+    _t0 = _time.time()
+    # 构建缓存键：unknown_positions + targets + pool花色分布签名
+    _pool_sig = tuple(sorted([(s, sum(1 for _c in real_pool if _c.suit == s)) for s in SUITS]))
+    _targets_sig = tuple((pos, unknown_targets[pos]) for pos in unknown_positions)
+    _cache_key = (tuple(unknown_positions), _targets_sig, _pool_sig)
+
     shape = None
-    for _attempt in range(50):
-        shape = _generate_valid_shape_distribution(
-            {pos: effective_constraints[pos] for pos in unknown_positions},
-            unknown_positions,
-            unknown_targets,
-            pool=real_pool,
-        )
-        if shape is not None:
-            break
-    
+    _shape_attempts = 0
+    if _cache_key in _SHAPE_POOL and _SHAPE_POOL[_cache_key]:
+        # 缓存命中：从候选池随机选一个
+        shape = copy.deepcopy(random.choice(_SHAPE_POOL[_cache_key]))
+        _DIST_STATS["shape_cache_hits"] += 1
+    else:
+        # 首次生成：尝试产出多个候选填满池
+        _pool_candidates = []
+        for _attempt in range(50):
+            _shape_attempts += 1
+            _sh = _generate_valid_shape_distribution(
+                {pos: effective_constraints[pos] for pos in unknown_positions},
+                unknown_positions,
+                unknown_targets,
+                pool=real_pool,
+            )
+            if _sh is not None:
+                _pool_candidates.append(_sh)
+                if len(_pool_candidates) >= _SHAPE_POOL_TARGET:
+                    break
+        if _pool_candidates:
+            shape = copy.deepcopy(_pool_candidates[0])
+            _SHAPE_POOL[_cache_key] = _pool_candidates[:_SHAPE_POOL_MAX]
+        else:
+            shape = None
+    _DIST_STATS["shape_t"] += _time.time() - _t0
+    _DIST_STATS["shape_calls"] += 1
+    _DIST_STATS["shape_retries"] += _shape_attempts - 1 if _shape_attempts > 0 else 0
+
     if shape is None:
-        # 牌型生成失败，回退到原有算法
-        orig_sampler = DealSampler()
-        orig_sampler.constraints = constraints
-        orig_sampler._distribute_biased(result, pool, remaining_counts, known_voids)
-        return
+        # 牌型生成失败：放宽约束重试一次（清空suit_min/exact/balanced，只保留void和suit_max）
+        # 这比回退_distribute_biased质量更好（仍走全局HCP预算+牌张分配）
+        _relaxed_constraints = {}
+        for pos in unknown_positions:
+            c = effective_constraints.get(pos)
+            if c is None:
+                c = BidConstraint(position=pos)
+            c_relax = copy.copy(c)
+            c_relax.suit_min = {}  # 清空suit_min
+            c_relax.exact_suit = {}  # 清空exact_suit
+            c_relax.balanced = None  # 清空balanced
+            # 保留 suit_max（含void约束）和 HCP 范围
+            c_relax.suit_max = dict(c.suit_max)
+            c_relax.specific_cards = set(c.specific_cards)
+            _relaxed_constraints[pos] = c_relax
+        # 放宽后重试shape生成
+        for _attempt in range(30):
+            shape = _generate_valid_shape_distribution(
+                _relaxed_constraints,
+                unknown_positions,
+                unknown_targets,
+                pool=real_pool,
+            )
+            if shape is not None:
+                break
+        if shape is None:
+            # 放宽后仍失败：最终回退到_distribute_biased（极少发生）
+            orig_sampler = DealSampler()
+            orig_sampler.constraints = constraints
+            orig_sampler._distribute_biased(result, pool, remaining_counts, known_voids)
+            _DIST_STATS["fallback_count"] += 1
+            _suit_total = {s: sum(1 for _c in real_pool if _c.suit == s) for s in SUITS}
+            with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                _f.write(f"[FB_HARD] pool={len(real_pool)} suits={_suit_total} "
+                         f"unknown_pos={unknown_positions} targets={unknown_targets} "
+                         f"known_voids={known_voids}\n")
+            return
+        # 放宽重试成功：shape 已生成，继续走 HCP+牌张分配流程
+        # 注意：effective_constraints 仍用原值（HCP约束保留），shape只是放宽了suit_min/balanced
     
     # 合并已知牌张到完整shape
     full_shape = {}
@@ -1308,33 +1625,46 @@ def _distribute_global_constrained(
             full_shape[pos] = dict(shape[pos])
     
     # Step 2: 分配HCP预算
-    # 计算已知位置已有HCP
+    _t1 = _time.time()
     known_hcp = {}
     for pos in result:
         known_hcp[pos] = sum(HCP_MAP.get(c.rank, 0) for c in result[pos])
-    
-    # 未知位置从real_pool分配，HCP预算应针对real_pool中的牌
+
     hcp_budgets = None
-    for _attempt in range(50):
-        unknown_budgets = _allocate_hcp_budget(
-            {pos: effective_constraints[pos] for pos in unknown_positions},
-            unknown_positions,
-            pool=real_pool,
-        )
-        if unknown_budgets is not None:
-            hcp_budgets = {}
-            for pos in positions:
-                if pos in known_hcp:
-                    hcp_budgets[pos] = known_hcp[pos]
-                else:
-                    hcp_budgets[pos] = unknown_budgets[pos]
-            break
-    
+    # 可行性检查是确定性的，1次调用即可判断，无需重试50次
+    unknown_budgets = _allocate_hcp_budget(
+        {pos: effective_constraints[pos] for pos in unknown_positions},
+        unknown_positions,
+        pool=real_pool,
+    )
+    if unknown_budgets is not None:
+        hcp_budgets = {}
+        for pos in positions:
+            if pos in known_hcp:
+                hcp_budgets[pos] = known_hcp[pos]
+            else:
+                hcp_budgets[pos] = unknown_budgets[pos]
+    _DIST_STATS["hcp_t"] += _time.time() - _t1
+    _DIST_STATS["hcp_calls"] += 1
+    _DIST_STATS["hcp_retries"] += 0
+
+    # HCP 预算不可行（明确叫牌的硬约束之间矛盾，极少发生）
+    # 此时降级到 _distribute_biased（仍尊重约束，通过 _constrained_select 软逼近）
     if hcp_budgets is None:
-        # HCP分配失败，给个均匀预算
-        hcp_budgets = {pos: 10 for pos in positions}
-    
+        if _DIST_STATS["fallback_count"] < 3:
+            with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                _eff_bounds = {p: (effective_constraints[p].min_hcp, effective_constraints[p].max_hcp, effective_constraints[p].inference_source) for p in unknown_positions}
+                _pool_hcp = sum(HCP_MAP.get(c.rank, 0) for c in real_pool)
+                _f.write(f"[HCP_BUDGET_FAIL] unknown_bounds={_eff_bounds} "
+                         f"pool_hcp={_pool_hcp} → _distribute_biased\n")
+        _DIST_STATS["fallback_count"] += 1
+        orig_sampler = DealSampler()
+        orig_sampler.constraints = constraints
+        orig_sampler._distribute_biased(result, pool, remaining_counts, known_voids)
+        return
+
     # Step 3: 分配具体牌张
+    _t2 = _time.time()
     unknown_result = _assign_cards_by_shape_and_hcp(
         real_pool,
         shape,
@@ -1342,7 +1672,9 @@ def _distribute_global_constrained(
         {pos: effective_constraints[pos] for pos in unknown_positions},
         unknown_positions,
     )
-    
+    _DIST_STATS["assign_t"] += _time.time() - _t2
+    _DIST_STATS["assign_calls"] += 1
+
     # 合并到结果
     for pos in unknown_positions:
         result[pos] = unknown_result.get(pos, [])

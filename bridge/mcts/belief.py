@@ -12,6 +12,7 @@ DD/MCTS 搜索时按权重抽样，替代均匀随机采样，
 """
 
 import math
+import os
 import random
 from typing import Dict, List, Set, Tuple, Optional
 
@@ -132,13 +133,31 @@ class BeliefTracker:
 
         # 生成粒子（sampler._sample_once 带约束，这里做二次验证 + 信号加权 + 约束软惩罚）
         # 注意：直接调用 _sample_once，跳过sample()中的硬验证重试（中局剩余牌不满足整手约束，重试无意义，权重会软惩罚）
+        import time as _time
+        from bridge.mcts.sampler import reset_dist_stats, dump_dist_stats
+        reset_dist_stats()
+        _prep_t0 = _time.time()
         self.particles = []
         self.weights = []
+        _slow_samples = 0
+        _slowest_sample_t = 0.0
         for _ in range(self.num_particles):
+            _t_s0 = _time.time()
             sample = self.sampler._sample_once(state, perspective)
+            _dt_sample = _time.time() - _t_s0
+            if _dt_sample > _slowest_sample_t:
+                _slowest_sample_t = _dt_sample
+            if _dt_sample > 0.1:
+                _slow_samples += 1
             self.particles.append(sample)
             w = self._particle_weight(sample, known_voids, signal_evidence, self.constraints)
             self.weights.append(w)
+        _prep_total = _time.time() - _prep_t0
+        _log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "dd_debug.log")
+        with open(_log_path, "a", encoding="utf-8") as _f:
+            _f.write(f"[PREP] particles={self.num_particles} total={_prep_total:.2f}s "
+                     f"slowest_sample={_slowest_sample_t:.3f}s slow_samples={_slow_samples}\n")
+        dump_dist_stats()
 
         # 归一化
         total = sum(self.weights)

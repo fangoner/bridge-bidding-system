@@ -96,7 +96,7 @@ MCTS_MIN_ITERATIONS = 500  # floor for adaptive iteration scaling
 ROLLOUT_GREEDY_PROB = 0.80  # probability of heuristic vs random in rollout
 DD_NUM_SAMPLES = 200  # DD采样数（信念禁用回退时用，正常路径由 BELIEF_DD_PARTICLES 控制）
 DD_MIN_SAMPLES = 15   # floor for adaptive sample scaling
-DD_TIME_LIMIT = 60.0  # seconds per DD play decision (solve_board is heavy)
+DD_TIME_LIMIT = 30.0  # seconds per DD play decision (30秒预算，允许首攻冷启动)
 DD_MAXIMIN_ENABLE = True   # 最大化选牌：混合avg和min，偏好稳定牌
 DD_REGRET_BASE = 0.25      # 领先时 min 权重（保守）；落后时 min 权重=0（纯avg冒险）
 
@@ -120,9 +120,9 @@ TIERED_MCTS_CLUSTER_THRESHOLD = 0.5  # MCTS回退路径固定集群阈值（墩�
 # 信念状态跟踪 / 粒子滤波参数
 BELIEF_ENABLE = True            # 是否启用信念跟踪（False回退到纯随机采样）
 BELIEF_NUM_PARTICLES = 60       # 默认粒子数（回退用）
-BELIEF_DD_PARTICLES = 200       # DD引擎粒子数（不抽取，全量加权平均，100-500）
+BELIEF_DD_PARTICLES = 200       # DD引擎粒子数（不抽取，全量加权平均，100-1500）
 BELIEF_DD_PARTICLES_MIN = 100
-BELIEF_DD_PARTICLES_MAX = 500
+BELIEF_DD_PARTICLES_MAX = 2000
 BELIEF_MCTS_PARTICLES = 500     # MCTS引擎粒子数（加权draw池，300-1000）
 BELIEF_MCTS_PARTICLES_MIN = 300
 BELIEF_MCTS_PARTICLES_MAX = 1000

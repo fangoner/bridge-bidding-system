@@ -191,7 +191,7 @@ function SettingsPanel({
             {playEngine === 'dd' && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>粒子</Typography>
-                <input type="range" min={ddParticlesRange.min} max={ddParticlesRange.max}
+                <input type="range" min={ddParticlesRange.min} max={ddParticlesRange.max} step={10}
                   value={ddParticles} onChange={(e) => handleParticleChange('dd', Number(e.target.value))}
                   style={{ width: 72, height: 16 }} />
                 <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 600, minWidth: 24 }}>{ddParticles}</Typography>
@@ -201,14 +201,14 @@ function SettingsPanel({
               <>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                   <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>中盘</Typography>
-                  <input type="range" min={ddParticlesRange.min} max={ddParticlesRange.max}
+                  <input type="range" min={ddParticlesRange.min} max={ddParticlesRange.max} step={10}
                     value={ddParticles} onChange={(e) => handleParticleChange('dd', Number(e.target.value))}
                     style={{ width: 60, height: 16 }} />
                   <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 600, minWidth: 24 }}>{ddParticles}</Typography>
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                   <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>残局</Typography>
-                  <input type="range" min={alphaMuParticlesRange.min} max={alphaMuParticlesRange.max}
+                  <input type="range" min={alphaMuParticlesRange.min} max={alphaMuParticlesRange.max} step={10}
                     value={alphaMuParticles} onChange={(e) => handleParticleChange('alphaMu', Number(e.target.value))}
                     style={{ width: 60, height: 16 }} />
                   <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 600, minWidth: 24 }}>{alphaMuParticles}</Typography>
@@ -218,7 +218,7 @@ function SettingsPanel({
             {playEngine === 'alphamu' && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>粒子</Typography>
-                <input type="range" min={alphaMuParticlesRange.min} max={alphaMuParticlesRange.max}
+                <input type="range" min={alphaMuParticlesRange.min} max={alphaMuParticlesRange.max} step={10}
                   value={alphaMuParticles} onChange={(e) => handleParticleChange('alphaMu', Number(e.target.value))}
                   style={{ width: 72, height: 16 }} />
                 <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 600, minWidth: 24 }}>{alphaMuParticles}</Typography>
@@ -227,7 +227,7 @@ function SettingsPanel({
             {playEngine === 'mcts' && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>粒子</Typography>
-                <input type="range" min={mctsParticlesRange.min} max={mctsParticlesRange.max}
+                <input type="range" min={mctsParticlesRange.min} max={mctsParticlesRange.max} step={10}
                   value={mctsParticles} onChange={(e) => handleParticleChange('mcts', Number(e.target.value))}
                   style={{ width: 72, height: 16 }} />
                 <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 600, minWidth: 24 }}>{mctsParticles}</Typography>

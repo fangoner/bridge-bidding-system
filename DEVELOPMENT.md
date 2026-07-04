@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。v1.39新增截屏/图片识别导入牌局（Doubao Vision API）、定约/首攻确认对话框、研究模式、花色主题感知系统。v1.40 Tiered分层引擎重做（DD替代MCTS中盘）、新增Perfect DD全知引擎和人类DD提示功能。v1.41打牌引擎大师级优化：αμ搜索解决PIMC缺陷、信念跟踪粒子滤波、防守信号模型、LLM校验层、三信号关键决策检测、首攻DD+LLM融合、MCTS根节点选牌修复。v1.42 αμ超时快速DD回退、记录服务器端备份、提示词RKCB规则强化（对方问叫拦截+将牌判定+5NT后续）、打牌返回叫牌按钮、手牌面板LLM模型显示。v1.43 按牌复盘替代按墩复盘（52张逐张回退）、DD Hint预录到trick数据（出牌时自动计算并存入）、复盘时DD hint标记（最优绿色/非最优橙色）、出牌记录按牌高亮/灰化。v1.44 手牌布局4层容器结构重构：东西家旋转溢出修复、手牌输入框和"未知"控件独立渲染、白天模式字体可读性增强。
+本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。v1.39新增截屏/图片识别导入牌局（Doubao Vision API）、定约/首攻确认对话框、研究模式、花色主题感知系统。v1.40 Tiered分层引擎重做（DD替代MCTS中盘）、新增Perfect DD全知引擎和人类DD提示功能。v1.41打牌引擎大师级优化：αμ搜索解决PIMC缺陷、信念跟踪粒子滤波、防守信号模型、LLM校验层、三信号关键决策检测、首攻DD+LLM融合、MCTS根节点选牌修复。v1.42 αμ超时快速DD回退、记录服务器端备份、提示词RKCB规则强化（对方问叫拦截+将牌判定+5NT后续）、打牌返回叫牌按钮、手牌面板LLM模型显示。v1.43 按牌复盘替代按墩复盘（52张逐张回退）、DD Hint预录到trick数据（出牌时自动计算并存入）、复盘时DD hint标记（最优绿色/非最优橙色）、出牌记录按牌高亮/灰化。v1.44 手牌布局4层容器结构重构：东西家旋转溢出修复、手牌输入框和"未知"控件独立渲染、白天模式字体可读性增强。v1.45 DD引擎性能优化全套修复：中局约束扣减法替代比例缩减、软硬约束区分（负推断/点力守恒视为软约束）、solve_all_boards批量求解（分批≤200），600粒子性能提升5-30倍。
 
 ## 功能模块
 
@@ -715,7 +715,17 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 
 ## 版本历史
 
-### v1.44 (当前版本)
+### v1.45 (当前版本)
+- **DD引擎性能优化全套修复**
+  - **中局约束扣减法** — 替代比例缩减，按已出牌扣减HCP/min_controls/suit_min/exact_suit/suit_max。物理意义：初始约束 = 已出部分 + 剩余部分。修复中局约束矛盾导致的fallback（`sampler.py#L1425-L1486`）
+  - **软硬约束区分** — `negative_inference`（pass→≤7HCP）和 `hcp_conservation`（点力守恒推断）的max_hcp/min_hcp视为软约束，不参与 `_allocate_hcp_budget` 硬可行性检查，由 `compute_sample_violation_score` 软加权处理。修复300粒子首张牌卡住（HCP预算9800次重试）和prepare 16秒慢（300次降级到 `_distribute_biased`）（`sampler.py#L1069-L1091`）
+  - **solve_all_boards 批量求解** — 用 endplay 官方批量API替代串行 solve_board，分批 ≤ 200（C库 MAXNOOFBOARDS 限制）。新增 `_build_deal_for_world` 和 `_solve_batch` 函数。600粒子性能：avg 0.3-4.3ms（vs 串行2-17ms），total 0.2-2.6s（vs 串行1.3-10s），提升5-30倍（`dd_search.py#L259-L387`）
+  - **DD_TIME_LIMIT** 15s → 30s，**BELIEF_DD_PARTICLES_MAX** 1500 → 2000
+  - **移除自写 ThreadPoolExecutor 并行** — endplay dds C库非线程安全，Windows堆损坏崩溃（0xC0000409）
+  - **诊断日志** — `[DD_STATS] mode=BATCH/SERIAL`、`[BATCH]`、`[BATCH_FAIL]`、`[DD_SLOW]`、`[HCP_BUDGET_FAIL]`
+  - 修改文件: `bridge/mcts/sampler.py`, `bridge/mcts/dd_search.py`, `config.py`
+
+### v1.44
 - **手牌布局4层容器结构重构**
   - **东西家手牌旋转溢出修复** — 手牌Box旋转90°后视觉范围向下偏移 `(cardHeight - cardWidth) / 2 = 13.65px`，通过 `top: offset - (cardHeight - cardWidth) / 2` 向上补偿（`HandDisplay.jsx#L244`）
   - **手牌输入框独立渲染** — 新增 `renderIndependentHandInput(position)` 函数，四家用绝对定位独立渲染，距桌面边框30px（通过card-table-container的padding），TextField固定宽度120px，renderHandWithStatus内showInput/showPlayHandInput分支留空

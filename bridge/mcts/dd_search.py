@@ -38,7 +38,7 @@ def _has_duplicates(hands: Dict[str, List[Card]]) -> bool:
 
 try:
     from endplay import Deal
-    from endplay.dds import solve_board
+    from endplay.dds import solve_board, solve_all_boards
     from endplay.types import Card as EpCard, Denom, Player, Rank
     ENDPLAY_AVAILABLE = True
 except ImportError:
@@ -138,6 +138,255 @@ def _dd_eval_one_world(sampled, all_played, trick_cards, trick_leader,
         pass  # 单个世界失败不阻塞整体流程
 
 
+def _dd_eval_one_world_pure(world, all_played, trick_cards, trick_leader,
+                            playable, state, perspective, declarer, dummy,
+                            trump, weight):
+    """纯函数版：返回 partial_scores dict，不修改共享状态，供并行调用。
+
+    返回: dict {str(card): {"weighted_sum": float, "total_weight": float,
+                             "scores": list, "mn": int, "mx": int}}
+           若失败返回 None。
+    """
+    try:
+        # 深拷贝 world，避免修改原数据
+        sampled = {pos: [Card(suit=c.suit, rank=c.rank) for c in hand]
+                   for pos, hand in world.items()}
+
+        # 1. 安全网：移除已出牌
+        for pos, card in all_played:
+            if pos in sampled:
+                sampled[pos] = [c for c in sampled[pos]
+                                if not (c.suit == card.suit and c.rank == card.rank)]
+
+        # 2. 检测重复牌
+        if _has_duplicates(sampled):
+            return None
+
+        # 3. 加回当前墩的牌
+        for pos, card in trick_cards:
+            sampled[pos].append(card)
+
+        # 4. PBN → Deal → solve_board
+        pbn = _hands_to_pbn(sampled)
+        deal = Deal(pbn)
+        deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
+        if trick_cards:
+            deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
+            for _pos, card in trick_cards:
+                deal.play(_to_ep(card), from_hand=True)
+        else:
+            deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
+
+        result = solve_board(deal)
+        score_map = {}
+        for ep_card, side_score in result:
+            key = (_DENOM_TO_SUIT.get(ep_card.suit), _RANK_TO_CHAR.get(ep_card.rank))
+            score_map[key] = side_score
+
+        total_played = state.declarer_tricks + state.defender_tricks
+        remaining_tricks = 13 - total_played
+        curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
+        curplayer_is_declarer = curplayer_pos in (declarer, dummy)
+
+        partial = {}
+        for card in playable:
+            key = (card.suit, card.rank)
+            target_tricks = score_map.get(key, 0)
+            if curplayer_is_declarer:
+                decl_side_tricks = target_tricks
+            else:
+                decl_side_tricks = remaining_tricks - target_tricks
+            total = state.declarer_tricks + decl_side_tricks
+            partial[str(card)] = {
+                "weighted_sum": total * weight,
+                "total_weight": weight,
+                "scores": [total],
+                "mn": total,
+                "mx": total,
+            }
+        return partial
+
+    except Exception:
+        return None
+
+
+def _merge_partial_scores(card_scores, partial):
+    """将 partial scores 合并到 card_scores（线程安全由调用方保证）。"""
+    if partial is None:
+        return
+    for card_key, p in partial.items():
+        if card_key not in card_scores:
+            continue
+        stats = card_scores[card_key]
+        stats["weighted_sum"] += p["weighted_sum"]
+        stats["total_weight"] += p["total_weight"]
+        stats["scores"].extend(p["scores"])
+        stats["mn"] = min(stats["mn"], p["mn"])
+        stats["mx"] = max(stats["mx"], p["mx"])
+
+
+def _build_deal_for_world(world, all_played, trick_cards, trick_leader,
+                          perspective, trump):
+    """从粒子 world 构建 endplay Deal（移除已出牌、加回当前墩、设置 trump/first）。
+    返回 (Deal, sampled) 或 (None, None) 表示构建失败（重复牌等）。"""
+    # 深拷贝 world
+    sampled = {pos: [Card(suit=c.suit, rank=c.rank) for c in hand]
+               for pos, hand in world.items()}
+    # 1. 安全网：移除已出牌
+    for pos, card in all_played:
+        if pos in sampled:
+            sampled[pos] = [c for c in sampled[pos]
+                            if not (c.suit == card.suit and c.rank == card.rank)]
+    # 2. 检测重复牌
+    if _has_duplicates(sampled):
+        return None, None
+    # 3. 加回当前墩的牌
+    for pos, card in trick_cards:
+        sampled[pos].append(card)
+    # 4. PBN → Deal
+    pbn = _hands_to_pbn(sampled)
+    deal = Deal(pbn)
+    deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
+    if trick_cards:
+        deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
+        for _pos, card in trick_cards:
+            deal.play(_to_ep(card), from_hand=True)
+    else:
+        deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
+    return deal, sampled
+
+
+def _solve_batch(particles, all_played, trick_cards, trick_leader,
+                 playable, state, perspective, declarer, dummy,
+                 trump, card_scores, time_limit, start_time):
+    """用 solve_all_boards 批量求解所有粒子，累加结果到 card_scores。
+
+    solve_all_boards 的 C 库硬限制 MAXNOOFBOARDS=200，所以分批处理，每批 ≤ 200。
+    返回 (samples_done, solve_times_list, solve_total, solve_max)。
+    """
+    import time as _time
+    _BATCH_SIZE = 200  # endplay C 库 MAXNOOFBOARDS 限制
+
+    # 1. 构建所有 Deal
+    deals = []
+    weights = []
+    for idx, (world, weight) in enumerate(particles):
+        if _time.time() - start_time > time_limit:
+            break
+        deal, _sampled = _build_deal_for_world(world, all_played, trick_cards,
+                                                trick_leader, perspective, trump)
+        if deal is not None:
+            deals.append(deal)
+            weights.append(weight)
+
+    if not deals:
+        return 0, [], 0.0, 0.0
+
+    total_played = state.declarer_tricks + state.defender_tricks
+    remaining_tricks = 13 - total_played
+    solve_times = []
+    solve_total = 0.0
+    solve_max = 0.0
+    samples_done = 0
+    batch_count = 0
+
+    # 2. 分批求解（每批 ≤ 200）
+    for batch_start in range(0, len(deals), _BATCH_SIZE):
+        if _time.time() - start_time > time_limit:
+            break
+        batch_end = min(batch_start + _BATCH_SIZE, len(deals))
+        batch_deals = deals[batch_start:batch_end]
+        batch_weights = weights[batch_start:batch_end]
+        _t_batch = _time.time()
+        try:
+            solved_list = solve_all_boards(batch_deals)
+            _dt_batch = _time.time() - _t_batch
+            solve_total += _dt_batch
+            _per_deal = _dt_batch / max(len(batch_deals), 1)
+            if _per_deal > solve_max:
+                solve_max = _per_deal
+            batch_count += 1
+            # 累加结果
+            for i, solved in enumerate(solved_list):
+                weight = batch_weights[i]
+                deal = batch_deals[i]
+                score_map = {}
+                for ep_card, side_score in solved:
+                    key = (_DENOM_TO_SUIT.get(ep_card.suit), _RANK_TO_CHAR.get(ep_card.rank))
+                    score_map[key] = side_score
+                curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
+                curplayer_is_declarer = curplayer_pos in (declarer, dummy)
+                for card in playable:
+                    key = (card.suit, card.rank)
+                    target_tricks = score_map.get(key, 0)
+                    if curplayer_is_declarer:
+                        decl_side_tricks = target_tricks
+                    else:
+                        decl_side_tricks = remaining_tricks - target_tricks
+                    total = state.declarer_tricks + decl_side_tricks
+                    stats = card_scores[str(card)]
+                    stats["weighted_sum"] += total * weight
+                    stats["total_weight"] += weight
+                    stats["scores"].append(total)
+                    stats["mn"] = min(stats["mn"], total)
+                    stats["mx"] = max(stats["mx"], total)
+                samples_done += 1
+                solve_times.append(_per_deal)
+        except Exception as _e:
+            # 批失败：诊断第一个 Deal
+            with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                _f.write(f"[BATCH_FAIL] batch#{batch_count} start={batch_start} "
+                         f"size={len(batch_deals)} reason={type(_e).__name__}: {_e}\n")
+                if batch_deals:
+                    try:
+                        _f.write(f"  deal[0] pbn={batch_deals[0].to_pbn()} "
+                                 f"trump={batch_deals[0].trump} first={batch_deals[0].first}\n")
+                    except Exception:
+                        pass
+            # 该批降级到串行
+            for i, deal in enumerate(batch_deals):
+                if _time.time() - start_time > time_limit:
+                    break
+                weight = batch_weights[i]
+                _t_s = _time.time()
+                try:
+                    result = solve_board(deal)
+                except Exception:
+                    continue
+                _dt_s = _time.time() - _t_s
+                solve_total += _dt_s
+                if _dt_s > solve_max:
+                    solve_max = _dt_s
+                score_map = {}
+                for ep_card, side_score in result:
+                    key = (_DENOM_TO_SUIT.get(ep_card.suit), _RANK_TO_CHAR.get(ep_card.rank))
+                    score_map[key] = side_score
+                curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
+                curplayer_is_declarer = curplayer_pos in (declarer, dummy)
+                for card in playable:
+                    key = (card.suit, card.rank)
+                    target_tricks = score_map.get(key, 0)
+                    if curplayer_is_declarer:
+                        decl_side_tricks = target_tricks
+                    else:
+                        decl_side_tricks = remaining_tricks - target_tricks
+                    total = state.declarer_tricks + decl_side_tricks
+                    stats = card_scores[str(card)]
+                    stats["weighted_sum"] += total * weight
+                    stats["total_weight"] += weight
+                    stats["scores"].append(total)
+                    stats["mn"] = min(stats["mn"], total)
+                    stats["mx"] = max(stats["mx"], total)
+                samples_done += 1
+                solve_times.append(_dt_s)
+
+    with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+        _f.write(f"[BATCH] total_deals={samples_done} batches_ok={batch_count} "
+                 f"batch_total={solve_total:.2f}s "
+                 f"per_deal_avg={solve_total*1000/max(samples_done,1):.1f}ms\n")
+    return samples_done, solve_times, solve_total, solve_max
+
+
 class DDSearch:
 
     def __init__(self, sampler: DealSampler = None, num_samples: int = 100,
@@ -206,25 +455,91 @@ class DDSearch:
         # 信念跟踪器：准备加权粒子集
         belief_stats = None
         particles = None  # [(world, weight), ...]
+        _prepare_t = 0.0
         if self.sampler.belief_tracker is not None:
+            _t_prep0 = time.time()
             self.sampler.belief_tracker.prepare(state, perspective)
+            _prepare_t = time.time() - _t_prep0
             belief_stats = self.sampler.belief_tracker.stats()
             particles = self.sampler.belief_tracker.get_all_particles()
+            _has_constraints = bool(self.sampler.constraints)
+            _constraint_count = len(self.sampler.constraints) if self.sampler.constraints else 0
             print(f"[DD] 信念粒子全量模式: {len(particles)} 粒子, "
-                  f"active={belief_stats.get('active_particles','?')}")
+                  f"active={belief_stats.get('active_particles','?')}, "
+                  f"prepare={_prepare_t:.2f}s, "
+                  f"constraints={_has_constraints}({ _constraint_count }), "
+                  f"remaining_tricks={remaining_tricks}")
+            with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                _f.write(f"[DD] trick={13-remaining_tricks+1} particles={len(particles)} "
+                         f"active={belief_stats.get('active_particles','?')} "
+                         f"prepare={_prepare_t:.2f}s "
+                         f"constraints={_has_constraints}({ _constraint_count }) "
+                         f"remaining_tricks={remaining_tricks}\n")
 
         start_time = time.time()
         samples_done = 0
+        _solve_total = 0.0
+        _solve_max = 0.0
+        _solve_count = 0
 
-        # 若信念粒子可用，遍历全部粒子（每个粒子唯一，无重复）
+        # 批量求解优先：solve_all_boards 内部用线程池加速，dds C 库自管理线程安全
+        # 失败时降级到串行 solve_board
+        _solve_times = []  # 所有粒子耗时，用于统计分布
+        _batch_used = False
         if particles:
-            for world, weight in particles:
-                if time.time() - start_time > self.time_limit:
-                    break
-                samples_done += 1
-                _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
-                                   playable, state, perspective, declarer, dummy,
-                                   trump, card_scores, weight, samples_done)
+            # 尝试批量求解
+            _t_batch_total = time.time()
+            _bd, _bt, _bs_tot, _bs_max = _solve_batch(
+                particles, all_played, trick_cards, trick_leader,
+                playable, state, perspective, declarer, dummy,
+                trump, card_scores, self.time_limit, start_time)
+            if _bd > 0:
+                # 批量成功
+                _batch_used = True
+                samples_done = _bd
+                _solve_times = _bt
+                _solve_total = _bs_tot
+                _solve_max = _bs_max
+                _solve_count = _bd
+                with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                    _f.write(f"[DD] 批量求解完成: {_bd}世界 batch_total={_bs_tot:.2f}s\n")
+            else:
+                # 批量失败：降级到串行
+                with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                    _f.write(f"[DD] 批量求解失败，降级到串行\n")
+                for world, weight in particles:
+                    if time.time() - start_time > self.time_limit:
+                        break
+                    samples_done += 1
+                    _t_s0 = time.time()
+                    _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
+                                       playable, state, perspective, declarer, dummy,
+                                       trump, card_scores, weight, samples_done)
+                    _dt_solve = time.time() - _t_s0
+                    _solve_times.append(_dt_solve)
+                    _solve_total += _dt_solve
+                    _solve_count += 1
+                    if _dt_solve > _solve_max:
+                        _solve_max = _dt_solve
+                    if _solve_count <= 3:
+                        with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                            _f.write(f"[DD]   sample#{_solve_count} solve={_dt_solve:.3f}s\n")
+                    if _dt_solve > 0.1:
+                        with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                            _f.write(f"[DD_SLOW] sample#{_solve_count} solve={_dt_solve:.3f}s\n")
+            # 输出耗时分布统计
+            if _solve_times:
+                _st_sorted = sorted(_solve_times)
+                _n = len(_st_sorted)
+                _p50 = _st_sorted[int(_n * 0.5)]
+                _p90 = _st_sorted[int(_n * 0.9)]
+                _p99 = _st_sorted[min(int(_n * 0.99), _n - 1)]
+                _avg = sum(_st_sorted) / _n
+                _mode = "BATCH" if _batch_used else "SERIAL"
+                with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                    _f.write(f"[DD_STATS] mode={_mode} n={_n} avg={_avg*1000:.1f}ms p50={_p50*1000:.1f}ms "
+                             f"p90={_p90*1000:.1f}ms p99={_p99*1000:.1f}ms max={_solve_max*1000:.1f}ms "
+                             f"total={_solve_total:.2f}s\n")
         else:
             # 回退：sampler.sample() 直接生成（即纯约束采样，等权）
             while samples_done < adaptive_samples:
@@ -237,8 +552,15 @@ class DDSearch:
                                    trump, card_scores, 1.0, samples_done)
 
         elapsed = time.time() - start_time
+        _solve_avg = (_solve_total / _solve_count) if _solve_count > 0 else 0.0
         print(f"[DD] 全量模式完成: {samples_done} 世界, {elapsed:.1f}s"
-              f"{' (信念加权)' if particles else ' (纯约束等权)'}")
+              f"{' (信念加权)' if particles else ' (纯约束等权)'} "
+              f"solve_avg={_solve_avg:.3f}s solve_max={_solve_max:.3f}s "
+              f"solve_total={_solve_total:.1f}s prepare={_prepare_t:.2f}s")
+        with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+            _f.write(f"[DD] 完成: {samples_done}世界 {elapsed:.1f}s "
+                     f"solve_avg={_solve_avg:.3f}s solve_max={_solve_max:.3f}s "
+                     f"solve_total={_solve_total:.1f}s prepare={_prepare_t:.2f}s\n")
 
         best_card = None
         best_score = -float("inf")

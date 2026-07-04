@@ -10,6 +10,7 @@ import HandDisplay from './HandDisplay';
 import { getCardSuitColor } from '../constants/suits';
 import DoubleDummyTable from './DoubleDummyTable';
 import { isHumanPosition, hasAnyHuman, getHumanPositions, BRIDGE_POSITIONS } from '../utils/position';
+import { calcScore } from '../utils/score';
 import { useGame } from '../context/GameContext';
 
 const MODEL_LABELS = {
@@ -790,7 +791,7 @@ function CardTable({
             userSelect: 'none',
           }}>
           {position}{dealer === position ? '*' : ''}
-          {hasHandData && hand?.hcp !== undefined && !showInput ? ` ${hand.hcp}点` : ''}
+          {hasHandData && hand?.hcp !== undefined && !showInput && shouldShowHandContent(position) ? ` ${hand.hcp}点` : ''}
         </Typography>
         {onPositionRoleChange && (
           <ToggleButton value="check" size="small"
@@ -993,7 +994,7 @@ function CardTable({
             }}>
               <Typography variant="caption" sx={{ fontWeight: 700, fontSize: '0.75rem', color: isDark ? '#e2e8f0' : '#333' }}>
                 {position}{dealer === position ? '*' : ''}
-                {hasHandData && hand?.hcp !== undefined && !showInput ? ` ${hand.hcp}点` : ''}
+                {hasHandData && hand?.hcp !== undefined && !showInput && shouldShowHandContent(position) ? ` ${hand.hcp}点` : ''}
               </Typography>
               {onPositionRoleChange && (
                 <ToggleButton value="check" size="small"
@@ -1058,7 +1059,7 @@ function CardTable({
             }}>
               <Typography variant="caption" sx={{ fontWeight: 700, fontSize: '0.75rem', color: isDark ? '#e2e8f0' : '#333' }}>
                 {position}{dealer === position ? '*' : ''}
-                {hasHandData && hand?.hcp !== undefined && !showInput ? ` ${hand.hcp}点` : ''}
+                {hasHandData && hand?.hcp !== undefined && !showInput && shouldShowHandContent(position) ? ` ${hand.hcp}点` : ''}
               </Typography>
               {onPositionRoleChange && (
                 <ToggleButton value="check" size="small"
@@ -1613,6 +1614,85 @@ function CardTable({
           </Box>
         );
         return ReactDOM.createPortal(box, document.body);
+      })()}
+
+      {/* 牌桌右下角：墩数统计 + 得分 */}
+      {showPlayPanel && playState?.contract && (() => {
+        const contract = playState.contract
+        const declarerTricks = playState.declarer_tricks || 0
+        const defenderTricks = playState.defender_tricks || 0
+        const isComplete = playState.phase === 'complete'
+        let finalScores = null
+        if (isComplete && contract?.level) {
+          finalScores = {
+            nonVul: calcScore(contract.level, contract.suit || 'NT', contract.doubled || false, contract.redoubled || false, declarerTricks, false),
+            vul: calcScore(contract.level, contract.suit || 'NT', contract.doubled || false, contract.redoubled || false, declarerTricks, true),
+          }
+        }
+        const bottomStyle = isMobile ? { bottom: 8, right: 8 } : { bottom: 12, right: 12 }
+        return (
+          <Box sx={{
+            position: 'absolute',
+            zIndex: 20,
+            ...bottomStyle,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 0.5,
+            alignItems: 'flex-end',
+          }}>
+            <Box sx={{
+              display: 'flex',
+              gap: 0.75,
+              alignItems: 'center',
+              bgcolor: isDark ? 'rgba(17,24,39,0.88)' : 'rgba(255,255,255,0.9)',
+              backdropFilter: 'blur(10px)',
+              borderRadius: 1.5,
+              px: 1,
+              py: 0.5,
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+            }}>
+              <Typography component="span" variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>
+                庄 <strong style={{ color: theme.palette.primary.main }}>{declarerTricks}</strong>
+              </Typography>
+              <Typography component="span" variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>
+                防 <strong style={{ color: theme.palette.warning.main }}>{defenderTricks}</strong>
+              </Typography>
+              <Typography component="span" variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>
+                需 <strong>{contract.tricks_needed || '?'}</strong>
+              </Typography>
+            </Box>
+            {isComplete && finalScores && (
+              <Box sx={{ display: 'flex', gap: 0.5 }}>
+                <Chip
+                  label={`无 ${finalScores.nonVul >= 0 ? '+' : ''}${finalScores.nonVul}`}
+                  size="small"
+                  sx={{
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    height: 22,
+                    bgcolor: isDark ? 'rgba(76,175,80,0.2)' : '#e8f5e9',
+                    color: finalScores.nonVul >= 0 ? '#2e7d32' : '#c62828',
+                    backdropFilter: 'blur(8px)',
+                  }}
+                />
+                <Chip
+                  label={`有 ${finalScores.vul >= 0 ? '+' : ''}${finalScores.vul}`}
+                  size="small"
+                  sx={{
+                    fontSize: '0.7rem',
+                    fontWeight: 700,
+                    height: 22,
+                    bgcolor: isDark ? 'rgba(255,152,0,0.2)' : '#fff3e0',
+                    color: finalScores.vul >= 0 ? '#e65100' : '#c62828',
+                    backdropFilter: 'blur(8px)',
+                  }}
+                />
+              </Box>
+            )}
+          </Box>
+        )
       })()}
 
       {/* 人类无手牌时手动输入出牌 */}

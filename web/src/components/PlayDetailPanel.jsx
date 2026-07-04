@@ -4,57 +4,6 @@ import { KeyboardArrowDown, KeyboardArrowRight } from '@mui/icons-material'
 import { getSuitColor } from '../constants/suits'
 import { PANEL_LAYOUT } from '../styles/constants'
 
-// ── 桥牌计分（前端版本）──
-const TRICK_VALUE = { '♣': 20, '♦': 20, '♥': 30, '♠': 30, 'NT': 30 }
-const NT_FIRST = 10
-
-function calcScore(level, suit, doubled, redoubled, tricksMade, vul) {
-  const needed = level + 6
-  const diff = tricksMade - needed
-  if (diff >= 0) return contractMade(level, suit, doubled, redoubled, diff, vul)
-  return contractDown(-diff, doubled, redoubled, vul)
-}
-
-function contractMade(level, suit, doubled, redoubled, overtricks, vul) {
-  const mult = redoubled ? 4 : doubled ? 2 : 1
-  let score = TRICK_VALUE[suit] * level * mult
-  if (suit === 'NT') score += NT_FIRST * (doubled || redoubled ? mult : 1)
-
-  if (overtricks > 0) {
-    let each
-    if (doubled || redoubled) each = vul ? (redoubled ? 400 : 200) : (redoubled ? 200 : 100)
-    else each = TRICK_VALUE[suit]
-    score += each * overtricks
-  }
-
-  if ((TRICK_VALUE[suit] * level) >= 100) score += vul ? 500 : 300  // game bonus
-  else score += 50  // partscore
-
-  if (level === 6) score += vul ? 750 : 500
-  else if (level === 7) score += vul ? 1500 : 1000
-
-  if (doubled) score += 50
-  else if (redoubled) score += 100
-
-  return score
-}
-
-function contractDown(undertricks, doubled, redoubled, vul) {
-  let penalty = 0
-  if (doubled || redoubled) {
-    const perTrick = vul ? [200, 300, 300] : [100, 200, 200]
-    for (let i = 1; i <= undertricks; i++) {
-      penalty += i <= 3 ? perTrick[i - 1] : 300
-    }
-    if (redoubled) penalty *= 2
-  } else {
-    penalty = vul
-      ? [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300][Math.min(undertricks - 1, 12)]
-      : [50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650][Math.min(undertricks - 1, 12)]
-  }
-  return -penalty
-}
-
 function PlayDetailPanel({
   isMobile,
   playState,
@@ -105,8 +54,6 @@ function PlayDetailPanel({
   const contract = playState?.contract
   const dummy = playState?.dummy
   const tricks = playState?.tricks || []
-  const declarerTricks = playState?.declarer_tricks || 0
-  const defenderTricks = playState?.defender_tricks || 0
   const isHumanTurn = (() => {
     const cp = playState?.current_player
     if (!cp || !positionRoles) return false
@@ -118,21 +65,6 @@ function PlayDetailPanel({
   })()
   const isComplete = playState?.phase === 'complete'
   const isStartOfTrick = (playState?.current_trick?.cards?.length || 0) === 0
-
-  // 完成后计算得分（无局 + 有局两种）
-  const finalScores = useMemo(() => {
-    if (!isComplete || !contract) return null
-    const lvl = contract.level || 0
-    const st = contract.suit || 'NT'
-    const dbl = contract.doubled || false
-    const rdl = contract.redoubled || false
-    const made = declarerTricks
-    if (!lvl) return null
-    return {
-      nonVul: calcScore(lvl, st, dbl, rdl, made, false),
-      vul: calcScore(lvl, st, dbl, rdl, made, true),
-    }
-  }, [isComplete, contract, declarerTricks])
 
   // 估算token数（中文字符≈1 token，其他≈4字符/token）
   const estimateTokens = (text) => {
@@ -634,42 +566,9 @@ function PlayDetailPanel({
       overflow: 'hidden',
       boxSizing: 'border-box'
     }}>
-      {/* 标题栏：打牌详情 + 墩数统计 + 操作按钮在一行 */}
+      {/* 标题栏：打牌详情 + 操作按钮 */}
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5, flexShrink: 0, height: 44, flexWrap: 'nowrap', gap: 0.5, overflow: 'hidden' }}>
         <Typography variant="h6" sx={{ fontSize: '0.95rem', color: isDark ? '#e2e8f0' : undefined, flexShrink: 0 }}>打牌详情</Typography>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexShrink: 0 }}>
-          <Typography component="span" variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
-            庄家方 <strong style={{ color: theme.palette.primary.main }}>{declarerTricks}</strong>
-          </Typography>
-          <Typography component="span" variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
-            防守方 <strong style={{ color: theme.palette.warning.main }}>{defenderTricks}</strong>
-          </Typography>
-          <Typography component="span" variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
-            需要 <strong>{contract?.tricks_needed || '?'}</strong>
-          </Typography>
-          {isComplete && finalScores && (
-            <>
-              <Chip
-                label={`无局 ${finalScores.nonVul >= 0 ? '+' : ''}${finalScores.nonVul}`}
-                size="small"
-                sx={{
-                  fontSize: '0.7rem', fontWeight: 700, height: 22,
-                  bgcolor: isDark ? 'rgba(76,175,80,0.2)' : '#e8f5e9',
-                  color: finalScores.nonVul >= 0 ? '#2e7d32' : '#c62828',
-                }}
-              />
-              <Chip
-                label={`有局 ${finalScores.vul >= 0 ? '+' : ''}${finalScores.vul}`}
-                size="small"
-                sx={{
-                  fontSize: '0.7rem', fontWeight: 700, height: 22,
-                  bgcolor: isDark ? 'rgba(255,152,0,0.2)' : '#fff3e0',
-                  color: finalScores.vul >= 0 ? '#e65100' : '#c62828',
-                }}
-              />
-            </>
-          )}
-        </Box>
         <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', flexShrink: 0 }}>
           {!isComplete && !playInitiated && (
             <Button variant="outlined" color="success" onClick={onBeginPlay} disabled={aiLoading} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.2 }}>开始</Button>

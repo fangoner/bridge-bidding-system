@@ -21,8 +21,11 @@ const getBidColor = (bid, theme) => {
 
   // Dark mode: muted but distinct tones on dark backgrounds
   if (isDark) {
-    if (suit === 'H' || suit === 'D') {
+    if (suit === 'H') {
       return { color: '#fca5a5', bgColor: 'rgba(239,68,68,0.15)', borderColor: 'rgba(239,68,68,0.25)' };
+    }
+    if (suit === 'D') {
+      return { color: '#a78bfa', bgColor: 'rgba(124,58,237,0.15)', borderColor: 'rgba(124,58,237,0.25)' };
     }
     if (suit === 'S' || suit === 'C') {
       return { color: '#cbd5e1', bgColor: 'rgba(148,163,184,0.12)', borderColor: 'rgba(148,163,184,0.2)' };
@@ -43,8 +46,11 @@ const getBidColor = (bid, theme) => {
   }
 
   // Light mode
-  if (suit === 'H' || suit === 'D') {
+  if (suit === 'H') {
     return { color: '#dc2626', bgColor: '#fef2f2', borderColor: '#fca5a5' };
+  }
+  if (suit === 'D') {
+    return { color: '#7c3aed', bgColor: '#f5f3ff', borderColor: '#a78bfa' };
   }
   if (suit === 'S' || suit === 'C') {
     return { color: '#1e293b', bgColor: '#f1f5f9', borderColor: '#94a3b8' };

@@ -32,8 +32,8 @@ const HCPBadge = styled(Box)(({ theme }) => ({
   marginLeft: 'auto',
 }));
 
-// ── 牌面颜色 ──
-const SUIT_COLORS = { '♠': '#1a1a2e', '♥': '#d32f2f', '♦': '#d32f2f', '♣': '#1a1a2e' }
+// ── 牌面颜色（♥红、♦紫，高对比区分两种红色花色）──
+const SUIT_COLORS = { '♠': '#1a1a2e', '♥': '#d32f2f', '♦': '#7c3aed', '♣': '#1a1a2e' }
 const SUIT_SYMBOLS = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' }
 const SUIT_ORDER = ['spades', 'hearts', 'diamonds', 'clubs']
 
