@@ -744,6 +744,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
 
   // 添加叫牌
   const addBid = async (bid) => {
+    // 花色符号→字母规范化（统一显示为字母格式）
+    const suitSymbolToLetter = { '♠': 'S', '♥': 'H', '♦': 'D', '♣': 'C' }
+    bid = bid.replace(/[♠♥♦♣]/g, sym => suitSymbolToLetter[sym] || sym)
     const isCurrentHuman = positionRoles && positionRoles[currentBidder] === 'human'
     // 人类叫牌后，立即标记叫牌已开始（在currentBidder更新之前）
     if (isCurrentHuman && !biddingStarted) {
@@ -1644,7 +1647,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     // 保存用户确认的首攻信息，供 handleBeginPlay 使用
     setImageOpeningLead(openingLead || null)
     setContractDialogOpen(false)
-    await doPlayInit(contract, [], [])
+    // 传递截屏/识别得到的叫牌序列，确保后端能据此提取约束（避免DD显示"无约束随机采样"）
+    await doPlayInit(contract, biddingSequence, aiBiddingHistory)
   }
 
   // 出牌
@@ -2309,6 +2313,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
               <Button
                 size="small" color="warning" variant="outlined"
                 onClick={() => {
+                  setWarning(null)
                   setCustomDealText(handsToEditText(hands))
                   setCustomDealOpen(true)
                 }}
@@ -2318,6 +2323,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
               <Button
                 size="small" color="warning" variant="outlined"
                 onClick={() => {
+                  setWarning(null)
                   setEditBiddingText(biddingToEditText(biddingSequence))
                   setShowEditBiddingDialog(true)
                 }}
@@ -2443,7 +2449,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
 
       {/* 自定义牌局对话框 */}
       <Dialog open={customDealOpen} onClose={() => setCustomDealOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>输入自定义牌局</DialogTitle>
+        <DialogTitle>修正手牌</DialogTitle>
         <DialogContent>
           <Alert severity="info" sx={{ mb: 2 }}>
             支持多种格式（按南西北东顺序，每行一家）：<br />
@@ -2467,11 +2473,30 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         <DialogActions>
           <Button onClick={() => setCustomDealOpen(false)}>取消</Button>
           <Button onClick={async () => {
-            if (customDealText.trim()) {
-              await handleCustomDeal(customDealText)
-              setCustomDealOpen(false)
-              setCustomDealText('')
-            }
+            if (!customDealText.trim()) return
+            const newHands = await handleCustomDeal(customDealText)
+            if (!newHands) return
+            setCustomDealOpen(false)
+            setCustomDealText('')
+            // 修正后立即保存牌局，确保历史记录中是完整手牌
+            saveBridgeRecord({
+              id: currentRecordId || Date.now().toString(),
+              timestamp: new Date().toLocaleString(),
+              type: 'bidding_in_progress',
+              board: {
+                hands: newHands,
+                bidding_sequence: [],
+                contract: null,
+                dealer: dealer,
+                game_mode: gameMode,
+                practice_direction: practiceDirection,
+                position_roles: positionRoles,
+              },
+              bidding: { ai_bidding_history: [], deal_system: dealSystem },
+              play: null,
+              note: '',
+            })
+            if (currentRecordId) loadBridgeRecords()
           }} variant="contained" disabled={!customDealText.trim() || loading}>
             {loading ? <CircularProgress size={20} /> : '确定'}
           </Button>

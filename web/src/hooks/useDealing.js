@@ -10,6 +10,8 @@ import { usePlay } from '../context/PlayContext'
 export function parseBiddingSequenceStr(biddingStr) {
   if (!biddingStr) return []
   const items = biddingStr.split('-').filter(s => s.trim())
+  // 花色符号→字母的规范化（统一显示为字母格式）
+  const suitSymbolToLetter = { '♠': 'S', '♥': 'H', '♦': 'D', '♣': 'C' }
   const result = items.map(item => {
     const match = item.trim().match(/^\(([^)]+)\)(.+)$/)
     if (match) {
@@ -17,6 +19,8 @@ export function parseBiddingSequenceStr(biddingStr) {
       if (bid === '不叫' || bid === 'Pass' || bid === 'PASS') bid = 'pass'
       if (bid === '加倍' || bid === 'Double') bid = 'X'
       if (bid === '再加倍' || bid === 'Redouble') bid = 'XX'
+      // 花色符号转字母（如 1♠ → 1S）
+      bid = bid.replace(/[♠♥♦♣]/g, sym => suitSymbolToLetter[sym] || sym)
       return { position: match[1], bid }
     }
     return null
@@ -174,11 +178,14 @@ export function useDealing({ clearBiddingDraft }) {
       if (data.success) {
         setHands(data.hands)
         resetGameState({ imageOpeningLead: data.opening_lead || null })
+        return data.hands
       } else {
         setError(data.message || '牌局解析失败')
+        return null
       }
     } catch {
       setError('自定义牌局失败，请检查API服务是否正常运行')
+      return null
     } finally {
       setLoading(false)
     }

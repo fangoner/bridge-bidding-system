@@ -1076,6 +1076,10 @@ def extract_constraints_from_bid_history(bid_history: str, system: str = SYSTEM_
     passed_before: Dict[str, bool] = {}
     for pos, _ in bid_sequence:
         pos_bids.setdefault(pos, [])
+
+    # 跟踪对方已叫过的花色（用于扣叫识别）
+    # key = 位置, value = 该位置已叫过的花色集合
+    pos_suits_called: Dict[str, set] = {pos: set() for pos, _ in bid_sequence}
     
     # 判断是否第二家加倍（开叫人下家直接加倍，即第二个叫品是X）
     is_second_seat_double = False
@@ -1181,7 +1185,27 @@ def extract_constraints_from_bid_history(bid_history: str, system: str = SYSTEM_
                 level, suit = parsed
                 partner = {"南": "北", "北": "南", "东": "西", "西": "东"}[pos]
 
-                if is_rebid:
+                # ========== 扣叫识别（优先于再叫/应叫/争叫分支） ==========
+                # 扣叫 = 叫出对方已叫过的花色，表示控制/强牌逼叫，不承诺该花色长度
+                # 收集所有对方位置已叫过的花色
+                opponent_suits_so_far = set()
+                for other_pos in ["南", "北", "东", "西"]:
+                    if other_pos != pos and other_pos != partner:
+                        opponent_suits_so_far |= pos_suits_called.get(other_pos, set())
+
+                if suit != "NT" and suit in opponent_suits_so_far:
+                    # 扣叫：不设 suit_min（不承诺长度），显示强牌逼叫
+                    # HCP 范围：扣叫通常 12+ 点逼叫，开叫人扣叫 16+ 点
+                    cue_min_hcp = 16 if is_rebid else 10
+                    constraint = BidConstraint(
+                        position=pos,
+                        min_hcp=cue_min_hcp,
+                        max_hcp=21,
+                        inference_source="cue_bid",
+                    )
+                    # 扣叫不设 suit_min，避免错误约束导致采样困难
+
+                if constraint is None and is_rebid:
                     first_bid_by_player = first_substantive_bid  # 该位置第一次实质性叫品
                     first_parsed_p = _normalize_bid(first_bid_by_player)
 
@@ -1237,7 +1261,7 @@ def extract_constraints_from_bid_history(bid_history: str, system: str = SYSTEM_
                         is_jump_rebid,
                         is_reverse_bid,
                     )
-                else:
+                elif constraint is None:
                     # 第一次叫牌：争叫或应叫
                     our_side_opened = False
                     if idx >= 2:
@@ -1344,6 +1368,9 @@ def extract_constraints_from_bid_history(bid_history: str, system: str = SYSTEM_
 
         # 记录当前叫品到该位置的历史（用于再叫判断）
         pos_bids[pos].append(bid_str)
+        # 记录该位置已叫过的花色（用于扣叫识别）
+        if parsed and parsed[0] not in (SPECIAL_PASS, SPECIAL_DOUBLE, SPECIAL_REDOUBLE) and parsed[1] != "NT":
+            pos_suits_called[pos].add(parsed[1])
     
     # 应用动态推断：否定推断（从Pass推导上限），使用体系特定阈值
     constraints = _apply_negative_inference(constraints, bid_sequence, cfg)

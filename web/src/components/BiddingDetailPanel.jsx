@@ -306,8 +306,18 @@ function BiddingDetailPanel({
       overflow: isMobile ? undefined : 'hidden',
       boxSizing: 'border-box'
     }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5, flexShrink: 0, height: 44, flexWrap: 'wrap', gap: 0.5, overflow: 'hidden' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Box sx={{
+        display: 'flex',
+        flexDirection: isMobile ? 'column' : 'row',
+        alignItems: isMobile ? 'stretch' : 'center',
+        mb: 0.5,
+        flexShrink: 0,
+        height: isMobile ? 'auto' : 44,
+        gap: 0.5,
+        overflow: 'hidden',
+      }}>
+        {/* 第一排：标题 + Tab + 简单 + 历史选择 */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: isMobile ? 'wrap' : 'nowrap', mr: isMobile ? 0 : 'auto' }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 600, fontSize: '1rem' }}>
             叫牌细节
           </Typography>
@@ -321,20 +331,19 @@ function BiddingDetailPanel({
             <ToggleButton value="jf" sx={{ px: 1, py: 0, fontSize: '0.7rem', minWidth: 36 }}>JF</ToggleButton>
             <ToggleButton value="details" sx={{ px: 1, py: 0, fontSize: '0.7rem', minWidth: 36 }}>细节</ToggleButton>
           </ToggleButtonGroup>
-        </Box>
-        <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5 }}>
-          <FormControlLabel
-            control={<Checkbox checked={simpleDisplayMode} onChange={(e) => setSimpleDisplayMode(e.target.checked)} size="small" />}
-            label="简单"
-            sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, height: 24 }}
-          />
-          <Select
-            size="small"
-            value={selectedBiddingIndex}
-            onChange={(e) => setSelectedBiddingIndex(e.target.value)}
-            disabled={simpleDisplayMode || aiBiddingHistory.length === 0}
-            sx={{ fontSize: '0.75rem', height: 24, minWidth: 80, '& .MuiSelect-select': { py: 0 } }}
-          >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: isMobile ? 0 : 'auto' }}>
+            <FormControlLabel
+              control={<Checkbox checked={simpleDisplayMode} onChange={(e) => setSimpleDisplayMode(e.target.checked)} size="small" />}
+              label="简单"
+              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, height: 24 }}
+            />
+            <Select
+              size="small"
+              value={selectedBiddingIndex}
+              onChange={(e) => setSelectedBiddingIndex(e.target.value)}
+              disabled={simpleDisplayMode || aiBiddingHistory.length === 0}
+              sx={{ fontSize: '0.75rem', height: 24, minWidth: 80, '& .MuiSelect-select': { py: 0 } }}
+            >
               <MenuItem value={-1}>最新</MenuItem>
               {historySelectOptions.map((opt) => (
                 <MenuItem key={opt.value} value={opt.value}>
@@ -342,10 +351,12 @@ function BiddingDetailPanel({
                 </MenuItem>
               ))}
             </Select>
+          </Box>
         </Box>
-        <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+        {/* 第二排：叫牌相关按钮（手机版独占一行，桌面版跟在后面） */}
+        <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', justifyContent: isMobile ? 'center' : 'flex-end' }}>
           <Button variant="outlined" size="small" onClick={!biddingStarted ? onStartBidding : onResetBidding} disabled={!hands || aiThinking || readonlyMode} sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, px: 0.5, py: 0, minWidth: 36 }}>
-            {!biddingStarted ? '开始' : '重新叫牌'}
+            {!biddingStarted ? '开始叫牌' : '重新叫牌'}
           </Button>
           {biddingStarted && !isBiddingCompleteFn() && (
             <Button variant={stopBidding ? "contained" : "outlined"} color={stopBidding ? "success" : "warning"} size="small" onClick={onToggleStopBidding} disabled={(stopBidding && aiThinking) || readonlyMode} sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, px: 0.5, py: 0, minWidth: 36 }}>

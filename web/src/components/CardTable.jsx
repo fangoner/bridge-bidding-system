@@ -86,7 +86,7 @@ function CardTable({
   reviewCursor,
   reviewTrick,
 }) {
-  const { fallbackModel, playModel } = useGame()
+  const { fallbackModel, playModel, studyMode } = useGame()
   const [handInputs, setHandInputs] = useState({
     '南': '',
     '北': '',
@@ -138,7 +138,9 @@ function CardTable({
   const ewColH = 460
   const infoBarHeight = 24 // 信息条估计高度（旋转后视觉宽度）
   const biddingTableWidth = isMobile ? 'calc((100vw - 12px) * 0.5)' : 160
-  const centerBoxSize = isMobile ? 120 : 220
+  const centerBoxWidth = isMobile ? 152 : 220
+  const centerBoxHeight = isMobile ? 240 : 220
+  const centerBoxSize = 220 // 桌面版中心面板宽高（包含 HAND_GAP 布局）
 
   // 叫牌面板初始定位
   useEffect(() => {
@@ -149,7 +151,7 @@ function CardTable({
         const rect = center.getBoundingClientRect()
         setBidBoxPos({
           left: rect.left + rect.width / 2 - 100,
-          top: rect.top + rect.height / 2 + centerBoxSize / 2 + 20,
+          top: rect.top + rect.height / 2 + centerBoxHeight / 2 + 20,
           ready: true,
         })
       } else {
@@ -157,7 +159,7 @@ function CardTable({
       }
     }, 100)
     return () => clearTimeout(t)
-  }, [bidBoxPos.ready, centerBoxSize])
+  }, [bidBoxPos.ready, centerBoxHeight])
 
   // Grid间距：手牌区到中心区的统一间距
   const GRID_GAP = isMobile ? 6 : 4
@@ -509,13 +511,15 @@ function CardTable({
         width: '100%',
         fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", Roboto, sans-serif',
         fontSize: '0.9rem',
+        fontWeight: 600,
       }}>
         <Box sx={{
           display: 'flex',
-          justifyContent: 'space-around',
+          justifyContent: 'center',
+          gap: isMobile ? 1 : 0,
           borderBottom: `2px solid ${theme.palette.text.primary}`,
-          paddingBottom: 0.5,
-          marginBottom: 0.5,
+          paddingBottom: isMobile ? 1 : 1,
+          marginBottom: isMobile ? 0.5 : 1,
           fontWeight: 'bold',
           color: textPrimary,
           position: 'sticky',
@@ -523,7 +527,7 @@ function CardTable({
           zIndex: 2,
         }}>
           {positions.map(pos => (
-            <Box key={pos} component="span" sx={{ flex: 1, textAlign: 'center', minWidth: 50, color: pos === dealer ? theme.palette.error.main : 'inherit' }}>
+            <Box key={pos} component="span" sx={{ flex: 1, textAlign: 'center', minWidth: isMobile ? 30 : 50, color: pos === dealer ? theme.palette.error.main : 'inherit' }}>
               {pos}
             </Box>
           ))}
@@ -531,7 +535,8 @@ function CardTable({
         {rows.map((row, rowIndex) => (
           <Box key={rowIndex} sx={{
             display: 'flex',
-            justifyContent: 'space-around',
+            justifyContent: 'center',
+            gap: isMobile ? 1 : 0,
             padding: '4px 0',
             borderBottom: `1px solid ${theme.palette.divider}`,
             '&:last-child': { borderBottom: 'none' },
@@ -539,23 +544,20 @@ function CardTable({
             {positions.map((pos, colIndex) => {
               const bid = row.bids[colIndex]
               const meaning = row.info[colIndex]
-              if (!bid) {
-                return <Box key={colIndex} component="span" sx={{ flex: 1, textAlign: 'center', minWidth: 50 }} />
-              }
-              const displayText = bid === 'pass' ? 'P' : bid
+              const displayText = !bid ? '' : (bid === 'pass' ? 'P' : bid)
               const cellEl = (
                 <Box
+                  key={colIndex}
                   component="span"
+                  className={`bidding-cell ${bid ? 'has-bid' : ''}`}
                   sx={{
                     flex: 1,
                     textAlign: 'center',
-                    minWidth: 50,
+                    minWidth: isMobile ? 30 : 50,
                     fontWeight: 500,
                     color: textPrimary,
-                    backgroundColor: alpha(theme.palette.primary.main, 0.08),
+                    backgroundColor: bid ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
                     borderRadius: 1,
-                    cursor: meaning ? 'pointer' : 'default',
-                    padding: '2px 0',
                   }}
                 >
                   {displayText}
@@ -771,12 +773,15 @@ function CardTable({
   const InfoBar = ({ position, sx }) => {
     const hand = hands?.[position]
     const hasHandData = hand && (hand.spades || hand.hearts || hand.diamonds || hand.clubs)
-    const showInput = !readonlyMode && !showPlayPanel && isAIPosition(position) && !hasHandData && (!biddingStarted || stopBidding)
+    const showInput = !showPlayPanel && isAIPosition(position) && !hasHandData && (!biddingStarted || stopBidding)
     const isCurrentlyBidding = currentBiddingPosition === position
+    const isDeclarerInfo = showPlayPanel && playState?.contract?.declarer === position
     return (
       <Box sx={{
-        display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0,
-        bgcolor: isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.7)',
+        display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0,
+        bgcolor: isDeclarerInfo
+          ? '#FFB6C1'
+          : (isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.7)'),
         backdropFilter: 'blur(4px)', borderRadius: 1, px: 0.8, py: 0.2,
         ...sx,
       }}>
@@ -791,15 +796,20 @@ function CardTable({
             userSelect: 'none',
           }}>
           {position}{dealer === position ? '*' : ''}
-          {hasHandData && hand?.hcp !== undefined && !showInput && shouldShowHandContent(position) ? ` ${hand.hcp}点` : ''}
         </Typography>
+        {hasHandData && hand?.hcp !== undefined && !showInput && shouldShowHandContent(position) && (
+          <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.75rem', color: isDark ? '#fbbf24' : '#d97706' }}>
+            {hand.hcp}点
+          </Typography>
+        )}
         {onPositionRoleChange && (
           <ToggleButton value="check" size="small"
             selected={positionRoles[position] === 'human'}
-            disabled={(showPlayPanel && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading)) || readonlyMode || (!showPlayPanel && biddingStarted && !hasHand(position))}
+            disabled={(showPlayPanel && !studyMode && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading)) || (!showPlayPanel && biddingStarted && !stopBidding && !hasHand(position))}
             onChange={() => onPositionRoleChange(position, positionRoles[position] === 'human' ? 'ai' : 'human')}
-            sx={{ height: 18, px: 0.6, fontSize: '0.65rem', fontWeight: 600, borderRadius: 1, minWidth: 30, border: 'none',
-              bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.15)' : 'action.hover', color: 'text.primary',
+            sx={{ height: 18, px: 0.6, fontSize: '0.75rem', fontWeight: 600, borderRadius: 1, minWidth: 30, border: 'none',
+              bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.15)' : 'action.hover',
+              color: positionRoles[position] === 'human' ? '#6366f1' : (isDark ? '#60a5fa' : '#2563eb'),
             }}
           >{positionRoles[position] === 'human' ? '人类' : modelLabel(showPlayPanel ? playModel : fallbackModel)}</ToggleButton>
         )}
@@ -811,9 +821,9 @@ function CardTable({
   const renderIndependentHandInput = (position) => {
     const isAI = isAIPosition(position)
     const hasHandData = hasHand(position)
-    const showInput = !readonlyMode && !showPlayPanel && isAI && !hasHandData && (!biddingStarted || stopBidding)
+    const showInput = !showPlayPanel && isAI && !hasHandData && (!biddingStarted || stopBidding)
     const manualPlayedCount = showPlayPanel ? getManualPlayedCards(position).length : 0
-    const showPlayHandInput = !readonlyMode && showPlayPanel && playState
+    const showPlayHandInput = showPlayPanel && playState
       && (!playState.hands?.[position] || playState.hands[position].length === 0)
       && manualPlayedCount === 0
       && !(position === playState.dummy && playState.phase === 'lead')
@@ -951,15 +961,16 @@ function CardTable({
     const currentTurnPos = showPlayPanel ? playState?.current_player : currentBiddingPosition;
     const isAI = isAIPosition(position)
     const hasHandData = hasHand(position)
-    const showInput = !readonlyMode && !showPlayPanel && isAI && !hasHandData && (!biddingStarted || stopBidding)
+    const showInput = !showPlayPanel && isAI && !hasHandData && (!biddingStarted || stopBidding)
     const isHuman = positionRoles && positionRoles[position] === 'human'
     const manualPlayedCount = showPlayPanel ? getManualPlayedCards(position).length : 0
-    const showPlayHandInput = !readonlyMode && showPlayPanel && playState
+    const showPlayHandInput = showPlayPanel && playState
       && (!playState.hands?.[position] || playState.hands[position].length === 0)
       && manualPlayedCount === 0
       && !(position === playState.dummy && playState.phase === 'lead')
       && (isAI || position === playState.dummy)
     const handKnownInPlay = showPlayPanel && playState?.hands?.[position]?.length > 0
+    const isDeclarer = showPlayPanel && playState?.contract?.declarer === position
     
     // 打牌阶段：根据模式选择手牌数据和已出牌标记
     const displayHand = getPlayHand(position)
@@ -984,25 +995,36 @@ function CardTable({
         border: 'none',
         borderRadius: 0,
         gap: 0,
+        ...(currentTurnPos === position && {
+          boxShadow: `0 0 0 2px ${theme.palette.primary.main}, 0 4px 14px rgba(0,0,0,0.2)`,
+          borderRadius: '8px',
+        }),
         transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
       }}>
           {/* 信息栏：可通过 noInfo 隐藏 */}
           {!sxProps?.noInfo && sxProps?.infoSide === 'top' && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: `${INNER_GAP}px`, flexShrink: 0,
-              bgcolor: isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.7)',
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: `${INNER_GAP}px`, flexShrink: 0,
+              bgcolor: isDeclarer
+                ? '#FFB6C1'
+                : (isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.7)'),
               backdropFilter: 'blur(4px)', borderRadius: 1, px: 0.8, py: 0.2,
             }}>
               <Typography variant="caption" sx={{ fontWeight: 700, fontSize: '0.75rem', color: isDark ? '#e2e8f0' : '#333' }}>
                 {position}{dealer === position ? '*' : ''}
-                {hasHandData && hand?.hcp !== undefined && !showInput && shouldShowHandContent(position) ? ` ${hand.hcp}点` : ''}
               </Typography>
+              {hasHandData && hand?.hcp !== undefined && !showInput && shouldShowHandContent(position) && (
+                <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.75rem', color: isDark ? '#fbbf24' : '#d97706' }}>
+                  {hand.hcp}点
+                </Typography>
+              )}
               {onPositionRoleChange && (
                 <ToggleButton value="check" size="small"
                   selected={positionRoles[position] === 'human'}
-                  disabled={(showPlayPanel && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading)) || readonlyMode || (!showPlayPanel && biddingStarted && !hasHand(position))}
+                  disabled={(showPlayPanel && !studyMode && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading)) || (!showPlayPanel && biddingStarted && !stopBidding && !hasHand(position))}
                   onChange={() => onPositionRoleChange(position, positionRoles[position] === 'human' ? 'ai' : 'human')}
-                  sx={{ height: 18, px: 0.6, fontSize: '0.65rem', fontWeight: 600, borderRadius: 1, minWidth: 30, border: 'none',
-                    bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.15)' : 'action.hover', color: 'text.primary',
+                  sx={{ height: 18, px: 0.6, fontSize: '0.75rem', fontWeight: 600, borderRadius: 1, minWidth: 30, border: 'none',
+                    bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.15)' : 'action.hover',
+                    color: positionRoles[position] === 'human' ? '#6366f1' : (isDark ? '#60a5fa' : '#2563eb'),
                   }}
                 >{positionRoles[position] === 'human' ? '人类' : modelLabel(showPlayPanel ? playModel : fallbackModel)}</ToggleButton>
               )}
@@ -1053,21 +1075,28 @@ function CardTable({
           )}
           {/* 信息栏（靠中心一侧）：infoSide='bottom'=在手牌下方 */}
           {!sxProps?.noInfo && (!sxProps?.infoSide || sxProps.infoSide === 'bottom') && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: `${INNER_GAP}px`, flexShrink: 0,
-              bgcolor: isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.7)',
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: `${INNER_GAP}px`, flexShrink: 0,
+              bgcolor: isDeclarer
+                ? '#FFB6C1'
+                : (isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.7)'),
               backdropFilter: 'blur(4px)', borderRadius: 1, px: 0.8, py: 0.2,
             }}>
               <Typography variant="caption" sx={{ fontWeight: 700, fontSize: '0.75rem', color: isDark ? '#e2e8f0' : '#333' }}>
                 {position}{dealer === position ? '*' : ''}
-                {hasHandData && hand?.hcp !== undefined && !showInput && shouldShowHandContent(position) ? ` ${hand.hcp}点` : ''}
               </Typography>
+              {hasHandData && hand?.hcp !== undefined && !showInput && shouldShowHandContent(position) && (
+                <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.75rem', color: isDark ? '#fbbf24' : '#d97706' }}>
+                  {hand.hcp}点
+                </Typography>
+              )}
               {onPositionRoleChange && (
                 <ToggleButton value="check" size="small"
                   selected={positionRoles[position] === 'human'}
-                  disabled={(showPlayPanel && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading)) || readonlyMode || (!showPlayPanel && biddingStarted && !hasHand(position))}
+                  disabled={(showPlayPanel && !studyMode && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading)) || (!showPlayPanel && biddingStarted && !stopBidding && !hasHand(position))}
                   onChange={() => onPositionRoleChange(position, positionRoles[position] === 'human' ? 'ai' : 'human')}
-                  sx={{ height: 18, px: 0.6, fontSize: '0.65rem', fontWeight: 600, borderRadius: 1, minWidth: 30, border: 'none',
-                    bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.15)' : 'action.hover', color: 'text.primary',
+                  sx={{ height: 18, px: 0.6, fontSize: '0.75rem', fontWeight: 600, borderRadius: 1, minWidth: 30, border: 'none',
+                    bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.15)' : 'action.hover',
+                    color: positionRoles[position] === 'human' ? '#6366f1' : (isDark ? '#60a5fa' : '#2563eb'),
                   }}
                 >{positionRoles[position] === 'human' ? '人类' : modelLabel(showPlayPanel ? playModel : fallbackModel)}</ToggleButton>
               )}
@@ -1081,22 +1110,24 @@ function CardTable({
     <Box className="card-table-container" sx={{
       display: 'flex',
       flexDirection: 'column',
-      alignItems: isMobile ? 'stretch' : 'center',
-      justifyContent: isMobile ? 'space-between' : 'center',
-      p: isMobile ? '12px' : '30px',
+      alignItems: 'center',
+      justifyContent: 'center',
+      p: isMobile ? '0' : '30px',
       m: 0,
       background: scheme.table.background,
       borderRadius: 2,
       boxShadow: 'none',
       width: '100%',
-      height: '100%',
+      height: isMobile
+        ? `calc(30px + 74px + 60px + ${infoBarHeight}px + 3px + ${centerBoxHeight}px + 3px + ${infoBarHeight}px + 60px + 74px + 30px)`
+        : '100%',
       maxWidth: '100%',
       position: 'relative',
-      overflow: 'visible',
+      overflow: isMobile ? 'hidden' : 'visible',
       boxSizing: 'border-box',
       }}>
       {/* 模拟实战清空按钮：任何阶段可见可点击（叫牌/打牌均可） */}
-      {!readonlyMode && onSimulatedReset && gameMode !== 'pair' && (
+      {onSimulatedReset && gameMode !== 'pair' && (
         <Box sx={{
           position: 'absolute',
           top: 8,
@@ -1147,7 +1178,7 @@ function CardTable({
                 ⏱ {Math.floor(biddingTotalTime / 60)}:{(biddingTotalTime % 60).toString().padStart(2, '0')}
               </Box>
             )}
-            {!readonlyMode && onClearAllHands && !showPlayPanel && (
+            {onClearAllHands && !showPlayPanel && (
               <Tooltip title="清除牌局" arrow slotProps={{
                 tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
                 arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
@@ -1161,7 +1192,7 @@ function CardTable({
                 </IconButton>
               </Tooltip>
             )}
-            {!readonlyMode && onEditHands && !showPlayPanel && (
+            {onEditHands && !showPlayPanel && (
               <Tooltip title="修正手牌" arrow slotProps={{
                 tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
                 arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
@@ -1177,7 +1208,7 @@ function CardTable({
             )}
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'flex-end' }}>
-            {!readonlyMode && onEditBidding && !showPlayPanel && (
+            {onEditBidding && !showPlayPanel && (
               <Tooltip title="编辑叫牌" arrow slotProps={{
                 tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
                 arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
@@ -1191,7 +1222,11 @@ function CardTable({
                 </IconButton>
               </Tooltip>
             )}
-            {handleAnalyzeContract && outputFormats && !showPlayPanel && (
+            {handleAnalyzeContract && outputFormats && !showPlayPanel && ['南','北','东','西'].every(pos => {
+              const h = hands?.[pos]
+              if (!h) return false
+              return (h.spades?.length || 0) + (h.hearts?.length || 0) + (h.diamonds?.length || 0) + (h.clubs?.length || 0) === 13
+            }) && (
               <Tooltip title="检验定约 (Deep Finesse)" arrow slotProps={{
                 tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
                 arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
@@ -1247,44 +1282,129 @@ function CardTable({
       )}
 
       {isMobile ? (
-        <>
-          <Box sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
-            {renderHandWithStatus(north, '北', { width: '88vw', height: 'auto', maxWidth: '100%', mb: '6px', infoSide: 'bottom' })}
+        <Box sx={{
+          position: 'relative',
+          width: '100%',
+          height: '100%',
+          boxSizing: 'border-box',
+        }}>
+          {/* 中心面板：绝对定位居中 */}
+          <Box sx={{
+            position: 'absolute',
+            top: '50%', left: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: centerBoxWidth,
+            height: centerBoxHeight,
+            border: scheme.table.centerBorder,
+            borderRadius: 2,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'flex-start',
+            background: scheme.table.centerBg,
+            backdropFilter: scheme.table.centerBackdrop,
+            WebkitBackdropFilter: scheme.table.centerBackdrop,
+            boxShadow: scheme.table.centerShadow,
+            p: 0,
+            overflowY: 'auto',
+            zIndex: 50,
+          }}>
+            {renderCenterContent()}
           </Box>
 
-          <Box sx={{ display: 'flex', gap: '12px', width: '100%', mb: '6px', justifyContent: 'center' }}>
-            {renderHandWithStatus(west, '西', { width: '43vw', height: 'auto', maxWidth: '100%', infoSide: 'bottom' })}
-            {renderHandWithStatus(east, '东', { width: '43vw', height: 'auto', maxWidth: '100%', infoSide: 'bottom' })}
+          {/* 北家手牌：距顶40px，向中心移动 */}
+          <Box sx={{
+            position: 'absolute',
+            top: '40px', left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 10,
+          }}>
+            {renderHandWithStatus(north, '北', { width: 'auto', height: 'auto', noInfo: true })}
+          </Box>
+          {/* 北家信息条：中心面板上方 */}
+          <Box sx={{
+            position: 'absolute',
+            top: `calc(50% - ${centerBoxHeight / 2}px - 3px - ${infoBarHeight / 2}px)`,
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            zIndex: 100,
+          }}>
+            <InfoBar position="北" />
           </Box>
 
-          <Box sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
-            {renderHandWithStatus(south, '南', { width: '88vw', height: 'auto', maxWidth: '100%', mb: '6px', infoSide: 'top' })}
+          {/* 南家手牌：距底40px（与北向中心移动对称） */}
+          <Box sx={{
+            position: 'absolute',
+            bottom: '40px', left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 10,
+          }}>
+            {renderHandWithStatus(south, '南', { width: 'auto', height: 'auto', noInfo: true })}
           </Box>
-          
-          <Box className="table-center" sx={{ width: '100%', display: 'flex', justifyContent: isMobile ? 'flex-start' : 'center' }}>
-            <Box className="table-border" sx={{
-              width: biddingTableWidth,
-              minWidth: biddingTableWidth,
-              flexShrink: 0,
-              minHeight: 80,
-              maxHeight: 'none',
-              p: 0,
-              border: scheme.table.centerBorder,
-              borderRadius: 2,
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'flex-start',
-              background: scheme.table.centerBg,
-              backdropFilter: scheme.table.centerBackdrop,
-              WebkitBackdropFilter: scheme.table.centerBackdrop,
-              boxShadow: scheme.table.centerShadow,
-              padding: 1,
-              overflowY: 'auto',
-            }}>
-              {renderCenterContent()}
-            </Box>
+          {/* 南家信息条：中心面板下方 */}
+          <Box sx={{
+            position: 'absolute',
+            top: `calc(50% + ${centerBoxHeight / 2}px + 3px + ${infoBarHeight / 2}px)`,
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            zIndex: 100,
+          }}>
+            <InfoBar position="南" />
           </Box>
-        </>
+
+          {/* 西家手牌：左溢出一半宽度，只显示靠中心的一半 */}
+          <Box sx={{
+            position: 'absolute',
+            left: '-37px', top: '50%',
+            transform: 'translateY(-50%)',
+            zIndex: 10,
+          }}>
+            {renderHandWithStatus(west, '西', { width: 'auto', height: 'auto', noInfo: true, orientation: 'vertical', popDirection: 'right' })}
+          </Box>
+          {/* 西家信息条：中心面板左侧，旋转-90° */}
+          <Box sx={{
+            position: 'absolute',
+            top: '50%',
+            left: `calc(50% - ${centerBoxWidth / 2}px - 3px - ${infoBarHeight / 2}px)`,
+            transform: 'translate(-50%, -50%) rotate(-90deg)',
+            transformOrigin: 'center center',
+            zIndex: 100,
+            whiteSpace: 'nowrap',
+          }}>
+            <InfoBar position="西" />
+          </Box>
+
+          {/* 东家手牌：右溢出一半宽度，只显示靠中心的一半 */}
+          <Box sx={{
+            position: 'absolute',
+            right: '-37px', top: '50%',
+            transform: 'translateY(-50%)',
+            zIndex: 10,
+          }}>
+            {renderHandWithStatus(east, '东', { width: 'auto', height: 'auto', noInfo: true, orientation: 'vertical', popDirection: 'left' })}
+          </Box>
+          {/* 东家信息条：中心面板右侧，旋转90° */}
+          <Box sx={{
+            position: 'absolute',
+            top: '50%',
+            left: `calc(50% + ${centerBoxWidth / 2}px + 3px + ${infoBarHeight / 2}px)`,
+            transform: 'translate(-50%, -50%) rotate(90deg)',
+            transformOrigin: 'center center',
+            zIndex: 100,
+            whiteSpace: 'nowrap',
+          }}>
+            <InfoBar position="东" />
+          </Box>
+
+          {/* 独立手牌输入框 + 未知控件 */}
+          {renderIndependentHandInput('北')}
+          {renderIndependentHandInput('南')}
+          {renderIndependentHandInput('西')}
+          {renderIndependentHandInput('东')}
+          {renderIndependentUnknown('北')}
+          {renderIndependentUnknown('南')}
+          {renderIndependentUnknown('西')}
+          {renderIndependentUnknown('东')}
+        </Box>
       ) : (
         <Box sx={{
           // 桌面端布局容器（绿色桌面由外层card-table-container提供）
@@ -1660,7 +1780,12 @@ function CardTable({
                 防 <strong style={{ color: theme.palette.warning.main }}>{defenderTricks}</strong>
               </Typography>
               <Typography component="span" variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary' }}>
-                需 <strong>{contract.tricks_needed || '?'}</strong>
+                {isComplete && declarerTricks !== undefined && contract.tricks_needed
+                  ? (declarerTricks >= contract.tricks_needed
+                      ? <>超 <strong style={{ color: '#2e7d32' }}>{declarerTricks - contract.tricks_needed}</strong></>
+                      : <>宕 <strong style={{ color: '#c62828' }}>{contract.tricks_needed - declarerTricks}</strong></>)
+                  : <>需 <strong>{contract.tricks_needed || '?'}</strong></>
+                }
               </Typography>
             </Box>
             {isComplete && finalScores && (
@@ -1707,7 +1832,18 @@ function CardTable({
         if (isPlayPaused && isStartOfTrick) return null
         const handLen = playState.hands?.[cp]?.length || 0
         if (handLen > 0) return null // 有手牌时用牌桌点击出牌
-        const style = { bottom: isMobile ? 8 : '12%', right: isMobile ? 8 : '10%' }
+        let style = {}
+        if (isMobile) {
+          style = { bottom: 8, right: 8 }
+        } else if (cp === '南') {
+          style = { top: 'calc(75% + 71px + 36px)', left: '50%', transform: 'translateX(-50%)' }
+        } else if (cp === '北') {
+          style = { top: 'calc(25% - 71px + 36px)', left: '50%', transform: 'translateX(-50%)' }
+        } else if (cp === '西') {
+          style = { left: 'calc(25% - 71px)', top: 'calc(50% + 36px)', transform: 'translateX(-50%)' }
+        } else if (cp === '东') {
+          style = { left: 'calc(75% + 71px)', top: 'calc(50% + 36px)', transform: 'translateX(-50%)' }
+        }
         return (
           <Box sx={{ position: 'absolute', zIndex: 10, ...style, display: 'flex', gap: 0.5, alignItems: 'center', bgcolor: isDark ? 'rgba(17,24,39,0.88)' : 'rgba(255,255,255,0.88)', backdropFilter: 'blur(12px)', borderRadius: 2, p: 0.5, border: '1px solid', borderColor: 'divider', boxShadow: '0 4px 20px rgba(0,0,0,0.15)' }}>
             <TextField size="small" placeholder="♠A 或 SA"

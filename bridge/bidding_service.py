@@ -1,4 +1,5 @@
 from typing import Dict, Optional, Any, List, Tuple
+import json
 from bridge.bidding import extract_retrieval_keyword, get_partner_position, get_position_name
 from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT
 from config import MAIN_PROMPT_TEMPERATURE, FALLBACK_PROMPT_TEMPERATURE
@@ -26,8 +27,14 @@ class BiddingService:
         self.bid_meanings = bid_meanings
     
     def _is_no_valid_bid(self, result: Dict) -> bool:
-        bid = result.get("选定叫品", "").strip()
+        bid = result.get("选定叫品", "")
+        # LLM 可能返回 dict/list 等非 str 类型，统一转为 str
+        if not isinstance(bid, str):
+            bid = json.dumps(bid, ensure_ascii=False) if bid is not None else ""
+        bid = bid.strip()
         selection_process = result.get("叫品筛选过程", "")
+        if not isinstance(selection_process, str):
+            selection_process = json.dumps(selection_process, ensure_ascii=False) if selection_process is not None else ""
         
         if bid and bid not in ["pass", "JF无合格叫品", ""]:
             return False
@@ -306,11 +313,17 @@ class BiddingService:
         
         try:
             result = self.llm_client.chat_bidding_fallback(prompt, temperature=FALLBACK_PROMPT_TEMPERATURE, thinking=self._use_reasoning)
+            # LLM 偶尔返回 dict/list 类型的字段（schema 声明是 string 但未强制），
+            # 这里统一规范化为 str，避免后续字符串拼接抛 TypeError
+            for _k in ("叫品筛选过程", "叫品含义", "选定叫品", "叫牌位置", "手牌分析", "叫牌历史"):
+                _v = result.get(_k, "")
+                if not isinstance(_v, str):
+                    result[_k] = json.dumps(_v, ensure_ascii=False) if _v is not None else ""
             result["叫品筛选过程"] = "[备用提示词] " + result.get("叫品筛选过程", "")
             result["JF约定"] = actual_jf_keyword
             result["阻击叫体系"] = deal_system
-            
-            bid = result.get("选定叫品", "").strip().lower()
+
+            bid = result.get("选定叫品", "").strip()
             if not bid or bid in ["jf无合格叫品", "无合格叫品", "没有合格叫品"]:
                 result["选定叫品"] = "pass"
                 result["叫品筛选过程"] += " [强制选择pass]"

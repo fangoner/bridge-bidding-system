@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react'
 import { Box, Typography, useTheme } from '@mui/material'
 import { styled } from '@mui/material/styles'
+import useMediaQuery from '@mui/material/useMediaQuery'
 
 const HandTitle = styled(Typography)(({ theme }) => ({
   fontWeight: 700,
@@ -52,8 +53,10 @@ function PlayingCard({
   // 统一比例：牌宽=size，牌高=size*1.42（正常竖向扑克牌）
   const cardW = size
   const cardH = size * CARD_ASPECT
-  const fontSize = Math.max(8, cardW * 0.40)
-  const smallFont = Math.max(5.5, cardW * 0.22)
+  // 小牌（手机<65px）时缩小中央花色占比，加大角落字占比
+  const isSmall = cardW < 50
+  const fontSize = Math.max(5, cardW * (isSmall ? 0.15 : 0.20))
+  const smallFont = Math.max(5, cardW * (isSmall ? 0.28 : 0.22))
 
   const isVertical = orientation === 'vertical'
   const hoverTransform = 'translateY(-15px)'
@@ -181,9 +184,10 @@ function HandDisplay({
   }, [hand])
 
   // 固定牌宽和重叠比例
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   const { cardWidth, overlapRatio } = useMemo(() => {
-    return { cardWidth: FIXED_CARD_WIDTH, overlapRatio: FIXED_OVERLAP }
-  }, [])
+    return { cardWidth: isMobile ? Math.round(FIXED_CARD_WIDTH * 0.8) : FIXED_CARD_WIDTH, overlapRatio: FIXED_OVERLAP }
+  }, [isMobile])
 
   // 总牌面长度（含重叠）- 沿主轴方向
   const totalFanLength = useMemo(() => {

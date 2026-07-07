@@ -56,9 +56,10 @@ function BiddingTable({ biddingSequence, dealer }) {
     }}>
       <Box className="bidding-header" sx={{
         display: 'flex',
-        justifyContent: 'space-around',
+        justifyContent: 'center',
+        gap: isMobile ? 1 : 0,
         borderBottom: `2px solid ${theme.palette.text.primary}`,
-        paddingBottom: isMobile ? 0.5 : 1,
+        paddingBottom: isMobile ? 1 : 1,
         marginBottom: isMobile ? 0.5 : 1,
         fontWeight: 'bold',
         color: theme.palette.text.primary,
@@ -73,7 +74,7 @@ function BiddingTable({ biddingSequence, dealer }) {
             sx={{
               flex: 1,
               textAlign: 'center',
-              minWidth: isMobile ? 70 : 50,
+              minWidth: isMobile ? 30 : 50,
               color: pos === dealer ? theme.palette.error.main : 'inherit',
             }}
             className={pos === dealer ? 'dealer' : ''}
@@ -89,7 +90,8 @@ function BiddingTable({ biddingSequence, dealer }) {
           className="bidding-row"
           sx={{
             display: 'flex',
-            justifyContent: 'space-around',
+            justifyContent: 'center',
+            gap: isMobile ? 1 : 0,
             padding: '4px 0',
             borderBottom: `1px solid ${theme.palette.divider}`,
             '&:last-child': {
@@ -105,7 +107,7 @@ function BiddingTable({ biddingSequence, dealer }) {
               sx={{
                 flex: 1,
                 textAlign: 'center',
-                minWidth: isMobile ? 70 : 50,
+                minWidth: isMobile ? 30 : 50,
                 fontWeight: 500,
                 color: theme.palette.text.primary,
                 backgroundColor: row[colIndex] ? alpha(theme.palette.primary.main, 0.08) : 'transparent',

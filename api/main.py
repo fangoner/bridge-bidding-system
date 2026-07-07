@@ -1360,7 +1360,15 @@ async def play_card(request: PlayCardRequest):
         tricks_before = len(state_before.tricks) if state_before else 0
 
         card = Card(suit=request.card["suit"], rank=request.card["rank"])
+        _log = f"[PLAY_CARD] position={request.position} card={card} current_player={state_before.current_player if state_before else 'N/A'} hands[{request.position}]={state_before.hands.get(request.position) if state_before else 'N/A'}"
+        print(_log)
+        with open("dd_debug.log", "a", encoding="utf-8") as _f:
+            _f.write(_log + "\n")
         success, message = service.play_card(request.position, card)
+        _log2 = f"[PLAY_CARD] result: success={success} message={message}"
+        print(_log2)
+        with open("dd_debug.log", "a", encoding="utf-8") as _f:
+            _f.write(_log2 + "\n")
 
         state = service.get_state()
         trick_winner = None

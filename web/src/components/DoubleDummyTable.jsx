@@ -4,6 +4,7 @@ import { BRIDGE_POSITIONS } from '../utils/position'
 
 function DoubleDummyTable({ tableData }) {
   const theme = useTheme()
+  const isMobile = window.innerWidth < 600
 
   if (!tableData) return null
 
@@ -28,14 +29,15 @@ function DoubleDummyTable({ tableData }) {
       width: '100%',
       fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", Roboto, sans-serif',
       fontWeight: 600,
-      fontSize: { xs: '0.75rem', md: '0.9rem' },
+      fontSize: isMobile ? '0.9rem' : '0.9rem',
     }}>
       <Box className="bidding-header" sx={{
         display: 'flex',
-        justifyContent: 'space-around',
+        justifyContent: 'center',
+        gap: isMobile ? 1 : 0,
         borderBottom: `2px solid ${theme.palette.text.primary}`,
-        paddingBottom: { xs: 0.5, md: 1 },
-        marginBottom: { xs: 0.5, md: 1 },
+        paddingBottom: isMobile ? 1 : 1,
+        marginBottom: isMobile ? 0.5 : 1,
         fontWeight: 'bold',
         color: theme.palette.text.primary,
         position: 'sticky',
@@ -49,7 +51,7 @@ function DoubleDummyTable({ tableData }) {
             sx={{
               flex: 1,
               textAlign: 'center',
-              minWidth: { xs: 35, md: 50 },
+              minWidth: isMobile ? 30 : 50,
             }}
           >
             {pos}
@@ -63,7 +65,8 @@ function DoubleDummyTable({ tableData }) {
           className="bidding-row"
           sx={{
             display: 'flex',
-            justifyContent: 'space-around',
+            justifyContent: 'center',
+            gap: isMobile ? 1 : 0,
             padding: '4px 0',
             borderBottom: `1px solid ${theme.palette.divider}`,
             '&:last-child': {
@@ -79,7 +82,7 @@ function DoubleDummyTable({ tableData }) {
               sx={{
                 flex: 1,
                 textAlign: 'center',
-                minWidth: 50,
+                minWidth: isMobile ? 30 : 50,
                 fontWeight: 500,
                 color: theme.palette.text.primary,
                 backgroundColor: alpha(theme.palette.primary.main, 0.08),

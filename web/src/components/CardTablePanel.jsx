@@ -126,20 +126,19 @@ function CardTablePanel({
       flexDirection: 'column',
       width: isMobile ? '100%' : '640px',
       overflow: 'hidden',
-      height: '640px',
-      minHeight: '640px',
+      height: isMobile ? 'auto' : '640px',
+      minHeight: isMobile ? 'auto' : '640px',
       flexShrink: 0,
       boxSizing: 'border-box'
     }}>
       <Box sx={{
         display: 'flex',
+        flexDirection: isMobile ? 'column' : 'row',
         justifyContent: 'space-between',
-        alignItems: 'center',
+        alignItems: isMobile ? 'stretch' : 'center',
         mb: 0.5,
         flexShrink: 0,
-        height: 44,
-        flexWrap: isMobile ? 'wrap' : 'nowrap',
-        overflow: 'hidden',
+        height: isMobile ? 'auto' : 44,
         gap: isMobile ? 0.5 : 0,
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
@@ -202,10 +201,23 @@ function CardTablePanel({
               </IconButton>
             </Tooltip>
           )}
+          {!showPlayPanel && isMobile && mode !== 'simulated' && (
+          <Box sx={{ display: 'flex', gap: 0.5, ml: 'auto', borderLeft: '1px solid', borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)', pl: 1 }}>
+            <Button
+              variant="contained"
+              size="small"
+              onClick={() => onDeal(dealMode)}
+              disabled={loading || aiThinking}
+              sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5, py: 0 }}
+            >
+              发牌
+            </Button>
+          </Box>
+          )}
 
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          {!showPlayPanel && hasAnyHuman(positionRoles) && getHumanPositions(positionRoles).length < 3 && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: isMobile ? 'center' : 'center', flex: isMobile ? 'none' : 1, flexWrap: 'wrap', minHeight: isMobile ? 0 : undefined }}>
+          {(!showPlayPanel || biddingStarted) && hasAnyHuman(positionRoles) && getHumanPositions(positionRoles).length < 3 && (
             <>
               <Typography variant="body2" sx={{ fontSize: '0.75rem', fontWeight: 700, mr: 0 }}>
                 {gameMode === 'pair' ? '双人练习' : '四人练习'}
@@ -275,47 +287,47 @@ function CardTablePanel({
               sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem', color: studyMode ? '#e65100' : undefined, fontWeight: studyMode ? 700 : undefined }, mr: 0, height: 24 }}
             />
           )}
-          {!showPlayPanel && mode !== 'simulated' && (
-          <Box sx={{ display: 'flex', gap: 0.5, ml: 1, borderLeft: '1px solid', borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)', pl: 1 }}>
-            <Button
-              variant="contained"
-              size="small"
-              onClick={() => onDeal(dealMode)}
-              disabled={loading || aiThinking}
-              sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5, py: 0 }}
-            >
-              发牌
-            </Button>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={onCustomDeal}
-              disabled={loading}
-              sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5 }}
-            >
-              手动
-            </Button>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={onImageDeal}
-              disabled={loading}
-              sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5 }}
-            >
-              图片
-            </Button>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={onScreenshotDeal}
-              disabled={loading}
-              sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5 }}
-            >
-              截屏
-            </Button>
-          </Box>
-          )}
         </Box>
+        {!isMobile && !showPlayPanel && mode !== 'simulated' && (
+        <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', flexShrink: 0, borderLeft: '1px solid', borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)', pl: 1 }}>
+          <Button
+            variant="contained"
+            size="small"
+            onClick={() => onDeal(dealMode)}
+            disabled={loading || aiThinking}
+            sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5, py: 0 }}
+          >
+            发牌
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={onCustomDeal}
+            disabled={loading}
+            sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5 }}
+          >
+            手动
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={onImageDeal}
+            disabled={loading}
+            sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5 }}
+          >
+            图片
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={onScreenshotDeal}
+            disabled={loading}
+            sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5 }}
+          >
+            截屏
+          </Button>
+        </Box>
+        )}
       </Box>
       <Box sx={{
         display: 'flex',
@@ -323,7 +335,7 @@ function CardTablePanel({
         flex: 1,
         minHeight: 0,
         overflow: 'hidden',
-        height: '100%',
+        height: isMobile ? 'auto' : '100%',
       }}>
         <CardTable
           hands={hands}
