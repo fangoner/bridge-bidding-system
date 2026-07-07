@@ -217,7 +217,7 @@ function CardTablePanel({
 
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: isMobile ? 'center' : 'center', flex: isMobile ? 'none' : 1, flexWrap: 'wrap', minHeight: isMobile ? 0 : undefined }}>
-          {(!showPlayPanel || biddingStarted) && hasAnyHuman(positionRoles) && getHumanPositions(positionRoles).length < 3 && (
+          {!showPlayPanel && hasAnyHuman(positionRoles) && getHumanPositions(positionRoles).length < 3 && (
             <>
               <Typography variant="body2" sx={{ fontSize: '0.75rem', fontWeight: 700, mr: 0 }}>
                 {gameMode === 'pair' ? '双人练习' : '四人练习'}

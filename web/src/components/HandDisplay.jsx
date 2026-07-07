@@ -83,7 +83,7 @@ function PlayingCard({
             : '0 2px 5px rgba(0,0,0,0.14), 0 1px 2px rgba(0,0,0,0.06)',
         cursor: isPlayable ? 'pointer' : 'default',
         opacity: 1,
-        filter: isPlayed ? 'grayscale(1)' : 'none',
+        filter: 'none',
         transform: 'none',
         transformOrigin: 'center center',
         ...style,

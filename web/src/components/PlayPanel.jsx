@@ -423,9 +423,17 @@ function PlayPanel({
           </Typography>
         </Paper>
         <Paper sx={{ p: 0.5, bgcolor: isDark ? 'rgba(255,255,255,0.05)' : '#f5f5f5', textAlign: 'center', minWidth: '70px', height: '40px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-          <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.7rem' }}>需要</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+            {isComplete && declarer_tricks !== undefined && contract?.tricks_needed
+              ? (declarer_tricks >= contract.tricks_needed ? '超' : '宕')
+              : '需要'}
+          </Typography>
           <Typography variant="h6" fontWeight="bold">
-            {contract?.tricks_needed || '?'}
+            {isComplete && declarer_tricks !== undefined && contract?.tricks_needed
+              ? (declarer_tricks >= contract.tricks_needed
+                  ? declarer_tricks - contract.tricks_needed
+                  : contract.tricks_needed - declarer_tricks)
+              : (contract?.tricks_needed || '?')}
           </Typography>
         </Paper>
       </Box>

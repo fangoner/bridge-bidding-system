@@ -32,12 +32,16 @@ _DIST_STATS = {"shape_t": 0.0, "hcp_t": 0.0, "assign_t": 0.0,
 _SHAPE_POOL = {}
 _SHAPE_POOL_MAX = 20  # 每个键最多缓存20个候选shape
 _SHAPE_POOL_TARGET = 10  # 首次生成时尝试产出10个候选
+# 已确认约束硬冲突的 cache_key 集合：避免每个粒子重复跑 50 次外层重试
+# 命中后直接走放宽约束分支，不再尝试 suit_min/exact_suit
+_SHAPE_POOL_HARD_CONFLICT = set()
 
 def reset_dist_stats():
     for k in _DIST_STATS:
         _DIST_STATS[k] = 0
     # 同时清空shape池（新PlayState或新prepare周期）
     _SHAPE_POOL.clear()
+    _SHAPE_POOL_HARD_CONFLICT.clear()
 
 def dump_dist_stats():
     """输出聚合计时到日志，只写1行"""
@@ -829,6 +833,33 @@ def _generate_valid_shape_distribution(
         for c in pool:
             suit_total[c.suit] += 1
 
+    # 一次性硬冲突预检：如果某花色 suit_min/exact_suit 之和 > 牌池该花色张数，
+    # 不可能满足，直接返回 None（避免 60 次无意义重试）
+    _lower_bound = {s: 0 for s in SUITS}
+    for pos in positions:
+        c = constraints.get(pos)
+        if not c:
+            continue
+        for s in SUITS:
+            if s in c.exact_suit:
+                _lower_bound[s] += c.exact_suit[s]
+            elif s in c.suit_min:
+                _lower_bound[s] += c.suit_min[s]
+    _hard_conflict_suits = [s for s in SUITS if _lower_bound[s] > suit_total[s]]
+    if _hard_conflict_suits:
+        # 约束硬冲突：suit_min/exact 之和超过牌池张数，无法生成合法 shape
+        with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+            _f.write(f"[SHAPE_HARD_CONFLICT] suits={_hard_conflict_suits} "
+                     f"lower_bound={_lower_bound} suit_total={suit_total} "
+                     f"positions={positions} targets={target_counts}\n")
+            for pos in positions:
+                c = constraints.get(pos)
+                if c:
+                    _f.write(f"  {pos}: suit_min={dict(c.suit_min)} exact={dict(c.exact_suit)} "
+                             f"suit_max={dict(c.suit_max)} balanced={c.balanced} "
+                             f"src={c.inference_source}\n")
+        return None
+
     # 预计算每家的 suit_max（含均型约束的 5 张上限）
     effective_max = {}
     for pos in positions:
@@ -1547,11 +1578,12 @@ def _distribute_global_constrained(
 
     shape = None
     _shape_attempts = 0
+    _hard_conflict_skip = _cache_key in _SHAPE_POOL_HARD_CONFLICT
     if _cache_key in _SHAPE_POOL and _SHAPE_POOL[_cache_key]:
         # 缓存命中：从候选池随机选一个
         shape = copy.deepcopy(random.choice(_SHAPE_POOL[_cache_key]))
         _DIST_STATS["shape_cache_hits"] += 1
-    else:
+    elif not _hard_conflict_skip:
         # 首次生成：尝试产出多个候选填满池
         _pool_candidates = []
         for _attempt in range(50):
@@ -1571,25 +1603,58 @@ def _distribute_global_constrained(
             _SHAPE_POOL[_cache_key] = _pool_candidates[:_SHAPE_POOL_MAX]
         else:
             shape = None
+            # 标记此 cache_key 为硬冲突，后续粒子直接跳到放宽分支
+            # 避免每个粒子重复跑 50 次外层重试（2000 粒子 × 50 = 10 万次无意义重试）
+            _SHAPE_POOL_HARD_CONFLICT.add(_cache_key)
     _DIST_STATS["shape_t"] += _time.time() - _t0
     _DIST_STATS["shape_calls"] += 1
     _DIST_STATS["shape_retries"] += _shape_attempts - 1 if _shape_attempts > 0 else 0
 
     if shape is None:
-        # 牌型生成失败：放宽约束重试一次（清空suit_min/exact/balanced，只保留void和suit_max）
-        # 这比回退_distribute_biased质量更好（仍走全局HCP预算+牌张分配）
+        # 牌型生成失败：针对性放宽约束
+        # 策略：只放宽冲突花色的 suit_min/exact_suit（降到 pool 能容纳的值），
+        # 保留其他花色约束、HCP 范围、suit_max（含void）、balanced
+        # 这样最大程度保留约束信息，粒子权重由 compute_sample_violation_score 软惩罚冲突花色
         _relaxed_constraints = {}
+        # 计算每个花色 pool 张数与各位置 suit_min/exact 之和的差值，找出冲突花色
+        _pool_by_suit = {s: sum(1 for _c in real_pool if _c.suit == s) for s in SUITS}
+        _lower_by_suit = {s: 0 for s in SUITS}
+        for pos in unknown_positions:
+            c = effective_constraints.get(pos)
+            if not c:
+                continue
+            for s in SUITS:
+                if s in c.exact_suit:
+                    _lower_by_suit[s] += c.exact_suit[s]
+                elif s in c.suit_min:
+                    _lower_by_suit[s] += c.suit_min[s]
+        _conflict_suits = {s for s in SUITS if _lower_by_suit[s] > _pool_by_suit[s]}
+
         for pos in unknown_positions:
             c = effective_constraints.get(pos)
             if c is None:
                 c = BidConstraint(position=pos)
             c_relax = copy.copy(c)
-            c_relax.suit_min = {}  # 清空suit_min
-            c_relax.exact_suit = {}  # 清空exact_suit
-            c_relax.balanced = None  # 清空balanced
-            # 保留 suit_max（含void约束）和 HCP 范围
+            c_relax.suit_min = dict(c.suit_min)
             c_relax.suit_max = dict(c.suit_max)
+            c_relax.exact_suit = dict(c.exact_suit)
             c_relax.specific_cards = set(c.specific_cards)
+            # 只放宽冲突花色的 suit_min/exact_suit
+            for s in _conflict_suits:
+                if s in c_relax.exact_suit:
+                    # exact_suit 降为 suit_min 语义（至少改为 pool 可容纳值）
+                    available = max(0, _pool_by_suit[s] - (_lower_by_suit[s] - c_relax.exact_suit[s]))
+                    if available > 0:
+                        c_relax.suit_min[s] = min(c_relax.exact_suit[s], available)
+                    del c_relax.exact_suit[s]
+                elif s in c_relax.suit_min:
+                    # suit_min 降到 pool 可容纳值（其他位置 suit_min 已占用剩余）
+                    available = max(0, _pool_by_suit[s] - (_lower_by_suit[s] - c_relax.suit_min[s]))
+                    c_relax.suit_min[s] = min(c_relax.suit_min[s], available)
+            # 中局阶段（target<13）：balanced 约束下限已无法保证（pool 不足），
+            # 只保留上限（无6+张套），避免与 suit_max 叠加导致无解
+            if c.balanced and unknown_targets.get(pos, 13) < 13:
+                c_relax.balanced = None  # 由 suit_max≤5 替代上限检查
             _relaxed_constraints[pos] = c_relax
         # 放宽后重试shape生成
         for _attempt in range(30):

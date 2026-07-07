@@ -1259,11 +1259,17 @@ function CardTable({
           alignItems: 'flex-end',
         }}>
           <Box sx={{ display: 'flex', gap: 0.5 }}>
-            <Chip
-              label={`${playState.contract.level || '?'}${playState.contract.suit || 'NT'}${playState.contract.redoubled ? 'XX' : playState.contract.doubled ? 'X' : ''}`}
-              size="small"
-              sx={{ fontSize: '0.7rem', bgcolor: 'rgba(255,255,255,0.92)', color: '#1565c0', fontWeight: 700 }}
-            />
+            {(() => {
+              const suit = playState.contract.suit || 'NT'
+              const suitColor = { '♠': '#1a1a2e', '♥': '#d32f2f', '♦': '#7c3aed', '♣': '#1a1a2e', 'NT': '#1a1a2e' }[suit] || '#1a1a2e'
+              return (
+                <Chip
+                  label={`${playState.contract.level || '?'}${suit}${playState.contract.redoubled ? 'XX' : playState.contract.doubled ? 'X' : ''}`}
+                  size="small"
+                  sx={{ fontSize: '0.7rem', bgcolor: 'rgba(255,255,255,0.92)', color: suitColor, fontWeight: 700 }}
+                />
+              )
+            })()}
             <Chip
               label={`庄家: ${playState.contract.declarer || '?'}`}
               variant="outlined"
