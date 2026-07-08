@@ -1812,6 +1812,243 @@ async def get_dd_hints():
         return {"success": False, "error": str(e)}
 
 
+class ReviewDDHintsRequest(BaseModel):
+    play_state: dict
+    cursor: int  # 复盘游标：0-based，表示当前查看第几张牌（已出牌的序号）
+
+
+@app.post("/api/play/dd-hints-review")
+async def get_dd_hints_review(request: ReviewDDHintsRequest):
+    """复盘模式：根据游标位置重建牌局状态并计算DD提示。
+
+    前端传入完整的 playState（已完成或进行中）和 cursor，
+    后端重建该游标位置时的牌局状态（手牌、当前墩、当前出牌者），
+    计算 DD 提示。不修改全局 play_service 状态。
+    """
+    from bridge.play_types import Card, Contract, PlayState, PlayPhase, Trick, POSITION_ORDER, PARTNERS
+
+    try:
+        ps = request.play_state
+        cursor = request.cursor
+
+        if not ps or not ps.get("contract"):
+            return {"success": False, "error": "playState 无效"}
+
+        # 1. 重建 Contract
+        c_dict = ps["contract"]
+        contract = Contract(
+            level=c_dict["level"],
+            suit=c_dict["suit"],
+            declarer=c_dict["declarer"],
+            doubled=c_dict.get("doubled", False),
+            redoubled=c_dict.get("redoubled", False),
+        )
+
+        # 2. 收集所有已出牌（按出牌顺序）
+        all_played = []
+        for trick in ps.get("tricks", []):
+            for pos, card in trick.get("cards", []):
+                all_played.append((pos, Card(suit=card["suit"], rank=card["rank"])))
+        for pos, card in ps.get("current_trick", {}).get("cards", []):
+            all_played.append((pos, Card(suit=card["suit"], rank=card["rank"])))
+
+        # 3. 游标语义：cursor = N 表示前 N 张牌已出，第 N 张牌（all_played[N]）回到手牌，轮到该位置出牌
+        #    已出牌 = all_played[:N]，未出牌（含游标位置的加亮牌）= all_played[N:]
+        played_before_cursor = all_played[:cursor]
+
+        # 4. 重建四家完整手牌（从 playState.hands）
+        full_hands = {}
+        for pos in POSITION_ORDER:
+            hand_list = ps.get("hands", {}).get(pos, [])
+            full_hands[pos] = [Card(suit=c["suit"], rank=c["rank"]) for c in hand_list]
+
+        # 5. 从完整手牌中移除游标之前已出的牌，得到游标位置时的手牌
+        #    游标位置及之后的牌（包括 all_played[cursor]）保留在手牌中（未出）
+        hands_at_cursor = {pos: list(cards) for pos, cards in full_hands.items()}
+        for pos, card in played_before_cursor:
+            if pos in hands_at_cursor:
+                hands_at_cursor[pos] = [
+                    c for c in hands_at_cursor[pos]
+                    if not (c.suit == card.suit and c.rank == card.rank)
+                ]
+
+        # 6. 重建已完成墩和当前墩
+        #    前 cursor 张牌分布在若干完整墩 + 一个可能未满的当前墩
+        tricks_completed = []
+        current_trick_cards = []
+        card_count = 0
+        for trick in ps.get("tricks", []):
+            trick_cards = trick.get("cards", [])
+            if card_count + len(trick_cards) <= cursor:
+                # 整个墩都在游标之前，已完成
+                t = Trick(trump=contract.suit)
+                for pos, card in trick_cards:
+                    t.add_card(pos, Card(suit=card["suit"], rank=card["rank"]))
+                tricks_completed.append(t)
+                card_count += len(trick_cards)
+            else:
+                # 这个墩部分在游标之前
+                for pos, card in trick_cards:
+                    if card_count < cursor:
+                        current_trick_cards.append((pos, Card(suit=card["suit"], rank=card["rank"])))
+                        card_count += 1
+                    else:
+                        break
+                break
+        # 处理 current_trick（最后一个未完成墩）
+        if card_count < cursor:
+            for pos, card in ps.get("current_trick", {}).get("cards", []):
+                if card_count < cursor:
+                    current_trick_cards.append((pos, Card(suit=card["suit"], rank=card["rank"])))
+                    card_count += 1
+                else:
+                    break
+
+        # 如果当前墩满4张，移入已完成
+        if len(current_trick_cards) == 4:
+            t = Trick(trump=contract.suit)
+            for p, c in current_trick_cards:
+                t.add_card(p, c)
+            tricks_completed.append(t)
+            current_trick_cards = []
+
+        # 7. 确定当前出牌者 = all_played[cursor].pos（游标位置的牌的出牌者）
+        if cursor < len(all_played):
+            current_player = all_played[cursor][0]
+        else:
+            # 全部已出，无当前出牌者
+            current_player = None
+
+        if current_player is None:
+            return {"success": True, "hints": {}}
+
+        # 8. 构建 PlayState
+        state = PlayState(
+            contract=contract,
+            hands=hands_at_cursor,
+            player_roles=ps.get("player_roles", {}),
+        )
+        state.tricks = tricks_completed
+        state.current_trick = Trick(trump=contract.suit)
+        for p, c in current_trick_cards:
+            state.current_trick.add_card(p, c)
+        state.current_player = current_player
+        state.dummy = PARTNERS.get(contract.declarer)
+        # 计算墩数
+        state.declarer_tricks = sum(
+            1 for t in tricks_completed if t.winner() in (contract.declarer, state.dummy)
+        )
+        state.defender_tricks = len(tricks_completed) - state.declarer_tricks
+        state.phase = PlayPhase.PLAYING
+
+        # 9. 计算 DD 提示
+        hints = _compute_dd_hints_for_state_from_state(state)
+        return {"success": True, "hints": hints}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}
+
+
+def _compute_dd_hints_for_state_from_state(state) -> dict:
+    """从给定的 PlayState 计算 DD 提示（不依赖 PlayService）。"""
+    from bridge.mcts.dd_search import ENDPLAY_AVAILABLE
+    if not ENDPLAY_AVAILABLE:
+        return {}
+
+    try:
+        from endplay import Deal
+        from endplay.dds import solve_board
+        from endplay.types import Denom, Player
+        from bridge.mcts.dd_search import _hands_to_pbn, _to_ep, _DENOM_TO_SUIT, _RANK_TO_CHAR
+        from bridge.mcts.state_utils import get_current_trick_state, POSITION_TO_PLAYER, PLAYER_TO_POSITION, SUIT_TO_DENOM
+
+        perspective = state.current_player
+        if not perspective:
+            return {}
+
+        playable = state.get_playable_cards(perspective)
+        print(f"[DD-HINT] perspective={perspective}, playable={[str(c) for c in playable]}, "
+              f"hand_size={len(state.hands.get(perspective, []))}, "
+              f"trick_cards={[ (p, str(c)) for p, c in state.current_trick.cards]}")
+        if len(playable) <= 1:
+            print(f"[DD-HINT] playable<=1, returning empty")
+            return {}
+
+        declarer = state.contract.declarer
+        dummy = state.dummy
+        trump = state.contract.suit
+
+        trick_state = get_current_trick_state(state)
+        trick_cards = trick_state["cards"]
+        trick_leader = trick_state.get("leader")
+
+        total_played = state.declarer_tricks + state.defender_tricks
+        remaining_tricks = 13 - total_played
+
+        has_incomplete_hands = any(
+            not state.hands.get(pos) for pos in ["北", "东", "南", "西"]
+        )
+        if has_incomplete_hands:
+            return {}
+
+        hands = {}
+        for pos in ["北", "东", "南", "西"]:
+            hands[pos] = list(state.hands.get(pos, []))
+        for pos, card in trick_cards:
+            hands[pos] = [c for c in hands[pos]
+                          if not (c.suit == card.suit and c.rank == card.rank)]
+        for pos, card in trick_cards:
+            hands[pos].append(card)
+
+        pbn = _hands_to_pbn(hands)
+        deal = Deal(pbn)
+        deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
+
+        if trick_cards:
+            deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
+            for _pos, card in trick_cards:
+                deal.play(_to_ep(card), from_hand=True)
+        else:
+            deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
+
+        result = solve_board(deal)
+        score_map = {}
+        for ep_card, side_score in result:
+            key = (_DENOM_TO_SUIT.get(ep_card.suit), _RANK_TO_CHAR.get(ep_card.rank))
+            score_map[key] = side_score
+
+        curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
+        curplayer_is_declarer = curplayer_pos in (declarer, dummy)
+
+        contract_level = state.contract.level
+        target_tricks = contract_level + 6
+        hints = {}
+
+        for card in playable:
+            key = (card.suit, card.rank)
+            target_tricks_for_card = score_map.get(key, 0)
+            if curplayer_is_declarer:
+                decl_side_tricks = target_tricks_for_card
+            else:
+                decl_side_tricks = remaining_tricks - target_tricks_for_card
+            total = state.declarer_tricks + decl_side_tricks
+            delta = total - target_tricks
+            card_str = str(card)
+            if delta > 0:
+                hints[card_str] = f"+{delta}"
+            elif delta == 0:
+                hints[card_str] = "="
+            else:
+                hints[card_str] = str(delta)
+
+        print(f"[DD-HINT] returning {len(hints)} hints: {hints}")
+        return hints
+    except Exception as e:
+        print(f"[DD-HINT] exception: {e}")
+        return {}
+
+
 # ── 粒子数设置 ──
 class ParticleSettingsRequest(BaseModel):
     dd_particles: Optional[int] = None

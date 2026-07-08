@@ -48,7 +48,7 @@ SYSTEM_CONFIGS = {
         "response_pass_max": 4,         # JF: 5点以上应叫 → pass≤4
         "overcall_pass_max": 7,         # JF: 8点以上争叫 → pass≤7
         "response_1nt_pass_max": 7,     # JF: 8点以上应叫 → pass≤7
-        "nt_opening_min": 15,           # JF: 1NT 15-17均型
+        "nt_opening_min": 15,           # JF: 1NT 15-17，半均型（允许5张高花/6张低花）
         "nt_opening_max": 17,
         "weak_two_min": 6,              # JF: 弱二6-10
         "weak_two_max": 10,
@@ -174,13 +174,23 @@ def get_opening_bid_constraint(bid: str) -> Optional[BidConstraint]:
     # ========== 1阶开叫 ==========
     if level == 1:
         if suit == "NT":
-            # 1NT开叫：15-17HCP，均型（允许5张高花在某些版本，但标准自然通常高花≤4）
+            # 1NT开叫：15-17HCP
+            # 牌型规则：
+            # - 不允许7-2-2-2牌型（无7张套）：suit_max all ≤ 6
+            # - 允许五张高花或六张低花，但不可同时有5+张套和另一4+张套
+            # - 禁止有花色单缺（但允许单张A/K，此处用suit_min=2近似）
+            # - 不允许两门花色没有止张（需特定牌张判断，暂不编码）
+            #
+            # 编码说明：balanced=None（非标准均型，允许6张低花），
+            # 高花≤5（允许5张高花）、低花≤6（允许6张低花）、每花色≥2（禁止单缺）
+            # "不可同时5+和4+"为条件约束，当前架构无法精确编码，靠采样软加权近似
             return BidConstraint(
                 position="",
                 min_hcp=15,
                 max_hcp=17,
-                balanced=True,
-                suit_max={"♥": 4, "♠": 4},
+                balanced=None,
+                suit_min={"♠": 2, "♥": 2, "♦": 2, "♣": 2},
+                suit_max={"♠": 5, "♥": 5, "♦": 6, "♣": 6},
                 min_hcp_target=16,
             )
         elif suit in ("♣", "♦"):
@@ -232,12 +242,19 @@ def get_opening_bid_constraint(bid: str) -> Optional[BidConstraint]:
                 min_hcp_target=8,
             )
         elif suit == "NT":
-            # 2NT开叫：20-21HCP，均型
+            # 2NT开叫：20-21HCP，通常均型
+            # 牌型规则（与1NT一致）：
+            # - 不允许7-2-2-2牌型（无7张套）：suit_max all ≤ 6
+            # - 允许五张高花或六张低花，但不可同时有5+张套和另一4+张套
+            # - 不可以有单缺（除非是A或K，此处用suit_min=2近似）
+            # - 不保证所有花色都有止张（不编码止张约束）
             return BidConstraint(
                 position="",
                 min_hcp=20,
                 max_hcp=21,
-                balanced=True,
+                balanced=None,
+                suit_min={"♠": 2, "♥": 2, "♦": 2, "♣": 2},
+                suit_max={"♠": 5, "♥": 5, "♦": 6, "♣": 6},
                 min_hcp_target=20,
             )
     
@@ -1413,13 +1430,22 @@ def _merge_constraints(c1: BidConstraint, c2: BidConstraint) -> BidConstraint:
         merged.balanced = c1.balanced if c1.balanced == c2.balanced else None
     else:
         merged.balanced = c1.balanced if c1.balanced is not None else c2.balanced
-    
+
     # 花色张数：suit_min取大值，suit_max取小值
     merged.suit_min = {}
     for suit in set(list(c1.suit_min.keys()) + list(c2.suit_min.keys())):
         m1 = c1.suit_min.get(suit, 0)
         m2 = c2.suit_min.get(suit, 0)
         merged.suit_min[suit] = max(m1, m2)
+
+    # 冲突检测：均型约束要求每花色2-5张，若某花色 suit_min>=6 则与均型矛盾
+    # 场景：先有 balanced=True（如1NT开叫），后有跳叫原花≥6张（显示非均型）
+    # 后续叫牌已明确显示非均型，应清除 balanced
+    if merged.balanced:
+        for suit, mn in merged.suit_min.items():
+            if mn >= 6:
+                merged.balanced = None
+                break
     
     merged.suit_max = {}
     for suit in set(list(c1.suit_max.keys()) + list(c2.suit_max.keys())):

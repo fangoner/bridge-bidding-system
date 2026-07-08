@@ -429,7 +429,9 @@ function PlayDetailPanel({
               const isBeforeCursor = reviewCursor != null && globalCardIdx < reviewCursor
               const isAtCursor = reviewCursor != null && globalCardIdx === reviewCursor
               const isAfterCursor = reviewCursor != null && globalCardIdx > reviewCursor
-              const isGrayed = isAfterCursor
+              // 游标语义：reviewCursor=N 表示前 N 张已出，第 N 张（globalCardIdx===N）回到手牌（未出）
+              // 所以 isAtCursor 和 isAfterCursor 都应灰显
+              const isGrayed = isAtCursor || isAfterCursor
 
               const color = getSuitColor(card.suit, isDark)
               const aiRecord = getAIRecordForCard(pos, card)
@@ -514,10 +516,10 @@ function PlayDetailPanel({
               <Button size="small" onClick={onReviewPrev} disabled={reviewCursor === 0}
                 sx={{ fontSize: '0.7rem', minWidth: 24, py: 0 }}>◀</Button>
               <Typography variant="caption" sx={{ fontSize: '0.75rem', fontWeight: 600, minWidth: 60, textAlign: 'center' }}>
-                第{reviewCursor + 1}/{totalCards || '?'}张
+                {reviewCursor}/{totalCards || '?'}张已出
               </Typography>
               <Button size="small" onClick={onReviewNext}
-                disabled={reviewCursor >= totalCards - 1}
+                disabled={reviewCursor >= totalCards}
                 sx={{ fontSize: '0.7rem', minWidth: 24, py: 0 }}>▶</Button>
               {onRewindToTrick && (
                 <Button size="small" color="warning" variant="outlined"

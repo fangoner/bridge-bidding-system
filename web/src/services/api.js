@@ -341,6 +341,20 @@ export const getDDHints = async () => {
   }
 };
 
+// 复盘模式：根据游标位置获取DD提示
+export const getDDHintsReview = async (playState, cursor) => {
+  try {
+    const response = await api.post('/api/play/dd-hints-review', {
+      play_state: playState,
+      cursor: cursor,
+    });
+    return response.data;
+  } catch (error) {
+    console.error('获取复盘DD提示失败:', error);
+    throw error;
+  }
+};
+
 // 获取粒子数设置
 export const getParticleSettings = async () => {
   try {

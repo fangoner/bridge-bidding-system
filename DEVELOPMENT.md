@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。v1.39新增截屏/图片识别导入牌局（Doubao Vision API）、定约/首攻确认对话框、研究模式、花色主题感知系统。v1.40 Tiered分层引擎重做（DD替代MCTS中盘）、新增Perfect DD全知引擎和人类DD提示功能。v1.41打牌引擎大师级优化：αμ搜索解决PIMC缺陷、信念跟踪粒子滤波、防守信号模型、LLM校验层、三信号关键决策检测、首攻DD+LLM融合、MCTS根节点选牌修复。v1.42 αμ超时快速DD回退、记录服务器端备份、提示词RKCB规则强化（对方问叫拦截+将牌判定+5NT后续）、打牌返回叫牌按钮、手牌面板LLM模型显示。v1.43 按牌复盘替代按墩复盘（52张逐张回退）、DD Hint预录到trick数据（出牌时自动计算并存入）、复盘时DD hint标记（最优绿色/非最优橙色）、出牌记录按牌高亮/灰化。v1.44 手牌布局4层容器结构重构：东西家旋转溢出修复、手牌输入框和"未知"控件独立渲染、白天模式字体可读性增强。v1.45 DD引擎性能优化全套修复：中局约束扣减法替代比例缩减、软硬约束区分（负推断/点力守恒视为软约束）、solve_all_boards批量求解（分批≤200），600粒子性能提升5-30倍。
+本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。v1.39新增截屏/图片识别导入牌局（Doubao Vision API）、定约/首攻确认对话框、研究模式、花色主题感知系统。v1.40 Tiered分层引擎重做（DD替代MCTS中盘）、新增Perfect DD全知引擎和人类DD提示功能。v1.41打牌引擎大师级优化：αμ搜索解决PIMC缺陷、信念跟踪粒子滤波、防守信号模型、LLM校验层、三信号关键决策检测、首攻DD+LLM融合、MCTS根节点选牌修复。v1.42 αμ超时快速DD回退、记录服务器端备份、提示词RKCB规则强化（对方问叫拦截+将牌判定+5NT后续）、打牌返回叫牌按钮、手牌面板LLM模型显示。v1.43 按牌复盘替代按墩复盘（52张逐张回退）、DD Hint预录到trick数据（出牌时自动计算并存入）、复盘时DD hint标记（最优绿色/非最优橙色）、出牌记录按牌高亮/灰化。v1.44 手牌布局4层容器结构重构：东西家旋转溢出修复、手牌输入框和"未知"控件独立渲染、白天模式字体可读性增强。v1.45 DD引擎性能优化全套修复：中局约束扣减法替代比例缩减、软硬约束区分（负推断/点力守恒视为软约束）、solve_all_boards批量求解（分批≤200），600粒子性能提升5-30倍。v1.46 复盘模式DD Hint与按牌回退完整重构：游标语义统一、playedCardCache尊重游标、reviewTrick/displayTrick边界修复、出牌记录面板滞后修复、载入记录自动进入打牌。
 
 ## 功能模块
 
@@ -715,7 +715,19 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 
 ## 版本历史
 
-### v1.45 (当前版本)
+### v1.46 (当前版本)
+- **复盘模式 DD Hint 与按牌回退完整重构**
+  - **游标语义统一** — `reviewCursor = N` 表示前 N 张牌已出，第 N 张（`allPlayed[N]`，0-based）回到手牌加亮，轮到该位置出牌。范围 0（首攻）到 totalCards（全部已出）
+  - **playedCardCache 尊重游标** — `playedCardsSet`（手牌灰显）只包含游标之前的牌；游标及之后的牌回到手牌正常显示。`playedByPosition` 保留全量用于东/西家手牌重建（`CardTable.jsx#L215-238`）
+  - **reviewTrick / displayTrick 边界修复** — `cardInTrick > 0` 显示当前墩；`cardInTrick == 0` 显示上一墩（完整4张）；全部已出显示最后一墩；首攻显示空墩 + "首攻位置 出牌"。新增 `cursorAtStart` 标记区分首攻与全部已出（`CardTable.jsx#L731-764`）
+  - **reviewTrickNum / reviewCardInTrick 修正** — `reviewCardInTrick = cardInTrick`（已出牌数，非 +1）；`displayTrickGlobalStart` 用 `displayTrickIdx` 之前所有墩的牌数总和
+  - **出牌记录面板滞后修复** — `isGrayed = isAtCursor || isAfterCursor`（之前只灰显 `isAfterCursor`，游标位置那张牌错误高亮）（`PlayDetailPanel.jsx#L434`）
+  - **载入记录自动进入打牌** — `loadRecordToTable` 清除残留状态（`lastCompletedTrick`/`reviewCursor`/`selectedPlayRecord`），记录含打牌数据时 useEffect 自动进入打牌界面，无打牌数据时停留在叫牌界面（`App.jsx#L2120-2126`）
+  - **DD Hint 链路修复** — 统一手牌重建（顶层 `hands` + `playState.hands` + `tricks`）；后端 `_compute_dd_hints_for_state_from_state` 返回所有可出牌 hints；前端 `playableCardSet` 与后端一致（`reviewInfo.trickCards` 边界 `<=` → `<`）
+  - **调试代码清理** — 移除 CardTablePanel 浮动调试信息框；后端 `[DD-HINT]` 日志保留
+  - 修改文件: `web/src/components/CardTable.jsx`, `web/src/components/CardTablePanel.jsx`, `web/src/components/PlayDetailPanel.jsx`, `web/src/App.jsx`, `api/main.py`
+
+### v1.45
 - **DD引擎性能优化全套修复**
   - **中局约束扣减法** — 替代比例缩减，按已出牌扣减HCP/min_controls/suit_min/exact_suit/suit_max。物理意义：初始约束 = 已出部分 + 剩余部分。修复中局约束矛盾导致的fallback（`sampler.py#L1425-L1486`）
   - **软硬约束区分** — `negative_inference`（pass→≤7HCP）和 `hcp_conservation`（点力守恒推断）的max_hcp/min_hcp视为软约束，不参与 `_allocate_hcp_budget` 硬可行性检查，由 `compute_sample_violation_score` 软加权处理。修复300粒子首张牌卡住（HCP预算9800次重试）和prepare 16秒慢（300次降级到 `_distribute_biased`）（`sampler.py#L1069-L1091`）

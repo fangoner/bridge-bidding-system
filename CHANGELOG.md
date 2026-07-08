@@ -1,5 +1,53 @@
 # 开发日志
 
+## 2026-07-08
+
+### 复盘模式 DD Hint 与按牌回退完整重构
+
+**背景**: 复盘模式下 DD Hint 不显示、退牌时手牌未高亮、中心面板显示错乱（"第14墩"、空白墩）、出牌记录面板滞后一张牌。根因是游标语义不一致、`playedCardCache` 未过滤游标、`reviewTrick`/`displayTrick` 边界条件错误、`isAtCursor` 灰显逻辑错误。
+
+**改进**:
+
+#### 1. 游标语义统一
+- `reviewCursor = N` 表示前 N 张牌已出，第 N 张牌（`allPlayed[N]`，0-based）回到手牌加亮，轮到该位置出牌
+- 范围：0（首攻，无牌已出）到 totalCards（全部已出）
+
+#### 2. playedCardCache 尊重游标
+- `playedCardsSet`（用于手牌灰显）只包含游标之前的牌；游标及之后的牌回到手牌正常显示（`CardTable.jsx#L215-238`）
+- `playedByPosition` 保留全量数据用于东/西家手牌重建
+
+#### 3. reviewTrick / displayTrick 边界修复
+- 游标在某墩内部（`cardInTrick > 0`）→ 显示该墩（部分牌已出）
+- 游标在某墩开头（`cardInTrick == 0`）→ 显示上一墩（完整 4 张）
+- 游标在所有 trick 之后（全部已出）→ 显示最后一墩
+- 首攻（`reviewCursor=0`）→ 显示空墩 + "首攻位置 出牌"
+- 新增 `cursorAtStart` 标记区分首攻与全部已出，避免 `displayTrickIdx === -1` 误判（`CardTable.jsx#L731-764`）
+
+#### 4. reviewTrickNum / reviewCardInTrick 修正
+- `reviewCardInTrick = cardInTrick`（已出牌数），不是 `cardInTrick + 1`
+- `displayTrickGlobalStart` 与 `reviewTrick` 同步，使用 `displayTrickIdx` 之前所有墩的牌数总和
+
+#### 5. 出牌记录面板滞后修复
+- `isGrayed = isAtCursor || isAfterCursor`（之前只灰显 `isAfterCursor`，导致游标位置那张牌高亮而非灰显）（`PlayDetailPanel.jsx#L434`）
+
+#### 6. 载入记录自动进入打牌
+- `loadRecordToTable` 清除残留状态：`setLastCompletedTrick(null)`、`setReviewCursor(null)`、`setSelectedPlayRecord(null)`，避免桌面显示上一副牌
+- 记录含打牌数据时 `loadedPlayRecord` 被设置，useEffect 自动调用 `handleStartPlay` 直接进入打牌界面（`App.jsx#L2120-2126`）
+- 无打牌数据时停留在叫牌界面
+
+#### 7. DD Hint 链路修复
+- 统一手牌重建逻辑：顶层 `hands` + `playState.hands`（剩余）+ `tricks`（已出）
+- 后端 `_compute_dd_hints_for_state_from_state` 返回所有可出牌的 hints（通过 `get_playable_cards` 计算跟花色规则）
+- 前端 `playableCardSet` 与后端一致（修复 `reviewInfo.trickCards` 边界错误 `<=` → `<`）
+
+#### 8. 调试代码清理
+- 移除 CardTablePanel 的浮动调试信息框（`ddDebugInfo`）
+- 后端 `[DD-HINT]` 日志保留（便于后续诊断）
+
+**修改文件**: `web/src/components/CardTable.jsx`, `web/src/components/CardTablePanel.jsx`, `web/src/components/PlayDetailPanel.jsx`, `web/src/App.jsx`, `api/main.py`
+
+**测试验证**: 复盘退牌时中心面板正确显示对应墩、手牌高亮、DD hint 显示所有可出牌、出牌记录面板与桌面同步
+
 ## 2026-07-05
 
 ### DD引擎性能优化全套修复（约束缩减 + 软硬约束区分 + 批量求解）

@@ -214,35 +214,113 @@ function CardTable({
   // 缓存：一次遍历所有墩，避免每个 position 重复遍历
   const playedCardCache = useMemo(() => {
     if (!showPlayPanel || !playState) return null
-    const playedCardsSet = new Set()
+    // playedByPosition: 收集所有已出牌（全量，用于手牌重建）
     const playedByPosition = { '北': [], '东': [], '南': [], '西': [] }
+    const allPlayed = []
     for (const trick of (playState.tricks || [])) {
       for (const [pos, card] of (trick.cards || [])) {
-        const key = card.suit + card.rank
-        playedCardsSet.add(key)
+        allPlayed.push({ pos, card })
         playedByPosition[pos].push({ suit: card.suit, rank: card.rank })
       }
     }
     for (const [pos, card] of (playState.current_trick?.cards || [])) {
-      const key = card.suit + card.rank
-      playedCardsSet.add(key)
+      allPlayed.push({ pos, card })
       playedByPosition[pos].push({ suit: card.suit, rank: card.rank })
     }
+    // playedCardsSet: 用于手牌灰显。复盘模式只标记游标之前的牌，游标及之后的牌回到手牌
+    const playedCardsSet = new Set()
+    const limit = reviewCursor != null ? reviewCursor : allPlayed.length
+    for (let i = 0; i < Math.min(limit, allPlayed.length); i++) {
+      const { card } = allPlayed[i]
+      playedCardsSet.add(card.suit + card.rank)
+    }
     return { playedCardsSet, playedByPosition }
-  }, [showPlayPanel, playState?.tricks, playState?.current_trick?.cards])
+  }, [showPlayPanel, playState?.tricks, playState?.current_trick?.cards, reviewCursor])
 
   const getPlayedCardsSet = () => {
     return playedCardCache?.playedCardsSet ?? null
   }
 
+  // 复盘模式：根据 reviewCursor 计算当前出牌者和当前墩信息
+  // 游标语义：reviewCursor = N 表示前 N 张牌已出，第 N 张牌（allPlayed[N]）回到手牌加亮，轮到该位置出牌
+  const POSITION_ORDER_ARR = ['南', '西', '北', '东']
+  const reviewInfo = useMemo(() => {
+    if (reviewCursor == null || !playState?.tricks) return null
+    // 收集所有已出牌（完整记录）
+    const allPlayed = []
+    for (const t of playState.tricks) {
+      for (const [pos, card] of (t.cards || [])) allPlayed.push({ pos, card })
+    }
+    for (const [pos, card] of (playState.current_trick?.cards || [])) allPlayed.push({ pos, card })
+
+    // 当前出牌者 = allPlayed[reviewCursor].pos（游标位置的牌的出牌者）
+    let currentPlayer = null
+    if (reviewCursor < allPlayed.length) {
+      currentPlayer = allPlayed[reviewCursor].pos
+    }
+
+    // 当前墩已出的牌 = 前 reviewCursor 张牌中属于当前墩的牌
+    // 当前墩 = 第 (Math.floor(reviewCursor/4) + 1) 个墩，已有 (reviewCursor % 4) 张牌
+    let trickCards = []
+    let globalStart = 0
+    let accum = 0
+    for (let i = 0; i < playState.tricks.length; i++) {
+      const tCards = playState.tricks[i].cards || []
+      if (reviewCursor < accum + tCards.length) {
+        // 游标在这个墩内部（部分已出）
+        const idxInTrick = reviewCursor - accum
+        trickCards = tCards.slice(0, Math.max(0, idxInTrick))  // 游标之前的牌（已出）
+        globalStart = accum
+        break
+      }
+      accum += tCards.length
+    }
+    // 所有 trick 都遍历完但未匹配，检查 current_trick
+    if (trickCards.length === 0 && reviewCursor >= accum) {
+      const ctCards = playState.current_trick?.cards || []
+      if (ctCards.length > 0 && reviewCursor < accum + ctCards.length) {
+        const idxInTrick = reviewCursor - accum
+        trickCards = ctCards.slice(0, Math.max(0, idxInTrick))
+        globalStart = accum
+      }
+      // 否则 trickCards 保持为空（首攻或游标在墩边界）
+    }
+    // 首攻（reviewCursor === 0）：trickCards 为空，currentPlayer 由 allPlayed[0].pos 给出
+    return { currentPlayer, trickCards, globalStart, allPlayed }
+  }, [reviewCursor, playState])
+
+  const reviewCurrentPlayer = reviewInfo?.currentPlayer
+  const reviewTrickGlobalStart = reviewInfo?.globalStart || 0
+
   // 计算当前可出的牌（跟花色规则）
   const playableCardSet = useMemo(() => {
-    if (!showPlayPanel || !playState || playState.phase === 'complete') return null
-    const cp = playState.current_player
+    if (!showPlayPanel || !playState) return null
+    // 复盘模式：phase 可能是 complete，但仍需要计算可出牌
+    if (playState.phase === 'complete' && reviewCursor == null) return null
+    const cp = reviewCursor != null ? reviewCurrentPlayer : playState.current_player
     if (!cp) return null
-    const hand = playState.hands?.[cp]
+    // 复盘模式：playState.hands 可能为空，用顶层 hands 重建
+    let hand = playState.hands?.[cp]
+    if ((!hand || hand.length === 0) && reviewCursor != null && hands?.[cp]) {
+      const suitMap = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' }
+      hand = []
+      for (const suitKey of ['spades', 'hearts', 'diamonds', 'clubs']) {
+        const suitStr = hands[cp][suitKey] || ''
+        for (const rank of suitStr) {
+          hand.push({ suit: suitMap[suitKey], rank: rank.toUpperCase() })
+        }
+      }
+      // 游标 = N：前 N 张牌已出（allPlayed[0..N-1]），从手牌移除；游标位置及之后的牌保留（未出）
+      const allPlayed = reviewInfo?.allPlayed || []
+      const beforeCursor = allPlayed.slice(0, reviewCursor).filter(p => p.pos === cp)
+      hand = hand.filter(c => !beforeCursor.some(p => p.card.suit === c.suit && p.card.rank === c.rank))
+    }
     if (!hand || hand.length === 0) return null
-    const trickCards = playState.current_trick?.cards || []
+    // 复盘模式：当前墩已出的牌需要从 reviewInfo 计算
+    let trickCards = playState.current_trick?.cards || []
+    if (reviewCursor != null && reviewInfo?.trickCards) {
+      trickCards = reviewInfo.trickCards
+    }
     const ledSuit = trickCards.length > 0 ? trickCards[0][1]?.suit : null
     const set = new Set()
     for (const card of hand) {
@@ -254,8 +332,20 @@ function CardTable({
     if (set.size === 0) {
       for (const card of hand) set.add(card.suit + card.rank)
     }
+    // 调试日志：确认 playableCardSet 与 ddHints 的一致性
+    if (reviewCursor != null) {
+      console.log('[PLAYABLE-DEBUG]', {
+        cp,
+        handSize: hand.length,
+        hand: hand.map(c => c.suit + c.rank),
+        ledSuit: trickCards.length > 0 ? trickCards[0][1]?.suit : null,
+        trickCards: trickCards.map(([p, c]) => [p, c.suit + c.rank]),
+        playableSet: Array.from(set),
+        reviewCursor,
+      })
+    }
     return set
-  }, [showPlayPanel, playState?.current_player, playState?.current_trick?.cards?.length, playState?.hands])
+  }, [showPlayPanel, playState, reviewCursor, reviewCurrentPlayer, reviewInfo, hands])
 
   // 打牌阶段的手牌：隐藏模式下用剩余手牌，显示模式下用原始手牌+已出标记
   const getManualPlayedCards = (position) => {
@@ -625,28 +715,57 @@ function CardTable({
     const isComplete = phase === 'complete'
     const isReview = reviewCursor != null
 
+    // 首攻位置：第一张牌的出牌者
+    const allPlayedFirstPos = playState?.tricks?.[0]?.cards?.[0]?.[0] || null
+
     // 复盘模式：计算游标所在的墩序号和墩内牌序号
+    // 游标语义：reviewCursor = N 表示前 N 张牌已出，第 N 张（allPlayed[N]，0-based）回到手牌加亮
+    // 显示规则与 reviewTrick (CardTablePanel) 一致：
+    // - cardInTrick > 0：显示当前墩（部分牌已出）
+    // - cardInTrick == 0：显示上一墩（完整 4 张）
+    // - N == totalCards：显示最后一墩（完整 4 张）
     let reviewTrickNum = 1
     let reviewCardInTrick = 1
     let displayTrickGlobalStart = 0  // displayTrick第一张牌之前的累计牌数
-    if (isReview && playState?.tricks) {
+    let displayTrickIdx = -1
+    let cursorAtStart = false  // 游标在某墩开头（首攻或墩边界）
+    if (isReview && playState?.tricks && playState.tricks.length > 0) {
       let accum = 0
       for (let i = 0; i < playState.tricks.length; i++) {
-        const tlen = playState.tricks[i].cards?.length || 0
-        if (reviewCursor < accum + tlen) {
-          reviewTrickNum = i + 1
-          reviewCardInTrick = reviewCursor - accum + 1
-          displayTrickGlobalStart = accum
+        const tLen = playState.tricks[i].cards?.length || 0
+        if (reviewCursor < accum + tLen) {
+          const cardInTrick = reviewCursor - accum
+          if (cardInTrick === 0) {
+            // 游标在该墩开头，显示上一墩（若 i=0 则无上一墩，首攻）
+            cursorAtStart = true
+            displayTrickIdx = i - 1
+            reviewTrickNum = i  // 显示第 i-1 墩（1-based: i）
+            reviewCardInTrick = (i > 0 ? (playState.tricks[i - 1].cards?.length || 0) : 0)
+          } else {
+            // 游标在该墩内部，显示该墩
+            displayTrickIdx = i
+            reviewTrickNum = i + 1
+            reviewCardInTrick = cardInTrick  // 已出牌数 = 显示的第 Y 张
+          }
           break
         }
-        accum += tlen
-        reviewTrickNum = i + 2  // 游标在最后一墩之后（不应出现）
+        accum += tLen
+      }
+      // 只有游标在所有 trick 之后（全部已出）且不是首攻时，才显示最后一墩
+      if (displayTrickIdx === -1 && !cursorAtStart) {
+        displayTrickIdx = playState.tricks.length - 1
+        reviewTrickNum = displayTrickIdx + 1
+        reviewCardInTrick = playState.tricks[displayTrickIdx].cards?.length || 0
+      }
+      // displayTrickGlobalStart = displayTrickIdx 之前所有墩的牌数总和
+      for (let i = 0; i < displayTrickIdx; i++) {
+        displayTrickGlobalStart += playState.tricks[i].cards?.length || 0
       }
     }
 
     // 复盘模式：显示 reviewTrick；否则优先当前墩，再 lastCompletedTrick
-    const displayTrick = isReview && reviewTrick
-      ? reviewTrick
+    const displayTrick = isReview
+      ? (reviewTrick || { cards: [] })  // 复盘模式：用 reviewTrick，墩边界时显示空墩（首攻）
       : (current_trick?.cards && current_trick.cards.length > 0)
         ? current_trick
         : lastCompletedTrick ? lastCompletedTrick : current_trick
@@ -657,12 +776,12 @@ function CardTable({
       return cardEntry ? cardEntry[1] : null
     }
 
-    // 判断某张牌（以position标识）是否在复盘游标之后
+    // 判断某张牌（以position标识）是否在复盘游标处或之后（应回到手牌，不在桌面显示）
     const isCardAfterCursor = (position) => {
       if (!isReview || !displayTrick?.cards) return false
       const cardIdx = displayTrick.cards.findIndex(([pos]) => pos === position)
       if (cardIdx < 0) return false
-      return displayTrickGlobalStart + cardIdx > reviewCursor
+      return displayTrickGlobalStart + cardIdx >= reviewCursor
     }
     
     const getLastTrickWinner = () => {
@@ -677,7 +796,9 @@ function CardTable({
       const positionLabels = { '北': 'N', '东': 'E', '南': 'S', '西': 'W' }
       const canClick = onPlayCardClick
 
-      if (!card) {
+      // 复盘模式：游标处及之后的牌回到手牌，桌面显示空位
+      const afterCursor = isCardAfterCursor(position)
+      if (!card || afterCursor) {
         return (
           <Box sx={{
             width: 44,
@@ -697,7 +818,6 @@ function CardTable({
       }
 
       const color = getCardSuitColor(card.suit)
-      const afterCursor = isCardAfterCursor(position)
 
       return (
         <Box
@@ -708,8 +828,7 @@ function CardTable({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            bgcolor: afterCursor ? '#e0e0e0' : '#fbfbf8',
-            opacity: afterCursor ? 0.4 : 1,
+            bgcolor: '#fbfbf8',
             border: '1px solid rgba(0,0,0,0.08)',
             borderRadius: '6px',
             boxShadow: '0 2px 6px rgba(0,0,0,0.22)',
@@ -748,9 +867,16 @@ function CardTable({
             {aiLoading ? (
               <CircularProgress size={22} sx={{ color: 'rgba(255,255,255,0.8)' }} />
             ) : isReview ? (
-              <Typography sx={{ fontSize: '0.7rem', fontWeight: 'bold', color: '#ffc107', textAlign: 'center', lineHeight: 1.2 }}>
-                第{reviewTrickNum}墩<br/>第{reviewCardInTrick}张
-              </Typography>
+              displayTrickIdx < 0 ? (
+                // 首攻（游标在第1墩开头）：显示首攻位置
+                <Typography sx={{ fontSize: '0.7rem', fontWeight: 600, color: 'rgba(255,255,255,0.75)', textAlign: 'center' }}>
+                  {reviewCurrentPlayer || allPlayedFirstPos || '首攻'}<br/>出牌
+                </Typography>
+              ) : (
+                <Typography sx={{ fontSize: '0.7rem', fontWeight: 'bold', color: '#ffc107', textAlign: 'center', lineHeight: 1.2 }}>
+                  第{reviewTrickNum}墩<br/>第{reviewCardInTrick}张
+                </Typography>
+              )
             ) : (displayTrick?.cards?.length === 4 && getLastTrickWinner()) ? (
               <Typography sx={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#ffeb3b' }}>
                 {getLastTrickWinner()}赢
@@ -958,7 +1084,7 @@ function CardTable({
     const orientation = sxProps?.orientation || 'horizontal'
     const popDirection = sxProps?.popDirection || 'auto'
     const isCurrentlyBidding = currentBiddingPosition === position;
-    const currentTurnPos = showPlayPanel ? playState?.current_player : currentBiddingPosition;
+    const currentTurnPos = showPlayPanel ? (reviewCursor != null ? reviewCurrentPlayer : playState?.current_player) : currentBiddingPosition;
     const isAI = isAIPosition(position)
     const hasHandData = hasHand(position)
     const showInput = !showPlayPanel && isAI && !hasHandData && (!biddingStarted || stopBidding)
@@ -1046,7 +1172,7 @@ function CardTable({
               <HandDisplay
                 hand={displayHand}
                 position={position}
-                isActive={showPlayPanel ? playState?.current_player === position : currentBidder === position}
+                isActive={showPlayPanel ? (reviewCursor != null ? reviewCurrentPlayer === position : playState?.current_player === position) : currentBidder === position}
                 isHuman={isHuman}
                 isDealer={dealer === position}
                 isPartner={hasAnyHuman(positionRoles) && isHumanPosition(positionRoles, getPartnerPosition(position))}
@@ -1070,7 +1196,9 @@ function CardTable({
                 cardHints={cardHints}
                 orientation={orientation}
                 popDirection={popDirection}
-                enableHover={showPlayPanel && playState?.current_player === position && !!onHandCardClick}
+                enableHover={showPlayPanel && (reviewCursor != null
+                  ? reviewCurrentPlayer === position
+                  : playState?.current_player === position && !!onHandCardClick)}
               />
           )}
           {/* 信息栏（靠中心一侧）：infoSide='bottom'=在手牌下方 */}

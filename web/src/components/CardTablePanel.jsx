@@ -93,21 +93,58 @@ function CardTablePanel({
   }, [playState?.tricks, playState?.current_trick?.cards])
 
   // 复盘游标对应的墩（按牌序号查找所属trick）
+  // 游标语义：reviewCursor = N 表示前 N 张牌已出，第 N 张（allPlayed[N]）回到手牌
+  // - N 在某墩内部（cardInTrick > 0）：返回该墩（显示已出的牌，未出的回到手牌）
+  // - N 在某墩开头（cardInTrick == 0）：返回上一个已完成墩（显示完整 4 张牌）
+  // - N == totalCards（全部已出）：返回最后一墩（显示完整的最后一墩）
   const reviewTrick = useMemo(() => {
     if (reviewCursor == null || !playState?.tricks) return null
     let accum = 0
+    let lastCompleteTrick = null
     for (const t of playState.tricks) {
-      if (reviewCursor < accum + (t.cards?.length || 0)) return t
-      accum += t.cards?.length || 0
+      const tLen = t.cards?.length || 0
+      if (reviewCursor < accum + tLen) {
+        // 游标在这个墩内
+        const cardInTrick = reviewCursor - accum
+        if (cardInTrick === 0) {
+          // 游标在该墩开头，显示上一墩
+          return lastCompleteTrick
+        }
+        // 游标在该墩内部，显示该墩
+        return t
+      }
+      accum += tLen
+      lastCompleteTrick = t
     }
-    return null
+    // 游标在所有 trick 之后：全部已出，返回最后一墩
+    return lastCompleteTrick
   }, [reviewCursor, playState?.tricks])
 
   // 检测是否四家手牌齐全（模拟实战牌不全时隐藏小房子/DD相关功能）
-  const allHandsComplete = ['南','北','东','西'].every(p => {
-    const h = hands?.[p]
-    return h && (h.spades || h.hearts || h.diamonds || h.clubs)
-  })
+  // 统一逻辑：顶层 hands 不足时，从 playState.hands + tricks 重建
+  const allHandsComplete = (() => {
+    for (const p of ['南','北','东','西']) {
+      const h = hands?.[p]
+      if (h && (h.spades || h.hearts || h.diamonds || h.clubs)) continue
+      // 顶层 hands 无此位置，检查 playState.hands（剩余）+ tricks（已出）
+      const remaining = playState?.hands?.[p]
+      const hasRemaining = Array.isArray(remaining) && remaining.length > 0
+      let hasPlayed = false
+      for (const t of (playState?.tricks || [])) {
+        for (const [pos] of (t.cards || [])) {
+          if (pos === p) { hasPlayed = true; break }
+        }
+        if (hasPlayed) break
+      }
+      if (!hasPlayed) {
+        for (const [pos] of (playState?.current_trick?.cards || [])) {
+          if (pos === p) { hasPlayed = true; break }
+        }
+      }
+      if (!hasRemaining && !hasPlayed) return false
+    }
+    return true
+  })()
   return (
     <Paper elevation={0} sx={{
       m: 0,
@@ -194,7 +231,7 @@ function CardTablePanel({
               )}
             </ToggleButtonGroup>
           )}
-          {showPlayPanel && toggleDDHints && ['南','北','东','西'].every(p => playState?.hands?.[p]?.length > 0) && (
+          {showPlayPanel && toggleDDHints && allHandsComplete && (
             <Tooltip title={showDDHints ? '隐藏DD提示' : '显示DD提示'} arrow>
               <IconButton size="small" onClick={toggleDDHints} sx={{ p: 0.3 }}>
                 {showDDHints ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}

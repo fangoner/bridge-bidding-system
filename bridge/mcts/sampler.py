@@ -860,16 +860,25 @@ def _generate_valid_shape_distribution(
                              f"src={c.inference_source}\n")
         return None
 
-    # 预计算每家的 suit_max（含均型约束的 5 张上限）
+    # 预计算每家的 suit_max（含均型约束的 5 张上限、exact_suit 精确上限）
     effective_max = {}
     for pos in positions:
         c = constraints.get(pos)
         em = {}
+        # 防御：若 balanced=True 与某花色 suit_min>=6 冲突，忽略 balanced（后续叫牌已显示非均型）
+        _balanced_effective = c.balanced if c else None
+        if _balanced_effective:
+            for s in SUITS:
+                if c.suit_min.get(s, 0) >= 6 or c.exact_suit.get(s, 0) >= 6:
+                    _balanced_effective = None
+                    break
         for s in SUITS:
             mx = 13
             if c and s in c.suit_max:
                 mx = c.suit_max[s]
-            if c and c.balanced:
+            if c and s in c.exact_suit:
+                mx = min(mx, c.exact_suit[s])
+            if _balanced_effective:
                 mx = min(mx, 5)
             em[s] = mx
         effective_max[pos] = em
@@ -965,15 +974,31 @@ def _generate_valid_shape_distribution(
         possible = True
         remaining_slots = total_remaining
         # 预计算每家每花色的剩余下限需求（= suit_min - 已分配）
+        # 均型约束（balanced=True，target>=13）：每花色至少2张
         remaining_min = {}
         for pos in positions:
             c = constraints.get(pos)
             remaining_min[pos] = {}
             for s in SUITS:
                 mn = c.suit_min.get(s, 0) if c else 0
+                if c and c.balanced and target_counts[pos] >= 13:
+                    mn = max(mn, 2)
                 remaining_min[pos][s] = max(0, mn - shape[pos][s])
 
         for ___ in range(remaining_slots):
+            # 计算每个花色的"紧张度"：剩余供给 ≤ 各位置该花色剩余下限需求之和
+            # 紧张花色只能分配给有下限需求的位置，防止其他位置"偷牌"
+            tight_suits = set()
+            for s in SUITS:
+                if remaining_by_suit[s] <= 0:
+                    continue
+                total_min_demand = 0
+                for pos in positions:
+                    if remaining_min[pos][s] > 0 and shape[pos][s] < effective_max[pos][s]:
+                        total_min_demand += remaining_min[pos][s]
+                if total_min_demand > 0 and remaining_by_suit[s] <= total_min_demand:
+                    tight_suits.add(s)
+
             # 早期剪枝：检查是否有"必须分配"的强制位置
             # 若某花色剩余供给 == 某位置该花色剩余下限需求，则强制分配给该位置
             forced = None
@@ -999,6 +1024,7 @@ def _generate_valid_shape_distribution(
                 pos, s = forced
             else:
                 # 普通随机：但优先选择有 suit_min 需求的位置
+                # 紧张花色只允许有下限需求的位置接收
                 priority_candidates = []
                 other_candidates = []
                 for pos in positions:
@@ -1009,16 +1035,18 @@ def _generate_valid_shape_distribution(
                             continue
                         if shape[pos][s] >= effective_max[pos][s]:
                             continue
+                        if s in tight_suits and remaining_min[pos][s] <= 0:
+                            continue  # 紧张花色：跳过无下限需求的位置
                         if remaining_min[pos][s] > 0:
                             priority_candidates.append((pos, s))
                         else:
                             other_candidates.append((pos, s))
                 candidates = priority_candidates if priority_candidates else other_candidates
-            if not candidates:
-                possible = False
-                _fail_reasons["no_candidates"] += 1
-                break
-            pos, s = random.choice(candidates)
+                if not candidates:
+                    possible = False
+                    _fail_reasons["no_candidates"] += 1
+                    break
+                pos, s = random.choice(candidates)
 
             shape[pos][s] += 1
             remaining_by_pos[pos] -= 1
@@ -1031,42 +1059,74 @@ def _generate_valid_shape_distribution(
 
         # Step 6: 最终验证所有约束
         ok = True
+        _fail_detail = None
         for pos in positions:
             c = constraints.get(pos)
             total = sum(shape[pos].values())
             if total != target_counts[pos]:
                 ok = False
+                _fail_detail = f"total_mismatch pos={pos} total={total} target={target_counts[pos]}"
                 break
             for s in SUITS:
                 cnt = shape[pos][s]
                 if cnt < 0:
                     ok = False
+                    _fail_detail = f"negative pos={pos} suit={s} cnt={cnt}"
                 if c:
                     if s in c.suit_min and cnt < c.suit_min[s]:
                         ok = False
+                        _fail_detail = f"suit_min pos={pos} suit={s} cnt={cnt} min={c.suit_min[s]}"
                     if s in c.suit_max and cnt > c.suit_max[s]:
                         ok = False
+                        _fail_detail = f"suit_max pos={pos} suit={s} cnt={cnt} max={c.suit_max[s]}"
                     if s in c.exact_suit and cnt != c.exact_suit[s]:
                         ok = False
+                        _fail_detail = f"exact_suit pos={pos} suit={s} cnt={cnt} exact={c.exact_suit[s]}"
             if c and c.balanced is not None:
-                dist = list(shape[pos].values())
-                # 中局阶段（target<13）放宽balanced下限：只保留上限5张和无6+张套
-                # 因为剩余牌池可能某花色=0，无法满足每花色≥2
-                if target_counts[pos] >= 13:
-                    is_bal = all(2 <= d <= 5 for d in dist) and not any(d >= 6 for d in dist)
-                else:
-                    is_bal = all(d <= 5 for d in dist) and not any(d >= 6 for d in dist)
-                if c.balanced and not is_bal:
+                # 防御：若 balanced=True 与某花色 suit_min>=6 冲突，跳过 balanced 检查
+                # （后续叫牌已显示非均型，balanced 应被清除，此处兜底）
+                _skip_balanced = False
+                if c.balanced:
+                    for s in SUITS:
+                        if c.suit_min.get(s, 0) >= 6 or c.exact_suit.get(s, 0) >= 6:
+                            _skip_balanced = True
+                            break
+                if not _skip_balanced:
+                    dist = list(shape[pos].values())
+                    # 中局阶段（target<13）放宽balanced下限：只保留上限5张和无6+张套
+                    # 因为剩余牌池可能某花色=0，无法满足每花色≥2
+                    if target_counts[pos] >= 13:
+                        is_bal = all(2 <= d <= 5 for d in dist) and not any(d >= 6 for d in dist)
+                    else:
+                        is_bal = all(d <= 5 for d in dist) and not any(d >= 6 for d in dist)
+                    if c.balanced and not is_bal:
+                        ok = False
+                        _fail_detail = f"balanced pos={pos} dist={dist} target={target_counts[pos]}"
+                    # 注意：balanced=False（非均型）不应禁止均型分布，
+                    # 该约束语义是"不要求均型"而非"必须非均型"，故移除 is_bal 拒绝逻辑
+        if ok:
+            for s in SUITS:
+                suit_sum = sum(shape[pos][s] for pos in positions)
+                if suit_sum != suit_total[s]:
                     ok = False
-                # 注意：balanced=False（非均型）不应禁止均型分布，
-                # 该约束语义是"不要求均型"而非"必须非均型"，故移除 is_bal 拒绝逻辑
-        for s in SUITS:
-            if sum(shape[pos][s] for pos in positions) != suit_total[s]:
-                ok = False
+                    _fail_detail = f"suit_total suit={s} sum={suit_sum} target={suit_total[s]}"
 
         if ok:
             return shape
         _fail_reasons["final_validation"] += 1
+        # 首次失败时打印详细诊断（避免日志爆炸）
+        if _fail_reasons["final_validation"] == 1:
+            with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                _f.write(f"[SHAPE_FAIL_DETAIL] reason={_fail_detail}\n")
+                _f.write(f"  shape={ {pos: dict(shape[pos]) for pos in positions} }\n")
+                _f.write(f"  targets={target_counts} suit_total={suit_total}\n")
+                for pos in positions:
+                    c = constraints.get(pos)
+                    if c:
+                        _f.write(f"  {pos}: suit_min={dict(c.suit_min)} suit_max={dict(c.suit_max)} "
+                                 f"exact={dict(c.exact_suit)} balanced={c.balanced} "
+                                 f"min_hcp={c.min_hcp} max_hcp={c.max_hcp} src={c.inference_source}\n")
+                _f.write(f"  effective_max={ {pos: dict(effective_max[pos]) for pos in positions} }\n")
 
     # 失败统计输出（只写1行）
     _total_fail = sum(_fail_reasons.values())
