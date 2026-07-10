@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。v1.39新增截屏/图片识别导入牌局（Doubao Vision API）、定约/首攻确认对话框、研究模式、花色主题感知系统。v1.40 Tiered分层引擎重做（DD替代MCTS中盘）、新增Perfect DD全知引擎和人类DD提示功能。v1.41打牌引擎大师级优化：αμ搜索解决PIMC缺陷、信念跟踪粒子滤波、防守信号模型、LLM校验层、三信号关键决策检测、首攻DD+LLM融合、MCTS根节点选牌修复。v1.42 αμ超时快速DD回退、记录服务器端备份、提示词RKCB规则强化（对方问叫拦截+将牌判定+5NT后续）、打牌返回叫牌按钮、手牌面板LLM模型显示。v1.43 按牌复盘替代按墩复盘（52张逐张回退）、DD Hint预录到trick数据（出牌时自动计算并存入）、复盘时DD hint标记（最优绿色/非最优橙色）、出牌记录按牌高亮/灰化。v1.44 手牌布局4层容器结构重构：东西家旋转溢出修复、手牌输入框和"未知"控件独立渲染、白天模式字体可读性增强。v1.45 DD引擎性能优化全套修复：中局约束扣减法替代比例缩减、软硬约束区分（负推断/点力守恒视为软约束）、solve_all_boards批量求解（分批≤200），600粒子性能提升5-30倍。v1.46 复盘模式DD Hint与按牌回退完整重构：游标语义统一、playedCardCache尊重游标、reviewTrick/displayTrick边界修复、出牌记录面板滞后修复、载入记录自动进入打牌。
+本项目是一个桥牌叫牌练习工具，从Dify工作流转换为独立应用。支持双人/四人叫牌练习，使用JF叫牌约定，通过DeepSeek API实现AI叫牌决策，集成Deep Finesse进行定约可行性分析。v1.32起新增打牌练习功能，支持AI打牌决策和双明手分析。v1.33全面重写打牌提示词，增强已见牌张追踪、防守信号体系和庄家分析框架。v1.37叫牌操作按钮迁移至叫牌详情面板，记录类型枚举重构。v1.39新增截屏/图片识别导入牌局（Doubao Vision API）、定约/首攻确认对话框、研究模式、花色主题感知系统。v1.40 Tiered分层引擎重做（DD替代MCTS中盘）、新增Perfect DD全知引擎和人类DD提示功能。v1.41打牌引擎大师级优化：αμ搜索解决PIMC缺陷、信念跟踪粒子滤波、防守信号模型、LLM校验层、三信号关键决策检测、首攻DD+LLM融合、MCTS根节点选牌修复。v1.42 αμ超时快速DD回退、记录服务器端备份、提示词RKCB规则强化（对方问叫拦截+将牌判定+5NT后续）、打牌返回叫牌按钮、手牌面板LLM模型显示。v1.43 按牌复盘替代按墩复盘（52张逐张回退）、DD Hint预录到trick数据（出牌时自动计算并存入）、复盘时DD hint标记（最优绿色/非最优橙色）、出牌记录按牌高亮/灰化。v1.44 手牌布局4层容器结构重构：东西家旋转溢出修复、手牌输入框和"未知"控件独立渲染、白天模式字体可读性增强。v1.45 DD引擎性能优化全套修复：中局约束扣减法替代比例缩减、软硬约束区分（负推断/点力守恒视为软约束）、solve_all_boards批量求解（分批≤200），600粒子性能提升5-30倍。v1.46 复盘模式DD Hint与按牌回退完整重构：游标语义统一、playedCardCache尊重游标、reviewTrick/displayTrick边界修复、出牌记录面板滞后修复、载入记录自动进入打牌。v1.47 DD引擎三连修复：deal.first明手领出bug（actual_turn参数）、选牌分层比较（小牌优先+动态显著性阈值+第三层avg回退）、手工出牌GUI面板。
 
 ## 功能模块
 
@@ -182,8 +182,8 @@
 - **打牌引擎** (play_service.py 五种引擎):
   - **LLM** (`"llm"`): DeepSeek API 大模型推理，默认引擎
   - **MCTS** (`"mcts"`): 确定化 + UCT 树搜索，蒙特卡洛采样未知手牌
-  - **DD** (`"dd"`): 纯蒙特卡洛 + solve_board 双明手评估
-  - **Perfect DD** (`"perfect"`): 全知双明手，一次 solve_board 得所有候选精确分，仅发牌练习模式可用
+  - **DD** (`"dd"`): 纯蒙特卡洛 + solve_board 双明手评估。v1.47修复明手领出时 `deal.first` 使用 `perspective`（已调整为庄家）导致墩数计算错误的bug，新增 `actual_turn` 参数（= `state.current_player`）传递到6个下游函数；选牌改用三层分层比较（`_compare_candidates`）：avg显著差异→小牌优先→rank相同回退avg方向
+  - **Perfect DD** (`"perfect"`): 全知双明手，一次 solve_board 得所有候选精确分，仅发牌练习模式可用。v1.47同步修复 `search_perfect` 的 `deal.first` bug
   - **Tiered** (`"tiered"`): 分层自动调度 —
     - 首攻(LEAD) → DD 蒙特卡洛 + LLM 战略性首攻融合（v1.41）
     - 明手亮开 → LLM reasoning
@@ -715,7 +715,15 @@ pip install openai python-dotenv python-docx pyautogui pyscreeze pillow
 
 ## 版本历史
 
-### v1.46 (当前版本)
+### v1.47 (当前版本)
+- **DD引擎三连修复：deal.first明手领出bug + 选牌分层比较 + 手工出牌面板**
+  - **deal.first 明手领出 bug** — `perspective` 已从明手调整为庄家（采样可见性），但 `solve_board` 需要真实出牌者位置。明手领出时 `playable` 是明手的牌，但 `solve_board` 从庄家位置评估 → `score_map.get(dummy_card, 0)` 返回 0 → 显示 2 或 7 而非 ~11。新增 `actual_turn` 参数（= `state.current_player`）传递到6个函数：`_dd_eval_one_world`、`_dd_eval_one_world_pure`、`_build_deal_for_world`、`_solve_batch`、`_enumerate_endgame`、`search_perfect`。5处 `deal.first` 和6处 `curplayer_pos` 改用 `actual_turn`（`dd_search.py#L162,L233,L313,L870,L1051` 和 `#L172,L243,L375,L422,L879,L1060`）。DD/Tiered/Perfect DD 全部修复，αμ不受影响
+  - **DDMC选牌分层比较** — 修复三个问题：(1) `rank_bonus` 方向错误（原 `RANK_ORDER/200` 大牌得更大bonus，应小牌优先保留大牌结构）；(2) 固定元组比较不匹配采样数（0.01噪声压过rank_bonus），改用动态 `_significance_threshold(n) = Z×√2×σ/√N`（Z=1.0,σ=2.2，N=500→0.14,N=1000→0.10,N=2000→0.07）；(3) rank相同时退化为迭代顺序，新增第三层回退到原始avg方向（庄家取高/防守取低）
+  - **`_compare_candidates` 三层决胜** — 第1层：avg差>threshold按方向（庄家取高/防守取低）；第2层：rank不同小牌优先；第3层：rank相同回退原始avg方向。`child_stats.sort()` 改用 `cmp_to_key(_compare_candidates)` 使显示排序与选牌逻辑一致
+  - **手工出牌GUI面板** — `CardTable.jsx` 新增4×13网格出牌面板（类似叫牌面板），选择花色和牌点出牌替代键盘输入；`HandDisplay.jsx` 新增 `dimmed` prop，明手手牌和已出牌变灰
+  - 修改文件: `bridge/mcts/dd_search.py`, `web/src/components/CardTable.jsx`, `web/src/components/HandDisplay.jsx`
+
+### v1.46
 - **复盘模式 DD Hint 与按牌回退完整重构**
   - **游标语义统一** — `reviewCursor = N` 表示前 N 张牌已出，第 N 张（`allPlayed[N]`，0-based）回到手牌加亮，轮到该位置出牌。范围 0（首攻）到 totalCards（全部已出）
   - **playedCardCache 尊重游标** — `playedCardsSet`（手牌灰显）只包含游标之前的牌；游标及之后的牌回到手牌正常显示。`playedByPosition` 保留全量用于东/西家手牌重建（`CardTable.jsx#L215-238`）

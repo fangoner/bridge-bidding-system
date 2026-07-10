@@ -1,5 +1,47 @@
 # 开发日志
 
+## 2026-07-11
+
+### DD引擎三连修复：deal.first明手领出bug + 选牌分层比较 + 手工出牌面板
+
+**背景**: DD引擎在明手（dummy）领出时显示错误墩数（2或7而非~11）；DDMC选牌的 `rank_bonus` 平局决胜方向错误（大牌优先而非小牌优先），且固定阈值不匹配不同采样数；当 avg 在阈值内且 rank 也相同时，选牌退化为迭代顺序任意决定；人类位置出牌缺乏GUI面板。
+
+**改进**:
+
+#### 1. deal.first 明手领出 bug 修复（关键）
+- **问题**: `deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)` 在明手领出时出错。`perspective` 已从明手调整为庄家（用于采样可见性），但 `solve_board` 需要真实出牌者位置。明手领出时，`playable` 是明手的牌，但 `solve_board` 从庄家位置评估 → `score_map.get(dummy_card, 0)` 返回 0 → `total = declarer_tricks + 0`，显示 2 或 7 而非 ~11
+- **修复**: 新增 `actual_turn` 参数（= `state.current_player`，真实出牌者），在 6 个函数中传递：`_dd_eval_one_world`、`_dd_eval_one_world_pure`、`_build_deal_for_world`、`_solve_batch`、`_enumerate_endgame`、`search_perfect`
+- 5 处 `deal.first = POSITION_TO_PLAYER.get(perspective, ...)` 替换为 `actual_turn`
+- 6 处 `curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)` 替换为 `actual_turn`
+- **影响范围**: DD引擎、Tiered引擎（调用 `dd_search.search()`）、Perfect DD（调用 `dd_search.search_perfect()`）全部修复；αμ引擎不受影响（原本就用 `player` 而非 `perspective`）
+
+#### 2. DDMC选牌分层比较逻辑
+- **问题1 - rank_bonus方向错误**: 原 `rank_bonus = RANK_ORDER / 200.0` → 大牌得更大bonus → 平局时选大牌，违背桥牌原则（应保留大牌结构/进张）
+- **修复**: 统一小牌优先（庄家方和防守方都是），`rank_bonus = (14 - RANK_ORDER) / 200.0`
+- **问题2 - 固定阈值不匹配采样数**: 原代码用元组比较 `(±blended, rank_bonus)`，avg 差 0.01 也会压过 rank_bonus，但 0.01 是纯噪声
+- **修复**: 新增 `_significance_threshold(n_samples)` 函数，`threshold = Z × √2 × σ / √N`（Z=1.0, σ=2.2）。N=500→0.14, N=1000→0.10, N=2000→0.07。动态匹配任意采样数
+- **问题3 - rank相同时退化迭代顺序**: 当 avg 在阈值内（平局）且 rank 也相同时，原 `_compare_candidates` 返回 0，由迭代顺序决定（如 ♠2 先于 ♦2 出现则 ♠2 胜出，即使 ♦2 的 avg 略低）
+- **修复**: 新增第三层决胜 — rank 相同时回退到原始 avg 方向（庄家方取高、防守方取低），虽在阈值内属噪声但仍比迭代顺序任意决定合理
+
+#### 3. `_compare_candidates` 三层决胜结构
+```python
+def _compare_candidates(a_avg, a_rank_val, b_avg, b_rank_val, is_declarer_side, threshold):
+    # 第1层：avg 差距 > threshold → 显著差异，按方向（庄家取高/防守取低）
+    # 第2层：rank 不同 → 小牌优先（保留大牌结构/进张）
+    # 第3层：rank 相同 → 回退原始 avg 方向（避免迭代顺序任意决定）
+```
+
+#### 4. 显示排序同步
+- `child_stats.sort()` 改用 `cmp_to_key(_compare_candidates)`，使前端"top plays"显示顺序与实际选牌逻辑一致
+
+#### 5. 手工出牌GUI面板
+- `CardTable.jsx` 新增 4×13 网格出牌面板（类似叫牌面板），通过选择花色和牌点出牌，替代键盘输入
+- `HandDisplay.jsx` 新增 `dimmed` prop，明手手牌和已出牌变灰
+
+**修改文件**: `bridge/mcts/dd_search.py`, `web/src/components/CardTable.jsx`, `web/src/components/HandDisplay.jsx`
+
+**测试验证**: 后端重启成功；明手领出时DD应显示正确墩数（~11而非2或7）；防守方平局时选小牌（如 ♦2 而非 ♠2，当两者 rank 都是2且 ♦2 avg 略低）
+
 ## 2026-07-08
 
 ### 复盘模式 DD Hint 与按牌回退完整重构

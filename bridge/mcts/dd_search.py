@@ -25,6 +25,73 @@ RANK_ORDER = {"A": 14, "K": 13, "Q": 12, "J": 11, "T": 10,
               "9": 9, "8": 8, "7": 7, "6": 6, "5": 5, "4": 4, "3": 3, "2": 2}
 
 
+def _card_rank_val(card_str: str) -> int:
+    """从牌张字符串（如 '♦2'）提取 rank 数值，用于平局时小牌优先排序。"""
+    if not card_str:
+        return 0
+    return RANK_ORDER.get(card_str[-1], 0)
+
+
+# ── 显著性阈值 ──
+# tricks 单次标准差经验值（桥牌 DD 评估中 tricks 的典型离散度）
+_SIGMA_TRICKS = 2.2
+# 显著性 Z 值（1.0 = 1σ ≈ 68% 置信，平衡灵敏度与噪声）
+_Z_SCORE = 1.0
+
+
+def _significance_threshold(n_samples: int) -> float:
+    """根据采样数动态计算 avg 显著性阈值。
+
+    阈值 = Z × √2 × σ / √N
+    配对采样下差值标准差通常更小，此为保守上界。
+    N=500→0.14, N=1000→0.10, N=2000→0.07
+    """
+    if n_samples <= 1:
+        return 0.0  # 单次精确求解无需阈值
+    return _Z_SCORE * math.sqrt(2) * _SIGMA_TRICKS / math.sqrt(n_samples)
+
+
+def _compare_candidates(a_avg, a_rank_val, b_avg, b_rank_val, is_declarer_side, threshold):
+    """比较两个候选牌。
+
+    返回: 1 if a 优于 b, -1 if b 优于 a, 0 if 等价。
+    分层决胜：
+    1. avg 差距 > threshold → 显著差异，按 avg 方向决胜
+       （庄家方取高，防守方取低）
+    2. rank 不同 → 小牌优先（保留大牌结构/进张）
+    3. rank 相同 → 回退到原始 avg（虽在阈值内属噪声，
+       但仍比迭代顺序任意决定更合理）
+    """
+    diff = a_avg - b_avg
+    if is_declarer_side:
+        if diff > threshold:
+            return 1   # a 显著更高（庄家方更优）
+        if diff < -threshold:
+            return -1  # b 显著更高
+    else:
+        if diff < -threshold:
+            return 1   # a 显著更低（防守方更优）
+        if diff > threshold:
+            return -1  # b 显著更低
+    # 平局：小牌优先（rank 值小 = 小牌）
+    if a_rank_val < b_rank_val:
+        return 1
+    if a_rank_val > b_rank_val:
+        return -1
+    # rank 也相同：回退到原始 avg 方向（避免迭代顺序任意决定）
+    if is_declarer_side:
+        if diff > 0:
+            return 1
+        if diff < 0:
+            return -1
+    else:
+        if diff < 0:
+            return 1
+        if diff > 0:
+            return -1
+    return 0
+
+
 def _has_duplicates(hands: Dict[str, List[Card]]) -> bool:
     """检测采样手牌中是否存在同一张牌出现在多个位置的情况。"""
     seen = set()
@@ -78,9 +145,12 @@ def _hands_to_pbn(hands: Dict[str, List[Card]]) -> str:
 
 
 def _dd_eval_one_world(sampled, all_played, trick_cards, trick_leader,
-                       playable, state, perspective, declarer, dummy,
+                       playable, state, perspective, actual_turn, declarer, dummy,
                        trump, card_scores, weight, sample_idx):
-    """对单个世界运行 solve_board，累加加权分到 card_scores。"""
+    """对单个世界运行 solve_board，累加加权分到 card_scores。
+
+    actual_turn: 真实出牌者（明手领出时 ≠ perspective，deal.first 必须用此值）
+    """
     try:
         # 1. 安全网：移除已出牌
         for pos, card in all_played:
@@ -105,7 +175,7 @@ def _dd_eval_one_world(sampled, all_played, trick_cards, trick_leader,
             for _pos, card in trick_cards:
                 deal.play(_to_ep(card), from_hand=True)
         else:
-            deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
+            deal.first = POSITION_TO_PLAYER.get(actual_turn, Player.north)
 
         result = solve_board(deal)
         score_map = {}
@@ -115,7 +185,7 @@ def _dd_eval_one_world(sampled, all_played, trick_cards, trick_leader,
 
         total_played = state.declarer_tricks + state.defender_tricks
         remaining_tricks = 13 - total_played
-        curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
+        curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, actual_turn)
         curplayer_is_declarer = curplayer_pos in (declarer, dummy)
 
         for card in playable:
@@ -139,10 +209,11 @@ def _dd_eval_one_world(sampled, all_played, trick_cards, trick_leader,
 
 
 def _dd_eval_one_world_pure(world, all_played, trick_cards, trick_leader,
-                            playable, state, perspective, declarer, dummy,
+                            playable, state, perspective, actual_turn, declarer, dummy,
                             trump, weight):
     """纯函数版：返回 partial_scores dict，不修改共享状态，供并行调用。
 
+    actual_turn: 真实出牌者（明手领出时 ≠ perspective，deal.first 必须用此值）
     返回: dict {str(card): {"weighted_sum": float, "total_weight": float,
                              "scores": list, "mn": int, "mx": int}}
            若失败返回 None。
@@ -175,7 +246,7 @@ def _dd_eval_one_world_pure(world, all_played, trick_cards, trick_leader,
             for _pos, card in trick_cards:
                 deal.play(_to_ep(card), from_hand=True)
         else:
-            deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
+            deal.first = POSITION_TO_PLAYER.get(actual_turn, Player.north)
 
         result = solve_board(deal)
         score_map = {}
@@ -185,7 +256,7 @@ def _dd_eval_one_world_pure(world, all_played, trick_cards, trick_leader,
 
         total_played = state.declarer_tricks + state.defender_tricks
         remaining_tricks = 13 - total_played
-        curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
+        curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, actual_turn)
         curplayer_is_declarer = curplayer_pos in (declarer, dummy)
 
         partial = {}
@@ -226,9 +297,12 @@ def _merge_partial_scores(card_scores, partial):
 
 
 def _build_deal_for_world(world, all_played, trick_cards, trick_leader,
-                          perspective, trump):
+                          perspective, actual_turn, trump):
     """从粒子 world 构建 endplay Deal（移除已出牌、加回当前墩、设置 trump/first）。
-    返回 (Deal, sampled) 或 (None, None) 表示构建失败（重复牌等）。"""
+
+    actual_turn: 真实出牌者（明手领出时 ≠ perspective，deal.first 必须用此值）
+    返回 (Deal, sampled) 或 (None, None) 表示构建失败（重复牌等）。
+    """
     # 深拷贝 world
     sampled = {pos: [Card(suit=c.suit, rank=c.rank) for c in hand]
                for pos, hand in world.items()}
@@ -252,12 +326,12 @@ def _build_deal_for_world(world, all_played, trick_cards, trick_leader,
         for _pos, card in trick_cards:
             deal.play(_to_ep(card), from_hand=True)
     else:
-        deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
+        deal.first = POSITION_TO_PLAYER.get(actual_turn, Player.north)
     return deal, sampled
 
 
 def _solve_batch(particles, all_played, trick_cards, trick_leader,
-                 playable, state, perspective, declarer, dummy,
+                 playable, state, perspective, actual_turn, declarer, dummy,
                  trump, card_scores, time_limit, start_time):
     """用 solve_all_boards 批量求解所有粒子，累加结果到 card_scores。
 
@@ -274,7 +348,7 @@ def _solve_batch(particles, all_played, trick_cards, trick_leader,
         if _time.time() - start_time > time_limit:
             break
         deal, _sampled = _build_deal_for_world(world, all_played, trick_cards,
-                                                trick_leader, perspective, trump)
+                                                trick_leader, perspective, actual_turn, trump)
         if deal is not None:
             deals.append(deal)
             weights.append(weight)
@@ -314,7 +388,7 @@ def _solve_batch(particles, all_played, trick_cards, trick_leader,
                 for ep_card, side_score in solved:
                     key = (_DENOM_TO_SUIT.get(ep_card.suit), _RANK_TO_CHAR.get(ep_card.rank))
                     score_map[key] = side_score
-                curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
+                curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, actual_turn)
                 curplayer_is_declarer = curplayer_pos in (declarer, dummy)
                 for card in playable:
                     key = (card.suit, card.rank)
@@ -361,7 +435,7 @@ def _solve_batch(particles, all_played, trick_cards, trick_leader,
                 for ep_card, side_score in result:
                     key = (_DENOM_TO_SUIT.get(ep_card.suit), _RANK_TO_CHAR.get(ep_card.rank))
                     score_map[key] = side_score
-                curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
+                curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, actual_turn)
                 curplayer_is_declarer = curplayer_pos in (declarer, dummy)
                 for card in playable:
                     key = (card.suit, card.rank)
@@ -428,7 +502,7 @@ class DDSearch:
 
         # 残局：尝试精确枚举所有分布
         if remaining_tricks <= self.endgame_card_threshold:
-            enum_result = self._enumerate_endgame(state, perspective, playable,
+            enum_result = self._enumerate_endgame(state, perspective, actual_turn, playable,
                                                    declarer, dummy, trump, is_declarer_side)
             if enum_result is not None:
                 return enum_result
@@ -491,7 +565,7 @@ class DDSearch:
             _t_batch_total = time.time()
             _bd, _bt, _bs_tot, _bs_max = _solve_batch(
                 particles, all_played, trick_cards, trick_leader,
-                playable, state, perspective, declarer, dummy,
+                playable, state, perspective, actual_turn, declarer, dummy,
                 trump, card_scores, self.time_limit, start_time)
             if _bd > 0:
                 # 批量成功
@@ -513,7 +587,7 @@ class DDSearch:
                     samples_done += 1
                     _t_s0 = time.time()
                     _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
-                                       playable, state, perspective, declarer, dummy,
+                                       playable, state, perspective, actual_turn, declarer, dummy,
                                        trump, card_scores, weight, samples_done)
                     _dt_solve = time.time() - _t_s0
                     _solve_times.append(_dt_solve)
@@ -548,7 +622,7 @@ class DDSearch:
                 sampled = self.sampler.sample(state, perspective)
                 samples_done += 1
                 _dd_eval_one_world(sampled, all_played, trick_cards, trick_leader,
-                                   playable, state, perspective, declarer, dummy,
+                                   playable, state, perspective, actual_turn, declarer, dummy,
                                    trump, card_scores, 1.0, samples_done)
 
         elapsed = time.time() - start_time
@@ -563,9 +637,14 @@ class DDSearch:
                      f"solve_total={_solve_total:.1f}s prepare={_prepare_t:.2f}s\n")
 
         best_card = None
-        best_score = -float("inf")
+        best_blended = None
+        best_rank_val = None
         child_stats = []
         use_maximin = getattr(self, 'use_maximin', True)
+
+        # 计算显著性阈值（与采样数匹配）
+        _first_scores = card_scores[str(playable[0])]["scores"] if playable else []
+        _threshold = _significance_threshold(len(_first_scores))
 
         for card in playable:
             stats = card_scores[str(card)]
@@ -584,7 +663,7 @@ class DDSearch:
                 "max_tricks": mx,
             })
 
-            rank_bonus = (RANK_ORDER.get(card.rank, 0) / 200.0)
+            rank_val = RANK_ORDER.get(card.rank, 0)
 
             if use_maximin:
                 from config import DD_REGRET_BASE
@@ -609,15 +688,23 @@ class DDSearch:
                     regret_weight = 0.0
 
                 blended = (1 - regret_weight) * w_avg + regret_weight * mn
-                score = (blended + rank_bonus) if is_declarer_side else -(blended + rank_bonus)
             else:
-                score = (w_avg + rank_bonus) if is_declarer_side else -(w_avg + rank_bonus)
+                blended = w_avg
 
-            if score > best_score:
-                best_score = score
+            # 显著性比较：avg 差距 < 阈值视为平局，小牌优先
+            if best_card is None or _compare_candidates(blended, rank_val, best_blended, best_rank_val, is_declarer_side, _threshold) > 0:
                 best_card = card
+                best_blended = blended
+                best_rank_val = rank_val
 
-        child_stats.sort(key=lambda s: s["avg_tricks"], reverse=is_declarer_side)
+        from functools import cmp_to_key
+        child_stats.sort(key=cmp_to_key(
+            lambda a, b: -_compare_candidates(
+                a["avg_tricks"], _card_rank_val(a["card"]),
+                b["avg_tricks"], _card_rank_val(b["card"]),
+                is_declarer_side, _threshold
+            )
+        ))
 
         top_plays_str = ", ".join(
             f"{s['card']}({s['avg_tricks']}[{s['min_tricks']}-{s['max_tricks']}])"
@@ -649,7 +736,7 @@ class DDSearch:
             },
         }
 
-    def _enumerate_endgame(self, state: PlayState, perspective: str,
+    def _enumerate_endgame(self, state: PlayState, perspective: str, actual_turn: str,
                            playable: List[Card], declarer: str, dummy: str,
                            trump: str, is_declarer_side: bool) -> Optional[dict]:
         """残局精确枚举：枚举所有可能的未知牌分布，对每个做双明手求解。
@@ -796,7 +883,7 @@ class DDSearch:
                         for _pos, card in trick_cards:
                             deal.play(_to_ep(card), from_hand=True)
                     else:
-                        deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
+                        deal.first = POSITION_TO_PLAYER.get(actual_turn, Player.north)
 
                     result = solve_board(deal)
                     score_map = {}
@@ -805,7 +892,7 @@ class DDSearch:
                                _RANK_TO_CHAR.get(ep_card.rank))
                         score_map[key] = side_score
 
-                    curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
+                    curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, actual_turn)
                     curplayer_is_declarer = curplayer_pos in (declarer, dummy)
 
                     for card in playable:
@@ -831,8 +918,13 @@ class DDSearch:
             return None  # 无有效分布，回退采样
 
         best_card = None
-        best_score = -float("inf")
+        best_blended = None
+        best_rank_val = None
         child_stats = []
+
+        # 计算显著性阈值（与采样数匹配）
+        _first_scores = card_scores[str(playable[0])] if playable else []
+        _threshold = _significance_threshold(len(_first_scores))
 
         for card in playable:
             scores = card_scores[str(card)]
@@ -846,7 +938,7 @@ class DDSearch:
                 "min_tricks": mn,
                 "max_tricks": mx,
             })
-            rank_bonus = (RANK_ORDER.get(card.rank, 0) / 200.0)
+            rank_val = RANK_ORDER.get(card.rank, 0)
             # 残局枚举同样适用 maximin（精确分布下 min 更可靠）
             if getattr(self, 'use_maximin', True):
                 from config import DD_REGRET_BASE
@@ -868,14 +960,22 @@ class DDSearch:
                 else:
                     regret_weight = 0.0
                 blended = (1 - regret_weight) * avg + regret_weight * mn
-                score = (blended + rank_bonus) if is_declarer_side else -(blended + rank_bonus)
             else:
-                score = (avg + rank_bonus) if is_declarer_side else -(avg + rank_bonus)
-            if score > best_score:
-                best_score = score
+                blended = avg
+            # 显著性比较：avg 差距 < 阈值视为平局，小牌优先
+            if best_card is None or _compare_candidates(blended, rank_val, best_blended, best_rank_val, is_declarer_side, _threshold) > 0:
+                best_blended = blended
+                best_rank_val = rank_val
                 best_card = card
 
-        child_stats.sort(key=lambda s: s["avg_tricks"], reverse=is_declarer_side)
+        from functools import cmp_to_key
+        child_stats.sort(key=cmp_to_key(
+            lambda a, b: -_compare_candidates(
+                a["avg_tricks"], _card_rank_val(a["card"]),
+                b["avg_tricks"], _card_rank_val(b["card"]),
+                is_declarer_side, _threshold
+            )
+        ))
 
         top_plays_str = ", ".join(
             f"{s['card']}({s['avg_tricks']}[{s['min_tricks']}-{s['max_tricks']}])"
@@ -964,7 +1064,7 @@ class DDSearch:
             for _pos, card in trick_cards:
                 deal.play(_to_ep(card), from_hand=True)
         else:
-            deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
+            deal.first = POSITION_TO_PLAYER.get(actual_turn, Player.north)
 
         result = solve_board(deal)
         score_map = {}
@@ -973,12 +1073,14 @@ class DDSearch:
                    _RANK_TO_CHAR.get(ep_card.rank))
             score_map[key] = side_score
 
-        curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
+        curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, actual_turn)
         curplayer_is_declarer = curplayer_pos in (declarer, dummy)
 
         best_card = None
-        best_score = -float("inf")
+        best_blended = None
+        best_rank_val = None
         child_stats = []
+        _threshold = 0.0  # Perfect DD 是精确值，无需显著性阈值
 
         for card in playable:
             key = (card.suit, card.rank)
@@ -995,13 +1097,21 @@ class DDSearch:
                 "min_tricks": total,
                 "max_tricks": total,
             })
-            rank_bonus = (RANK_ORDER.get(card.rank, 0) / 200.0)
-            score = (total + rank_bonus) if is_declarer_side else -(total + rank_bonus)
-            if score > best_score:
-                best_score = score
+            rank_val = RANK_ORDER.get(card.rank, 0)
+            # 显著性比较：精确值 threshold=0，平局时小牌优先
+            if best_card is None or _compare_candidates(total, rank_val, best_blended, best_rank_val, is_declarer_side, _threshold) > 0:
+                best_blended = total
+                best_rank_val = rank_val
                 best_card = card
 
-        child_stats.sort(key=lambda s: s["avg_tricks"], reverse=is_declarer_side)
+        from functools import cmp_to_key
+        child_stats.sort(key=cmp_to_key(
+            lambda a, b: -_compare_candidates(
+                a["avg_tricks"], _card_rank_val(a["card"]),
+                b["avg_tricks"], _card_rank_val(b["card"]),
+                is_declarer_side, _threshold
+            )
+        ))
 
         top_plays_str = ", ".join(
             f"{s['card']}({s['avg_tricks']})" for s in child_stats[:5]

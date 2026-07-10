@@ -157,6 +157,7 @@ function HandDisplay({
   orientation = 'horizontal', // 'horizontal' | 'vertical'
   popDirection = 'auto', // 'auto' | 'left' | 'right' 纵向时的弹出方向
   enableHover = false, // 是否启用悬停弹出效果
+  dimmed = false, // 整手牌变灰（如明手在人类手动出牌时）
 }) {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
@@ -216,7 +217,7 @@ function HandDisplay({
         flexShrink: 0,
       }}>
           {allCards.map((card, i) => {
-            const isPlayed = playedCards && playedCards.has(card.cardKey)
+            const isPlayed = (playedCards && playedCards.has(card.cardKey)) || dimmed
             const isPlayable = !playableSet || playableSet.has(card.cardKey)
             const isSelected = selectedCardKey === card.cardKey
             const hint = cardHints?.[card.cardKey]

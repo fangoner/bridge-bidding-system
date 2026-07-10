@@ -102,7 +102,7 @@ function CardTable({
   const [selectedBidLevel, setSelectedBidLevel] = useState(null)
   const [bidBoxPos, setBidBoxPos] = useState({ left: 0, top: 0, ready: false }) // Portal fixed位置
   const [mobileSelectedCard, setMobileSelectedCard] = useState(null) // 手机端双击出牌
-  const [manualCardInput, setManualCardInput] = useState({}) // {position: string} 手动出牌输入
+  // 手动出牌输入已迁移为花色+牌点选择面板，无需 state
   // 出牌人变化时清除手机端选中
   useEffect(() => {
     setMobileSelectedCard(null)
@@ -1098,6 +1098,16 @@ function CardTable({
     const handKnownInPlay = showPlayPanel && playState?.hands?.[position]?.length > 0
     const isDeclarer = showPlayPanel && playState?.contract?.declarer === position
     
+    // 人类庄家手动出牌模式（庄家手牌未知）：明手在非明手回合时变灰，提示用户用选择面板出庄家的牌
+    const humanDeclarerManualMode = showPlayPanel && playState
+      && playState.contract?.declarer
+      && positionRoles?.[playState.contract.declarer] === 'human'
+      && (!playState.hands?.[playState.contract.declarer] || playState.hands[playState.contract.declarer].length === 0)
+    const isDummyDimmed = humanDeclarerManualMode
+      && position === playState.dummy
+      && playState.current_player !== playState.dummy
+      && playState.phase !== 'complete'
+    
     // 打牌阶段：根据模式选择手牌数据和已出牌标记
     const displayHand = getPlayHand(position)
     const playedCardsSet = (showPlayedCards && showPlayPanel && playState) ? getPlayedCardsSet() : null
@@ -1199,6 +1209,7 @@ function CardTable({
                 enableHover={showPlayPanel && (reviewCursor != null
                   ? reviewCurrentPlayer === position
                   : playState?.current_player === position && !!onHandCardClick)}
+                dimmed={isDummyDimmed}
               />
           )}
           {/* 信息栏（靠中心一侧）：infoSide='bottom'=在手牌下方 */}
@@ -1954,7 +1965,7 @@ function CardTable({
         )
       })()}
 
-      {/* 人类无手牌时手动输入出牌 */}
+      {/* 人类无手牌时通过花色+牌点选择出牌（类似叫牌面板） */}
       {showPlayPanel && playState && (() => {
         const cp = playState.current_player
         if (!cp) return null
@@ -1966,38 +1977,109 @@ function CardTable({
         if (isPlayPaused && isStartOfTrick) return null
         const handLen = playState.hands?.[cp]?.length || 0
         if (handLen > 0) return null // 有手牌时用牌桌点击出牌
-        let style = {}
-        if (isMobile) {
-          style = { bottom: 8, right: 8 }
-        } else if (cp === '南') {
-          style = { top: 'calc(75% + 71px + 36px)', left: '50%', transform: 'translateX(-50%)' }
-        } else if (cp === '北') {
-          style = { top: 'calc(25% - 71px + 36px)', left: '50%', transform: 'translateX(-50%)' }
-        } else if (cp === '西') {
-          style = { left: 'calc(25% - 71px)', top: 'calc(50% + 36px)', transform: 'translateX(-50%)' }
-        } else if (cp === '东') {
-          style = { left: 'calc(75% + 71px)', top: 'calc(50% + 36px)', transform: 'translateX(-50%)' }
+
+        // 计算不可选的牌：已出的牌 + 其他位置可见手牌中的牌
+        const playedSet = getPlayedCardsSet() || new Set()
+        const otherPositions = ['南', '西', '北', '东'].filter(p => p !== cp)
+        const takenSet = new Set(playedSet)
+        const suitSymbols = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' }
+        for (const pos of otherPositions) {
+          const h = hands?.[pos]
+          if (!h) continue
+          for (const [suitKey, symbol] of Object.entries(suitSymbols)) {
+            const ranks = h[suitKey]
+            if (!ranks || ranks === '-') continue
+            for (const r of ranks) takenSet.add(symbol + r.toUpperCase())
+          }
         }
+        // 跟花色规则：人类位置无手牌数据，无法判断是否有该花色，仅在标题提示
+        const ledSuit = playState.current_trick?.cards?.[0]?.[1]?.suit || null
+
+        const SUIT_ROWS = [
+          { symbol: '♠', color: isDark ? '#cbd5e1' : '#1a1a2e', key: 'spades' },
+          { symbol: '♥', color: '#dc2626', key: 'hearts' },
+          { symbol: '♦', color: '#7c3aed', key: 'diamonds' },
+          { symbol: '♣', color: isDark ? '#cbd5e1' : '#1a1a2e', key: 'clubs' },
+        ]
+        const RANKS = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2']
+        const rankDisplay = (r) => r === 'T' ? '10' : r
+
+        const handlePick = (symbol, rank) => {
+          onManualPlay?.(cp, symbol + rank)
+        }
+
+        const style = { bottom: 8, left: '50%', transform: 'translateX(-50%)' }
+
         return (
-          <Box sx={{ position: 'absolute', zIndex: 10, ...style, display: 'flex', gap: 0.5, alignItems: 'center', bgcolor: isDark ? 'rgba(17,24,39,0.88)' : 'rgba(255,255,255,0.88)', backdropFilter: 'blur(12px)', borderRadius: 2, p: 0.5, border: '1px solid', borderColor: 'divider', boxShadow: '0 4px 20px rgba(0,0,0,0.15)' }}>
-            <TextField size="small" placeholder="♠A 或 SA"
-              value={manualCardInput[cp] || ''}
-              onChange={(e) => setManualCardInput(prev => ({ ...prev, [cp]: e.target.value }))}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (manualCardInput[cp] || '').trim()) {
-                  onManualPlay?.(cp, (manualCardInput[cp] || '').trim())
-                  setManualCardInput(prev => ({ ...prev, [cp]: '' }))
-                }
-              }}
-              sx={{ width: 100, '& input': { fontSize: '0.75rem', textAlign: 'center', py: 0.5 } }}
-            />
-            <Button variant="contained" size="small"
-              disabled={!(manualCardInput[cp] || '').trim()}
-              onClick={() => {
-                onManualPlay?.(cp, (manualCardInput[cp] || '').trim())
-                setManualCardInput(prev => ({ ...prev, [cp]: '' }))
-              }}
-              sx={{ fontSize: '0.7rem', py: 0.3, px: 0.75, minWidth: 36 }}>出牌</Button>
+          <Box sx={{
+            position: 'absolute', zIndex: 10, ...style,
+            bgcolor: isDark ? 'rgba(17,24,39,0.92)' : 'rgba(255,255,255,0.92)',
+            backdropFilter: 'blur(12px)',
+            borderRadius: 2, p: 1,
+            border: '1px solid', borderColor: 'divider',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+            display: 'flex', flexDirection: 'column', gap: 0.4,
+            maxWidth: isMobile ? '96vw' : 'auto',
+          }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.3, px: 0.5 }}>
+              <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color: isDark ? '#e2e8f0' : '#333' }}>
+                {cp}家 出牌{ledSuit ? ` (跟${ledSuit})` : ' (首攻)'}
+              </Typography>
+              <Typography sx={{ fontSize: '0.65rem', color: isDark ? '#94a3b8' : '#888' }}>
+                灰色=已出/他手
+              </Typography>
+            </Box>
+            {SUIT_ROWS.map(({ symbol, color }) => {
+              const isLedSuit = ledSuit === symbol
+              return (
+                <Box key={symbol} sx={{
+                  display: 'flex', alignItems: 'center', gap: 0.3,
+                  bgcolor: isLedSuit ? (isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.08)') : 'transparent',
+                  borderRadius: 1, px: 0.3, py: 0.15,
+                  border: isLedSuit ? `1px solid ${isDark ? 'rgba(129,140,248,0.4)' : 'rgba(99,102,241,0.3)'}` : '1px solid transparent',
+                }}>
+                  <Box sx={{
+                    width: 20, minWidth: 20, height: 24,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color, fontSize: '0.95rem', fontWeight: 700,
+                  }}>{symbol}</Box>
+                  <Box sx={{ display: 'flex', gap: 0.25, flexWrap: 'nowrap' }}>
+                    {RANKS.map((rank) => {
+                      const cardKey = symbol + rank
+                      const isTaken = takenSet.has(cardKey)
+                      return (
+                        <Button
+                          key={rank}
+                          variant="outlined"
+                          size="small"
+                          disabled={isTaken}
+                          onClick={() => handlePick(symbol, rank)}
+                          sx={{
+                            minWidth: 0, width: isMobile ? 22 : 26, height: 24, p: 0,
+                            fontSize: '0.7rem', fontWeight: 700,
+                            color: isTaken ? (isDark ? '#475569' : '#aaa') : color,
+                            bgcolor: isTaken
+                              ? (isDark ? 'rgba(100,116,139,0.08)' : 'rgba(148,163,184,0.1)')
+                              : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.6)'),
+                            borderColor: isTaken
+                              ? (isDark ? 'rgba(100,116,139,0.2)' : 'rgba(148,163,184,0.25)')
+                              : (isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)'),
+                            '&:hover': isTaken ? {} : {
+                              bgcolor: isDark ? 'rgba(99,102,241,0.25)' : 'rgba(99,102,241,0.15)',
+                              borderColor: '#6366f1',
+                              transform: 'translateY(-1px)',
+                            },
+                            cursor: isTaken ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          {rankDisplay(rank)}
+                        </Button>
+                      )
+                    })}
+                  </Box>
+                </Box>
+              )
+            })}
           </Box>
         )
       })()}
