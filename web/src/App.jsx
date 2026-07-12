@@ -96,7 +96,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     imageOpeningLead, setImageOpeningLead,
     mode, setMode,
     setReadonlyMode,
-    studyMode, setStudyMode,
   } = useGame()
 
   // 将当前手牌转换为自定义牌局文本格式（带花色符号，便于阅读编辑）
@@ -252,16 +251,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   // Play 域状态已迁入 PlayContext（usePlay）
 
   const prevTricksCountRef = useRef(0) // 用于检测一墩完成
-
-  // 研究模式切换：关闭时所有位置恢复AI
-  const handleStudyModeChange = (checked) => {
-    setStudyMode(checked)
-    if (!checked && showPlayPanel) {
-      const allAI = { '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai' }
-      setPositionRoles(allAI)
-      updatePlayPlayerRoles(allAI).catch(() => {})
-    }
-  }
   const playStateRef = useRef(playState)
   const aiPlayHistoryRef = useRef(aiPlayHistory)
   useEffect(() => { playStateRef.current = playState }, [playState])
@@ -1617,15 +1606,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         : seqStr
     }
 
-    const contractDummy = getPartnerPosition(contract.declarer)
-    let playRoles = { ...positionRoles }
-    // 庄家和明手角色必须一致，以庄家角色为准（研究模式下跳过）
-    if (!studyMode && playRoles[contractDummy] !== playRoles[contract.declarer]) {
-      playRoles[contractDummy] = playRoles[contract.declarer]
-    }
-    if (JSON.stringify(playRoles) !== JSON.stringify(positionRoles)) {
-      setPositionRoles(playRoles)
-    }
+    const playRoles = { ...positionRoles }
 
     try {
       const suitLetter = { '♠': 'S', '♥': 'H', '♦': 'D', '♣': 'C', 'S': 'S', 'H': 'H', 'D': 'D', 'C': 'C', 'NT': 'NT' }[contract.suit] || contract.suit
@@ -2252,84 +2233,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     }
   }, [playState, hands, biddingSequence, dealer, gameMode, practiceDirection, positionRoles, directPlayContractInfo, aiBiddingHistory, dealSystem, aiPlayHistory, currentRecordId, imageOpeningLead])
 
-  // 处理位置角色变化
+  // 处理位置角色变化：所有位置全手动设置，无连锁
   const handlePositionRoleChange = async (position, role) => {
-    const dummy = playState?.dummy
-    const declarer = playState?.contract?.declarer
-    let newRoles
-
-    if (showPlayPanel && playState && dummy && declarer) {
-      // 打牌阶段角色切换
-      if (mode === 'simulated' || studyMode) {
-        // 模拟实战 / 研究模式：无联动，仅切换指定位置角色
-        newRoles = { ...positionRoles, [position]: role }
-      } else {
-        // 发牌练习：庄家/明手必须同角色，防守方同侧保持合理
-        let updated = { ...positionRoles, [position]: role }
-
-        if (role === 'human') {
-          if (position === declarer || position === dummy) {
-            // 人类切换到庄家方：庄家+明手=human，原防守人类→AI
-            updated[declarer] = 'human'
-            updated[dummy] = 'human'
-            for (const pos of ['南','北','东','西']) {
-              if (pos !== declarer && pos !== dummy && updated[pos] === 'human') {
-                updated[pos] = 'ai'
-              }
-            }
-          } else {
-            // 人类切换到防守方：原庄家方人类→AI，另一防守人类→AI（只保留1个防守人类）
-            if (positionRoles[declarer] === 'human') {
-              updated[declarer] = 'ai'
-              updated[dummy] = 'ai'
-            }
-            for (const pos of ['南','北','东','西']) {
-              if (pos !== position && pos !== declarer && pos !== dummy && updated[pos] === 'human') {
-                updated[pos] = 'ai'
-              }
-            }
-          }
-        } else {
-          // role === 'ai': 把某位置改为AI
-          if (position === declarer || position === dummy) {
-            // 庄家方→AI：庄家+明手都变AI，让一防守方变human
-            updated[declarer] = 'ai'
-            updated[dummy] = 'ai'
-            for (const pos of ['南','北','东','西']) {
-              if (pos !== declarer && pos !== dummy) {
-                updated[pos] = 'human'
-                break
-              }
-            }
-          }
-          // 防守方→AI：不做额外调整（可能变成4AI）
-        }
-
-        newRoles = updated
-      }
-    } else if (gameMode !== 'pair') {
-      // 四人叫牌阶段：只允许0/1/3个人类（4AI / 1H+3AI / 3H+1AI）
-      let updated = { ...positionRoles, [position]: role }
-      const humanCount = Object.values(updated).filter(r => r === 'human').length
-      if (humanCount === 2) {
-        if (role === 'human') {
-          // 1H→切换人类位置：新位置=human，其余=AI
-          updated = { '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai', [position]: 'human' }
-        } else {
-          // 3H+1AI → 切换AI位置：原AI变human，新位置变AI
-          const oldAiPos = Object.keys(positionRoles).find(p => positionRoles[p] === 'ai')
-          if (oldAiPos && oldAiPos !== position) {
-            updated[oldAiPos] = 'human'
-          }
-        }
-      }
-      newRoles = updated
-      setShowPartnerHand(false)
-      setShowOpponentHands(false)
-    } else {
-      newRoles = { ...positionRoles, [position]: role }
-    }
-
+    const newRoles = { ...positionRoles, [position]: role }
     setPositionRoles(newRoles)
 
     // 每墩开头：当前玩家从人类切为AI时自动暂停，显示继续按钮
@@ -2344,10 +2250,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     if (showPlayPanel && playState) {
       try {
         const result = await updatePlayPlayerRoles(newRoles)
-        console.log('[DEBUG] updatePlayPlayerRoles result:', result)
         if (result.success) {
-          console.log('[DEBUG] new state is_human_turn:', result.state?.is_human_turn)
-          console.log('[DEBUG] new state player_roles:', result.state?.player_roles)
           setPlayState(result.state)
         }
       } catch (err) {
@@ -2488,7 +2391,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           onDeal={handleDeal}
           onHandCardClick={handleHandCardClick}
           onManualPlay={handleManualPlay}
-          onStudyModeChange={handleStudyModeChange}
           addBid={addBid}
           startBidding={startBidding}
           // 叫牌面板回调

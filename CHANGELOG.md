@@ -1,6 +1,87 @@
 # 开发日志
 
+## 2026-07-12
+
+### αμ+LLM引擎开发：分组重构 + Prompt系统重构 + Plan生命周期 + 绝望模式
+
+**背景**: αμ+LLM引擎首次大规模开发，分9个阶段逐步完成分组逻辑、触发条件、prompt设计、plan管理、UI联动的全方位优化。
+
+### 完成的9个阶段
+
+#### 1. 分组逻辑重构：按best_vector三层分组
+- 第一层：best_vector相同 → DDS等价
+- 第二层：同一批内按花色分开
+- 第三层：同花色内按[2-7]/[8-10]/[J-A]区间拆分，跨区间连续(7-8, T-J)不拆
+- 核心方法：`_group_candidates_by_vector`、`_split_by_rank_tier`
+
+#### 2. LLM触发条件调优
+- 50% → 30% → >0% + 15%截断 → 全保留（无成功率阈值）
+- 最终条件：组数≥2即触发
+
+#### 3. 绝望模式
+- αμ判定无成约机会（all success_rate==0）时也触发LLM，目标切换为多拿墩少宕
+- 新增 `_build_desperation_groups`、`_build_strategy_text`
+
+#### 4. 去除战术预设
+- 删除 `_classify_tactic`（87行）、`_split_by_tier`（48行）
+- prompt中强调"分组不预设战术，由LLM自行判断"
+
+#### 5. LLM事实性错误修复
+- 混淆庄家明手牌、数输墩方法错误、将牌计数错误（新增程序计算`_format_trump_analysis`）
+- 战术标签误导LLM、红桃输墩未数出
+
+#### 6. Prompt系统重构
+- 对标LLM引擎，借鉴：叫牌过程、将牌清完状态、NT赢墩分支、5维评估、进张管理、一致性约束
+- 删除死代码 `_llm_strategic_review`（136行，从未被调用）
+- 飞牌机会优先识别：对照对方关键大牌K/Q/J
+
+#### 7. Plan生命周期管理
+- 新增 `_mark_step_completed`：出牌后自动标记plan步骤完成
+- `_check_plan_invalidation` 扩展为4条件：全完成/大牌已出/超4墩/前提不满足
+
+#### 8. use_reasoning透传修复 + 徽章修复
+- 参数链修复：L277→`self._alphamu_llm_play, state, use_reasoning)`
+- 徽章：`actual_model = f"{pm_raw}::reasoning" if use_reasoning else pm_raw`
+- UI：SettingsPanel允许αμ+LLM选LLM型号和快答/思考；PlayDetailPanel显示 `αμ+V4-Pro·思考`
+
+#### 9. 15%截断移除
+- 用户决定："所有有机会成局的情况都应该考虑"
+- 删除 `_group_candidates_by_vector` 中的 `_truncate_by_gap` 调用
+
+**修改文件**: `bridge/play_service.py`(~965行变更), `api/main.py`, `web/src/components/PlayDetailPanel.jsx`, `web/src/components/SettingsPanel.jsx`, `bridge/mcts/alpha_mu.py`
+
+**测试文件**: `tests/test_vector_grouping.py`(13用例), `tests/test_grouping_examples.py`(10用例)
+
+**详细记录**: `αμ+LLM引擎开发记录.md`
+
+---
+
 ## 2026-07-11
+
+### αμ引擎关键修复：Min节点墩数未更新 + rank_bonus方向反转 + 前端显示墩数
+
+**背景**: αμ引擎在Min玩家打出第4张牌完成一墩时，`decl_tricks`/`def_tricks` 未更新，导致 `solve_board` 评估的墩数系统性偏差——庄家赢墩少算1墩、防守方赢墩多算1墩——使αμ系统性地偏好输墩而非赢墩。同时 `_rank_bonus` 方向与DD引擎一致性问题导致平局时选大牌而非小牌。
+
+**改进**:
+
+#### 1. `_dds_evaluate_single_world` 墩数未更新bug（关键）
+- **问题**: Min节点评估时，Min玩家打出第4张牌完成一墩后，`decl_tricks`/`def_tricks` 仍是完成前的值。`solve_board` 在 `deal.play()` 4张牌后评估的是剩余墩数（不含当前墩），但代码用 `remaining_tricks = 13 - (decl_tricks + def_tricks)` 计算剩余墩，多算了1墩
+- **后果**: 庄家赢墩时 `total = decl_tricks + side_tricks` 少算1墩（看起来更差）；防守方赢墩时 `total = decl_tricks + (remaining - side_tricks)` 因remaining多1而多算1墩（看起来更好）→ αμ系统性偏好输墩
+- **案例**: 6♣定约第2墩，南家领出♣2，西家♣9，北家可选♣T（赢墩）或♣3（输墩）。bug导致♣T评分少算1墩、♣3评分多算1墩，αμ错误选择♣3送墩
+- **修复**: 在 `_dds_evaluate_single_world` 中，当 `len(new_trick_cards) == 4` 时，调用 `trick_winner()` 判断赢家并更新 `decl_tricks`/`def_tricks`，再进行 `solve_board` 评估
+- **影响范围**: 仅αμ引擎的 `_dds_evaluate_single_world`（Min节点回退DDS路径）。`_dds_evaluate_world_post_move` 不受影响（墩数来自 `apply_play_to_state` 已更新）。DD/Perfect DD/Tiered 引擎不受影响（`solve_board` 返回每张候选牌的墩数已含当前墩）
+
+#### 2. `_rank_bonus` 方向反转
+- **问题**: αμ根节点选牌的 `_rank_bonus` 大牌得更高bonus（A=0.009, 2=0.0006），平局时选大牌，与DD引擎修复后的规则相反
+- **案例**: ♦K和♥6的avg_tricks完全相同(10.16)时，αμ选了♦K（浪费大牌）而非♥6（保留大牌结构）
+- **修复**: 反转rank_bonus映射，小牌得更高bonus（2=0.009, A=0.0006），与DD引擎 `_compare_candidates` 的"平局时小牌优先"规则一致
+
+#### 3. 前端barchart显示墩数
+- **改进**: `PlayDetailPanel.jsx` 的αμ候选牌右侧文本增加 `avg_tricks` 显示，从 `72% · 18/25 · front3` 改为 `72% · 10.2墩 · 18/25 · front3`，`minWidth` 从72调到110
+
+**修改文件**: `bridge/mcts/alpha_mu.py`, `web/src/components/PlayDetailPanel.jsx`
+
+**测试验证**: 6♣定约第2墩修复后正确选择♣T（赢墩）；前后端正常启动
 
 ### DD引擎三连修复：deal.first明手领出bug + 选牌分层比较 + 手工出牌面板
 

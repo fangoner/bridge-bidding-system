@@ -86,7 +86,7 @@ function CardTable({
   reviewCursor,
   reviewTrick,
 }) {
-  const { fallbackModel, playModel, studyMode } = useGame()
+  const { fallbackModel, playModel } = useGame()
   const [handInputs, setHandInputs] = useState({
     '南': '',
     '北': '',
@@ -99,6 +99,23 @@ function CardTable({
     '东': '',
     '西': ''
   })
+  const [handPickerSelections, setHandPickerSelections] = useState({
+    '南': {},
+    '北': {},
+    '东': {},
+    '西': {}
+  })
+  const [handPickerSuit, setHandPickerSuit] = useState({
+    '南': null,
+    '北': null,
+    '东': null,
+    '西': null
+  })
+  const [handPickerPanelOpen, setHandPickerPanelOpen] = useState(false)
+  const [handPickerPanelFor, setHandPickerPanelFor] = useState(null)
+  const [playPanelPos, setPlayPanelPos] = useState(null)
+  const [dragging, setDragging] = useState(false)
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const [selectedBidLevel, setSelectedBidLevel] = useState(null)
   const [bidBoxPos, setBidBoxPos] = useState({ left: 0, top: 0, ready: false }) // Portal fixed位置
   const [mobileSelectedCard, setMobileSelectedCard] = useState(null) // 手机端双击出牌
@@ -106,7 +123,23 @@ function CardTable({
   // 出牌人变化时清除手机端选中
   useEffect(() => {
     setMobileSelectedCard(null)
+    setPlayPanelPos(null)
   }, [playState?.current_player])
+
+  // 出牌面板全局拖拽（fixed定位相对于视口）
+  useEffect(() => {
+    if (!dragging) return
+    const onMove = (e) => {
+      setPlayPanelPos({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y })
+    }
+    const onUp = () => setDragging(false)
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    return () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+  }, [dragging, dragStart])
 
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
@@ -931,7 +964,7 @@ function CardTable({
         {onPositionRoleChange && (
           <ToggleButton value="check" size="small"
             selected={positionRoles[position] === 'human'}
-            disabled={(showPlayPanel && !studyMode && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading)) || (!showPlayPanel && biddingStarted && !stopBidding && !hasHand(position))}
+            disabled={(!showPlayPanel && biddingStarted && !stopBidding && !hasHand(position))}
             onChange={() => onPositionRoleChange(position, positionRoles[position] === 'human' ? 'ai' : 'human')}
             sx={{ height: 18, px: 0.6, fontSize: '0.75rem', fontWeight: 600, borderRadius: 1, minWidth: 30, border: 'none',
               bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.15)' : 'action.hover',
@@ -943,7 +976,223 @@ function CardTable({
     )
   }
 
-  // 独立手牌输入框（四家通用，绝对定位，距桌面边框30px）
+  // 共享手牌选牌面板（独立居中，点击TextField后激活）
+  const renderHandPickerPanel = () => {
+    const position = handPickerPanelFor
+    if (!handPickerPanelOpen || !position) return null
+
+    const selections = handPickerSelections[position] || {}
+    const selectedCards = Object.keys(selections)
+    const selectedCount = selectedCards.length
+
+    const pickSuit = handPickerSuit[position]
+    const setPickSuit = (s) => setHandPickerSuit(prev => ({ ...prev, [position]: s }))
+
+    const takenSet = new Set()
+    for (const [pos, hand] of Object.entries(hands || {})) {
+      if (pos === position || !hand || typeof hand !== 'object') continue
+      for (const [sk, sr] of Object.entries(hand)) {
+        if (!sr || sr === '-' || typeof sr !== 'string') continue
+        const ss = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' }[sk] || sk
+        for (const r of sr) takenSet.add(`${ss}${r}`)
+      }
+    }
+
+    const toggleCard = (suit, rank) => {
+      const cardKey = suit + rank
+      if (takenSet.has(cardKey)) return
+      setHandPickerSelections(prev => {
+        const cur = { ...(prev[position] || {}) }
+        if (cur[cardKey]) {
+          delete cur[cardKey]
+        } else {
+          if (Object.keys(cur).length >= 13) return prev
+          cur[cardKey] = true
+        }
+        return { ...prev, [position]: cur }
+      })
+      setInputErrors(prev => ({ ...prev, [position]: '' }))
+    }
+
+    const clearAll = () => {
+      setHandPickerSelections(prev => ({ ...prev, [position]: {} }))
+      setHandPickerSuit(prev => ({ ...prev, [position]: null }))
+      setInputErrors(prev => ({ ...prev, [position]: '' }))
+    }
+
+    const closePanel = () => {
+      setHandPickerPanelOpen(false)
+      setHandPickerPanelFor(null)
+      setHandPickerSuit(prev => ({ ...prev, [position]: null }))
+    }
+
+    const handleConfirm = () => {
+      if (selectedCount !== 13) {
+        setInputErrors(prev => ({ ...prev, [position]: `已选${selectedCount}张，需要13张` }))
+        return
+      }
+
+      const bySuit = { '♠': [], '♥': [], '♦': [], '♣': [] }
+      for (const ck of selectedCards) {
+        const s = ck[0]
+        if (bySuit[s]) bySuit[s].push(ck.slice(1))
+      }
+      const ro = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2']
+      for (const s of Object.keys(bySuit)) bySuit[s].sort((a, b) => ro.indexOf(a) - ro.indexOf(b))
+
+      const suitMap = { '♠': 'spades', '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs' }
+      const hand = {}
+      let hcp = 0
+      const hcpMap = { 'A': 4, 'K': 3, 'Q': 2, 'J': 1 }
+      for (const [s, ranks] of Object.entries(bySuit)) {
+        hand[suitMap[s]] = ranks.join('')
+        for (const r of ranks) hcp += (hcpMap[r] || 0)
+      }
+      hand.hcp = hcp
+
+      const dup = new Map()
+      for (const [pos, h] of Object.entries(hands || {})) {
+        if (pos === position || !h || typeof h !== 'object') continue
+        for (const [sk, sr] of Object.entries(h)) {
+          if (!sr || sr === '-' || typeof sr !== 'string') continue
+          const s2 = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' }[sk] || sk
+          for (const r of sr) dup.set(`${s2}${r}`, pos)
+        }
+      }
+      for (const ck of selectedCards) {
+        if (dup.has(ck)) {
+          setInputErrors(prev => ({ ...prev, [position]: `${ck} 已在${dup.get(ck)}家手牌中` }))
+          return
+        }
+      }
+
+      const isAI2 = isAIPosition(position)
+      const showInput = !showPlayPanel && isAI2 && !hasHand(position) && (!biddingStarted || stopBidding)
+      if (showInput) {
+        setHands(prev => ({ ...prev, [position]: hand }))
+      } else {
+        onSetPlayHand?.(position, hand)
+      }
+
+      setHandPickerSelections(prev => ({ ...prev, [position]: {} }))
+      setHandPickerSuit(prev => ({ ...prev, [position]: null }))
+      setHandPickerPanelOpen(false)
+      setHandPickerPanelFor(null)
+    }
+
+    const bySuitDisplay = { '♠': [], '♥': [], '♦': [], '♣': [] }
+    for (const ck of selectedCards) {
+      const s = ck[0]
+      if (bySuitDisplay[s]) bySuitDisplay[s].push(ck.slice(1))
+    }
+    for (const s of Object.keys(bySuitDisplay)) bySuitDisplay[s].sort((a, b) => ro.indexOf(a) - ro.indexOf(b))
+
+    const suits = [
+      { s: '♠', c: isDark ? '#cbd5e1' : '#1a1a2e' },
+      { s: '♥', c: '#dc2626' },
+      { s: '♦', c: '#7c3aed' },
+      { s: '♣', c: isDark ? '#cbd5e1' : '#1a1a2e' },
+    ]
+    const ranks = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2']
+    const rd = (r) => r === 'T' ? '10' : r
+
+    const btnBase = (w, h, fs) => ({
+      minWidth: 0, width: w, height: h, p: 0,
+      fontSize: fs, fontWeight: 600, borderRadius: 0.5,
+    })
+
+    return (
+      <Box sx={{
+        position: 'absolute',
+        top: 0, left: 0, right: 0, bottom: 0,
+        zIndex: 200,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        bgcolor: 'rgba(0,0,0,0.3)',
+      }} onClick={closePanel}>
+        <Box sx={{
+          bgcolor: isDark ? 'rgba(17,24,39,0.97)' : 'rgba(255,255,255,0.97)',
+          backdropFilter: 'blur(12px)', borderRadius: 2, p: 1.5,
+          border: '1px solid', borderColor: 'divider',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
+          display: 'flex', flexDirection: 'column', gap: 0.5,
+          width: 380,
+        }} onClick={e => e.stopPropagation()}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 0.5 }}>
+            <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, color: isDark ? '#e2e8f0' : '#333' }}>
+              {position}家 手牌 ({selectedCount}/13)
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 0.5 }}>
+              <Button size="small" onClick={clearAll} disabled={selectedCount === 0}
+                sx={{ fontSize: '0.6rem', py: 0.1, px: 0.8, minWidth: 0, height: 22 }}>清空</Button>
+              <Button size="small" variant="contained" onClick={handleConfirm}
+                disabled={selectedCount !== 13}
+                sx={{ fontSize: '0.6rem', py: 0.1, px: 1, minWidth: 0, height: 22 }}>确认</Button>
+            </Box>
+          </Box>
+
+          {selectedCount > 0 && (
+            <Box sx={{ px: 0.5, fontFamily: 'monospace', fontSize: '0.75rem', color: isDark ? '#e2e8f0' : '#333' }}>
+              {suits.map(({ s, c }) => (
+                <span key={s}>
+                  <span style={{ color: c }}>{s}</span>
+                  {bySuitDisplay[s].length > 0 ? bySuitDisplay[s].join('') : '-'}
+                  {' '}
+                </span>
+              ))}
+            </Box>
+          )}
+
+          {inputErrors[position] && (
+            <Typography sx={{ fontSize: '0.68rem', color: '#dc2626', px: 0.5 }}>{inputErrors[position]}</Typography>
+          )}
+
+          <Box sx={{ display: 'flex', gap: 0.5, px: 0.5, justifyContent: 'center' }}>
+            {suits.map(({ s, c }) => (
+              <Button key={s} size="small"
+                variant={pickSuit === s ? 'contained' : 'outlined'}
+                onClick={() => setPickSuit(pickSuit === s ? null : s)}
+                sx={{
+                  ...btnBase(44, 34, '1.1rem'),
+                  color: pickSuit === s ? '#fff' : c,
+                  borderColor: pickSuit === s ? '#6366f1' : (isDark ? '#334155' : '#ccc'),
+                  bgcolor: pickSuit === s ? '#6366f1' : 'transparent',
+                  '&:hover': { bgcolor: pickSuit === s ? '#818cf8' : (isDark ? '#334155' : '#f0f0f0') },
+                }}
+              >{s}</Button>
+            ))}
+          </Box>
+
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.3, px: 0.5, justifyContent: 'center' }}>
+            {ranks.map((rank) => {
+              const cardKey = pickSuit ? pickSuit + rank : null
+              const sel = cardKey && !!selections[cardKey]
+              const taken = cardKey && takenSet.has(cardKey)
+              return (
+                <Button key={rank} size="small"
+                  disabled={taken || !pickSuit}
+                  onClick={() => pickSuit && toggleCard(pickSuit, rank)}
+                  sx={{
+                    ...btnBase(30, 30, '0.7rem'),
+                    color: taken ? (isDark ? '#64748b' : '#aaa')
+                      : sel ? '#fff' : (isDark ? '#cbd5e1' : '#333'),
+                    borderColor: taken ? (isDark ? '#374151' : '#ddd')
+                      : sel ? '#ef4444' : (isDark ? '#334155' : '#ccc'),
+                    bgcolor: taken ? 'transparent'
+                      : sel ? (isDark ? '#dc2626' : '#ef4444') : 'transparent',
+                    '&:hover': { bgcolor: taken ? 'transparent'
+                      : sel ? '#f87171' : (isDark ? '#334155' : '#f0f0f0') },
+                    '&.Mui-disabled': { color: isDark ? '#475569' : '#bbb', borderColor: isDark ? '#374151' : '#ddd' },
+                  }}
+                >{rd(rank)}</Button>
+              )
+            })}
+          </Box>
+        </Box>
+      </Box>
+    )
+  }
+
+  // 独立手牌输入框（TextField + 选牌按钮）
   const renderIndependentHandInput = (position) => {
     const isAI = isAIPosition(position)
     const hasHandData = hasHand(position)
@@ -957,7 +1206,6 @@ function CardTable({
 
     if (!showInput && !showPlayHandInput) return null
 
-    // 四家定位：东西垂直居中，南北水平居中
     let positionStyle = {}
     if (position === '西') {
       positionStyle = { left: 0, top: '50%', transform: 'translateY(-50%)' }
@@ -989,7 +1237,7 @@ function CardTable({
           error={!!inputErrors[position]}
           helperText={inputErrors[position] || helperText}
           sx={{
-            width: '120px',
+            width: '140px',
             bgcolor: isDark ? 'rgba(255,255,255,0.05)' : '#ffffff',
             borderRadius: 1,
             '& .MuiInputBase-input': {
@@ -1008,15 +1256,28 @@ function CardTable({
             },
           }}
         />
-        <Button
-          size="small"
-          variant="contained"
-          sx={{ mt: 0.5, fontSize: '0.7rem', py: 0.3 }}
-          onClick={() => showInput ? handleHandInputSubmit(position) : handleAIHandSubmit(position)}
-          disabled={!handInputs[position].trim()}
-        >
-          确认
-        </Button>
+        <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5 }}>
+          <Button
+            size="small"
+            variant="outlined"
+            sx={{ fontSize: '0.65rem', py: 0.2, px: 0.8 }}
+            onClick={() => {
+              setHandPickerPanelFor(position)
+              setHandPickerPanelOpen(true)
+            }}
+          >
+            选牌
+          </Button>
+          <Button
+            size="small"
+            variant="contained"
+            sx={{ fontSize: '0.65rem', py: 0.2, px: 0.8 }}
+            onClick={() => showInput ? handleHandInputSubmit(position) : handleAIHandSubmit(position)}
+            disabled={!handInputs[position].trim()}
+          >
+            确认
+          </Button>
+        </Box>
       </Box>
     )
   }
@@ -1156,7 +1417,7 @@ function CardTable({
               {onPositionRoleChange && (
                 <ToggleButton value="check" size="small"
                   selected={positionRoles[position] === 'human'}
-                  disabled={(showPlayPanel && !studyMode && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading)) || (!showPlayPanel && biddingStarted && !stopBidding && !hasHand(position))}
+                  disabled={(!showPlayPanel && biddingStarted && !stopBidding && !hasHand(position))}
                   onChange={() => onPositionRoleChange(position, positionRoles[position] === 'human' ? 'ai' : 'human')}
                   sx={{ height: 18, px: 0.6, fontSize: '0.75rem', fontWeight: 600, borderRadius: 1, minWidth: 30, border: 'none',
                     bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.15)' : 'action.hover',
@@ -1231,7 +1492,7 @@ function CardTable({
               {onPositionRoleChange && (
                 <ToggleButton value="check" size="small"
                   selected={positionRoles[position] === 'human'}
-                  disabled={(showPlayPanel && !studyMode && playInitiated && (!isPlayPaused || aiLoading) && !((playState?.current_trick?.cards?.length || 0) === 0 && !aiLoading)) || (!showPlayPanel && biddingStarted && !stopBidding && !hasHand(position))}
+                  disabled={(!showPlayPanel && biddingStarted && !stopBidding && !hasHand(position))}
                   onChange={() => onPositionRoleChange(position, positionRoles[position] === 'human' ? 'ai' : 'human')}
                   sx={{ height: 18, px: 0.6, fontSize: '0.75rem', fontWeight: 600, borderRadius: 1, minWidth: 30, border: 'none',
                     bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.15)' : 'action.hover',
@@ -2008,22 +2269,41 @@ function CardTable({
           onManualPlay?.(cp, symbol + rank)
         }
 
-        const style = { bottom: 8, left: '50%', transform: 'translateX(-50%)' }
+        const posStyle = playPanelPos
+          ? { left: playPanelPos.x, top: playPanelPos.y }
+          : { bottom: 16, left: '50%', transform: 'translateX(-50%)' }
 
-        return (
+        const onMouseDown = (e) => {
+          if (e.button !== 0) return
+          setDragging(true)
+          const panelEl = e.currentTarget.parentElement
+          const rect = panelEl.getBoundingClientRect()
+          setDragStart({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+        }
+
+        const panelContent = (
           <Box sx={{
-            position: 'absolute', zIndex: 10, ...style,
+            position: 'fixed', zIndex: 9999, ...posStyle,
             bgcolor: isDark ? 'rgba(17,24,39,0.92)' : 'rgba(255,255,255,0.92)',
             backdropFilter: 'blur(12px)',
             borderRadius: 2, p: 1,
             border: '1px solid', borderColor: 'divider',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
             display: 'flex', flexDirection: 'column', gap: 0.4,
             maxWidth: isMobile ? '96vw' : 'auto',
+            cursor: dragging ? 'grabbing' : 'auto',
           }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.3, px: 0.5 }}>
+            <Box
+              sx={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.3, px: 0.5,
+                cursor: 'grab', userSelect: 'none',
+                '&:active': { cursor: 'grabbing' },
+              }}
+              onMouseDown={onMouseDown}
+            >
               <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color: isDark ? '#e2e8f0' : '#333' }}>
                 {cp}家 出牌{ledSuit ? ` (跟${ledSuit})` : ' (首攻)'}
+                {'  '}<span style={{ fontSize: '0.6rem', fontWeight: 400, color: isDark ? '#94a3b8' : '#aaa' }}>拖拽移动</span>
               </Typography>
               <Typography sx={{ fontSize: '0.65rem', color: isDark ? '#94a3b8' : '#888' }}>
                 灰色=已出/他手
@@ -2082,7 +2362,10 @@ function CardTable({
             })}
           </Box>
         )
+        return ReactDOM.createPortal(panelContent, document.body)
       })()}
+
+      {renderHandPickerPanel()}
     </Box>
   );
 }

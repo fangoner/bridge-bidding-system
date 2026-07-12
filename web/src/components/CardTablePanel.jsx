@@ -32,7 +32,6 @@ function CardTablePanel({
   onDeal,
   onHandCardClick,
   onManualPlay,
-  onStudyModeChange,
   addBid,
   startBidding,
 }) {
@@ -48,7 +47,6 @@ function CardTablePanel({
     showOpponentHands, setShowOpponentHands,
     positionRoles,
     readonlyMode, mode,
-    studyMode,
     imageOpeningLead,
     dealMode,
   } = useGame()
@@ -315,13 +313,6 @@ function CardTablePanel({
               control={<Checkbox checked={showPlayedCards} onChange={(e) => setShowPlayedCards(e.target.checked)} size="small" />}
               label="显示已出"
               sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
-            />
-          )}
-          {showPlayPanel && (
-            <FormControlLabel
-              control={<Checkbox checked={studyMode} onChange={(e) => onStudyModeChange(e.target.checked)} size="small" />}
-              label="研究模式"
-              sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem', color: studyMode ? '#e65100' : undefined, fontWeight: studyMode ? 700 : undefined }, mr: 0, height: 24 }}
             />
           )}
         </Box>

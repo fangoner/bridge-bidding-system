@@ -30,7 +30,6 @@ export default function MainTableArea({
   onDeal,
   onHandCardClick,
   onManualPlay,
-  onStudyModeChange,
   addBid,
   startBidding,
   // 叫牌面板业务回调
@@ -81,7 +80,6 @@ export default function MainTableArea({
         onDeal={onDeal}
         onHandCardClick={onHandCardClick}
         onManualPlay={onManualPlay}
-        onStudyModeChange={onStudyModeChange}
         addBid={addBid}
         startBidding={startBidding}
       />

@@ -71,7 +71,6 @@ export function GameProvider({ children }) {
   const [imageOpeningLead, setImageOpeningLead] = useState(null)
   const [mode, setMode] = useState('practice') // 'practice' | 'simulated'
   const [readonlyMode, setReadonlyMode] = useState(false)
-  const [studyMode, setStudyMode] = useState(false)
 
   const value = useMemo(
     () => ({
@@ -104,7 +103,6 @@ export function GameProvider({ children }) {
       imageOpeningLead, setImageOpeningLead,
       mode, setMode,
       readonlyMode, setReadonlyMode,
-      studyMode, setStudyMode,
     }),
     [
       hands, loading, aiThinking, error, warning,
@@ -114,7 +112,7 @@ export function GameProvider({ children }) {
       fallbackModel, playModel,
       apiStatus, currentRecordId, showDraftBanner,
       customDealOpen, imageDealOpen, customDealText, imagePath, imageFile,
-      imageOpeningLead, mode, readonlyMode, studyMode,
+      imageOpeningLead, mode, readonlyMode,
     ],
   )
 
