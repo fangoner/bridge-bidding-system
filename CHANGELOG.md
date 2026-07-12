@@ -56,6 +56,26 @@
 
 ---
 
+### UI改进：全手动角色管理 + 手牌选牌面板 + 出牌面板可拖拽
+
+**背景**: 去掉所有位置角色连锁逻辑，始终支持独立切换；手牌输入从键盘改为两排选牌面板；出牌面板支持拖拽到任意位置。
+
+**改进**:
+- `handlePositionRoleChange` 全部移除连锁逻辑：叫牌阶段没有humanCount限制(0/1/3)，打牌阶段没有庄家/明手绑定、没有防守方约束
+- `handleStudyModeChange` 移除（研究模式功能全删）
+- 从GameContext移除 `studyMode` state，所有引用清除
+- ToggleButton disabled条件简化：打牌阶段始终可切换（仅叫牌开始时锁）
+- `doPlayInit` 删除庄家/明手角色同步
+- 手牌输入保留TextField（键盘输入）+ 新增"选牌"按钮
+- 共享选牌面板（居中半透明遮罩，380px宽）：第一排选花色，第二排选数字，选满13张确认
+- 出牌面板改为 `position: fixed` + `ReactDOM.createPortal` 到 `document.body`，脱离容器边界限制
+- 标题栏拖拽（`mousedown` + `document`级 `mousemove/mouseup`），`zIndex: 9999`
+- 新出牌人时面板位置重置到底部居中
+
+**修改文件**: `web/src/App.jsx`, `web/src/components/CardTable.jsx`, `web/src/components/CardTablePanel.jsx`, `web/src/components/MainTableArea.jsx`, `web/src/context/GameContext.jsx`
+
+---
+
 ## 2026-07-11
 
 ### αμ引擎关键修复：Min节点墩数未更新 + rank_bonus方向反转 + 前端显示墩数
