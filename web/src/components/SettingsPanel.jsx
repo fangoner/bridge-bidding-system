@@ -169,7 +169,7 @@ function SettingsPanel({
               parsed={playParsed}
               onModelChange={onPlayModelChange}
               onReasoningChange={onPlayReasoningChange}
-              disabled={playEngine !== 'llm' && playEngine !== 'tiered'}
+              disabled={playEngine !== 'llm' && playEngine !== 'tiered' && playEngine !== 'alphamu_llm'}
               models={visibleModels}
             />
 
@@ -186,6 +186,7 @@ function SettingsPanel({
                 <MenuItem value="perfect" disabled={mode !== 'practice'} title={mode !== 'practice' ? '完美DD需要四家完整手牌，仅发牌练习模式可用' : ''}>完美DD (全知)</MenuItem>
                 <MenuItem value="tiered">Tiered 分层</MenuItem>
                 <MenuItem value="alphamu">αμ 搜索</MenuItem>
+                <MenuItem value="alphamu_llm">αμ+LLM策略审查</MenuItem>
               </Select>
             </FormControl>
             {playEngine === 'dd' && (
@@ -216,6 +217,15 @@ function SettingsPanel({
               </>
             )}
             {playEngine === 'alphamu' && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>粒子</Typography>
+                <input type="range" min={alphaMuParticlesRange.min} max={alphaMuParticlesRange.max} step={10}
+                  value={alphaMuParticles} onChange={(e) => handleParticleChange('alphaMu', Number(e.target.value))}
+                  style={{ width: 72, height: 16 }} />
+                <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 600, minWidth: 24 }}>{alphaMuParticles}</Typography>
+              </Box>
+            )}
+            {playEngine === 'alphamu_llm' && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>粒子</Typography>
                 <input type="range" min={alphaMuParticlesRange.min} max={alphaMuParticlesRange.max} step={10}

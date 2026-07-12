@@ -108,7 +108,7 @@ function PlayDetailPanel({
     const tieredPhaseLabel = TIERED_PHASE_LABELS[fullOutput.tiered_phase] || ''
 
     // 输出模式：显示 fullOutput 中所有有效字段（排除内部/已渲染的）
-    const SKIP_KEYS = ['mcts_stats', 'tiered_phase', 'tiered_dd_fallback', 'tiered_mcts_fallback', 'validation_warning']
+    const SKIP_KEYS = ['mcts_stats', 'tiered_phase', 'tiered_dd_fallback', 'tiered_mcts_fallback', 'validation_warning', 'llm_review']
     const FIELD_COLORS = ['#e65100', 'text.primary', '#2e7d32', '#1976d2', '#37474f', '#1565c0']
     const fields = Object.keys(fullOutput)
       .filter(k => !SKIP_KEYS.includes(k) && fullOutput[k] != null && fullOutput[k] !== '')
@@ -155,6 +155,21 @@ function PlayDetailPanel({
           ) : record.used_engine === 'alphamu' ? (
             <Typography variant="caption" sx={{ color: '#7b1fa2', fontSize: '0.7rem', fontWeight: 500 }}>
               αμ
+            </Typography>
+          ) : record.used_engine === 'alphamu_llm' ? (
+            <Typography variant="caption" sx={{ color: '#6a1b9a', fontSize: '0.7rem', fontWeight: 500 }}>
+              {(() => {
+                const MODEL_LABELS = {
+                  'deepseek-v4-flash': 'V4-Flash',
+                  'deepseek-v4-pro': 'V4-Pro',
+                  'doubao-seed-2.1-pro': '豆包Pro',
+                  'doubao-seed-2.1-turbo': '豆包Turbo',
+                }
+                const base = (record.used_model || '').replace('::reasoning', '')
+                const label = MODEL_LABELS[base] || base || 'LLM'
+                const isReasoning = (record.used_model || '').includes('::reasoning')
+                return `αμ+${label}${isReasoning ? '·思考' : '·快答'}`
+              })()}
             </Typography>
           ) : record.used_engine === 'tiered' ? (
             <Typography variant="caption" sx={{ color: '#e65100', fontSize: '0.7rem', fontWeight: 500 }}>
@@ -232,7 +247,7 @@ function PlayDetailPanel({
                 </Box>
               )
             })}
-            {(record.used_engine === 'mcts' || (record.used_engine || '') === 'dd' || record.used_engine === 'tiered' || record.used_engine === 'perfect' || record.used_engine === 'alphamu') && (() => {
+            {(record.used_engine === 'mcts' || (record.used_engine || '') === 'dd' || record.used_engine === 'tiered' || record.used_engine === 'perfect' || record.used_engine === 'alphamu' || record.used_engine === 'alphamu_llm') && (() => {
               try {
                 const mctsRaw = fullOutput.mcts_stats
                 if (!mctsRaw) { console.log('[Stats] no mcts_stats'); return null }
@@ -275,9 +290,9 @@ function PlayDetailPanel({
                             transition: 'width 0.3s',
                           }} />
                         </Box>
-                        <Typography variant="caption" sx={{ minWidth: 72, fontSize: '0.65rem', color: colorMuted, textAlign: 'right' }}>
+                        <Typography variant="caption" sx={{ minWidth: 110, fontSize: '0.65rem', color: colorMuted, textAlign: 'right' }}>
                           {isAlphaMu
-                            ? `${((c.success_rate || 0) * 100).toFixed(0)}% · ${c.success_count || 0}/${c.total_useful || '?'} · front${c.front_size || 1}`
+                            ? `${((c.success_rate || 0) * 100).toFixed(0)}% · ${c.avg_tricks ?? '?'}墩 · ${c.success_count || 0}/${c.total_useful || '?'} · front${c.front_size || 1}`
                             : isDD
                               ? `${c.avg_tricks}墩 [${c.min_tricks}-${c.max_tricks}]`
                               : `${c.visits}次 · ${c.avg_tricks}墩`
@@ -289,29 +304,69 @@ function PlayDetailPanel({
                 )
               } catch (e) { console.error('[Stats] viz error:', e); return null }
             })()}
+            {record.used_engine === 'alphamu_llm' && (() => {
+              try {
+                const reviewRaw = fullOutput.llm_review
+                if (!reviewRaw) return null
+                const review = typeof reviewRaw === 'string' ? JSON.parse(reviewRaw) : reviewRaw
+                const groupIdx = review.group || 0
+                const reviewCard = review.card || ''
+                const reason = review.reason || ''
+                const plan = review.plan || ''
+                const planValid = review.plan_valid === true
+                const planInvalid = review.plan_valid === false
+                const hasGroup = groupIdx > 0 && Boolean(reviewCard)
+                let labelColor = '#757575'
+                let labelText = '采纳αμ选择'
+                if (hasGroup) {
+                  labelColor = '#6a1b9a'
+                  labelText = `选组${groupIdx}出${reviewCard}（${reason}）`
+                } else if (planValid) {
+                  labelColor = '#1565c0'
+                  labelText = `计划有效: ${plan.length > 48 ? plan.slice(0, 48) + '...' : plan}`
+                } else if (planInvalid) {
+                  labelColor = '#e65100'
+                  labelText = `计划无效: ${plan.length > 48 ? plan.slice(0, 48) + '...' : plan}`
+                }
+                return (
+                  <Box sx={{ mt: 0.5, p: 0.5, borderRadius: 0.5, bgcolor: isDark ? 'rgba(255,255,255,0.04)' : '#f5f5f5' }}>
+                    <Typography variant="caption" sx={{ fontSize: '0.65rem', color: labelColor, fontWeight: 500, display: 'block' }}>
+                      {labelText}
+                    </Typography>
+                  </Box>
+                )
+              } catch (e) { return null }
+            })()}
           </>
         ) : (
           // 输入模式：显示传给AI的完整提示词
-          prompt ? (
-            <Box>
-              <Typography variant="caption" sx={{ display: 'block', color: colorMuted, fontSize: '0.7rem', mb: 0.25 }}>
-                提示词长度: {prompt.length.toLocaleString()} 字符
-                &nbsp;·&nbsp;约 {(estimateTokens(prompt)).toLocaleString()} token
-              </Typography>
-              <Box component="pre" sx={{ 
-                p: 0.75, background: bgCode, borderRadius: 1,
-                fontSize: '0.7rem', lineHeight: 1.4,
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                border: '1px solid #e9ecef', maxHeight: '400px', overflow: 'auto',
-              }}>
-                {prompt}
+          (() => {
+            // LLM打牌的提示词在 llm_review.llm_prompt 中
+            const reviewRaw = fullOutput.llm_review
+            const review = reviewRaw && typeof reviewRaw === 'string' ? JSON.parse(reviewRaw) : reviewRaw
+            const llmPrompt = review ? review.llm_prompt : null
+            const displayPrompt = llmPrompt || prompt
+            return displayPrompt ? (
+              <Box>
+                <Typography variant="caption" sx={{ display: 'block', color: colorMuted, fontSize: '0.7rem', mb: 0.25 }}>
+                  提示词长度: {displayPrompt.length.toLocaleString()} 字符
+                  &nbsp;·&nbsp;约 {(estimateTokens(displayPrompt)).toLocaleString()} token
+                </Typography>
+                <Box component="pre" sx={{ 
+                  p: 0.75, background: bgCode, borderRadius: 1,
+                  fontSize: '0.7rem', lineHeight: 1.4,
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  border: '1px solid #e9ecef', maxHeight: '400px', overflow: 'auto',
+                }}>
+                  {displayPrompt}
+                </Box>
               </Box>
-            </Box>
-          ) : (
-            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
-              无输入数据
-            </Typography>
-          )
+            ) : (
+              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+                无输入数据
+              </Typography>
+            )
+          })()
         )}
       </Box>
     )

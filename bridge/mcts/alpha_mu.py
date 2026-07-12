@@ -242,12 +242,14 @@ class AlphaMuSearch:
         # 内部状态（search 时设置）
         self._goal: int = 0          # our_side 需要达到的赢墩数
         self._is_our_side_declarer: bool = True
+        self._debug_dds_log: List[str] = []  # DDS诊断日志（每次search重置）
 
     def search(self, state: PlayState) -> dict:
         self._nodes_searched = 0
         self._dds_calls = 0
         self._err_stats = {k: 0 for k in self._err_stats}
         self._err_samples = {}
+        self._debug_dds_log = []
 
         perspective = state.current_player
         actual_turn = state.current_player
@@ -258,20 +260,25 @@ class AlphaMuSearch:
             perspective = declarer
         trump = state.contract.suit
         tricks_needed = state.contract.tricks_needed
+        contract_str = f"{state.contract.level}{state.contract.suit}"
 
         import os
         _debug_path = os.path.join(os.path.dirname(__file__), "..", "..", "alpha_mu_debug.log")
+        _trick_cards_str = [(p, str(c)) for p, c in state.current_trick.cards]
         with open(_debug_path, "w", encoding="utf-8") as _f:
             _f.write(f"[αμ ROOT] perspective={perspective}, actual_turn={actual_turn}, declarer={declarer}, dummy={dummy}\n")
+            _f.write(f"contract={contract_str}, tricks_needed={tricks_needed}\n")
             _f.write(f"decl_tricks={state.declarer_tricks}, def_tricks={state.defender_tricks}\n")
             _f.write(f"hand_sizes={ {p: len(h) for p, h in state.hands.items()} }\n")
-            _f.write(f"current_trick_cards={len(state.current_trick.cards)}\n")
+            _f.write(f"current_trick_cards={len(state.current_trick.cards)}, trick={_trick_cards_str}\n")
+            _f.write(f"played_cards={[str(c) for trick in state.tricks for _, c in trick.cards]}\n")
             for p in ["北", "东", "南", "西"]:
                 _f.write(f"  {p}: {[str(c) for c in state.hands.get(p, [])]}\n")
         print(f"[αμ] perspective={perspective}, actual_turn={actual_turn}, declarer={declarer}, dummy={dummy}, "
+              f"contract={contract_str}, tricks_needed={tricks_needed}, "
               f"decl_tricks={state.declarer_tricks}, def_tricks={state.defender_tricks}, "
               f"hand_sizes={ {p: len(h) for p, h in state.hands.items()} }, "
-              f"current_trick_cards={len(state.current_trick.cards)}")
+              f"current_trick_cards={len(state.current_trick.cards)}, trick={_trick_cards_str}")
 
         playable_raw = state.get_playable_cards(actual_turn)
         # ── 排序：将牌优先，确保小将牌不会因超时排到末尾被截断 ──
@@ -453,6 +460,13 @@ class AlphaMuSearch:
         err_samples_str = "; ".join(
             f"[{k}] {v[:200]}" for k, v in self._err_samples.items()
         )
+
+        # 将DDS诊断日志追加到debug文件
+        if self._debug_dds_log:
+            with open(_debug_path, "a", encoding="utf-8") as _f:
+                _f.write(f"\n[DDS DIAGNOSTIC] {len(self._debug_dds_log)} samples:\n")
+                for line in self._debug_dds_log:
+                    _f.write(f"  {line}\n")
 
         return {
             "card": best_move,
@@ -865,6 +879,15 @@ class AlphaMuSearch:
                 self._err_stats["path_B_duplicates"] += 1
                 return 0
 
+            # 墩完成时更新墩数（solve_board评估的是剩余墩，不含当前墩）
+            if len(new_trick_cards) == 4:
+                from bridge.mcts.state_utils import trick_winner
+                winning_pos = trick_winner(new_trick_cards, trump)
+                if winning_pos in (declarer, dummy):
+                    decl_tricks += 1
+                else:
+                    def_tricks += 1
+
             pbn = _hands_to_pbn(sim_hands)
             deal = Deal(pbn)
             deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
@@ -950,6 +973,17 @@ class AlphaMuSearch:
             else:
                 total_decl_tricks = decl_tricks + (remaining_tricks - side_tricks)
             self._err_stats["path_D_ok"] += 1
+            # 诊断日志：前5次调用记录详细信息
+            if len(self._debug_dds_log) < 5:
+                log_hands = {p: [str(c) for c in h] for p, h in sim_hands.items()}
+                self._debug_dds_log.append(
+                    f"[leaf] decl_tricks={decl_tricks}, def_tricks={def_tricks}, "
+                    f"trick_cards={[(p, str(c)) for p, c in trick_cards]}, "
+                    f"new_current={new_current}, deal.first={deal.first}, "
+                    f"deal.curplayer={deal.curplayer}, curplayer_is_declarer={curplayer_is_declarer}, "
+                    f"side_tricks={side_tricks}, remaining={remaining_tricks}, "
+                    f"total_decl={total_decl_tricks}, hands={log_hands}"
+                )
             return total_decl_tricks
         except Exception as e:
             self._err_stats["path_E_exception"] += 1
@@ -1023,11 +1057,12 @@ class AlphaMuSearch:
 
     @staticmethod
     def _rank_bonus(card: Card) -> float:
-        """平局 tie-break，bonus 足够小不覆盖真实差异。"""
+        """平局 tie-break，bonus 足够小不覆盖真实差异。
+        小牌 bonus 更大（保留大牌结构/进张），与 DD 引擎 _compare_candidates 一致。"""
         rank_values = {
-            'A': 0.009, 'K': 0.008, 'Q': 0.007, 'J': 0.006, 'T': 0.005,
-            '9': 0.004, '8': 0.003, '7': 0.002, '6': 0.001,
-            '5': 0.0009, '4': 0.0008, '3': 0.0007, '2': 0.0006,
+            '2': 0.009, '3': 0.008, '4': 0.007, '5': 0.006, '6': 0.005,
+            '7': 0.004, '8': 0.003, '9': 0.002, 'T': 0.001,
+            'J': 0.0009, 'Q': 0.0008, 'K': 0.0007, 'A': 0.0006,
         }
         return rank_values.get(card.rank, 0.0)
 

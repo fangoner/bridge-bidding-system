@@ -30,8 +30,8 @@ class PlayService:
     def __init__(self, llm_client):
         self.llm_client = llm_client
         self.engine = PlayEngine()
-        # 做庄计划：庄家和明手之间共享传递
-        self.declarer_plan = ""
+        # 做庄计划：庄家和明手之间共享传递（结构化）
+        self.declarer_plan = self._empty_plan()
         # 防守计划：每个防守者各自维护，key=位置
         self.defender_plans = {}
         # 粒子数设置（按引擎分别可调）
@@ -84,7 +84,50 @@ class PlayService:
             except Exception as e:
                 print(f"[PlayService] αμ 搜索器初始化失败: {e}")
                 self.alpha_mu_search = None
-    
+
+    @staticmethod
+    def _empty_plan() -> dict:
+        """空计划结构。"""
+        return {
+            "steps": [],
+            "created_at_trick": 0,
+            "last_validated_trick": 0,
+            "raw_text": "",
+        }
+
+    def _format_plan_for_prompt(self, plan) -> str:
+        """把结构化plan格式化为prompt可读文本。"""
+        if not plan or not isinstance(plan, dict):
+            return ""
+        steps = plan.get("steps", [])
+        raw = plan.get("raw_text", "")
+        if not steps and not raw:
+            return ""
+        parts = []
+        if raw:
+            parts.append(raw)
+        if steps:
+            parts.append("步骤:")
+            for i, s in enumerate(steps, 1):
+                action = s.get("action", "")
+                pre = s.get("precondition", "")
+                done = "✓" if s.get("completed") else "○"
+                line = f"  {i}. [{done}] {action}"
+                if pre:
+                    line += f" (前提: {pre})"
+                parts.append(line)
+        return "\n".join(parts)
+
+    def _is_plan_empty(self, plan) -> bool:
+        """判断plan是否为空。"""
+        if not plan:
+            return True
+        if isinstance(plan, str):
+            return not plan.strip()
+        if isinstance(plan, dict):
+            return not plan.get("steps") and not plan.get("raw_text", "").strip()
+        return True
+
     def initialize(
         self,
         hands: Dict[str, dict],
@@ -104,7 +147,7 @@ class PlayService:
         contract.redoubled = redoubled
 
         # 重置做庄和防守计划
-        self.declarer_plan = ""
+        self.declarer_plan = self._empty_plan()
         self.defender_plans = {}
         # 缓存叫牌约束（供MCTS采样器使用）
         self.bid_history = bid_history
@@ -171,11 +214,11 @@ class PlayService:
                     self.defender_plans.pop(undone_position, None)
                 else:
                     # 庄家方撤销：丢弃做庄进度
-                    self.declarer_plan = ""
-            
+                    self.declarer_plan = self._empty_plan()
+
             # 如果墩数回退（从已完成墩恢复），清空所有计划
             if tricks_after < tricks_before:
-                self.declarer_plan = ""
+                self.declarer_plan = self._empty_plan()
                 self.defender_plans.clear()
         
         return success, message
@@ -192,6 +235,7 @@ class PlayService:
                           use_tiered: bool = False,
                           use_perfect: bool = False,
                           use_alphamu: bool = False,
+                          use_alphamu_llm: bool = False,
                           dd_samples: int = None) -> Dict[str, Any]:
         state = self.engine.get_state()
         if not state:
@@ -228,6 +272,10 @@ class PlayService:
         if use_alphamu:
             return await asyncio.to_thread(self._alphamu_full_play, state)
 
+        # === αμ + LLM策略审查分支 ===
+        if use_alphamu_llm:
+            return await asyncio.to_thread(self._alphamu_llm_play, state, use_reasoning)
+
         # === MCTS 引擎分支 ===
         if use_mcts:
             return await asyncio.to_thread(self._mcts_play, state)
@@ -248,6 +296,7 @@ class PlayService:
             return {"error": "没有可出的牌"}
 
         hands_info = self._format_hands_info(state)
+        missing_info = self._format_missing_key_cards(state)
         completed_tricks = self._format_completed_tricks(state)
         current_trick = self._format_current_trick(state)
         played_cards_info = self._format_played_cards_info(state)
@@ -298,9 +347,12 @@ class PlayService:
 
         # 获取上一轮计划
         if is_declarer_side:
-            previous_plan = f"## 上一轮做庄进度与调整\n{self.declarer_plan}" if self.declarer_plan else "（首轮出牌，尚无做庄计划）"
+            plan_text = self._format_plan_for_prompt(self.declarer_plan)
+            previous_plan = f"## 上一轮做庄进度与调整\n{plan_text}" if plan_text else "（首轮出牌，尚无做庄计划）"
         else:
             prev = self.defender_plans.get(current_player, "")
+            if isinstance(prev, dict):
+                prev = self._format_plan_for_prompt(prev)
             previous_plan = f"## 上一轮防守计划\n{prev}" if prev else "（首次出牌，尚无防守计划）"
 
         # 根据角色选择不同提示词模板
@@ -375,10 +427,12 @@ class PlayService:
             # 保存候选对比作为下一轮计划参考
             candidate_analysis = result.get("候选对比", "")
             if isinstance(candidate_analysis, str) and candidate_analysis:
+                plan_obj = self._empty_plan()
+                plan_obj["raw_text"] = candidate_analysis
                 if is_declarer_side:
-                    self.declarer_plan = candidate_analysis
+                    self.declarer_plan = plan_obj
                 else:
-                    self.defender_plans[current_player] = candidate_analysis
+                    self.defender_plans[current_player] = plan_obj
 
             # 防御：将 full_output 中所有非字符串值转为 JSON 字符串
             safe_output = {}
@@ -810,6 +864,75 @@ class PlayService:
             lines.append(" ".join(parts))
         return "\n".join(lines) if lines else "无约束（随机采样）"
 
+    def _format_missing_key_cards(self, state: PlayState) -> str:
+        """列出两家手牌中都不出现的关键大牌，提醒LLM这些牌在对方手中。"""
+        declarer = state.contract.declarer
+        dummy = state.dummy
+        if not dummy:
+            return ""
+        visible_cards = set()
+        for pos in [declarer, dummy]:
+            for c in state.hands.get(pos, []):
+                visible_cards.add(str(c))
+        all_key = ["♠A", "♠K", "♠Q", "♠J", "♠T",
+                    "♥A", "♥K", "♥Q", "♥J", "♥T",
+                    "♦A", "♦K", "♦Q", "♦J", "♦T",
+                    "♣A", "♣K", "♣Q", "♣J", "♣T"]
+        missing = [c for c in all_key if c not in visible_cards]
+        if missing:
+            return f"未出现的关键大牌（在对方手中）: {' '.join(missing)}"
+        return ""
+
+    def _format_trump_analysis(self, state: PlayState) -> str:
+        """程序直接计算将牌统计，避免LLM数错。"""
+        trump = state.contract.suit
+        if not trump or trump == "NT":
+            return "无将定约，无将牌输墩。"
+
+        declarer = state.contract.declarer
+        dummy = state.dummy
+        if not dummy:
+            return ""
+
+        decl_trumps = [c for c in state.hands.get(declarer, []) if c.suit == trump]
+        dummy_trumps = [c for c in state.hands.get(dummy, []) if c.suit == trump]
+
+        played_trumps = []
+        for trick in state.tricks:
+            for pos, card in trick.cards:
+                if card.suit == trump:
+                    played_trumps.append(card)
+        for pos, card in state.current_trick.cards:
+            if card.suit == trump:
+                played_trumps.append(card)
+
+        decl_count = len(decl_trumps)
+        dummy_count = len(dummy_trumps)
+        played_count = len(played_trumps)
+        our_count = decl_count + dummy_count
+        opp_count = 13 - our_count - played_count
+
+        all_ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"]
+        known = set(str(c) for c in decl_trumps + dummy_trumps + played_trumps)
+        opp_cards = [f"{trump}{r}" for r in all_ranks if f"{trump}{r}" not in known]
+        opp_honors = [c for c in opp_cards if c[-1] in ("A", "K", "Q", "J")]
+
+        lines = [
+            f"将牌: {trump}",
+            f"庄家({declarer})将牌({decl_count}张): {' '.join(str(c) for c in decl_trumps) if decl_trumps else '无'}",
+            f"明手({dummy})将牌({dummy_count}张): {' '.join(str(c) for c in dummy_trumps) if dummy_trumps else '无'}",
+            f"庄家方现有将牌合计: {our_count}张",
+            f"已出过的将牌({played_count}张): {' '.join(str(c) for c in played_trumps) if played_trumps else '无'}",
+            f"对方现有将牌: {opp_count}张 (= 13 - {our_count} - {played_count})",
+            f"对方将牌具体牌张: {' '.join(opp_cards) if opp_cards else '无'}",
+        ]
+        if opp_honors:
+            lines.append(f"对方将牌大牌(A/K/Q/J): {' '.join(opp_honors)} → {len(opp_honors)}个潜在将牌输墩")
+        else:
+            lines.append("对方将牌无大牌(A/K/Q/J) → 无将牌输墩")
+
+        return "\n".join(lines)
+
     def _parse_constraints_from_meanings(self, meanings_text: str) -> Dict[str, BidConstraint]:
         """从叫牌含义文本中解析约束信息（复用叫牌阶段LLM已输出信息，无需二次LLM调用）。
 
@@ -1109,6 +1232,828 @@ class PlayService:
         except Exception as e:
             print(f"[αμ-full] 搜索异常: {e}，回退 DD")
             return self._dd_play(state)
+
+    def _alphamu_llm_play(self, state: PlayState, use_reasoning: bool = False) -> Dict[str, Any]:
+        """αμ搜索 + 分组LLM选组打牌。
+
+        αμ处理常规局面；当多个DDS等价组成功率接近且αμ分不清时，
+        LLM按组分析战术并选组。LLM打牌计划跨墩传递。
+
+        Step 1: αμ搜索
+        Step 2: 按 best_vector 分组（DDS等价=同组）
+          - 不满足触发条件 → 保留αμ
+          - 满足触发条件 → LLM分析每组战术，选择一组
+        Step 3: 应用LLM决策
+          - 组内DDS等价：当前玩家自己出组中最大，明手出组中最小
+          - 保存plan跨墩传递"""
+        # Step 1: αμ搜索
+        print(f"[αμ+LLM] use_reasoning={use_reasoning}, model={self.llm_client.model}")
+        alpha_result = self._alphamu_full_play(state)
+        full_output = alpha_result.get("full_output", {})
+        mcts_stats = full_output.get("mcts_stats", {})
+        candidates = mcts_stats.get("candidates", [])
+
+        # Step 2: 按 best_vector 分组
+        trump_suit = state.contract.suit if state.contract.suit != "NT" else ""
+        groups = self._group_candidates_by_vector(candidates, trump_suit=trump_suit)
+        if not self._should_trigger_llm(groups, candidates):
+            return alpha_result
+
+        # 仅庄家方触发
+        declarer = state.contract.declarer
+        dummy = state.dummy
+        if state.current_player not in (declarer, dummy):
+            return alpha_result
+
+        # 检测plan是否失效，失效则清空（强制LLM重新制定）
+        if self._check_plan_invalidation(state):
+            print(f"[αμ+LLM] 检测到plan失效，清空旧计划")
+            self.declarer_plan = self._empty_plan()
+
+        # Step 3: LLM分组审查
+        alpha_card_str = full_output.get("推荐出牌", "")
+        review = self._llm_group_review(state, candidates, groups,
+                                         alpha_card=alpha_card_str,
+                                         previous_plan=self._format_plan_for_prompt(self.declarer_plan))
+        trick_number = len(state.tricks) + 1
+        if review.get("plan"):
+            self.declarer_plan = self._build_plan_from_review(review, trick_number)
+            plan_preview = self._format_plan_for_prompt(self.declarer_plan)[:60]
+            print(f"[αμ+LLM] 打牌计划已{'确认' if review.get('plan_valid') else '制定'}: {plan_preview}...")
+        elif review.get("plan_valid") is False and not self._is_plan_empty(self.declarer_plan):
+            self.declarer_plan = self._empty_plan()
+            print(f"[αμ+LLM] LLM认为现有计划无效，清空")
+
+        # 处理LLM选组
+        chosen_group_idx = review.get("group")
+        chosen_group = None
+        # LLM输出1-based，转0-based
+        if isinstance(chosen_group_idx, (int, float)) and not isinstance(chosen_group_idx, bool):
+            idx = int(chosen_group_idx) - 1
+            if 0 <= idx < len(groups):
+                chosen_group = groups[idx]
+
+        if chosen_group:
+            # 按规则从组内选牌
+            playable = self.engine.get_playable_cards()
+            playable_strs = {str(c): c for c in playable}
+            group_playable = [c for c in chosen_group["cards"] if c.get("card", "") in playable_strs]
+            if group_playable:
+                # 当前玩家是明手 → 选最小；否则选最大
+                is_dummy_turn = (state.current_player == dummy)
+                if is_dummy_turn:
+                    target_card_str = min(group_playable, key=lambda c: self._extract_rank(c.get("card", "")))["card"]
+                else:
+                    target_card_str = max(group_playable, key=lambda c: self._extract_rank(c.get("card", "")))["card"]
+
+                target = playable_strs.get(target_card_str)
+                if target:
+                    target, validation = self._validate_and_fallback(target, playable, state)
+                    alpha_result["card"] = target.to_dict()
+                    group_desc = ", ".join(c.get("card", "") for c in chosen_group["cards"])
+                    group_reason = review.get("reason", f"选择组{chosen_group_idx}（{group_desc}）")
+                    review_reasoning = f"[αμ+LLM] 选组{chosen_group_idx}出{target_card_str}（{group_reason}）"
+                    plan_desc = review.get("plan", "")
+                    if plan_desc:
+                        review_reasoning += f"（计划: {plan_desc[:60]}...）"
+                    alpha_result["reasoning"] = f"{review_reasoning}\n{alpha_result.get('reasoning', '')}"
+                    alpha_result["full_output"]["推荐出牌"] = target_card_str
+                    alpha_result["full_output"]["核心逻辑"] = review_reasoning
+                    review["card"] = target_card_str
+                    alpha_result["full_output"]["llm_review"] = review
+                    return alpha_result
+
+        # 回退：LLM选组失败，保留αμ
+        print(f"[αμ+LLM] LLM选组失败(idx={chosen_group_idx})，保留αμ选择")
+        if review.get("plan"):
+            self.declarer_plan = self._build_plan_from_review(review, trick_number)
+        alpha_result["full_output"]["llm_review"] = review
+        return alpha_result
+
+    def _build_plan_from_review(self, review: dict, trick_number: int) -> dict:
+        """从LLM审查结果构建结构化plan。
+
+        LLM输出的plan可能是字符串或含steps的结构。
+        统一转为结构化dict存储。
+        """
+        plan = self._empty_plan()
+        plan["created_at_trick"] = trick_number
+        plan["last_validated_trick"] = trick_number
+
+        raw = review.get("plan", "")
+        steps = review.get("steps", [])
+
+        if isinstance(raw, str) and raw:
+            plan["raw_text"] = raw
+        if isinstance(steps, list) and steps:
+            plan["steps"] = steps
+        elif isinstance(raw, str) and raw:
+            # 没有结构化steps，尝试简单解析（按句号/分号分割）
+            sentences = [s.strip() for s in raw.replace("；", "。").split("。") if s.strip()]
+            plan["steps"] = [
+                {"step": i + 1, "action": s, "precondition": "", "completed": False}
+                for i, s in enumerate(sentences[:6])  # 最多6步
+            ]
+        return plan
+
+    def _check_plan_invalidation(self, state: PlayState) -> bool:
+        """检测当前plan是否失效。
+
+        失效条件：
+        1. plan中提到的大牌已出（如"飞♠K"但♠K已出）
+        2. plan创建后已过太多墩（>4墩未更新）
+        3. 步骤前提条件明显不满足
+
+        返回True表示plan失效，需要重新制定。
+        """
+        plan = self.declarer_plan
+        if self._is_plan_empty(plan):
+            return False
+
+        if not isinstance(plan, dict):
+            return False
+
+        trick_number = len(state.tricks) + 1
+        created_at = plan.get("created_at_trick", 0)
+        if created_at > 0 and trick_number - created_at > 4:
+            return True
+
+        steps = plan.get("steps", [])
+        if not steps:
+            return False
+
+        played_cards = set()
+        for trick in state.tricks:
+            for pos, card in trick.cards:
+                played_cards.add(str(card))
+
+        for s in steps:
+            if s.get("completed"):
+                continue
+            action = s.get("action", "")
+            precondition = s.get("precondition", "")
+
+            check_text = action + " " + precondition
+            key_cards = ["♠A", "♠K", "♠Q", "♠J", "♠T",
+                         "♥A", "♥K", "♥Q", "♥J", "♥T",
+                         "♦A", "♦K", "♦Q", "♦J", "♦T",
+                         "♣A", "♣K", "♣Q", "♣J", "♣T"]
+            for card in key_cards:
+                if card in check_text and card in played_cards:
+                    return True
+
+        return False
+
+    def _should_trigger_llm(self, groups: list, candidates: list = None) -> bool:
+        """判断是否需要触发LLM分组审查。
+
+        条件：截断后的vector组数≥2（有选择空间）。
+        截断逻辑已在_group_candidates_by_vector中完成：
+        按成功率降序排序，遇到第一个≥15%的差距即截断，
+        排除较低及以下的组。这样即使所有组成功率都低，
+        只要彼此差距<15%，仍会保留并触发LLM——
+        因为其中可能包含唯一成局线路。
+        """
+        return len(groups) >= 2
+
+    def _extract_rank(self, card_str: str) -> int:
+        """从牌张代码中提取数字等级。♠2→2, ♥J→11, ♣Q→12, ♦K→13, ♠A→14"""
+        rank_str = card_str[1:] if len(card_str) >= 2 else ""
+        rank_map = {"2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7,
+                    "8": 8, "9": 9, "T": 10, "10": 10, "J": 11, "Q": 12, "K": 13, "A": 14}
+        return rank_map.get(rank_str, 0)
+
+    def _group_candidates_by_vector(self, candidates: list,
+                                     trump_suit: str = "") -> list:
+        """按best_vector分组：vector相同=DDS等价=一组。
+
+        充分利用αμ搜索结果。连续张vector必然相同（自动覆盖），
+        非连续但vector相同（如2,3,5）也合并为一组。
+        vector缺失时退化为连续张分组（兼容边界）。
+
+        在vector组内，进一步按区间[2-7]/[8-10]/[J-A]、跨区间连续性、
+        将牌/非将牌细分。
+
+        阈值：任何success_rate>0的候选牌都参与分组（任何机会都保留）。
+        截断：分组后按成功率降序排序，遇到第一个≥15%的差距即截断，
+        排除较低及以下的组。
+
+        返回: [{"cards": [...], "success_rate": float, "group_id": int, "best_vector": str}, ...]
+        """
+        above = [c for c in candidates if c.get("success_rate", 0) > 0]
+        if len(above) < 2:
+            return []
+
+        by_vector = {}
+        no_vector = []
+        for c in above:
+            vec = c.get("best_vector", "")
+            if vec and vec != "∅":
+                by_vector.setdefault(vec, []).append(c)
+            else:
+                no_vector.append(c)
+
+        result = []
+        for vec, cards in by_vector.items():
+            subgroups = self._split_by_rank_tier(cards)
+            for sg in subgroups:
+                result.append({
+                    "cards": sg,
+                    "success_rate": max(c.get("success_rate", 0) for c in sg),
+                    "best_vector": vec,
+                    "tactic": self._classify_tactic(sg, trump_suit=trump_suit),
+                })
+
+        if no_vector:
+            for group in self._raw_continuous_groups(no_vector):
+                group["tactic"] = self._classify_tactic(group.get("cards", []), trump_suit=trump_suit)
+                result.append(group)
+
+        result.sort(key=lambda g: g["success_rate"], reverse=True)
+
+        result = self._truncate_by_gap(result, gap_threshold=0.15)
+
+        for i, g in enumerate(result):
+            g["group_id"] = i + 1
+        return result
+
+    @staticmethod
+    def _truncate_by_gap(groups: list, gap_threshold: float = 0.15) -> list:
+        """按成功率降序排序后，遇到第一个≥gap_threshold的差距即截断。
+
+        排除较低及以下的组。这样即使所有组成功率都低，
+        只要彼此差距<gap_threshold，仍会保留——
+        因为其中可能包含唯一成局线路。
+
+        示例（gap_threshold=0.15）：
+        - [60%, 58%, 55%, 20%] → 55%→20%差距35%≥15% → 截断，保留[60%, 58%, 55%]
+        - [10%, 8%, 5%] → 无≥15%差距 → 全保留
+        - [60%, 40%] → 差距20%≥15% → 截断，保留[60%]
+        - [60%, 58%] → 差距2%<15% → 全保留
+        """
+        if len(groups) <= 1:
+            return groups
+        for i in range(len(groups) - 1):
+            gap = groups[i]["success_rate"] - groups[i + 1]["success_rate"]
+            if gap >= gap_threshold:
+                return groups[:i + 1]
+        return groups
+
+    def _split_by_rank_tier(self, cards: list) -> list:
+        """在vector组内按花色+rank区间分拆：先按花色，再按[2-7]/[8-10]/[J-A]，跨区间连续不拆。
+
+        不同花色分开分组（战术意义不同），同花色内大牌和小牌也分开。
+        只有同花色且同区间（或跨区间连续如7-8/T-J）才合并。
+
+        例: ♠2♠3♠4♠5♠Q → [♠2♠3♠4♠5](low) + [♠Q](high)
+        例: ♠2♠3♣2♣3♠Q♣K → [♠2♠3](low) + [♣2♣3](low) + [♠Q](high) + [♣K](high)
+        例: ♠7♠8 → [♠7♠8](连续跨区间不拆)
+        """
+        if len(cards) <= 1:
+            return [cards]
+        by_suit = {}
+        for c in cards:
+            suit = c.get("card", "")[:1] if c.get("card") else "?"
+            by_suit.setdefault(suit, []).append(c)
+        result = []
+        for suit, suit_cards in by_suit.items():
+            if len(suit_cards) <= 1:
+                result.append(suit_cards)
+                continue
+            sorted_cards = sorted(suit_cards, key=lambda c: self._extract_rank(c.get("card", "")))
+            subgroups = [[sorted_cards[0]]]
+            for i in range(1, len(sorted_cards)):
+                prev_rank = self._extract_rank(sorted_cards[i-1].get("card", ""))
+                curr_rank = self._extract_rank(sorted_cards[i].get("card", ""))
+                same_tier = (self._rank_tier(prev_rank) == self._rank_tier(curr_rank))
+                is_continuous = (curr_rank - prev_rank == 1)
+                if same_tier or is_continuous:
+                    subgroups[-1].append(sorted_cards[i])
+                else:
+                    subgroups.append([sorted_cards[i]])
+            result.extend(subgroups)
+        return result
+
+    @staticmethod
+    def _rank_tier(rank: int) -> str:
+        """牌面等级区间：[2-7]=low, [8-10]=mid, [J-A]=high。"""
+        if rank <= 7:
+            return "low"
+        elif rank <= 10:
+            return "mid"
+        else:
+            return "high"
+
+    def _classify_tactic(self, cards: list, trump_suit: str = "") -> str:
+        """为分组标注战术意义，便于LLM分析。
+
+        标签是提示而非定论，LLM需结合局面验证。
+
+        将牌high[J-A]：清将/飞牌（将牌也可能飞牌，如♠Q飞♠K）
+        将牌low[2-7]：清将/将牌出牌
+        将牌mid[8-10]：清将/将牌出牌
+        非将牌low[2-7]：送墩/保留
+        非将牌mid[8-10]：试探/建立
+        非将牌high[J-A]：兑现赢墩/飞牌
+        """
+        if not cards:
+            return "未分类"
+
+        first_card = cards[0].get("card", "")
+        suit = first_card[0] if first_card else ""
+        ranks = [self._extract_rank(c.get("card", "")) for c in cards]
+        max_rank = max(ranks) if ranks else 0
+        is_trump = bool(trump_suit) and suit == trump_suit
+        tier = self._rank_tier(max_rank)
+
+        if is_trump:
+            if tier == "high":
+                return "清将/飞牌"
+            elif len(cards) >= 2:
+                return "清将"
+            else:
+                return "将牌出牌"
+
+        if tier == "high":
+            if len(cards) >= 2:
+                return "飞牌/逼牌"
+            else:
+                return "兑现赢墩/飞牌"
+        elif tier == "mid":
+            if len(cards) >= 2:
+                return "长套建立"
+            else:
+                return "试探出牌"
+        else:
+            return "送墩/保留"
+
+    def _split_by_tier(self, cards: list, trump_suit: str = "") -> list:
+        """按区间[2-7]/[8-10]/[J-A]、跨区间连续性、将牌/非将牌细分。
+
+        规则：
+        1. 将牌和非将牌先分开（即使vector相同也拆）
+        2. 同一区间内的牌同组
+        3. 跨区间时只有等级连续（如7-8, 10-J）才合并
+
+        例: ♠2♠3♠5♠Q♣2♣3 (♠是将牌, vector相同) →
+            [♠2♠3♠5♠Q] (将牌) 拆成 [♠2♠3♠5](low) + [♠Q](high)
+            [♣2♣3] (非将牌, low)
+        """
+        if len(cards) <= 1:
+            return [cards]
+
+        # 1. 先按将牌/非将牌分开
+        trump_cards = []
+        non_trump_cards = []
+        for c in cards:
+            suit = c.get("card", "")[0]
+            if trump_suit and suit == trump_suit:
+                trump_cards.append(c)
+            else:
+                non_trump_cards.append(c)
+
+        # 2. 对每部分按区间+连续性细分
+        result = []
+        for part in [trump_cards, non_trump_cards]:
+            if not part:
+                continue
+            if len(part) == 1:
+                result.append(part)
+                continue
+            sorted_cards = sorted(part, key=lambda c: self._extract_rank(c.get("card", "")))
+            subgroups = [[sorted_cards[0]]]
+            for i in range(1, len(sorted_cards)):
+                prev_rank = self._extract_rank(sorted_cards[i-1].get("card", ""))
+                curr_rank = self._extract_rank(sorted_cards[i].get("card", ""))
+                same_tier = (self._rank_tier(prev_rank) == self._rank_tier(curr_rank))
+                is_continuous = (curr_rank - prev_rank == 1)
+
+                if same_tier or is_continuous:
+                    subgroups[-1].append(sorted_cards[i])
+                else:
+                    subgroups.append([sorted_cards[i]])
+            result.extend(subgroups)
+        return result
+
+    def _raw_continuous_groups(self, candidates: list) -> list:
+        """vector缺失时的退化分组：同花色+等级连续(差=1)。"""
+        if not candidates:
+            return []
+        by_suit = {}
+        for c in candidates:
+            card_str = c.get("card", "")
+            if not card_str:
+                continue
+            suit = card_str[0]
+            rank = self._extract_rank(card_str)
+            by_suit.setdefault(suit, []).append((rank, c))
+
+        raw_groups = []
+        for suit, entries in by_suit.items():
+            entries.sort(key=lambda e: e[0])
+            current = [entries[0]]
+            for i in range(1, len(entries)):
+                if entries[i][0] - entries[i-1][0] == 1:
+                    current.append(entries[i])
+                else:
+                    raw_groups.append(current)
+                    current = [entries[i]]
+            raw_groups.append(current)
+
+        result = []
+        for group in raw_groups:
+            cards = [c for _, c in group]
+            result.append({
+                "cards": cards,
+                "success_rate": max(c.get("success_rate", 0) for c in cards),
+                "best_vector": "",
+            })
+        return result
+
+    def _group_candidates_by_threshold(self, candidates: list, threshold: float = 0.50) -> list:
+        """[已弃用] 对candidates按同花色连续分组。保留供回退使用。"""
+        above = [c for c in candidates if c.get("success_rate", 0) >= threshold]
+        if len(above) < 2:
+            return []
+
+        by_suit = {}
+        for c in above:
+            card_str = c.get("card", "")
+            if not card_str:
+                continue
+            suit = card_str[0]
+            rank = self._extract_rank(card_str)
+            by_suit.setdefault(suit, []).append((rank, c))
+
+        raw_groups = []
+        for suit, entries in by_suit.items():
+            entries.sort(key=lambda e: e[0])
+            current = [entries[0]]
+            for i in range(1, len(entries)):
+                if entries[i][0] - entries[i-1][0] == 1:
+                    current.append(entries[i])
+                else:
+                    raw_groups.append(current)
+                    current = [entries[i]]
+            raw_groups.append(current)
+
+        result = []
+        for idx, group in enumerate(raw_groups):
+            cards = [c for _, c in group]
+            max_rate = max(c.get("success_rate", 0) for c in cards)
+            result.append({
+                "cards": cards,
+                "success_rate": max_rate,
+                "group_id": idx + 1,
+            })
+        return result
+
+    def _candidates_same_suit_equals(self, candidates: list) -> bool:
+        """检测所有候选是否同花色紧密连张（如♥3♥2, ♠5♠4♠3）。
+
+        当所有候选都是同一花色且等级紧密相连（相邻差=1），
+        出哪张牌都等价，没有战略决策需要LLM审查。
+        这不同于同花色但含高牌的等价（如♠2 vs ♠Q），
+        后者保留LLM审查识别飞牌等战略差异。"""
+        if len(candidates) < 2:
+            return False
+        top = candidates[0]
+        tied = [c for c in candidates[:8]
+                if c.get("success_rate") == top.get("success_rate")]
+        if len(tied) < 2:
+            return False
+        suits = set()
+        ranks = []
+        for c in tied:
+            card_str = c.get("card", "")
+            if not card_str:
+                return False
+            suit = card_str[0]
+            suits.add(suit)
+            ranks.append(self._extract_rank(card_str))
+        if len(suits) != 1:
+            return False
+        # 检查是否紧密连张（排序后相邻差=1）
+        ranks.sort()
+        for i in range(len(ranks) - 1):
+            if ranks[i + 1] - ranks[i] != 1:
+                return False
+        return True
+
+    def _all_suits_continuous(self, cards: list) -> bool:
+        """检查一组候选牌，每个花色内部是否各自连续（差=1）。"""
+        if len(cards) < 2:
+            return True
+        by_suit = {}
+        for c in cards:
+            card_str = c.get("card", "")
+            if not card_str:
+                return False
+            suit = card_str[0]
+            rank = self._extract_rank(card_str)
+            by_suit.setdefault(suit, []).append(rank)
+        for suit, ranks in by_suit.items():
+            ranks.sort()
+            for i in range(len(ranks) - 1):
+                if ranks[i + 1] - ranks[i] != 1:
+                    return False
+        return True
+
+    def _candidates_mixed_rank_equivalents(self, candidates: list):
+        """检测同花色内同时含小牌和大牌、不相连且DDS完全等价。
+
+        当同一花色既有小牌（等级≤5）又有大牌（等级≥11），
+        且等级不相连（有缺口），且所有等价牌best_vector相同时，
+        说明DDS确信结果无差异。出最高牌迷惑对手，同时LLM分析指导后续。
+
+        返回: (Card, str)（最高牌对象和字符串），None（若未检测到）"""
+        if len(candidates) < 3:
+            return None
+        top = candidates[0]
+        tied = [c for c in candidates[:8]
+                if c.get("success_rate") == top.get("success_rate")
+                and c.get("avg_tricks") == top.get("avg_tricks")]
+        if len(tied) < 3:
+            return None
+        first_vec = tied[0].get("best_vector", "")
+        if not first_vec:
+            return None
+        for c in tied:
+            if c.get("best_vector", "") != first_vec:
+                return None
+
+        by_suit = {}
+        for c in tied:
+            card_str = c.get("card", "")
+            if not card_str:
+                continue
+            suit = card_str[0]
+            rank = self._extract_rank(card_str)
+            by_suit.setdefault(suit, []).append((rank, card_str))
+
+        for suit, entries in by_suit.items():
+            ranks = [e[0] for e in entries]
+            if len(ranks) < 2:
+                continue
+            # 要求小牌和大牌同时存在
+            min_r = min(ranks)
+            max_r = max(ranks)
+            if not (min_r <= 5 and max_r >= 11):
+                continue
+            # 要求不相连（存在等级缺口 > 1）
+            ranks.sort()
+            has_gap = any(ranks[i + 1] - ranks[i] > 1 for i in range(len(ranks) - 1))
+            if not has_gap:
+                continue
+            highest_str = max(entries, key=lambda e: e[0])[1]
+            return (Card(suit=highest_str[0], rank=highest_str[1:]), highest_str)
+        return None
+
+    def _candidates_dds_equivalent(self, candidates: list) -> bool:
+        """检测DDS等价是否真正等价（才跳过LLM审查）。
+
+        DDS等价有两种情况：
+        - **真正等价**：每个花色内部的牌都连续（任何等级）
+          ♠2345、♥KQJ（同花色）、♣AKQJ+♦32（跨花色但各自连续）
+          → DDS真认为结果相同，跳过LLM
+        - **可疑等价**：某花色内部不连续（如♠Q vs ♠2，有等级缺口）
+          → DDS完美信息掩盖战略差异（如飞牌），保留LLM审查"""
+        if len(candidates) < 2:
+            return False
+        top = candidates[0]
+        tied = [c for c in candidates[:8]
+                if c.get("success_rate") == top.get("success_rate")
+                and c.get("avg_tricks") == top.get("avg_tricks")]
+        if len(tied) < 2:
+            return False
+        first_vec = tied[0].get("best_vector", "")
+        if not first_vec:
+            return False
+        if not all(c.get("best_vector", "") == first_vec for c in tied):
+            return False
+
+        return self._all_suits_continuous(tied)
+
+    def _needs_strategic_review(self, candidates: list, state: PlayState) -> bool:
+        """检测是否需要LLM策略审查。
+
+        触发条件：
+        1. 至少2个候选
+        2. 前两名候选成功率接近（αμ无法区分，差距≤10%）
+        3. 最优成功率不高（≤70%，说明定约难打，可能有唯一路线）
+        4. 仅庄家方触发（防守方无需识别做庄唯一路线）
+        """
+        if len(candidates) < 2:
+            return False
+        top1 = candidates[0]
+        top2 = candidates[1]
+        # 条件1: 前两名成功率接近
+        if top1.get("success_rate", 0) - top2.get("success_rate", 0) > 0.10:
+            return False
+        # 条件2: 成功率不高
+        if top1.get("success_rate", 0) > 0.70:
+            return False
+        # 条件3: 仅庄家方
+        declarer = state.contract.declarer
+        dummy = state.dummy
+        if state.current_player not in (declarer, dummy):
+            return False
+        return True
+
+    def _llm_group_review(self, state: PlayState, candidates: list,
+                           groups: list,
+                           alpha_card: str = "",
+                           previous_plan: str = "",
+                           use_reasoning: bool = False) -> dict:
+        """LLM分组审查：分析各组战术意图，选择一组出牌。
+
+        返回dict:
+          - plan: str, 打牌计划
+          - plan_valid: bool, 现有计划是否仍然有效
+          - group: int, 选择的组号（1-based）
+          - reason: str, 推荐理由
+          - llm_prompt: str, 完整提示词
+        """
+        hands_info = self._format_hands_info(state)
+        missing_info = self._format_missing_key_cards(state)
+        trump_analysis = self._format_trump_analysis(state)
+        completed_tricks = self._format_completed_tricks(state)
+        current_trick = self._format_current_trick(state)
+        played_cards_info = self._format_played_cards_info(state)
+
+        declarer = state.contract.declarer
+        dummy = state.dummy
+        declarer_remaining = max(0, state.contract.tricks_needed - state.declarer_tricks)
+        defender_remaining = max(0, (14 - state.contract.tricks_needed) - state.defender_tricks)
+        is_trump = state.contract.suit
+        is_nt = (is_trump == "NT")
+        trump_cleared = self._check_trump_cleared(state) if not is_nt else False
+
+        current_player = state.current_player
+        player_role = "庄家" if current_player == declarer else ("明手" if current_player == dummy else "防守方")
+        current_trick_count = len(state.current_trick.cards)
+        play_position = current_trick_count + 1
+        remaining_players = 4 - play_position
+
+        system_prompt = (
+            "你是桥牌做庄专家，负责分析各组出牌并选择一组。"
+            "先数输墩（有将）或赢墩（无将），再分析各组对应的战术，最终选组。"
+            "关键战术包括：飞牌（手中有一张大牌可以捕捉外面的大牌）、"
+            "将吃（用短将牌花色将吃输张）、进张管理（保留进张来兑现赢墩）、"
+            "长套建立（通过将吃或送牌建立额外赢墩）、终局打法（投入/挤牌）。"
+            "请以JSON格式输出分析结果。"
+        )
+
+        # 格式化组信息（DDS等价分组，不标注战术，避免误导LLM）
+        group_lines = []
+        for g in groups:
+            card_strs = [c.get("card", "") for c in g["cards"]]
+            rate = f"{g['success_rate']:.0%}"
+            dds_eq_label = "DDS等价" if len(card_strs) > 1 else ""
+            group_lines.append(
+                f"组{g['group_id']}: {' '.join(card_strs)} "
+                f"(成功率{rate}) {dds_eq_label}".rstrip()
+            )
+        groups_text = "\n".join(group_lines)
+
+        plan_section = ""
+        if previous_plan:
+            plan_section = f"""
+## 现有打牌计划
+{previous_plan}
+
+### 校验任务
+- 如果仍适用（所选组就是计划第一步）→ plan_valid=true，保持计划不变
+- 如果所选组不是计划第一步 → plan_valid=false，必须制定新计划（因为偏离了原路线）
+
+### 必须更新计划的情况（满足任一即 plan_valid=false）
+- 防守方出牌异常（如垫出意外大牌、出非领出花色）
+- 已暴露大牌位置与计划假设不符（如计划假设♠K在西，但已出牌显示在东）
+- 花色分布严重不利（如原假设3-2实际5-0）
+- 进手张被破坏（如关键进手张被防守方逼出）
+"""
+        else:
+            plan_section = """
+## 打牌计划制定
+当前尚无打牌计划，请根据局面制定高层次的做庄策略，并明确第一步动作。
+"""
+
+        # 叫牌过程
+        bidding_seq = state.bidding_sequence or "未提供"
+
+        # 数输墩/赢墩分支
+        if is_nt:
+            loss_analysis = """1. **数赢墩（无将定约）**：
+   - 逐花色列出顶张赢墩（例：♠庄AKQ2+明63→顶张3墩）。
+   - 总计现有赢墩数，计算与定约所需墩数的差距。
+   - 哪个花色能补足缺口且脱手次数最少？
+   - 危险方是谁？树立中谁进手会攻击我薄弱花色？
+   - 首攻花色是否需要忍让几轮以切断联通？
+   - 首选路线失败后的后备方案及成功率？"""
+        else:
+            loss_analysis = """1. **数输墩（有将定约，从庄家方整体数，庄家+明手作为一体，通常从长将牌的一边数）**：
+   - **将牌输墩**：直接参考上方"将牌统计"。对方将牌大牌(A/K/Q/J)的数量就是将牌输墩数。
+   - **各边花输墩**：每个边花合并庄家和明手的牌一起数，识别必须输的墩。
+     * 如果庄家方某花色没有A，则对方有A，该花色至少有1个输墩。
+     * 如果庄家方某花色有A但缺K，且对方有K，可能还有1个输墩。
+     * A是赢张不是输张；只有缺少大牌支持的小牌才是输张。
+     * 注意：边花输墩可通过将吃、飞牌、长套垫牌等方式消除。
+   - 合计总输墩，计算为了完成定约还需要减少多少输墩。"""
+
+        user_prompt = f"""## 局面信息
+定约: {state.contract}
+庄家: {declarer}, 明手: {dummy}
+**当前出牌方: {current_player}（{player_role}）**
+**必须从{current_player}的手牌中出牌，不能出其他位置的牌。**
+本墩出牌位置: 第{play_position}家（当前墩已有{current_trick_count}张牌，之后还有{remaining_players}家未出）
+庄家方已得: {state.declarer_tricks}墩, 还需: {declarer_remaining}墩成约
+防守方已得: {state.defender_tricks}墩, 还需: {defender_remaining}墩击垮
+将牌已清完: {"是" if trump_cleared else "否"}（仅当有将定约时）
+当前墩: {current_trick}
+
+## 叫牌过程
+{bidding_seq}
+（用于推断对方花色长度和大牌位置，辅助飞牌方向选择和将吃风险评估）
+
+## 基本规则提醒
+大牌永远大于小牌（A>K>Q>J>10>...>2）；必须跟出领出花色；将牌大于任何边花。
+
+## 手牌
+{hands_info}
+
+**注意：当前轮到{current_player}（{player_role}）出牌，plan中的步骤必须是{current_player}能实际执行的（牌在{current_player}手中）。**
+
+## 将牌统计（程序计算，请直接使用，不要自行数牌）
+{trump_analysis}
+
+## 对方关键大牌（未出现的关键大牌在对方手中）
+{missing_info}
+
+## 已完成墩
+{completed_tricks}
+
+## 已出牌
+{played_cards_info}
+
+## 可选出牌组
+同一组内的牌在αμ采样空间中DDS等价（出哪张结果相同），不同组之间DDS不等价。
+分组**不预设战术**——同一组牌既可能用于飞牌，也可能用于清将，也可能用于其他战术。
+战术由你根据局面自行判断，不要根据牌张大小臆测战术类别。
+{groups_text}
+
+{plan_section}
+## 战略分析
+{loss_analysis}
+2. **识别飞牌机会（优先级高）**：
+   对照"对方关键大牌"列表，检查每个候选组所在花色是否缺K/Q/J（在对方手中）。
+   - **如果某组所在花色对方有K/Q/J**：优先考虑飞牌或其他战术（如投入、挤牌）来捕捉这些大牌，
+     不要简单选择αμ成功率最高的组。αμ的成功率是采样平均值，可能掩盖了飞牌的战术价值。
+   - **飞牌方向**：根据叫牌过程和已出牌张推断对方大牌位置，选择从明手或庄家启动飞牌。
+   - 飞牌机会一旦错过（如先拔了A），可能永久丢失——这是选组时必须权衡的关键因素。
+3. **对每组进行5维评估**，判断其是否能消除输墩（有将）或补足赢墩（无将）：
+   (1) **战术意图**：该组能用于什么战术？常见战术包括：飞牌、树立长套、将吃、进张管理、终局打法（投入/挤牌）。{"有将定约还包括清将。" if not is_nt else ""}
+       注意：同花色内的小牌和大牌都可能用于多种战术，需结合局面判断。
+   (2) **消除能力**：能消除哪个输墩（或补足几个赢墩）？该战术是否是完成定约所必需的？
+   (3) **预测回牌**：出该组后，防守方最可能回攻什么？是否威胁定约（如穿攻明手薄弱花色）？
+   (4) **失败代价**：若该战术失败，后备路线是否还在？是否会把定约推向不可挽回？
+       特别注意：飞牌失败通常只丢1墩，但错过飞牌机会可能导致定约必宕。
+   (5) **将吃风险**：出非将牌长套时，防守方缺门后可能将吃。连出两张同花色边花后要小心。
+      考虑对方将牌长度，必要时先清将再打长套。{"（当前将牌已清完，无需担心被将吃）" if trump_cleared else ""}
+4. **进张管理**：选这组后，明暗两手的进手张是否够兑现树立的赢墩？是否有桥路堵塞风险？
+   特别注意：若选择树立长套，兑现长套赢墩时需要足够的进手张回到长套方。
+   飞牌也需要进手张——飞牌成功后需要回到长套方继续飞或兑现赢墩。
+5. **已选牌与战术的关系**：所选组是启动战术、延续战术，还是与战术无关？
+   如果某组是启动关键战术的第一手，应优先选择。
+6. 基于以上分析，选择最优的一组。
+   **不要简单选择成功率最高的组**——战术价值比成功率更重要，飞牌机会错过即丢失。
+
+## 一致性强约束
+你选择的组必须与"战略分析"中认定的最优战术一致。
+若分析认定需要飞牌，所选组必须能启动飞牌；若认定需要树立长套，所选组必须能启动长套建立。
+若所选组与战略分析结论矛盾，视为严重推理失败，必须重新选择。
+
+## 输出JSON
+{{
+  "group": 1,（选择的组号）
+  "plan": "打牌计划简述（一句话概括）",
+  "steps": [
+    {{"step": 1, "action": "具体动作", "precondition": "前提条件（如某大牌位置、花色分布）"}},
+    {{"step": 2, "action": "...", "precondition": "..."}}
+  ],
+  "plan_valid": true/false,
+  "reason": "选择理由（含战术分析）"
+}}"""
+
+        try:
+            full_prompt = f"{system_prompt}\n\n{user_prompt}"
+            result = self.llm_client.chat_json(
+                system_prompt, user_prompt,
+                temperature=0.3, thinking=use_reasoning)
+            result["llm_prompt"] = full_prompt
+            return result
+        except Exception as e:
+            print(f"[αμ+LLM] 分组审查失败: {e}")
+            return {"group": 0, "reason": f"审查异常: {e}", "llm_prompt": ""}
 
     def _dd_play(self, state: PlayState, dd_samples: int = None) -> Dict[str, Any]:
         """DD搜索打牌（纯蒙特卡洛 + 双明手评估，由asyncio.to_thread调用）"""

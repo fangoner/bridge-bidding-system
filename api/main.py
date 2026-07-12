@@ -1448,7 +1448,7 @@ async def undo_play():
 class PlayAIRequest(BaseModel):
     use_reasoning: bool = False
     play_model: Optional[str] = None
-    play_engine: Optional[str] = None  # "llm" | "mcts" | "dd" | "tiered" | "perfect"
+    play_engine: Optional[str] = None  # "llm" | "mcts" | "dd" | "tiered" | "perfect" | "alphamu" | "alphamu_llm"
     dd_sample_count: Optional[int] = None  # DD 蒙地卡罗采样数
 
 
@@ -1504,6 +1504,7 @@ async def ai_play(request: PlayAIRequest):
 
         # 临时切换打牌模型（不影响叫牌模型）
         pm_raw = request.play_model or ""
+        print(f"[ai_play] play_model={request.play_model!r}, use_reasoning={request.use_reasoning}, engine={request.play_engine}")
         use_doubao_play = is_doubao_model(pm_raw)
         use_reasoning = request.use_reasoning or is_reasoning_model(pm_raw)
         # 豆包需将 ::reasoning 追加到模型名以匹配正确的 endpoint
@@ -1528,7 +1529,7 @@ async def ai_play(request: PlayAIRequest):
         elif pm_raw and pm_raw in ALL_MODELS:
             original_model = llm_client.model
             llm_client.model = pm_raw
-            actual_model = pm_raw
+            actual_model = f"{pm_raw}::reasoning" if use_reasoning else pm_raw
         
         try:
             if not service.is_human_turn():
@@ -1538,6 +1539,7 @@ async def ai_play(request: PlayAIRequest):
                 use_tiered = engine == "tiered"
                 use_perfect = engine == "perfect"
                 use_alphamu = engine == "alphamu"
+                use_alphamu_llm = engine == "alphamu_llm"
                 dd_samples = (request.dd_sample_count
                               if (use_dd or use_tiered) else None)
                 t0 = time.time()
@@ -1551,6 +1553,7 @@ async def ai_play(request: PlayAIRequest):
                     use_tiered=use_tiered,
                     use_perfect=use_perfect,
                     use_alphamu=use_alphamu,
+                    use_alphamu_llm=use_alphamu_llm,
                     dd_samples=dd_samples)
                 elapsed_ms = int((time.time() - t0) * 1000)
 
