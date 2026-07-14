@@ -266,7 +266,7 @@ export const undoPlay = async () => {
 };
 
 // AI出牌
-export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null) => {
+export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null) => {
   try {
     const requestData = {
       use_reasoning: useReasoning,
@@ -282,11 +282,15 @@ export const aiPlay = async (playModel = null, useReasoning = false, playEngine 
       requestData.dd_sample_count = ddSampleCount;
     }
     
-    // Reasoner模型需要更长超时（5分钟），Chat模型2分钟
     const timeout = useReasoning ? 300000 : 120000;
-    const response = await api.post('/api/play/ai-play', requestData, { timeout });
+    const config = { timeout, signal };
+    const response = await api.post('/api/play/ai-play', requestData, config);
     return response.data;
   } catch (error) {
+    if (error.name === 'CanceledError' || error.name === 'AbortError') {
+      console.log('[AI Play] 请求已被用户中止')
+      throw error
+    }
     console.error('AI出牌失败:', error);
     throw error;
   }

@@ -1085,6 +1085,7 @@ function CardTable({
       const s = ck[0]
       if (bySuitDisplay[s]) bySuitDisplay[s].push(ck.slice(1))
     }
+    const ro = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2']
     for (const s of Object.keys(bySuitDisplay)) bySuitDisplay[s].sort((a, b) => ro.indexOf(a) - ro.indexOf(b))
 
     const suits = [

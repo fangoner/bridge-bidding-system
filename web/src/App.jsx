@@ -253,6 +253,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const prevTricksCountRef = useRef(0) // 用于检测一墩完成
   const playStateRef = useRef(playState)
   const aiPlayHistoryRef = useRef(aiPlayHistory)
+  const abortControllerRef = useRef(null)
   useEffect(() => { playStateRef.current = playState }, [playState])
   useEffect(() => { aiPlayHistoryRef.current = aiPlayHistory }, [aiPlayHistory])
 
@@ -1750,12 +1751,20 @@ function AppShell({ darkMode, onToggleDarkMode }) {
 
   // AI出牌
   const handleAIPlay = async () => {
+    // 如果已有进行中的请求，先中止
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
     setAiThinking(true)
     setError(null)
     
     try {
       const pm = parseModelValue(playModel)
-      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount)
+      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal)
+      if (controller.signal.aborted) return
       console.log('[AI Play] engine:', result.used_engine, 'elapsed:', result.elapsed_ms + 'ms', 'model:', result.used_model)
 
       if (result.success) {
@@ -1772,7 +1781,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           timestamp: makeBidTimestamp(),
         }
         setAiPlayHistory(prev => [...prev, aiRecord])
-        setPlayStarted(true) // AI出牌后标记打牌已开始，按钮变为暂停
+        setPlayStarted(true)
         
         const stateResult = await getPlayState()
         if (stateResult.success) {
@@ -1782,9 +1791,16 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         setError(result.error || 'AI出牌失败')
       }
     } catch (err) {
+      if (err.name === 'CanceledError' || err.name === 'AbortError' || controller.signal.aborted) {
+        console.log('[AI Play] 用户已暂停，忽略')
+        return
+      }
       console.error('AI出牌失败:', err)
       setError('AI出牌失败: ' + (err.response?.data?.detail || err.message))
     } finally {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null
+      }
       setAiThinking(false)
     }
   }
@@ -1861,9 +1877,13 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     setIsPlayPaused(false)
   }
 
-  // 暂停打牌（AI返回后暂停）
+  // 暂停打牌（立即中止AI请求）
   const handlePausePlay = () => {
     setIsPlayPaused(true)
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
   }
 
   // 撤销最近一次出牌
