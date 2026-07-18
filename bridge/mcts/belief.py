@@ -202,57 +202,23 @@ class BeliefTracker:
         """计算单个粒子的权重。
 
         硬证据（void）违反 → 权重 0
-        软证据（信号）→ 权重乘以 SIGNAL_WEIGHT 或 SIGNAL_PENALTY
         叫牌约束违反 → 根据违反程度指数衰减权重
 
-        signal_evidence 格式：(position, suit, is_high, signal_type)
-        signal_type: "attitude" | "count" | "suit_preference"
+        注意：防守信号不参与粒子权重计算（态度信号是意愿表达非张数信息，
+        张数信号判断可靠性低）。信号仅通过 format_partner_signals_for_prompt
+        注入LLM提示词，由LLM解读使用。
         """
-        # ── 硬证据：void 一致性 ──
         for pos, void_suits in known_voids.items():
             hand = particle.get(pos, [])
             for card in hand:
                 if card.suit in void_suits:
-                    return 0.0  # void 花色不应有任何牌
+                    return 0.0
 
-        # ── 软证据：信号一致性 ──
         weight = 1.0
-        for evidence in signal_evidence:
-            # 兼容旧格式（3元组）和新格式（4元组）
-            if len(evidence) == 4:
-                pos, suit, is_high, signal_type = evidence
-            else:
-                pos, suit, is_high = evidence
-                signal_type = "attitude"
 
-            suit_len = sum(1 for c in particle.get(pos, []) if c.suit == suit)
-
-            if signal_type == "attitude":
-                # 态度信号：高牌=欢迎=偏长，低牌=不欢迎=偏短
-                if is_high:
-                    if suit_len >= 3:
-                        weight *= BELIEF_SIGNAL_WEIGHT
-                    elif suit_len <= 1:
-                        weight *= BELIEF_SIGNAL_PENALTY
-                else:
-                    if suit_len <= 2:
-                        weight *= BELIEF_SIGNAL_WEIGHT
-                    elif suit_len >= 4:
-                        weight *= BELIEF_SIGNAL_PENALTY
-            elif signal_type == "count":
-                # 张数信号：偶数张（is_high=True）→ 偏长，奇数张（is_high=False）→ 偏短
-                # 信息量较小，使用较温和的权重调整
-                if is_high and suit_len >= 4:
-                    weight *= (BELIEF_SIGNAL_WEIGHT ** 0.5)
-                elif not is_high and suit_len <= 3:
-                    weight *= (BELIEF_SIGNAL_WEIGHT ** 0.5)
-            # suit_preference 信号对单花色长度约束较弱，主要靠 LLM 解读，这里不调整权重
-
-        # ── 叫牌约束软惩罚：违反越多，权重指数衰减 ──
         if constraints:
             violation_score = compute_sample_violation_score(particle, constraints)
             if violation_score > 0:
-                # 指数衰减：每违反1分（约1HCP差距或1张花色差距），权重乘以0.5
                 weight *= math.exp(-violation_score * 0.3)
 
         return weight

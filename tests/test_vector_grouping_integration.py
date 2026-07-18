@@ -240,7 +240,7 @@ def test_prompt_generation():
     state = _init_endgame(service)
 
     # 获取真实candidates
-    alpha_result = service._alphamu_full_play(state)
+    alpha_result = service._alpha_mu_play(state)
     candidates = alpha_result.get("full_output", {}).get("mcts_stats", {}).get("candidates", [])
 
     if len(candidates) < 2:

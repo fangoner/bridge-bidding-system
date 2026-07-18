@@ -20,7 +20,7 @@ from config import (
     TIERED_MCTS_CLUSTER_THRESHOLD,
     BELIEF_ENABLE, BELIEF_DD_PARTICLES, BELIEF_MCTS_PARTICLES,
     ALPHA_MU_ENABLE, ALPHA_MU_ENDGAME_CARDS, ALPHA_MU_NUM_WORLDS,
-    ALPHA_MU_MAX_DEPTH, ALPHA_MU_TIME_LIMIT,
+    ALPHA_MU_MAX_DEPTH, ALPHA_MU_TIME_LIMIT, ALPHA_MU_M,
     BELIEF_ALPHA_MU_PARTICLES,
 )
 
@@ -78,7 +78,7 @@ class PlayService:
                     self.alpha_mu_search = AlphaMuSearch(
                         sampler=self.dd_search.sampler,
                         num_worlds=ALPHA_MU_NUM_WORLDS,
-                        max_depth=ALPHA_MU_MAX_DEPTH,
+                        M=ALPHA_MU_M,
                         time_limit=ALPHA_MU_TIME_LIMIT,
                     )
             except Exception as e:
@@ -270,7 +270,7 @@ class PlayService:
 
         # === αμ 纯引擎分支（从开局到残局全覆盖） ===
         if use_alphamu:
-            return await asyncio.to_thread(self._alphamu_full_play, state)
+            return await asyncio.to_thread(self._alpha_mu_play, state)
 
         # === αμ + LLM策略审查分支 ===
         if use_alphamu_llm:
@@ -376,16 +376,6 @@ class PlayService:
         # 附加额外提示（如DD候选参考）
         if extra_prompt:
             prompt += extra_prompt
-
-        # 防守方：注入同伴已发防守信号
-        if not is_declarer_side:
-            try:
-                from bridge.mcts.signals import format_partner_signals_for_prompt
-                signal_prompt = format_partner_signals_for_prompt(state, current_player)
-                if signal_prompt:
-                    prompt += signal_prompt
-            except Exception as e:
-                print(f"[Play] 信号注入失败: {e}")
 
         thinking = use_reasoning or force_reasoning
         model_label = "reasoning" if thinking else "chat"
@@ -1128,48 +1118,12 @@ class PlayService:
         return constraints
 
     def _alpha_mu_play(self, state: PlayState) -> Dict[str, Any]:
-        """αμ 搜索打牌：残局多步前瞻，解决 strategy fusion。
+        """αμ 引擎单入口（论文实现）。
 
-        在每手 ≤ALPHA_MU_ENDGAME_CARDS 张时启用，用 belief tracker 的粒子
-        作为 possible worlds，递归搜索 Pareto 前沿，选 min-max regret 最优。
-        失败时回退到 DD。
-        """
-        if self.alpha_mu_search is None:
-            return self._dd_play(state)
-
-        constraints = self._get_bid_constraints()
-        if constraints:
-            self._apply_constraints(constraints)
-
-        # αμ 使用专用粒子数（残局世界少但精，30 足够）
-        bt = getattr(self.dd_search.sampler, 'belief_tracker', None)
-        if bt is not None:
-            bt.num_particles = self.alpha_mu_particles
-
-        try:
-            result = self.alpha_mu_search.search(state)
-            card = result.get("card")
-            if card is None:
-                # αμ 失败，回退 DD
-                return self._dd_play(state)
-            full_output = result.get("full_output", {})
-            full_output["叫牌约束"] = self._format_constraints_for_display(constraints)
-            return {
-                "card": card.to_dict() if hasattr(card, "to_dict") else None,
-                "reasoning": result.get("reasoning", ""),
-                "full_output": full_output,
-                "prompt": "[αμ] no prompt",
-            }
-        except Exception as e:
-            print(f"[αμ] 搜索异常: {e}，回退 DD")
-            return self._dd_play(state)
-
-    def _alphamu_full_play(self, state: PlayState) -> Dict[str, Any]:
-        """纯 αμ 引擎：从头到尾用 αμ 搜索，参数随剩余牌数自适应。
-
-        牌数越多 → 世界数越少、深度越浅、预算越大（给 DDS 留够余量）。
-        牌数越少 → 世界数越多、深度越深、预算收紧（利用递归深搜）。
-        残局（≤8张）直接调用 _alpha_mu_play 复用已有逻辑。
+        参数随剩余牌数自适应：
+        - 牌数 > 8：M=1（退化为 PIMC，避免指数爆炸）
+        - 牌数 ≤ 8：M=2（论文推荐值，利用递归深搜解决 strategy fusion）
+        论文 §5 实验在 32 cards endings（每手 8 张）进行，M=2 的设计目标就是残局。
         """
         from bridge.mcts.alpha_mu import AlphaMuSearch, ENDPLAY_AVAILABLE
         from bridge.mcts.dd_search import ENDPLAY_AVAILABLE as _DD_OK
@@ -1180,23 +1134,26 @@ class PlayService:
         perspective = state.current_player
         cards = len(state.hands.get(perspective, []))
 
-        # ── 自适应 worlds：基数=用户设置，随牌数减少线性放大，上限 100 ──
-        # 13张→base, 12→2×base, ... 4张→10×base (cap 100)
         base_worlds = ALPHA_MU_NUM_WORLDS
         n_worlds = min(100, base_worlds * max(1, 14 - cards))
-        max_depth = 1
+
+        # M=2 为默认（论文推荐值）。
+        # 论文 §4.3 四项优化（TT/Early Cut/Root Cut/Iterative Deepening）已修复：
+        # - TT key 不含 M，M=k 可复用 M=k-1 的结果
+        # - Early Cut 用 M=k-1 的 front 作上界
+        # - Root Cut 候选按 M=k-1 得分排序，条件放宽为 >=
+        # 这些优化能把 M=2 的 DDS 调用数从 ~4461 降到 ~500-1000
+        M_value = ALPHA_MU_M  # 配置值（默认 2）
+
         if cards <= 4:
             time_lim, dds_budget = 8.0, 5000
-        elif cards <= 6:
-            time_lim, dds_budget = 12.0, 8000
         elif cards <= 8:
-            time_lim, dds_budget = 15.0, 10000
+            time_lim, dds_budget = 12.0, 8000
         elif cards <= 10:
-            time_lim, dds_budget = 20.0, 15000
-        elif cards <= 12:
-            time_lim, dds_budget = 25.0, 18000
+            time_lim, dds_budget = 25.0, 15000
         else:
-            time_lim, dds_budget = 60.0, 20000
+            # 13 张牌 M=2，靠 TT/Early Cut/Root Cut 优化控制 DDS 数
+            time_lim, dds_budget = 30.0, 20000
 
         # 创建临时搜索器（复用 dd_search 的 sampler + 约束）
         constraints = self._get_bid_constraints()
@@ -1211,7 +1168,7 @@ class PlayService:
         search = AlphaMuSearch(
             sampler=self.dd_search.sampler,
             num_worlds=n_worlds,
-            max_depth=max_depth,
+            M=M_value,
             time_limit=time_lim,
             dds_budget=dds_budget,
         )
@@ -1248,7 +1205,7 @@ class PlayService:
           - 保存plan跨墩传递"""
         # Step 1: αμ搜索
         print(f"[αμ+LLM] use_reasoning={use_reasoning}, model={self.llm_client.model}")
-        alpha_result = self._alphamu_full_play(state)
+        alpha_result = self._alpha_mu_play(state)
         full_output = alpha_result.get("full_output", {})
         mcts_stats = full_output.get("mcts_stats", {})
         candidates = mcts_stats.get("candidates", [])

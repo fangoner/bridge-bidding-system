@@ -1260,8 +1260,9 @@ function CardTable({
         <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5 }}>
           <Button
             size="small"
-            variant="outlined"
-            sx={{ fontSize: '0.65rem', py: 0.2, px: 0.8 }}
+            variant="contained"
+            color="secondary"
+            sx={{ fontSize: '0.7rem', py: 0.3, px: 1, fontWeight: 'bold' }}
             onClick={() => {
               setHandPickerPanelFor(position)
               setHandPickerPanelOpen(true)
@@ -1272,7 +1273,20 @@ function CardTable({
           <Button
             size="small"
             variant="contained"
-            sx={{ fontSize: '0.65rem', py: 0.2, px: 0.8 }}
+            color="success"
+            sx={{
+              fontSize: '0.75rem',
+              py: 0.4,
+              px: 1.2,
+              fontWeight: 'bold',
+              color: '#ffffff',
+              bgcolor: '#2e7d32',
+              '&:hover': { bgcolor: '#1b5e20' },
+              '&.Mui-disabled': {
+                bgcolor: 'rgba(0,0,0,0.3)',
+                color: 'rgba(255,255,255,0.5)',
+              },
+            }}
             onClick={() => showInput ? handleHandInputSubmit(position) : handleAIHandSubmit(position)}
             disabled={!handInputs[position].trim()}
           >

@@ -126,9 +126,9 @@ BELIEF_DD_PARTICLES_MAX = 2000
 BELIEF_MCTS_PARTICLES = 500     # MCTS引擎粒子数（加权draw池，300-1000）
 BELIEF_MCTS_PARTICLES_MIN = 300
 BELIEF_MCTS_PARTICLES_MAX = 1000
-BELIEF_ALPHA_MU_PARTICLES = 30  # αμ引擎粒子数（possible worlds，20-50）
-BELIEF_ALPHA_MU_PARTICLES_MIN = 20
-BELIEF_ALPHA_MU_PARTICLES_MAX = 50
+BELIEF_ALPHA_MU_PARTICLES = 100  # αμ引擎粒子数（possible worlds，30-500）
+BELIEF_ALPHA_MU_PARTICLES_MIN = 30
+BELIEF_ALPHA_MU_PARTICLES_MAX = 500
 BELIEF_SIGNAL_WEIGHT = 1.3      # 信号一致时权重乘数
 BELIEF_SIGNAL_PENALTY = 0.7     # 信号不一致时权重乘数
 BELIEF_SIGNAL_MIN_RANK = 8      # ≥此值（8=8）视为高牌信号（欢迎）
@@ -137,5 +137,6 @@ BELIEF_SIGNAL_MIN_RANK = 8      # ≥此值（8=8）视为高牌信号（欢迎�
 ALPHA_MU_ENABLE = True            # 是否启用 αμ 搜索
 ALPHA_MU_ENDGAME_CARDS = 8        # 每手剩余牌数≤此值时启用 αμ（残局）
 ALPHA_MU_NUM_WORLDS = 20          # possible worlds 数量
-ALPHA_MU_MAX_DEPTH = 4            # 最大搜索深度（Max moves 数）
+ALPHA_MU_M = 2                    # 论文 M 参数：Max 递归层数（M=1 退化为 PIMC，Min 不减 M）
+ALPHA_MU_MAX_DEPTH = ALPHA_MU_M   # 兼容旧引用
 ALPHA_MU_TIME_LIMIT = 8.0         # 时间限制（秒）

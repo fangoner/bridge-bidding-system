@@ -85,9 +85,10 @@ export function useModelSettings() {
   })
   const [mctsParticlesRange] = useState({ min: 300, max: 1000 })
   const [alphaMuParticles, setAlphaMuParticles] = useState(() => {
-    try { return parseInt(localStorage.getItem(ALPHA_MU_PARTICLES_KEY)) || 30 } catch { return 30 }
-  })
-  const [alphaMuParticlesRange] = useState({ min: 20, max: 50 })
+    try { return parseInt(localStorage.getItem(ALPHA_MU_PARTICLES_KEY)) || 100 } catch { return 100 }
+  }, [])
+
+  const [alphaMuParticlesRange] = useState({ min: 30, max: 500 })
 
   const handleParticleChange = useCallback((engine, value) => {
     const setters = {

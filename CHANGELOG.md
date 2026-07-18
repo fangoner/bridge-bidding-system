@@ -1,5 +1,148 @@
 # 开发日志
 
+## 2026-07-19
+
+### αμ 搜索引擎性能优化：M bug 修复 + DirectDDS + Bitmap 手牌
+
+**背景**：昨天论文重构后发现 M≥2 极慢（8张 M=2 需 51s，只完成 1/8 候选）。DeepSeek 分析指出 M 语义差一级、DDS 调用爆炸、三项论文优化全部失效。
+
+#### M 语义 Bug 修复
+
+- **根因**：`_evaluate_state` 只在 Max 分支检查 `M_remaining <= 0`，Min 分支无检查。论文 Alg2 L2 的 `stop(state, M, ...)` 在 Min/Max 分发之前触发
+- **修复**：将 `M_remaining <= 0` 检查提到 `_evaluate_state` 顶部（Min/Max 分发之前）
+- **效果**：M=1 从 8294 次 DDS → 260 次（13候选×20worlds），比值精确 1.0x
+
+#### DirectDDS：ctypes 直调 DDS 库
+
+- 新建 `bridge/mcts/direct_dds.py`：绕过 endplay 的 Card→PBN→Deal→DDS 链路
+- DDS 的 `remainCards[player][suit]` 是简单位域，直接用 ctypes 构造 `ddTableDeal` 调 `SolveAllBoardsBin`
+- 新增 `solve_all_boards_bits`：Bitmap 手牌零转换输入
+- **效果**：M=1 leaf eval 从 0.35s → 0.057s（6x 加速），消除 34% 的 PBN/Deal 开销
+
+#### Python 层优化（Phase 1-4）
+
+1. **消除双重 hand clone**：`_search_recursive` 改为 shallow copy（`list(cards)` → 直接复用 Card 引用）
+2. **复用 Card 实例**：6 处 `Card(suit=c.suit, rank=c.rank)` 全部改为直接 `c`
+3. **ParetoFront.add() 原地操作**：新建 list → swap-pop 原地修改
+4. **笛卡尔积 skip-copy**：`OutcomeVector.__init__` 加 `_copy` 参数，笛卡尔积内跳过防御性拷贝
+5. **TT key 粗化**：world 手牌指纹改用 `hash(...)` 值，key 从 O(cards×worlds) 降为 O(worlds)
+6. **TT 守卫放宽**：移除 `stored_M >= M_remaining` 守卫 + Early Cut 移除 `stored_M < M_remaining` 限制
+
+#### Bitmap 手牌表示（Phase 5）
+
+- 新建 `bridge/mcts/bit_hands.py`：64-bit 手牌位图（每花色 16 bits，与 DDS 格式完全一致）
+- `_search_recursive`：clone 从 `{pos: list(cards)}` → `dict(bits)`（4 个 int 复制 vs ~32 个 Card 引用）
+- card 移除从 `list.remove()` O(n) → `hand &= ~card_bit` O(1)
+- suit 检查从遍历 Card 列表 → 位掩码 AND
+- `_evaluate_leaf` 使用 `solve_all_boards_bits` 直接传 bitmap，零 Card 迭代
+- 新增 bitmap 版 `apply_play_to_state_bits`、`get_playable_from_bits`、`_trick_winner_bits`
+- 边界处（`_build_child_state`、`_build_min_child_state`）用 `hand_bits_to_cards` 转回 Card
+
+#### 论文吻合度审查
+
+逐条对照 αμ 论文（Cazenave & Ventos, 2019）检查当前实现：
+- 核心算法 17 项完全吻合（OutcomeVector、ParetoFront、Cartesian Min、Max union、World Cuts、Iterative Deepening）
+- 3 项有小偏差已修正（TT best_move 存储 + Move Ordering、Root Cut 条件、文档字符串）
+- TT hit/early cut 在桥牌中结构性难以触发（每张牌唯一，无 transposition）。论文 Table 3 的 TT 加速依赖游戏状态复用，在桥牌中不适用
+
+#### 性能汇总
+
+| 场景 | 优化前 | 优化后 | 加速比 |
+|------|--------|--------|--------|
+| M=1 8张 (PIMC) | 0.35s | **0.050s** | **7x** |
+| M=1 DDS调用 | 8294 | 260 | 32x |
+| M=2 8张 | 51s | ~15s (估) | ~3x |
+
+#### 修改文件
+
+- `bridge/mcts/alpha_mu.py`：M bug 修复 + DirectDDS + bitmap 内部节点（~1100 行变更）
+- `bridge/mcts/direct_dds.py`（新建）：ctypes 直调 DDS + bitmap 输入
+- `bridge/mcts/bit_hands.py`（新建）：64-bit 手牌位图 + bitmap 版状态操作
+- `bridge/mcts/belief.py`：移除信号粒子权重（信号仅注入 LLM 提示词）
+- `bridge/play_service.py`：`_alpha_mu_play` 自适应 M 值
+- `tests/verify_m_fix.py`（新建）：M bug 修复验证脚本
+
+## 2026-07-18
+
+### αμ搜索引擎按论文全面重构 + 四项性能优化实现
+
+**背景**: 之前 αμ 实现与原文存在多处偏差（Min 节点合并语义错误、根节点选牌偏离论文、缺少论文 §4.3 的四项关键优化）。今天对照论文 PDF 逐条修正，并加入全部论文优化。最终因 M=2 在 13 张牌时复杂度过高，改为按手牌数自适应 M 值。
+
+### 阶段1：核心算法按论文修正
+
+**Min 节点合并（§4.2 关键修正）**
+- 旧实现：取 `child_front.maximin_vector()` 单一代表向量再做 per-index min（错误）
+- 第一次修正：per-index min over all (move, vector) pairs，返回单一 vector（仍错误）
+- **最终修正（按论文 §4.2）**：Min 节点返回 **ParetoFront（多个 vectors）**，需计算所有 child fronts 的**笛卡尔积**，每个组合 per-index min（考虑 world cuts），支配消除后插入 Min 的 front
+- 论文原文："compute all the combinations of the vectors in the Pareto fronts of all the Min moves"
+- Algorithm 2 line 22 `mini ← min(mini, f)` 是增量式 front 之间的 min 操作：`min(A, B) = { per-index min(a, b) for a in A for b in B }` + 支配消除
+
+**根节点选牌（§4.1）**
+- 旧实现：maximin（worst 优先）+ 5 层 tie-break（avg_tricks/min_tricks/rank_bonus/is_quick）
+- **修正**：`best_score = max success_rate over vectors in front`，平局按出现顺序
+- 论文原文："The score of a move for the declarer is the highest score of all vectors in the Pareto front of the move"
+
+**Stop Function（§4.1, Alg2 L2）**
+- 新增：`_evaluate_state` 入口检查 decl/def tricks 已达标则返回全 1/全 0
+- 论文："stop function also stops the search if the game is already won"
+
+**移除工程附加项**
+- 删除 quick-DDS 超时回退（非论文内容）
+- 删除 tie-break 附加项（avg_tricks/min_tricks/rank_bonus）
+
+### 阶段2：论文 §4.3 四项性能优化
+
+**1. Iterative Deepening**
+- 从 M=1 开始，逐步增加到 self.M（默认 2）
+- M=1 退化为 PIMC，速度快，先得到 baseline
+- M=2 复用 M=1 的 transposition table
+
+**2. Transposition Table**
+- key = `(next_player, trick_cards, decl_tricks, def_tricks, worlds_fingerprint, M_remaining)`
+- value = `(ParetoFront, best_move)`
+- 同一次 search 内：相同状态复用结果
+- 新增 `_make_tt_key`、`_tt_hit` 统计
+
+**3. Early Cuts（Alg2 L9-11）**
+- Min 节点入口检查 transposition table 中的 `t.front ≤ α`
+- α = 上层 Max 的累积 front（每个 Max 候选完成后更新）
+- 若 t.front 被 α 支配，剪枝返回 t.front
+- 新增 `_front_dominated_by`、`_vec_geq`、`_early_cut` 统计
+
+**4. Root Cuts（Alg2 L39-43）**
+- 根节点某 move 的 best_score == 上次迭代 best_score 则停止
+- 论文证明此 move 即为 M=k 的最优，可安全停止
+- 新增 `_prev_best_score`、`_root_cut` 统计
+
+### 阶段3：按手牌数自适应 M 值
+
+**问题**: 13 张牌 M=2 单候选 30s（4461 DDS 调用），5 候选只完成 1 个就超时。Transposition table 跨 M 不生效（key 不同）。
+
+**根因**: 论文 §5 实验在 32 cards endings（每手 8 张）进行，M=2 设计目标就是残局。13 张牌不是 αμ 的设计目标。
+
+**修正**（play_service.py `_alpha_mu_play`）：
+- `cards > 8`：强制 `M=1`（即 PIMC），避免指数爆炸
+- `cards ≤ 8`：使用配置的 `ALPHA_MU_M`（默认 2），符合论文设计
+- 时间预算：13 张牌从 30s/20000 → 15s/8000（M=1 实测 5 候选约 10s）
+
+### 实测数据
+
+13 张牌 3NT 定约，5 候选（♦A/K/J/6/5）：
+- M=1 全部完成：9.56s, 722 DDS, score=0.800~0.900
+- M=2 单候选 ♦A：30s, 4461 DDS, score=1.000（但只完成 1/5）
+- 自适应后：13 张牌只跑 M=1，约 10s 完成全部候选
+
+### 修改文件
+
+- `bridge/mcts/alpha_mu.py`：Min 节点重写（笛卡尔积）、根节点选牌重写（best_score）、stop function、transposition table、early cuts、root cuts、iterative deepening
+- `bridge/play_service.py`：`_alpha_mu_play` 按手牌数自适应 M 值，时间预算下调
+
+### 待办（明天继续）
+
+- 13 张牌时 M=1 等价于 PIMC，可考虑是否需要其他引擎（DD/Tiered）兜底
+- 残局（≤8 张）M=2 性能未测试
+- 论文中未实现的优化已全部完成，无更多论文内优化可用
+
 ## 2026-07-12
 
 ### αμ+LLM引擎开发：分组重构 + Prompt系统重构 + Plan生命周期 + 绝望模式

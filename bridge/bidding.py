@@ -382,22 +382,31 @@ def get_next_position(current_position) -> str:
     return order[(idx + 1) % 4]
 
 
+_SUIT_UNICODE_TO_LETTER = str.maketrans({"♣": "C", "♦": "D", "♥": "H", "♠": "S"})
+
+
+def _normalize_bid_suit(bid: str) -> str:
+    return bid.translate(_SUIT_UNICODE_TO_LETTER)
+
+
 def is_valid_bid(bid: str, last_bid: Optional[str] = None) -> bool:
     if bid.lower() == "pass":
         return True
     if bid in ["X", "XX"]:
         return True
-    
+
+    bid = _normalize_bid_suit(bid)
     match = re.match(r'^([1-7])([CDHS]|NT)$', bid, re.IGNORECASE)
     if not match:
         return False
-    
+
     if last_bid is None:
         return True
-    
+
     if last_bid.lower() == "pass":
         return True
-    
+
+    last_bid = _normalize_bid_suit(last_bid)
     last_match = re.match(r'^([1-7])([CDHS]|NT)$', last_bid, re.IGNORECASE)
     if not last_match:
         return True
