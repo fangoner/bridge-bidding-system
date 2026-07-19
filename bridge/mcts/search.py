@@ -108,10 +108,6 @@ class MctsSearch:
             defender_tricks=state.defender_tricks,
         )
 
-        # 信念跟踪器：在搜索循环前生成加权粒子集
-        if self.sampler.belief_tracker is not None:
-            self.sampler.belief_tracker.prepare(state, perspective)
-
         start_time = time.time()
         iteration = 0
 

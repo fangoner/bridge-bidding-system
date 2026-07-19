@@ -218,20 +218,10 @@ class DealSampler:
 
     def __init__(self):
         self.constraints: Dict[str, BidConstraint] = {}
-        self.belief_tracker = None  # 已废弃，保留属性避免 AttributeError
+        self.belief_tracker = None  # 已废弃，保留属性向后兼容
 
     def set_constraints(self, constraints: Dict[str, BidConstraint]) -> None:
-        """设置叫牌约束，后续 sample() 会验证采样结果。
-
-        Args:
-            constraints: {position: BidConstraint} 映射
-        """
         self.constraints = constraints or {}
-
-    # ---- 向后兼容接口（Phase 0a 移除 BeliefTracker） ----
-    def set_belief_tracker(self, tracker=None) -> None:
-        """[已废弃] BeliefTracker 已移除。保留接口避免 import 错误。"""
-        pass
 
     def sample(self, state: PlayState, perspective: str) -> Dict[str, List[Card]]:
         """均匀采样一套与当前信息一致的手牌，等级约束验证。
