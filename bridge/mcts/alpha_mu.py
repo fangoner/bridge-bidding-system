@@ -1118,22 +1118,57 @@ class AlphaMuSearch:
         if not batch_items:
             return ParetoFront([OutcomeVector(result_vector, useful_mask, tricks_list)])
 
-        # 批处理求解（分批 ≤200）
+        # 2021 论文 §Leaf Parallelization: 并行求解 DDS 批次
         _t_solve_start = time.time()
         _BATCH = 200
-        raw_results = []
+        raw_results = [None] * len(batch_items)
+
+        # 分块
+        chunks = []
+        chunk_indices = []
         for bi in range(0, len(batch_items), _BATCH):
-            if self._time_up():
-                raw_results.extend([None] * (len(batch_items) - len(raw_results)))
-                break
             chunk = batch_items[bi:bi + _BATCH]
             chunk_data = [(hands_bits, trump, first, cards)
                          for _, hands_bits, trump, first, cards, _, _ in chunk]
-            try:
-                chunk_results = solve_all_boards_bits(chunk_data)
-                raw_results.extend(chunk_results)
-            except Exception:
-                raw_results.extend([None] * len(chunk))
+            chunks.append(chunk_data)
+            chunk_indices.append(list(range(bi, min(bi + _BATCH, len(batch_items)))))
+
+        if not chunks:
+            return ParetoFront([OutcomeVector(result_vector, useful_mask, tricks_list)])
+
+        # 单块或已经超时 → 串行
+        if len(chunks) == 1 or self._time_up():
+            for ci, chunk_data in enumerate(chunks):
+                if self._time_up():
+                    break
+                try:
+                    cr = solve_all_boards_bits(chunk_data)
+                    for j, idx in enumerate(chunk_indices[ci]):
+                        if j < len(cr):
+                            raw_results[idx] = cr[j]
+                except Exception:
+                    pass
+        else:
+            # 多块并行求解
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            _max_workers = min(4, len(chunks))
+            with ThreadPoolExecutor(max_workers=_max_workers) as executor:
+                futures = {}
+                for ci, chunk_data in enumerate(chunks):
+                    if self._time_up():
+                        break
+                    f = executor.submit(solve_all_boards_bits, chunk_data)
+                    futures[f] = ci
+                for f in as_completed(futures):
+                    ci = futures[f]
+                    try:
+                        cr = f.result()
+                        for j, idx in enumerate(chunk_indices[ci]):
+                            if cr is not None and j < len(cr):
+                                raw_results[idx] = cr[j]
+                    except Exception:
+                        pass
+
         self._dds_calls += sum(1 for r in raw_results if r is not None and len(r) > 0)
         _solve_ms = (time.time() - _t_solve_start) * 1000
 
