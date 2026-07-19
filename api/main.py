@@ -2052,25 +2052,28 @@ def _compute_dd_hints_for_state_from_state(state) -> dict:
         return {}
 
 
-# ── 粒子数设置 ──
+# ── 样本数 / world数设置（原"粒子数"，Phase 0a 后改为直接控制引擎参数）──
 class ParticleSettingsRequest(BaseModel):
-    dd_particles: Optional[int] = None
-    mcts_particles: Optional[int] = None
-    alpha_mu_particles: Optional[int] = None
+    dd_particles: Optional[int] = None       # DD 样本数
+    mcts_particles: Optional[int] = None     # MCTS 迭代数
+    alpha_mu_particles: Optional[int] = None # αμ world数
 
 
 @app.get("/api/play/particle-settings")
 async def get_particle_settings():
-    """获取当前粒子数设置"""
+    """获取当前采样/W数设置"""
     service = get_play_service()
+    dd_val = service.dd_search.num_samples
+    mcts_val = service.mcts.iterations
+    amu_val = service.alpha_mu_search.num_worlds if service.alpha_mu_search else ALPHA_MU_NUM_WORLDS
     return {
-        "dd_particles": getattr(service, 'dd_particles', 200),
+        "dd_particles": dd_val,
         "dd_min": BELIEF_DD_PARTICLES_MIN,
         "dd_max": BELIEF_DD_PARTICLES_MAX,
-        "mcts_particles": getattr(service, 'mcts_particles', 500),
+        "mcts_particles": mcts_val,
         "mcts_min": BELIEF_MCTS_PARTICLES_MIN,
         "mcts_max": BELIEF_MCTS_PARTICLES_MAX,
-        "alpha_mu_particles": getattr(service, 'alpha_mu_particles', 30),
+        "alpha_mu_particles": amu_val,
         "alpha_mu_min": BELIEF_ALPHA_MU_PARTICLES_MIN,
         "alpha_mu_max": BELIEF_ALPHA_MU_PARTICLES_MAX,
     }
@@ -2078,24 +2081,21 @@ async def get_particle_settings():
 
 @app.post("/api/play/particle-settings")
 async def set_particle_settings(request: ParticleSettingsRequest):
-    """设置粒子数（实时生效，无需重新开局）"""
+    """设置 DD样本数 / αμ world数（实时生效）"""
     service = get_play_service()
     updates = {}
     if request.dd_particles is not None:
         val = max(BELIEF_DD_PARTICLES_MIN, min(BELIEF_DD_PARTICLES_MAX, request.dd_particles))
-        service.dd_particles = val
-        if service.belief_tracker is not None:
-            service.belief_tracker.num_particles = val
+        service.dd_search.num_samples = val
         updates["dd_particles"] = val
     if request.mcts_particles is not None:
         val = max(BELIEF_MCTS_PARTICLES_MIN, min(BELIEF_MCTS_PARTICLES_MAX, request.mcts_particles))
-        service.mcts_particles = val
-        if hasattr(service.mcts.sampler, 'belief_tracker') and service.mcts.sampler.belief_tracker is not None:
-            service.mcts.sampler.belief_tracker.num_particles = val
+        service.mcts.iterations = val
         updates["mcts_particles"] = val
     if request.alpha_mu_particles is not None:
         val = max(BELIEF_ALPHA_MU_PARTICLES_MIN, min(BELIEF_ALPHA_MU_PARTICLES_MAX, request.alpha_mu_particles))
-        service.alpha_mu_particles = val
+        if service.alpha_mu_search is not None:
+            service.alpha_mu_search.num_worlds = val
         updates["alpha_mu_particles"] = val
     return {"success": True, "updates": updates}
 

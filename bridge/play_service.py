@@ -2022,9 +2022,9 @@ class PlayService:
         else:
             print(f"[DD] 无约束 (bid_history={'空' if not self.bid_history else repr(self.bid_history[:80])})")
 
-        # Phase 0a: DD 样本数由 DD_NUM_SAMPLES 控制
-
-        # 允许请求级覆盖采样数
+        # Phase 0a: DD 样本数由粒子设置 API 或 DD_NUM_SAMPLES 控制
+        # 请求级 dd_samples 允许临时覆盖（用完恢复）
+        _saved_num_samples = self.dd_search.num_samples
         if dd_samples is not None:
             self.dd_search.num_samples = dd_samples
 
@@ -2051,6 +2051,9 @@ class PlayService:
                 "error": str(e),
                 "prompt": "[DD error]",
             }
+        finally:
+            if dd_samples is not None:
+                self.dd_search.num_samples = _saved_num_samples
 
     def _perfect_play(self, state: PlayState) -> Dict[str, Any]:
         """完美DD打牌（全知双明手，无采样，一次 solve_board 得所有候选精确分）"""
