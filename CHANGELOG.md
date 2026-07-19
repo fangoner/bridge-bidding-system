@@ -1,5 +1,45 @@
 # 开发日志
 
+## 2026-07-20
+
+### Bug 修复（GLM review 第 2-4 轮）
+
+三轮 review 确认 12 个真实 bug，已全部修复。GLM 额外报告的 25 项逐条核实如下：
+
+| # | 描述 | 判断 | 处理 |
+|---|------|------|------|
+| — | _make_tt_key dict 处理 | ✅ 真 bug | `7c22656` 已修 |
+| — | _count_played 已删仍调用 | ✅ 真 bug | `7c22656` 已修 |
+| — | _vec_geq useful_mask | ✅ 真 bug | `7c22656` 已修 |
+| — | _sample_uniform void 丢牌+回填死循环 | ✅ 真 bug | `7c22656`+`d15639a` 已修 |
+| — | _build_deal_from_bits else 分支 | ⚠️ 防御性 | `2efbcee` 已补 |
+| — | SolveAllBoardsBin argtypes/ret check | ⚠️ 防御性 | `2efbcee` 已补 |
+| — | card_bit_rank/suit_idx 空 bits 默认值 | ⚠️ 防御性 | `2efbcee` 已补 |
+| — | _merge_constraints HCP 反转 | ✅ 真 bug | `937210d` 已修 |
+| — | negative_inference 覆盖 source | ✅ 真 bug | `937210d` 已修 |
+| — | 死代码/死 import | 清理 | `937210d`+`b68890b` 已删 |
+| 1 | 多线程 SetMaxThreads | ❌ 不是 bug | SetMaxThreads 管内部 OpenMP，非外部线程安全。但 `_load_dll` 确实该加锁 → `fe16e26` |
+| 2 | 双重计数 | ❌ 不会触发 | 但 try 块范围过大 → `fe16e26` 缩小 |
+| 3 | endplay 依赖 | ❌ 文档问题 | 项目始终装 endplay |
+| 4 | 跨平台 DLL | ❌ Windows-only | |
+| 5 | bit_count 3.10+ | ❌ 实际 3.11+ | |
+| 6 | solve_perfect | ❌ state.hands 由 play_engine 维护 | |
+| 7 | enumerate_endgame | ❌ 约束验证不检查具体牌张 | |
+| 8 | rank/suit 默认值 | ⚠️ rank 默认 2→0 | `fe16e26` 已改 |
+| 9 | apply_play_to_state_bits trump | ❌ current_trick["trump"] = 定约将牌 | |
+| 10 | get_playable_from_bits | ❌ 调用方全传 Card | |
+| 11 | 批量不一致 | ❌ 故意设计 | |
+| 12 | dds_result_to_decl_tricks | ❌ 已删 import | |
+| 13 | hand_count 性能 | 微优化 | |
+| 14 | 测试文件 | ✅ 该删 | `b68890b` 已删 |
+| 15 | API 死变量 | ⚠️ 存在但低优 | |
+| 16 | validate_level1 空手牌 | ❌ 设计如此 | |
+| 17 | 缺字段 | ❌ 功能请求 | |
+| 18 | min_hcp_target | 清理项 | |
+| 19 | belief_tracker 残留 | ✅ 该清 | `b68890b` 已清 |
+| 20-24 | 命名/检查/文档 | ❌ 不是 bug | |
+| 25 | Bug D 回填死循环 | ✅ 真 bug | `d15639a` 已修 |
+
 ## 2026-07-19 (v1.50)
 
 ### 世界采样对齐论文 + 2021 论文 5 项优化全部实现 + DD 引擎 DirectDDS 升级
