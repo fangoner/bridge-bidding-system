@@ -172,22 +172,24 @@ def worlds_to_bits(worlds: List[Optional[Dict[str, List[Card]]]]) \
 # ── 花色比较辅助 ──
 
 def card_bit_rank(card_bit: int) -> int:
-    """从绝对位图取 rank 值（2-14）。"""
-    # 找到最高 set bit 的位置（即 rank 值）
+    """从绝对位图取 rank 值（2-14）。card_bit=0 时抛 ValueError。"""
+    if card_bit == 0:
+        raise ValueError("card_bit_rank: empty bit")
     for s_idx in range(4):
-        shift = s_idx * 16
-        suit_bits = (card_bit >> shift) & 0xFFFF
+        suit_bits = (card_bit >> (s_idx * 16)) & 0xFFFF
         if suit_bits:
             return (suit_bits & -suit_bits).bit_length() - 1
-    return 2
+    raise ValueError(f"card_bit_rank: no suit bits in {card_bit:#x}")
 
 
 def card_bit_suit_idx(card_bit: int) -> int:
-    """从绝对位图取花色索引 0-3。"""
+    """从绝对位图取花色索引 0-3。card_bit=0 时抛 ValueError。"""
+    if card_bit == 0:
+        raise ValueError("card_bit_suit_idx: empty bit")
     for s_idx in range(4):
         if (card_bit >> (s_idx * 16)) & 0xFFFF:
             return s_idx
-    return 0
+    raise ValueError(f"card_bit_suit_idx: no suit bits in {card_bit:#x}")
 
 
 # ── Bitmap 版状态操作（对应 state_utils.apply_play_to_state 等）──

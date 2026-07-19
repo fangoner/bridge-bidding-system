@@ -102,25 +102,13 @@ def _has_duplicates(hands: Dict[str, List[Card]]) -> bool:
     return False
 
 # Phase 0b: DirectDDS 替换 endplay，ctypes 直调 DDS 库
-from bridge.mcts.direct_dds import (
-    solve_all_boards_raw,
-    dds_result_to_decl_tricks,
-    _RANK_TO_BIT,
-    _SUIT_TO_IDX,
-    _PLAYER_TO_POS as _DD_PLAYER_TO_POS,
-)
+from bridge.mcts.direct_dds import solve_all_boards_raw
 
 
 # Phase 0b fix: DDS suit/rank maps with equals bitmask parsing
 _DDS_SUIT = {0: '♠', 1: '♥', 2: '♦', 3: '♣'}
 _DDS_RANK = {14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9',
               8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2'}
-# Reverse: suit_char → suit_id for bit manipulation
-_DDS_SUIT_R = {'♠': 0, '♥': 1, '♦': 2, '♣': 3}
-# Reverse: rank_char → rank_bit
-_DDS_RANK_R = {c: b for b, c in _DDS_RANK.items()}
-
-
 def _dds_result_to_score_map(solved, exclude_cards=None):
     """DDS 结果 → {(suit, rank): score}，含 equals bitmask 展开。
 
@@ -358,8 +346,6 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
                 _t_s = _time.time()
                 try:
                     solved_list = solve_all_boards_raw([(hands, t, first_p, tc)])
-                    if solved_list and solved_list[0]:
-                        solved = solved_list[0]
                 except Exception:
                     continue
                 _dt_s = _time.time() - _t_s
@@ -537,10 +523,6 @@ class DDSearch:
                     _f.write(f"[DD_STATS] mode={_mode} n={_n} avg={_avg*1000:.1f}ms p50={_p50*1000:.1f}ms "
                              f"p90={_p90*1000:.1f}ms p99={_p99*1000:.1f}ms max={_solve_max*1000:.1f}ms "
                              f"total={_solve_total:.2f}s\n")
-        else:
-            # samples 已在上面生成，跳过
-            pass
-
         elapsed = time.time() - start_time
         _solve_avg = (_solve_total / _solve_count) if _solve_count > 0 else 0.0
         print(f"[DD] 全量模式完成: {samples_done} 世界, {elapsed:.1f}s"

@@ -205,8 +205,12 @@ def solve_all_boards_raw(
 
     solvedp = _solvedBoards()
 
-    # 调用 DDS
-    dll.SolveAllBoardsBin(ctypes.byref(bop), ctypes.byref(solvedp))
+    # 调用 DDS（argtypes/restype 确保 64-bit 指针正确传递）
+    dll.SolveAllBoardsBin.argtypes = [ctypes.POINTER(_boards), ctypes.POINTER(_solvedBoards)]
+    dll.SolveAllBoardsBin.restype = ctypes.c_int
+    ret = dll.SolveAllBoardsBin(ctypes.byref(bop), ctypes.byref(solvedp))
+    if ret != 1:
+        return [None] * n
 
     results = []
     for i in range(n):
@@ -319,9 +323,16 @@ def _build_deal_from_bits(
             if hasattr(card, 'suit'):
                 d.currentTrickSuit[i] = _SUIT_TO_IDX.get(card.suit, 0)
                 d.currentTrickRank[i] = _RANK_TO_BIT.get(card.rank, 2)
-            else:
-                # card is already a bit value
-                pass
+            elif isinstance(card, int) and card != 0:
+                s_idx = 0
+                for si in range(4):
+                    if (card >> (si * 16)) & 0xFFFF:
+                        s_idx = si
+                        break
+                suit_bits = (card >> (s_idx * 16)) & 0xFFFF
+                r_bit = (suit_bits & -suit_bits).bit_length() - 1
+                d.currentTrickSuit[i] = s_idx
+                d.currentTrickRank[i] = r_bit
 
     # 从 bitmap 直接提取 remainCards[4][4]
     for pos, bits in hands_bits.items():
@@ -364,7 +375,12 @@ def solve_all_boards_bits(
             bop.mode[i] = mode
 
         solvedp = _solvedBoards()
-        dll.SolveAllBoardsBin(ctypes.byref(bop), ctypes.byref(solvedp))
+        dll.SolveAllBoardsBin.argtypes = [ctypes.POINTER(_boards), ctypes.POINTER(_solvedBoards)]
+        dll.SolveAllBoardsBin.restype = ctypes.c_int
+        ret = dll.SolveAllBoardsBin(ctypes.byref(bop), ctypes.byref(solvedp))
+        if ret != 1:
+            all_results.extend([None] * bn)
+            continue
 
         for i in range(bn):
             try:
