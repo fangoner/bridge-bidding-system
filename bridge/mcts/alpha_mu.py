@@ -328,23 +328,13 @@ class AlphaMuSearch:
                 "full_output": {"推荐出牌": str(playable[0])},
             }
 
-        # ── 1. 生成 possible worlds ──
-        if self.sampler.belief_tracker is not None:
-            self.sampler.belief_tracker.prepare(state, perspective)
+        # ── 1. 生成 possible worlds（均匀采样 + 分级约束验证）──
+        # Phase 0a: 直接调用 sampler.sample_n()，等权均匀 world 集合
         worlds: List[Dict[str, List[Card]]] = []
-        if self.sampler.belief_tracker is not None and self.sampler.belief_tracker.particles:
-            all_particles = self.sampler.belief_tracker.get_all_particles()
-            all_particles.sort(key=lambda x: x[1], reverse=True)
-            for world, _w in all_particles[:self.num_worlds]:
-                worlds.append(world)
-        else:
-            for _ in range(self.num_worlds):
-                try:
-                    w = self.sampler.sample(state, perspective)
-                    if w is not None:
-                        worlds.append(w)
-                except Exception:
-                    continue
+        try:
+            worlds = self.sampler.sample_n(self.num_worlds, state, perspective)
+        except Exception:
+            worlds = []
         if not worlds:
             raise RuntimeError("αμ: 无法生成 possible worlds")
 

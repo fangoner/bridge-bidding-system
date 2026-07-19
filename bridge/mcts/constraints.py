@@ -1,5 +1,12 @@
-"""叫牌约束：从叫牌含义中提取的点力/牌型限制，用于MCTS采样过滤。"""
-from dataclasses import dataclass, field
+"""叫牌约束：从叫牌含义中提取的点力/牌型限制，用于采样过滤。
+
+约束分级体系（Phase 0a）：
+  Level 1 (硬约束) — 叫牌明确承诺，采样时必须满足：
+    hard_coded* / meaning_parsed / convention_* / cue_bid / overcall_* / unusual_nt
+  Level 3 (忽略) — 推理猜测，不参与采样：
+    negative_inference / hcp_conservation
+"""
+from dataclasses import dataclass, field, copy as dc_copy
 from typing import Dict, List, Optional, Set, Tuple
 
 from bridge.play_types import Card, POSITION_ORDER
@@ -7,87 +14,173 @@ from bridge.play_types import Card, POSITION_ORDER
 CONTROL_MAP = {"A": 2, "K": 1}  # A=2控制，K=1控制
 
 
+# ---- 约束来源分类 ----
+_HARD_SOURCE_PREFIXES = (
+    "hard_coded",      # 叫牌阶段硬编码（含体系后缀 hard_coded_jf / hard_coded_natural）
+    "meaning_parsed",   # LLM 叫品含义解析
+    "convention_",      # 约定叫识别（convention_takeout_double / convention_stayman 等）
+    "cue_bid",          # 扣叫
+    "overcall_",        # 争叫（overcall_2level 等）
+    "unusual_nt",       # 非寻常无将
+)
+
+_IGNORED_SOURCES = {
+    "negative_inference",   # 否定推断："他 pass 了大概 ≤7 HCP"——不是事实
+    "hcp_conservation",     # 点力守恒链式推理——一步错全盘错
+}
+
+
+def is_hard_source(src: str) -> bool:
+    """约束来源是否是 Level 1（硬约束/叫牌明确承诺）。"""
+    if not src:
+        return False
+    if src in _IGNORED_SOURCES:
+        return False
+    return src.startswith(_HARD_SOURCE_PREFIXES)
+
+
+def is_ignored_source(src: str) -> bool:
+    """约束来源是否应在采样中忽略（Level 3）。"""
+    return src in _IGNORED_SOURCES
+
+
+def filter_hard_constraints(
+    constraints: Dict[str, "BidConstraint"],
+) -> Dict[str, "BidConstraint"]:
+    """从约束字典中筛选仅 Level 1 硬约束（用于均匀采样验证）。"""
+    return {
+        pos: c for pos, c in constraints.items()
+        if is_hard_source(c.inference_source)
+    }
+
+
+def relax_constraint(c: "BidConstraint") -> "BidConstraint":
+    """生成 Level 2 放宽版约束：HCP ±2，suit_min 减半。"""
+    relaxed = BidConstraint(position=c.position, inference_source="relaxed")
+    if c.min_hcp is not None:
+        relaxed.min_hcp = max(0, c.min_hcp - 2)
+    if c.max_hcp is not None:
+        relaxed.max_hcp = min(37, c.max_hcp + 2)
+    if c.min_controls is not None:
+        relaxed.min_controls = max(0, c.min_controls - 1)
+    relaxed.suit_min = {s: max(1, n // 2) for s, n in c.suit_min.items()}
+    # suit_max / exact_suit / specific_cards / balanced 放宽时不保留
+    return relaxed
+
+
 @dataclass
 class BidConstraint:
-    """一个牌手在叫牌中暴露的约束
+    """一个牌手在叫牌中暴露的约束。
 
-    扩展字段说明：
-    - suit_max: 花色→最多张数（如1NT开叫高花≤4张）
-    - exact_suit: 花色→精确张数（如弱二开叫=6张）
-    - min_controls: 最少控制数（A=2, K=1）
-    - specific_cards: 必须持有的特定牌张集合，格式 {(suit, rank), ...}
-                      例如{("♠", "A")}表示必须持有♠A（如2♣强开叫通常有控制）
-    - forbidden_hcp: 禁止的点力范围（如逆叫后点力不能低于16）
-    - suit_quality: 花色→最低顶张要求（如弱二需要该套≥2个顶张大牌）
-                       格式: {suit: min_holding}，min_holding为顶张大牌的组合
+    inference_source 标记约束来源，由约束分级体系使用：
+    - Level 1 硬约束（采样验证）：hard_coded*, meaning_parsed, convention_*, cue_bid, overcall_*, unusual_nt
+    - Level 3 忽略（不参与采样）：negative_inference, hcp_conservation
     """
     position: str
     min_hcp: Optional[int] = None
     max_hcp: Optional[int] = None
-    balanced: Optional[bool] = None  # True=均型, False=非均型, None=未知
-    suit_min: Dict[str, int] = field(default_factory=dict)  # 花色→最少张数
-    suit_max: Dict[str, int] = field(default_factory=dict)  # 花色→最多张数
-    exact_suit: Dict[str, int] = field(default_factory=dict)  # 花色→精确张数
-    min_controls: Optional[int] = None  # 最少控制数（A=2, K=1）
-    min_hcp_target: Optional[int] = None  # HCP期望中心值（用于采样分布引导，非硬约束）
-    specific_cards: Set[Tuple[str, str]] = field(default_factory=set)  # 必须持有的特定牌张
-    inference_source: str = "hard_coded"  # 约束来源：hard_coded/negative_inference/hcp_conservation/convention
+    balanced: Optional[bool] = None
+    suit_min: Dict[str, int] = field(default_factory=dict)
+    suit_max: Dict[str, int] = field(default_factory=dict)
+    exact_suit: Dict[str, int] = field(default_factory=dict)
+    min_controls: Optional[int] = None
+    min_hcp_target: Optional[int] = None  # 已废弃：Phase 0a 后不再用于分布引导
+    specific_cards: Set[Tuple[str, str]] = field(default_factory=set)
+    inference_source: str = "hard_coded"
+
+
+def validate_level1(
+    hands: Dict[str, List[Card]],
+    constraints: Dict[str, "BidConstraint"],
+) -> bool:
+    """Level 1 硬约束验证：仅检查叫牌明确承诺（hard_coded / convention / meaning_parsed）。
+
+    忽略 negative_inference 和 hcp_conservation 来源的约束。
+    """
+    for pos, constraint in constraints.items():
+        if not is_hard_source(constraint.inference_source):
+            continue
+        cards = hands.get(pos, [])
+        if not cards:
+            continue
+        if not _check_constraint(cards, constraint):
+            return False
+    return True
+
+
+def validate_level2(
+    hands: Dict[str, List[Card]],
+    constraints: Dict[str, "BidConstraint"],
+) -> bool:
+    """Level 2 放宽约束验证：HCP ±2, suit_min 减半。"""
+    for pos, constraint in constraints.items():
+        if not is_hard_source(constraint.inference_source):
+            continue
+        cards = hands.get(pos, [])
+        if not cards:
+            continue
+        relaxed = relax_constraint(constraint)
+        if not _check_constraint(cards, relaxed):
+            return False
+    return True
+
+
+def validate_voids_only(
+    hands: Dict[str, List[Card]],
+    known_voids: Dict[str, Set[str]],
+) -> bool:
+    """Level 0 验证：仅检查已知缺门（看到垫牌推得的花色张数 = 0）。"""
+    for pos, void_suits in known_voids.items():
+        cards = hands.get(pos, [])
+        for c in cards:
+            if c.suit in void_suits:
+                return False
+    return True
+
+
+def _check_constraint(cards: List[Card], constraint: "BidConstraint") -> bool:
+    """检查一手牌是否满足单个约束的所有条件。"""
+    dist = _count_distribution(cards)
+    hcp = _compute_hcp(cards)
+    controls = _compute_controls(cards)
+
+    if constraint.min_hcp is not None and hcp < constraint.min_hcp:
+        return False
+    if constraint.max_hcp is not None and hcp > constraint.max_hcp:
+        return False
+    if constraint.min_controls is not None and controls < constraint.min_controls:
+        return False
+    for suit, min_len in constraint.suit_min.items():
+        if dist.get(suit, 0) < min_len:
+            return False
+    for suit, max_len in constraint.suit_max.items():
+        if dist.get(suit, 0) > max_len:
+            return False
+    for suit, exact_len in constraint.exact_suit.items():
+        if dist.get(suit, 0) != exact_len:
+            return False
+    if constraint.balanced is not None:
+        is_balanced = _is_balanced(dist)
+        if constraint.balanced and not is_balanced:
+            return False
+        if not constraint.balanced and is_balanced:
+            return False
+    for (suit, rank) in constraint.specific_cards:
+        if not any(c.suit == suit and c.rank == rank for c in cards):
+            return False
+    return True
 
 
 def validate_sample(
     hands: Dict[str, List[Card]],
-    constraints: Dict[str, BidConstraint],
+    constraints: Dict[str, "BidConstraint"],
 ) -> bool:
-    """检查采样出的手牌是否满足所有叫牌约束（硬约束验证）。
+    """检查采样出的手牌是否满足所有 Level 1 硬约束。
 
-    Args:
-        hands: 完整4家手牌 {position: [Card, ...]}
-        constraints: 需要检查的约束 {position: BidConstraint}
-
-    Returns:
-        True 如果满足所有硬约束
+    自动忽略 negative_inference / hcp_conservation 来源的约束。
+    等同于 validate_level1()，保留用于向后兼容。
     """
-    for pos, constraint in constraints.items():
-        cards = hands.get(pos, [])
-        if not cards:
-            continue
-
-        dist = _count_distribution(cards)
-        hcp = _compute_hcp(cards)
-        controls = _compute_controls(cards)
-
-        if constraint.min_hcp is not None and hcp < constraint.min_hcp:
-            return False
-        if constraint.max_hcp is not None and hcp > constraint.max_hcp:
-            return False
-
-        if constraint.min_controls is not None and controls < constraint.min_controls:
-            return False
-
-        for suit, min_len in constraint.suit_min.items():
-            if dist.get(suit, 0) < min_len:
-                return False
-
-        for suit, max_len in constraint.suit_max.items():
-            if dist.get(suit, 0) > max_len:
-                return False
-
-        for suit, exact_len in constraint.exact_suit.items():
-            if dist.get(suit, 0) != exact_len:
-                return False
-
-        if constraint.balanced is not None:
-            is_balanced = _is_balanced(dist)
-            if constraint.balanced and not is_balanced:
-                return False
-            if not constraint.balanced and is_balanced:
-                return False
-
-        for (suit, rank) in constraint.specific_cards:
-            if not any(c.suit == suit and c.rank == rank for c in cards):
-                return False
-
-    return True
+    return validate_level1(hands, constraints)
 
 
 def compute_sample_violation_score(

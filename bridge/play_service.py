@@ -18,10 +18,8 @@ from config import (
     TIERED_ENDGAME_CARDS, TIERED_MIN_SAMPLES, TIERED_OVERRIDE_THRESHOLD,
     TIERED_FUSION_SPREAD, TIERED_CLUSTER_SE, TIERED_TYPICAL_SD,
     TIERED_MCTS_CLUSTER_THRESHOLD,
-    BELIEF_ENABLE, BELIEF_DD_PARTICLES, BELIEF_MCTS_PARTICLES,
     ALPHA_MU_ENABLE, ALPHA_MU_ENDGAME_CARDS, ALPHA_MU_NUM_WORLDS,
     ALPHA_MU_MAX_DEPTH, ALPHA_MU_TIME_LIMIT, ALPHA_MU_M,
-    BELIEF_ALPHA_MU_PARTICLES,
 )
 
 
@@ -34,10 +32,6 @@ class PlayService:
         self.declarer_plan = self._empty_plan()
         # 防守计划：每个防守者各自维护，key=位置
         self.defender_plans = {}
-        # 粒子数设置（按引擎分别可调）
-        self.dd_particles = BELIEF_DD_PARTICLES
-        self.mcts_particles = BELIEF_MCTS_PARTICLES
-        self.alpha_mu_particles = BELIEF_ALPHA_MU_PARTICLES
         # MCTS搜索器（始终初始化，按需使用）
         self.mcts = MctsSearch(
             iterations=MCTS_ITERATIONS,
@@ -54,22 +48,12 @@ class PlayService:
             max_enumerations=DD_ENDGAME_MAX_ENUMERATIONS,
             use_maximin=DD_MAXIMIN_ENABLE,
         )
-        # 信念跟踪器：粒子滤波采样，缓解 strategy fusion 问题
-        # DD 引擎：粒子=样本数，不抽取，全量加权平均
-        # MCTS 引擎：粒子池供 draw，UCT 自带多样性
-        if BELIEF_ENABLE:
-            from bridge.mcts.belief import BeliefTracker
-            self.belief_tracker = BeliefTracker(self.dd_search.sampler,
-                                                num_particles=BELIEF_DD_PARTICLES)
-            self.dd_search.sampler.set_belief_tracker(self.belief_tracker)
-            self.mcts.sampler.set_belief_tracker(
-                BeliefTracker(self.mcts.sampler, num_particles=BELIEF_MCTS_PARTICLES)
-            )
-        else:
-            self.belief_tracker = None
+        # Phase 0a: BeliefTracker 已移除（均匀采样不需要粒子加权）
+        # DD 和 αμ 直接通过 sampler.sample_n() 生成无偏样本/world
+        self.belief_tracker = None
 
         # αμ 搜索器：残局多步前瞻，解决 strategy fusion 和 non-locality
-        # 复用 dd_search 的 sampler（含 belief tracker 和约束）
+        # 共享 dd_search 的 sampler（含叫牌约束）
         self.alpha_mu_search = None
         if ALPHA_MU_ENABLE:
             try:
@@ -153,14 +137,7 @@ class PlayService:
         self.bid_history = bid_history
         self.bid_meanings = bid_meanings  # 叫牌含义文本（复用LLM已分析信息）
         self.bid_constraints = None  # 延迟提取
-        # 重置信念跟踪器（清空旧粒子，新局开始）
-        if self.belief_tracker is not None:
-            self.belief_tracker.particles = []
-            self.belief_tracker.weights = []
-        # 同时重置MCTS的信念跟踪器
-        if hasattr(self.mcts.sampler, 'belief_tracker') and self.mcts.sampler.belief_tracker is not None:
-            self.mcts.sampler.belief_tracker.particles = []
-            self.mcts.sampler.belief_tracker.weights = []
+        # Phase 0a: BeliefTracker 已移除，粒子缓存不再需要清理
 
         return self.engine.initialize(hands, contract, player_roles, bidding_sequence)
     
@@ -1029,11 +1006,9 @@ class PlayService:
         return constraints
 
     def _apply_constraints(self, constraints: Dict[str, BidConstraint], sampler=None) -> None:
-        """将约束应用到采样器和信念跟踪器"""
+        """将约束应用到采样器"""
         target_sampler = sampler or self.dd_search.sampler
         target_sampler.set_constraints(constraints)
-        if target_sampler.belief_tracker is not None:
-            target_sampler.belief_tracker.set_constraints(constraints)
 
     def _get_bid_constraints(self) -> Dict[str, BidConstraint]:
         """从叫牌历史中提取约束：优先硬编码标准叫品表，LLM提取作为补充，结果缓存"""
@@ -1160,10 +1135,7 @@ class PlayService:
         if constraints:
             self._apply_constraints(constraints)
 
-        # 粒子池 ≥ 需求数，不浪费
-        bt = getattr(self.dd_search.sampler, 'belief_tracker', None)
-        if bt is not None:
-            bt.num_particles = max(self.alpha_mu_particles, n_worlds)
+        # Phase 0a: 均匀采样，世界数由 αμ 参数控制
 
         search = AlphaMuSearch(
             sampler=self.dd_search.sampler,
@@ -2050,10 +2022,7 @@ class PlayService:
         else:
             print(f"[DD] 无约束 (bid_history={'空' if not self.bid_history else repr(self.bid_history[:80])})")
 
-        # DD 使用专用粒子数（全量加权，200=200 world solve_board）
-        bt = getattr(self.dd_search.sampler, 'belief_tracker', None)
-        if bt is not None:
-            bt.num_particles = self.dd_particles
+        # Phase 0a: DD 样本数由 DD_NUM_SAMPLES 控制
 
         # 允许请求级覆盖采样数
         if dd_samples is not None:
@@ -2117,10 +2086,7 @@ class PlayService:
         if constraints:
             self._apply_constraints(constraints, self.mcts.sampler)
 
-        # MCTS 使用专用粒子数（draw池，500 保证多样性）
-        bt = getattr(self.mcts.sampler, 'belief_tracker', None)
-        if bt is not None:
-            bt.num_particles = self.mcts_particles
+        # Phase 0a: MCTS 样本数由 config 控制
 
         try:
             result = self.mcts.search(state)
