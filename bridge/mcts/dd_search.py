@@ -1,8 +1,6 @@
-"""纯蒙特卡洛 + 双明手评估搜索。
+"""纯蒙特卡洛 + 双明手评估搜索 (Phase 0b: DirectDDS)。
 
-采样后把当前墩牌加回手牌使四家张数相等，
-deal.play(from_hand=True) 写入当前墩，
-solve_board 求解并取期望值选最优出牌。
+均匀采样未知手牌，批量 DDS 求解候选出牌的期望赢墩。
 """
 
 import itertools
@@ -14,7 +12,7 @@ from typing import Dict, List, Optional
 from config import BASE_DIR
 from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER, PARTNERS
 from bridge.mcts.state_utils import (
-    cards_to_hand_str, get_current_trick_state, POSITION_TO_PLAYER, PLAYER_TO_POSITION, SUIT_TO_DENOM,
+    get_current_trick_state,
 )
 from bridge.mcts.sampler import DealSampler, ALL_CARDS
 from bridge.mcts.constraints import validate_sample
@@ -103,91 +101,41 @@ def _has_duplicates(hands: Dict[str, List[Card]]) -> bool:
             seen.add(key)
     return False
 
-try:
-    from endplay import Deal
-    from endplay.dds import solve_board, solve_all_boards
-    from endplay.types import Card as EpCard, Denom, Player, Rank
-    ENDPLAY_AVAILABLE = True
-except ImportError:
-    ENDPLAY_AVAILABLE = False
-
-_SUIT_MAP = {}
-_RANK_MAP = {}
-_DENOM_TO_SUIT = {}
-_RANK_TO_CHAR = {}
-
-if ENDPLAY_AVAILABLE:
-    _SUIT_MAP = {"♠": Denom.spades, "♥": Denom.hearts, "♦": Denom.diamonds, "♣": Denom.clubs}
-    _RANK_MAP = {r: getattr(Rank, "R" + r) for r in ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"]}
-    _DENOM_TO_SUIT = {Denom.spades: "♠", Denom.hearts: "♥", Denom.diamonds: "♦", Denom.clubs: "♣"}
-    _RANK_TO_CHAR = {getattr(Rank, "R" + c): c for c in ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"]}
+# Phase 0b: DirectDDS 替换 endplay，ctypes 直调 DDS 库
+from bridge.mcts.direct_dds import (
+    solve_all_boards_raw,
+    dds_result_to_decl_tricks,
+    _RANK_TO_BIT,
+    _SUIT_TO_IDX,
+    _PLAYER_TO_POS as _DD_PLAYER_TO_POS,
+)
 
 
-def _to_ep(card: Card) -> EpCard:
-    return EpCard(suit=_SUIT_MAP[card.suit], rank=_RANK_MAP[card.rank])
-
-
-def _hands_to_pbn(hands: Dict[str, List[Card]]) -> str:
-    parts = []
-    for pos in ["北", "东", "南", "西"]:
-        cards = hands.get(pos, [])
-        hand_str = cards_to_hand_str(cards)
-        suits = []
-        for s in hand_str.split():
-            if s and s != "-":
-                s = s[1:] if s[0] in "♠♥♦♣" else s
-            suits.append(s)
-        while len(suits) < 4:
-            suits.append("")
-        suits = ["" if s == "-" else s for s in suits]
-        parts.append(".".join(suits))
-    return f"N:{' '.join(parts)}"
-
-
-def _dd_eval_one_world(sampled, all_played, trick_cards, trick_leader,
+def _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
                        playable, state, perspective, actual_turn, declarer, dummy,
                        trump, card_scores, weight, sample_idx):
-    """对单个世界运行 solve_board，累加加权分到 card_scores。
-
-    actual_turn: 真实出牌者（明手领出时 ≠ perspective，deal.first 必须用此值）
-    """
+    """Phase 0b: DirectDDS 单世界求解，累加加权分到 card_scores。"""
+    _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
     try:
-        # 1. 安全网：移除已出牌
-        for pos, card in all_played:
-            if pos in sampled:
-                sampled[pos] = [c for c in sampled[pos]
-                                if not (c.suit == card.suit and c.rank == card.rank)]
-
-        # 2. 检测重复牌
-        if _has_duplicates(sampled):
+        hands, t, first_p, tc = _build_dds_data(world, all_played, trick_cards,
+                                                  trick_leader, perspective, actual_turn, trump)
+        if hands is None:
             return
-
-        # 3. 加回当前墩的牌
-        for pos, card in trick_cards:
-            sampled[pos].append(card)
-
-        # 4. PBN → Deal → solve_board
-        pbn = _hands_to_pbn(sampled)
-        deal = Deal(pbn)
-        deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
-        if trick_cards:
-            deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
-            for _pos, card in trick_cards:
-                deal.play(_to_ep(card), from_hand=True)
-        else:
-            deal.first = POSITION_TO_PLAYER.get(actual_turn, Player.north)
-
-        result = solve_board(deal)
+        solved_list = solve_all_boards_raw([(hands, t, first_p, tc)])
+        if not solved_list or solved_list[0] is None:
+            return
+        solved = solved_list[0]
         score_map = {}
-        for ep_card, side_score in result:
-            key = (_DENOM_TO_SUIT.get(ep_card.suit), _RANK_TO_CHAR.get(ep_card.rank))
-            score_map[key] = side_score
-
+        for suit_id, rank_bit, equals, score in solved:
+            s = {0: '♠', 1: '♥', 2: '♦', 3: '♣'}.get(suit_id)
+            r = {14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9',
+                  8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2'}.get(rank_bit)
+            if s and r:
+                score_map[(s, r)] = score
         total_played = state.declarer_tricks + state.defender_tricks
         remaining_tricks = 13 - total_played
-        curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, actual_turn)
-        curplayer_is_declarer = curplayer_pos in (declarer, dummy)
-
+        cur_p = (_DD_POS.get(first_p, 0) + len(tc)) % 4
+        curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
         for card in playable:
             key = (card.suit, card.rank)
             target_tricks = score_map.get(key, 0)
@@ -196,69 +144,44 @@ def _dd_eval_one_world(sampled, all_played, trick_cards, trick_leader,
             else:
                 decl_side_tricks = remaining_tricks - target_tricks
             total = state.declarer_tricks + decl_side_tricks
-
             stats = card_scores[str(card)]
             stats["weighted_sum"] += total * weight
             stats["total_weight"] += weight
             stats["scores"].append(total)
             stats["mn"] = min(stats["mn"], total)
             stats["mx"] = max(stats["mx"], total)
-
     except Exception:
-        pass  # 单个世界失败不阻塞整体流程
+        pass
 
 
 def _dd_eval_one_world_pure(world, all_played, trick_cards, trick_leader,
                             playable, state, perspective, actual_turn, declarer, dummy,
                             trump, weight):
-    """纯函数版：返回 partial_scores dict，不修改共享状态，供并行调用。
+    """Phase 0b: DirectDDS 纯函数版单世界求解，供并行调用。
 
-    actual_turn: 真实出牌者（明手领出时 ≠ perspective，deal.first 必须用此值）
-    返回: dict {str(card): {"weighted_sum": float, "total_weight": float,
-                             "scores": list, "mn": int, "mx": int}}
-           若失败返回 None。
+    返回: dict 或 None（失败时）。
     """
+    _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
     try:
-        # 深拷贝 world，避免修改原数据
-        sampled = {pos: [Card(suit=c.suit, rank=c.rank) for c in hand]
-                   for pos, hand in world.items()}
-
-        # 1. 安全网：移除已出牌
-        for pos, card in all_played:
-            if pos in sampled:
-                sampled[pos] = [c for c in sampled[pos]
-                                if not (c.suit == card.suit and c.rank == card.rank)]
-
-        # 2. 检测重复牌
-        if _has_duplicates(sampled):
+        hands, t, first_p, tc = _build_dds_data(world, all_played, trick_cards,
+                                                  trick_leader, perspective, actual_turn, trump)
+        if hands is None:
             return None
-
-        # 3. 加回当前墩的牌
-        for pos, card in trick_cards:
-            sampled[pos].append(card)
-
-        # 4. PBN → Deal → solve_board
-        pbn = _hands_to_pbn(sampled)
-        deal = Deal(pbn)
-        deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
-        if trick_cards:
-            deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
-            for _pos, card in trick_cards:
-                deal.play(_to_ep(card), from_hand=True)
-        else:
-            deal.first = POSITION_TO_PLAYER.get(actual_turn, Player.north)
-
-        result = solve_board(deal)
+        solved_list = solve_all_boards_raw([(hands, t, first_p, tc)])
+        if not solved_list or solved_list[0] is None:
+            return None
+        solved = solved_list[0]
         score_map = {}
-        for ep_card, side_score in result:
-            key = (_DENOM_TO_SUIT.get(ep_card.suit), _RANK_TO_CHAR.get(ep_card.rank))
-            score_map[key] = side_score
-
+        for suit_id, rank_bit, equals, score in solved:
+            s = {0: '♠', 1: '♥', 2: '♦', 3: '♣'}.get(suit_id)
+            r = {14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9',
+                  8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2'}.get(rank_bit)
+            if s and r:
+                score_map[(s, r)] = score
         total_played = state.declarer_tricks + state.defender_tricks
         remaining_tricks = 13 - total_played
-        curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, actual_turn)
-        curplayer_is_declarer = curplayer_pos in (declarer, dummy)
-
+        cur_p = (_DD_POS.get(first_p, 0) + len(tc)) % 4
+        curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
         partial = {}
         for card in playable:
             key = (card.suit, card.rank)
@@ -276,7 +199,6 @@ def _dd_eval_one_world_pure(world, all_played, trick_cards, trick_leader,
                 "mx": total,
             }
         return partial
-
     except Exception:
         return None
 
@@ -296,64 +218,58 @@ def _merge_partial_scores(card_scores, partial):
         stats["mx"] = max(stats["mx"], p["mx"])
 
 
-def _build_deal_for_world(world, all_played, trick_cards, trick_leader,
-                          perspective, actual_turn, trump):
-    """从粒子 world 构建 endplay Deal（移除已出牌、加回当前墩、设置 trump/first）。
+def _build_dds_data(world, all_played, trick_cards, trick_leader,
+                      perspective, actual_turn, trump):
+    """从 world 构建 DirectDDS 输入数据。
 
-    actual_turn: 真实出牌者（明手领出时 ≠ perspective，deal.first 必须用此值）
-    返回 (Deal, sampled) 或 (None, None) 表示构建失败（重复牌等）。
+    Phase 0b: 直接返回 (hands, trump, first_player, trick_cards)，
+    无需 PBN/Deal 中间层。
+
+    返回: (hands, trump, first, trick_cards) 或 (None, None, None, None)
     """
     # 深拷贝 world
     sampled = {pos: [Card(suit=c.suit, rank=c.rank) for c in hand]
                for pos, hand in world.items()}
-    # 1. 安全网：移除已出牌
+    # 1. 移除已出牌
     for pos, card in all_played:
         if pos in sampled:
             sampled[pos] = [c for c in sampled[pos]
                             if not (c.suit == card.suit and c.rank == card.rank)]
     # 2. 检测重复牌
     if _has_duplicates(sampled):
-        return None, None
+        return None, None, None, None
     # 3. 加回当前墩的牌
     for pos, card in trick_cards:
         sampled[pos].append(card)
-    # 4. PBN → Deal
-    pbn = _hands_to_pbn(sampled)
-    deal = Deal(pbn)
-    deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
+    # 4. 确定 first player
     if trick_cards:
-        deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
-        for _pos, card in trick_cards:
-            deal.play(_to_ep(card), from_hand=True)
+        first = trick_leader
     else:
-        deal.first = POSITION_TO_PLAYER.get(actual_turn, Player.north)
-    return deal, sampled
+        first = actual_turn
+    return sampled, trump, first, trick_cards
 
 
 def _solve_batch(samples, all_played, trick_cards, trick_leader,
                  playable, state, perspective, actual_turn, declarer, dummy,
                  trump, card_scores, time_limit, start_time):
-    """用 solve_all_boards 批量求解所有样本，累加结果到 card_scores。
+    """Phase 0b: DirectDDS 批量求解，ctypes 直调 DDS，无 PBN/Deal 转换。
 
-    Phase 0a: samples 是均匀无偏样本（等权 weight=1.0）。
-
-    solve_all_boards 的 C 库硬限制 MAXNOOFBOARDS=200，所以分批处理，每批 ≤ 200。
     返回 (samples_done, solve_times_list, solve_total, solve_max)。
     """
+    from bridge.mcts.direct_dds import MAXNOOFBOARDS, _POS_TO_PLAYER as DD_POS_TO_PLAYER
     import time as _time
-    _BATCH_SIZE = 200  # endplay C 库 MAXNOOFBOARDS 限制
 
-    # 1. 构建所有 Deal（均匀采样：所有样本等权）
-    deals = []
-    for idx, world in enumerate(samples):
+    # 1. 构建 DirectDDS 原始数据
+    dds_data = []  # [(hands, trump, first, trick_cards), ...]
+    for world in samples:
         if _time.time() - start_time > time_limit:
             break
-        deal, _sampled = _build_deal_for_world(world, all_played, trick_cards,
+        hands, t, first, tc = _build_dds_data(world, all_played, trick_cards,
                                                 trick_leader, perspective, actual_turn, trump)
-        if deal is not None:
-            deals.append(deal)
+        if hands is not None:
+            dds_data.append((hands, t, first, tc))
 
-    if not deals:
+    if not dds_data:
         return 0, [], 0.0, 0.0
 
     total_played = state.declarer_tricks + state.defender_tricks
@@ -362,32 +278,42 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
     solve_total = 0.0
     solve_max = 0.0
     samples_done = 0
-    batch_count = 0
 
-    # 2. 分批求解（每批 ≤ 200），所有样本等权
-    for batch_start in range(0, len(deals), _BATCH_SIZE):
+    # 2. DDS position mapping (same as direct_dds._POS_TO_PLAYER: 北=0,东=1,南=2,西=3)
+    _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
+
+    # 3. 分批求解（每批 ≤ 200）
+    for batch_start in range(0, len(dds_data), MAXNOOFBOARDS):
         if _time.time() - start_time > time_limit:
             break
-        batch_end = min(batch_start + _BATCH_SIZE, len(deals))
-        batch_deals = deals[batch_start:batch_end]
+        batch_end = min(batch_start + MAXNOOFBOARDS, len(dds_data))
+        batch = dds_data[batch_start:batch_end]
         _t_batch = _time.time()
         try:
-            solved_list = solve_all_boards(batch_deals)
+            solved_list = solve_all_boards_raw(batch)
             _dt_batch = _time.time() - _t_batch
             solve_total += _dt_batch
-            _per_deal = _dt_batch / max(len(batch_deals), 1)
+            _per_deal = _dt_batch / max(len(batch), 1)
             if _per_deal > solve_max:
                 solve_max = _per_deal
-            batch_count += 1
-            # 累加结果（等权 weight=1.0）
+            # 累加结果
             for i, solved in enumerate(solved_list):
-                deal = batch_deals[i]
+                if solved is None:
+                    continue
+                _hands, _trump_str, first_p, _tc = batch[i]
+                # score_map: {(suit, rank_char): side_tricks}
                 score_map = {}
-                for ep_card, side_score in solved:
-                    key = (_DENOM_TO_SUIT.get(ep_card.suit), _RANK_TO_CHAR.get(ep_card.rank))
-                    score_map[key] = side_score
-                curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, actual_turn)
-                curplayer_is_declarer = curplayer_pos in (declarer, dummy)
+                for suit_id, rank_bit, equals, score in solved:
+                    suit_char = {0: '♠', 1: '♥', 2: '♦', 3: '♣'}.get(suit_id)
+                    rank_char = {14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9',
+                                  8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2'}.get(rank_bit)
+                    if suit_char and rank_char:
+                        score_map[(suit_char, rank_char)] = score
+
+                # curplayer: (first + len(trick_cards)) % 4
+                cur_p = (_DD_POS.get(first_p, 0) + len(_tc)) % 4
+                curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
+
                 for card in playable:
                     key = (card.suit, card.rank)
                     target_tricks = score_map.get(key, 0)
@@ -397,7 +323,7 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
                         decl_side_tricks = remaining_tricks - target_tricks
                     total = state.declarer_tricks + decl_side_tricks
                     stats = card_scores[str(card)]
-                    stats["weighted_sum"] += total  # weight=1.0
+                    stats["weighted_sum"] += total
                     stats["total_weight"] += 1.0
                     stats["scores"].append(total)
                     stats["mn"] = min(stats["mn"], total)
@@ -405,35 +331,36 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
                 samples_done += 1
                 solve_times.append(_per_deal)
         except Exception as _e:
-            # 批失败：诊断第一个 Deal
             with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
-                _f.write(f"[BATCH_FAIL] batch#{batch_count} start={batch_start} "
-                         f"size={len(batch_deals)} reason={type(_e).__name__}: {_e}\n")
-                if batch_deals:
-                    try:
-                        _f.write(f"  deal[0] pbn={batch_deals[0].to_pbn()} "
-                                 f"trump={batch_deals[0].trump} first={batch_deals[0].first}\n")
-                    except Exception:
-                        pass
-            # 该批降级到串行（等权）
-            for i, deal in enumerate(batch_deals):
+                _f.write(f"[BATCH_FAIL_DD] batch_start={batch_start} "
+                         f"size={len(batch)} reason={type(_e).__name__}: {_e}\n")
+            # 降级到逐个求解
+            for hands, t, first_p, tc in batch:
                 if _time.time() - start_time > time_limit:
                     break
                 _t_s = _time.time()
                 try:
-                    result = solve_board(deal)
+                    solved_list = solve_all_boards_raw([(hands, t, first_p, tc)])
+                    if solved_list and solved_list[0]:
+                        solved = solved_list[0]
                 except Exception:
                     continue
                 _dt_s = _time.time() - _t_s
                 solve_total += _dt_s
                 if _dt_s > solve_max:
                     solve_max = _dt_s
+                if not solved_list or solved_list[0] is None:
+                    continue
+                solved = solved_list[0]
                 score_map = {}
-                for ep_card, side_score in result:
-                    key = (_DENOM_TO_SUIT.get(ep_card.suit), _RANK_TO_CHAR.get(ep_card.rank))
-                    score_map[key] = side_score
-                curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, actual_turn)
-                curplayer_is_declarer = curplayer_pos in (declarer, dummy)
+                for suit_id, rank_bit, equals, score in solved:
+                    suit_char = {0: '♠', 1: '♥', 2: '♦', 3: '♣'}.get(suit_id)
+                    rank_char = {14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9',
+                                  8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2'}.get(rank_bit)
+                    if suit_char and rank_char:
+                        score_map[(suit_char, rank_char)] = score
+                cur_p = (_DD_POS.get(first_p, 0) + len(tc)) % 4
+                curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
                 for card in playable:
                     key = (card.suit, card.rank)
                     target_tricks = score_map.get(key, 0)
@@ -443,7 +370,7 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
                         decl_side_tricks = remaining_tricks - target_tricks
                     total = state.declarer_tricks + decl_side_tricks
                     stats = card_scores[str(card)]
-                    stats["weighted_sum"] += total  # weight=1.0
+                    stats["weighted_sum"] += total
                     stats["total_weight"] += 1.0
                     stats["scores"].append(total)
                     stats["mn"] = min(stats["mn"], total)
@@ -451,10 +378,6 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
                 samples_done += 1
                 solve_times.append(_dt_s)
 
-    with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
-        _f.write(f"[BATCH] total_deals={samples_done} batches_ok={batch_count} "
-                 f"batch_total={solve_total:.2f}s "
-                 f"per_deal_avg={solve_total*1000/max(samples_done,1):.1f}ms\n")
     return samples_done, solve_times, solve_total, solve_max
 
 
@@ -464,8 +387,6 @@ class DDSearch:
                  min_samples: int = 15, time_limit: float = 5.0,
                  endgame_card_threshold: int = 10, max_enumerations: int = 5000,
                  use_maximin: bool = True):
-        if not ENDPLAY_AVAILABLE:
-            raise RuntimeError("endplay library not available (pip install endplay)")
         self.sampler = sampler or DealSampler()
         self.num_samples = num_samples
         self.min_samples = min_samples
@@ -548,7 +469,7 @@ class DDSearch:
         _solve_count = 0
 
         # 批量求解优先：solve_all_boards 内部用线程池加速，dds C 库自管理线程安全
-        # 失败时降级到串行 solve_board
+        # 失败时降级到串行 DDS
         _solve_times = []  # 所有粒子耗时，用于统计分布
         _batch_used = False
         if samples:
@@ -857,27 +778,23 @@ class DDSearch:
                     for pos, card in trick_cards:
                         hands[pos].append(card)
 
-                    # PBN → Deal → solve_board
-                    pbn = _hands_to_pbn(hands)
-                    deal = Deal(pbn)
-                    deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
-
-                    if trick_cards:
-                        deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
-                        for _pos, card in trick_cards:
-                            deal.play(_to_ep(card), from_hand=True)
-                    else:
-                        deal.first = POSITION_TO_PLAYER.get(actual_turn, Player.north)
-
-                    result = solve_board(deal)
+                    # Phase 0b: DirectDDS 替换 endplay
+                    first_p = trick_leader if trick_cards else actual_turn
+                    solved_list = solve_all_boards_raw([(hands, trump, first_p, trick_cards)])
+                    if not solved_list or solved_list[0] is None:
+                        continue
+                    result = solved_list[0]
                     score_map = {}
-                    for ep_card, side_score in result:
-                        key = (_DENOM_TO_SUIT.get(ep_card.suit),
-                               _RANK_TO_CHAR.get(ep_card.rank))
-                        score_map[key] = side_score
+                    for suit_id, rank_bit, equals, score in result:
+                        s = {0: '♠', 1: '♥', 2: '♦', 3: '♣'}.get(suit_id)
+                        r = {14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9',
+                              8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2'}.get(rank_bit)
+                        if s and r:
+                            score_map[(s, r)] = score
 
-                    curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, actual_turn)
-                    curplayer_is_declarer = curplayer_pos in (declarer, dummy)
+                    _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
+                    cur_p = (_DD_POS.get(first_p, 0) + len(trick_cards)) % 4
+                    curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
 
                     for card in playable:
                         key = (card.suit, card.rank)
@@ -992,13 +909,11 @@ class DDSearch:
         }
 
     def search_perfect(self, state: PlayState) -> dict:
-        """全知双明手搜索：AI 知道四家手牌，一次 solve_board 得所有候选精确分。
+        """全知双明手搜索：AI 知道四家手牌，一次 DirectDDS 得所有候选精确分。
 
         与 search() 不同，此方法不采样，直接使用 state.hands 中的全部手牌。
-        每次出牌只需一次 solve_board 调用，极快且确定。
         """
-        if not ENDPLAY_AVAILABLE:
-            raise RuntimeError("endplay 库不可用，无法运行完美DD搜索")
+        # DirectDDS 总是可用（依赖 endplay.dll，不含 Python 端依赖）
 
         perspective = state.current_player
         actual_turn = state.current_player
@@ -1039,26 +954,23 @@ class DDSearch:
         for pos, card in trick_cards:
             hands[pos].append(card)
 
-        pbn = _hands_to_pbn(hands)
-        deal = Deal(pbn)
-        deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
-
-        if trick_cards:
-            deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
-            for _pos, card in trick_cards:
-                deal.play(_to_ep(card), from_hand=True)
-        else:
-            deal.first = POSITION_TO_PLAYER.get(actual_turn, Player.north)
-
-        result = solve_board(deal)
+        # Phase 0b: DirectDDS Perfect 搜索
+        first_p = trick_leader if trick_cards else actual_turn
+        solved_list = solve_all_boards_raw([(hands, trump, first_p, trick_cards)])
+        if not solved_list or solved_list[0] is None:
+            return {"card": playable[0], "reasoning": "DD Perfect: DDS failed"}
+        result = solved_list[0]
         score_map = {}
-        for ep_card, side_score in result:
-            key = (_DENOM_TO_SUIT.get(ep_card.suit),
-                   _RANK_TO_CHAR.get(ep_card.rank))
-            score_map[key] = side_score
+        for suit_id, rank_bit, equals, score in result:
+            s = {0: '♠', 1: '♥', 2: '♦', 3: '♣'}.get(suit_id)
+            r = {14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9',
+                  8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2'}.get(rank_bit)
+            if s and r:
+                score_map[(s, r)] = score
 
-        curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, actual_turn)
-        curplayer_is_declarer = curplayer_pos in (declarer, dummy)
+        _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
+        cur_p = (_DD_POS.get(first_p, 0) + len(trick_cards)) % 4
+        curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
 
         best_card = None
         best_blended = None
