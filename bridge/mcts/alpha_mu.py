@@ -385,12 +385,17 @@ class AlphaMuSearch:
             iter_best_score = -1.0
 
             # M=k 迭代：按 M=k-1 得分降序排候选（best 在前）
+            # 2021 §Empty Entry: 标记上轮被 root cut 跳过的候选
+            empty_candidates = set()
             if prev_iter_scores and current_M > 1:
                 ordered_playable = sorted(
                     playable,
                     key=lambda c: prev_iter_scores.get(c, -1.0),
                     reverse=True,
                 )
+                # 未出现在 prev_iter_scores 中的候选 = 被上轮 root cut 跳过
+                empty_candidates = {c for c in playable
+                                   if c not in prev_iter_scores}
             else:
                 ordered_playable = playable
 
@@ -406,6 +411,19 @@ class AlphaMuSearch:
             for i, move in enumerate(ordered_playable):
                 if self._time_up():
                     break
+
+                # 2021 §Empty Entry: 上轮 root cut 跳过的候选，先浅层评估填 TT
+                if move in empty_candidates and current_M > 2:
+                    _ = self._search_recursive(
+                        state, worlds_bits, world_decl_tricks, world_def_tricks,
+                        move, actual_turn, M_remaining=0,  # leaf only
+                        declarer=declarer, dummy=dummy, trump=trump,
+                        tricks_needed=tricks_needed, our_side=our_side,
+                        alpha=ParetoFront(),
+                        deep_alpha=ParetoFront(),
+                    )
+                    self._err_stats["empty_entry"] = self._err_stats.get("empty_entry", 0) + 1
+
                 front = self._search_recursive(
                     state, worlds_bits, world_decl_tricks, world_def_tricks,
                     move, actual_turn, M_remaining=current_M - 1,
