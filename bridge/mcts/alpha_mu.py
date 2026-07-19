@@ -38,24 +38,8 @@ import time
 from typing import Dict, List, Optional, Set, Tuple, FrozenSet
 
 from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER, PARTNERS
-from bridge.mcts.state_utils import (
-    cards_to_hand_str, get_current_trick_state,
-    POSITION_TO_PLAYER, PLAYER_TO_POSITION, SUIT_TO_DENOM,
-)
+from bridge.mcts.state_utils import get_current_trick_state
 from bridge.mcts.sampler import DealSampler, ALL_CARDS
-
-try:
-    from endplay import Deal
-    from endplay.dds import solve_board, solve_all_boards
-    from endplay.types import Card as EpCard, Denom, Player, Rank
-    ENDPLAY_AVAILABLE = True
-except ImportError:
-    ENDPLAY_AVAILABLE = False
-
-from bridge.mcts.dd_search import (
-    _to_ep, _hands_to_pbn, _SUIT_MAP, _RANK_MAP,
-    _DENOM_TO_SUIT, _RANK_TO_CHAR, _has_duplicates,
-)
 
 
 # ── 数据结构 ──
@@ -103,6 +87,16 @@ class OutcomeVector:
     def count_success(self) -> int:
         """成功 world 的数量。"""
         return sum(1 for v, m in zip(self.values, self.useful_mask) if m and v == 1)
+
+    def is_all_won(self) -> bool:
+        """所有 useful world 是否都赢了（全 1 向量）。
+
+        2021 论文 §Cut on Win: 若某子节点返回全 1 向量，Max 节点可立即截断。
+        """
+        for v, m in zip(self.values, self.useful_mask):
+            if m and v == 0:
+                return False
+        return any(self.useful_mask)  # 至少有一个 useful world
 
     def avg_tricks(self) -> float:
         """我方平均赢墩数（tie-break 用）。"""
@@ -235,8 +229,12 @@ class AlphaMuSearch:
                  M: int = 2,
                  time_limit: float = 8.0,
                  dds_budget: int = 3000):
-        if not ENDPLAY_AVAILABLE:
-            raise RuntimeError("endplay library not available (pip install endplay)")
+        # DirectDDS: load dds.dll via ctypes (bundled with endplay)
+        try:
+            from bridge.mcts.direct_dds import _load_dll
+            _load_dll()
+        except Exception as e:
+            raise RuntimeError(f"DDS library not available: {e}")
         self.sampler = sampler or DealSampler()
         self.num_worlds = num_worlds
         self.M = M  # 论文参数：Max 递归层数（M=1 退化为 PIMC，Min 不减 M）
@@ -258,6 +256,7 @@ class AlphaMuSearch:
             "tt_hit": 0,
             "early_cut": 0,
             "root_cut": 0,
+            "cut_on_win": 0,  # 2021 论文
         }
         self._dds_budget = dds_budget
         self._err_samples: Dict[str, str] = {}
@@ -745,6 +744,10 @@ class AlphaMuSearch:
                 if child_score > best_child_score:
                     best_child_score = child_score
                     best_child_move = child_move
+                # 2021 论文 §Cut on Win: 子节点全赢 → 立即截断
+                if any(v.is_all_won() for v in child_front.vectors):
+                    self._err_stats["cut_on_win"] += 1
+                    break
             result = combined_front if combined_front.vectors else self._evaluate_leaf(
                 next_states, n, declarer, dummy, trump, tricks_needed)
             if tt_key is not None:
@@ -1048,130 +1051,6 @@ class AlphaMuSearch:
             return child_state
         return copy.copy(state)
 
-    def _evaluate_min_dds(
-        self,
-        next_states: List[Tuple[Dict[str, List[Card]], dict]],
-        n: int,
-        min_player: str,
-        declarer: str,
-        dummy: str,
-        trump: str,
-        tricks_needed: int,
-    ) -> ParetoFront:
-        """Min 节点 DDS 直接评估（回退路径）。批处理版：
-        收集所有 (world, move) 的 deal 一次性求解，Min 选使 our_side 失败(0)的 move。
-        保存实际赢墩数用于 tie-break。"""
-        from bridge.mcts.state_utils import get_playable_from_hands
-
-        result_vector = [0] * n
-        useful_mask = [True] * n
-        tricks_list = [0] * n
-
-        # 收集所有 (w_idx, min_move, deal, ns_info)
-        # 每个 deal 是应用了 min_move 后的状态
-        batch_items = []  # [(w_idx, min_move, deal, ns_info)]
-        world_moves = {}  # w_idx -> [(min_move, batch_idx)]
-
-        for w_idx, (hands, ns_info) in enumerate(next_states):
-            if ns_info.get("impossible"):
-                useful_mask[w_idx] = False
-                continue
-            min_hand = hands.get(min_player, [])
-            if not min_hand:
-                useful_mask[w_idx] = False
-                continue
-            trick_state = ns_info["new_trick"]
-            candidate_moves = get_playable_from_hands(hands, min_player, trick_state)
-            if not candidate_moves:
-                useful_mask[w_idx] = False
-                continue
-            world_moves[w_idx] = []
-            for min_move in candidate_moves:
-                deal = self._build_deal_after_move(
-                    hands, min_player, min_move, trick_state, trump)
-                if deal is None:
-                    continue
-                world_moves[w_idx].append((min_move, len(batch_items)))
-                batch_items.append((w_idx, min_move, deal, ns_info))
-
-        if not batch_items:
-            return ParetoFront([OutcomeVector(result_vector, useful_mask, tricks_list)])
-
-        # 批处理求解所有 (world, move)
-        solved_results = self._solve_batch([deal for _, _, deal, _ in batch_items])
-
-        # 每个 world 内 Min 选最优（最小化我方成功率）
-        for w_idx, moves_info in world_moves.items():
-            if not moves_info:
-                useful_mask[w_idx] = False
-                continue
-            best_for_min = 1  # 初始：our_side 成功
-            best_min_tricks = 13
-            for min_move, batch_idx in moves_info:
-                if batch_idx >= len(solved_results):
-                    continue
-                solved = solved_results[batch_idx]
-                if solved is None:
-                    continue
-                _, _, deal, ns_info = batch_items[batch_idx]
-                decl_tricks = self._compute_decl_tricks_from_solved(
-                    deal, solved,
-                    ns_info["decl_tricks"], ns_info["def_tricks"],
-                    declarer, dummy,
-                )
-                if decl_tricks is None:
-                    continue
-                our_tricks = decl_tricks if self._is_our_side_declarer else (13 - decl_tricks)
-                success = 1 if our_tricks >= self._goal else 0
-                if success < best_for_min:
-                    best_for_min = success
-                    best_min_tricks = our_tricks
-                elif success == best_for_min and our_tricks < best_min_tricks:
-                    best_min_tricks = our_tricks
-            result_vector[w_idx] = best_for_min
-            tricks_list[w_idx] = best_min_tricks
-
-        return ParetoFront([OutcomeVector(result_vector, useful_mask, tricks_list)])
-
-    def _build_deal_after_move(self, hands, player, move, trick_state, trump):
-        """构建应用了 player 出 move 之后的 endplay Deal（用于 Min/Max 节点 DDS 评估）。
-        会自动处理墩完成时的 trick count 更新逻辑（由 solve_all_boards 返回值还原）。"""
-        try:
-            sim_hands = {pos: [c for c in cards]
-                         for pos, cards in hands.items()}
-            if move not in sim_hands.get(player, []):
-                self._err_stats["path_A_move_not_in_hand"] += 1
-                return None
-            sim_hands[player].remove(move)
-            new_trick_cards = list(trick_state.get("cards", []))
-            new_trick_cards.append((player, move))
-            trick_leader = trick_state.get("leader") or player
-            for pos, card in new_trick_cards:
-                if card not in sim_hands.get(pos, []):
-                    sim_hands[pos].append(card)
-            if _has_duplicates(sim_hands):
-                self._err_stats["path_B_duplicates"] += 1
-                return None
-
-            pbn = _hands_to_pbn(sim_hands)
-            deal = Deal(pbn)
-            deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
-            if new_trick_cards:
-                deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
-                for _pos, card in new_trick_cards:
-                    deal.play(_to_ep(card), from_hand=True)
-            else:
-                deal.first = POSITION_TO_PLAYER.get(player, Player.north)
-            return deal
-        except Exception as e:
-            self._err_stats["path_E_exception"] += 1
-            if "path_E_exception" not in self._err_samples:
-                import traceback
-                self._err_samples["path_E_exception"] = (
-                    f"[build after move] exception={e}, player={player}, move={move}, "
-                    f"traceback={traceback.format_exc()[:500]}")
-            return None
-
     def _evaluate_leaf(
         self,
         next_states: List[Tuple[Dict[str, List[Card]], dict]],
@@ -1254,199 +1133,7 @@ class AlphaMuSearch:
 
         return ParetoFront([OutcomeVector(result_vector, useful_mask, tricks_list)])
 
-    def _build_deal_for_leaf(self, hands, ns_info, trump):
-        """从 hands + ns_info 构建 endplay Deal（不应用任何额外 move）。"""
-        try:
-            sim_hands = {pos: [c for c in cards]
-                         for pos, cards in hands.items()}
-            new_trick = ns_info["new_trick"]
-            trick_cards = new_trick.get("cards", [])
-            for pos, card in trick_cards:
-                if card not in sim_hands.get(pos, []):
-                    sim_hands[pos].append(card)
-            if _has_duplicates(sim_hands):
-                self._err_stats["path_B_duplicates"] += 1
-                return None
-
-            pbn = _hands_to_pbn(sim_hands)
-            deal = Deal(pbn)
-            deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
-            trick_leader = new_trick.get("leader")
-            new_current = ns_info["new_current"]
-            if trick_cards:
-                deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
-                for _pos, card in trick_cards:
-                    deal.play(_to_ep(card), from_hand=True)
-            else:
-                deal.first = POSITION_TO_PLAYER.get(new_current, Player.north)
-            return deal
-        except Exception as e:
-            self._err_stats["path_E_exception"] += 1
-            if "path_E_exception" not in self._err_samples:
-                import traceback
-                self._err_samples["path_E_exception"] = (
-                    f"[leaf build] exception={e}, "
-                    f"trick_cards={[(p, str(c)) for p, c in ns_info.get('new_trick', {}).get('cards', [])]}, "
-                    f"traceback={traceback.format_exc()[:500]}")
-            return None
-
-    def _solve_batch(self, deals: List) -> List:
-        """批处理求解 deals，返回与 deals 等长的结果列表（失败位置为 None）。
-        solve_all_boards 的 C 库硬限制 MAXNOOFBOARDS=200，分批处理。
-        单批失败时降级到逐个 solve_board。"""
-        if not deals:
-            return []
-        self._dds_calls += len(deals)
-        results: List = []
-        _BATCH_SIZE = 200
-        for batch_start in range(0, len(deals), _BATCH_SIZE):
-            if self._time_up():
-                results.extend([None] * (len(deals) - len(results)))
-                break
-            batch_end = min(batch_start + _BATCH_SIZE, len(deals))
-            batch_deals = deals[batch_start:batch_end]
-            _t0 = time.time()
-            try:
-                solved_list = solve_all_boards(batch_deals)
-                results.extend(solved_list)
-                self._err_stats["path_D_ok"] += len(solved_list)
-                _elapsed_ms = (time.time() - _t0) * 1000
-                _per_deal_ms = _elapsed_ms / len(batch_deals) if batch_deals else 0
-                if not hasattr(self, "_dds_time_total"):
-                    self._dds_time_total = 0.0
-                    self._dds_count_total = 0
-                self._dds_time_total += _elapsed_ms / 1000
-                self._dds_count_total += len(batch_deals)
-                if len(batch_deals) >= 5:
-                    print(f"[αμ DDS] batch={len(batch_deals)}, {_elapsed_ms:.1f}ms total, {_per_deal_ms:.2f}ms/deal")
-            except Exception as e:
-                self._err_stats["path_E_exception"] += 1
-                if "path_E_exception" not in self._err_samples:
-                    import traceback
-                    self._err_samples["path_E_exception"] = (
-                        f"[batch fail] exception={e}, batch_size={len(batch_deals)}, "
-                        f"traceback={traceback.format_exc()[:500]}")
-                for deal in batch_deals:
-                    if self._time_up():
-                        results.append(None)
-                        continue
-                    try:
-                        result = solve_board(deal)
-                        results.append(result)
-                        self._err_stats["path_D_ok"] += 1
-                    except Exception:
-                        results.append(None)
-                        self._err_stats["path_E_exception"] += 1
-        return results
-
-    def _compute_decl_tricks_from_solved(self, deal, solved, decl_tricks, def_tricks,
-                                         declarer, dummy):
-        """从 solve_all_boards 的单条结果计算庄家总赢墩数。
-
-        solved: List[(EpCard, score)] — 当前出牌方各候选牌的赢墩数
-        score = 当前出牌方所在阵营的剩余赢墩数（不含已完墩）
-        """
-        try:
-            if not solved:
-                self._err_stats["path_C_empty_result"] += 1
-                return None
-            new_current = PLAYER_TO_POSITION.get(deal.curplayer, None)
-            curplayer_is_declarer = new_current in (declarer, dummy)
-            remaining_tricks = 13 - (decl_tricks + def_tricks)
-            # solved 给的是当前出牌方所在阵营的赢墩数，取最大值（最优出牌）
-            side_tricks = max(score for _, score in solved)
-            if curplayer_is_declarer:
-                total_decl_tricks = decl_tricks + side_tricks
-            else:
-                total_decl_tricks = decl_tricks + (remaining_tricks - side_tricks)
-            return total_decl_tricks
-        except Exception as e:
-            self._err_stats["path_E_exception"] += 1
-            if "path_E_exception" not in self._err_samples:
-                import traceback
-                self._err_samples["path_E_exception"] = (
-                    f"[compute] exception={e}, "
-                    f"decl={decl_tricks}, def={def_tricks}, "
-                    f"traceback={traceback.format_exc()[:500]}")
-            return None
-
     # ── DDS 辅助 ──
-
-    def _dds_evaluate_single_world(
-        self,
-        hands: Dict[str, List[Card]],
-        player: str,
-        move: Card,
-        trick_state: dict,
-        decl_tricks: int,
-        def_tricks: int,
-        trick_done: bool,
-        declarer: str,
-        dummy: str,
-        trump: str,
-        tricks_needed: int,
-    ) -> int:
-        """旧的单 world 单调 DDS 接口（仅用于调试/兜底，主路径已走批处理）。
-        返回庄家总赢墩数。"""
-        self._dds_calls += 1
-        try:
-            sim_hands = {pos: [c for c in cards]
-                         for pos, cards in hands.items()}
-            if move not in sim_hands.get(player, []):
-                self._err_stats["path_A_move_not_in_hand"] += 1
-                return 0
-            sim_hands[player].remove(move)
-            new_trick_cards = list(trick_state.get("cards", []))
-            new_trick_cards.append((player, move))
-            trick_leader = trick_state.get("leader") or player
-            for pos, card in new_trick_cards:
-                if card not in sim_hands.get(pos, []):
-                    sim_hands[pos].append(card)
-            if _has_duplicates(sim_hands):
-                self._err_stats["path_B_duplicates"] += 1
-                return 0
-
-            if len(new_trick_cards) == 4:
-                from bridge.mcts.state_utils import trick_winner
-                winning_pos = trick_winner(new_trick_cards, trump)
-                if winning_pos in (declarer, dummy):
-                    decl_tricks += 1
-                else:
-                    def_tricks += 1
-
-            pbn = _hands_to_pbn(sim_hands)
-            deal = Deal(pbn)
-            deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
-            if new_trick_cards:
-                deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
-                for _pos, card in new_trick_cards:
-                    deal.play(_to_ep(card), from_hand=True)
-            else:
-                deal.first = POSITION_TO_PLAYER.get(player, Player.north)
-            result = solve_board(deal)
-            if not result:
-                self._err_stats["path_C_empty_result"] += 1
-                return 0
-            curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, player)
-            curplayer_is_declarer = curplayer_pos in (declarer, dummy)
-            remaining_tricks = 13 - (decl_tricks + def_tricks)
-            side_tricks = max(score for _, score in result)
-            if curplayer_is_declarer:
-                total_decl_tricks = decl_tricks + side_tricks
-            else:
-                total_decl_tricks = decl_tricks + (remaining_tricks - side_tricks)
-            self._err_stats["path_D_ok"] += 1
-            return total_decl_tricks
-        except Exception as e:
-            self._err_stats["path_E_exception"] += 1
-            if "path_E_exception" not in self._err_samples:
-                import traceback
-                self._err_samples["path_E_exception"] = (
-                    f"exception={e}, player={player}, move={move}, "
-                    f"decl={decl_tricks}, def={def_tricks}, "
-                    f"trick_cards={[(p, str(c)) for p, c in trick_state.get('cards', [])]}, "
-                    f"traceback={traceback.format_exc()[:500]}")
-            return 0
 
     # ── 辅助方法 ──
 
