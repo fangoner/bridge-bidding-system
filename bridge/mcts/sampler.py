@@ -158,15 +158,17 @@ def _sample_uniform(known_info: dict) -> Dict[str, List[Card]]:
     known_voids = known_info["known_voids"]
 
     idx = 0
+    # 初始化空位置
+    for pos in POSITION_ORDER:
+        if pos not in result:
+            result[pos] = []
     # 收集 void 跳过的牌，后面回填（避免丢牌）
     skipped: Dict[str, List[Card]] = {pos: [] for pos in POSITION_ORDER}
     for pos in POSITION_ORDER:
-        if pos in result:
-            continue
-        count = remaining_counts[pos]
+        have = len(result.get(pos, []))
+        need = remaining_counts.get(pos, 0) - have
         void_suits = known_voids.get(pos, set())
-        result[pos] = []
-        for _ in range(count):
+        for _ in range(need):
             while idx < len(pool) and pool[idx].suit in void_suits:
                 skipped[pos].append(pool[idx])
                 idx += 1

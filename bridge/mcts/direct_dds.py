@@ -210,11 +210,7 @@ def solve_all_boards_raw(
     solvedp = _solvedBoards()
 
     # 调用 DDS（argtypes/restype 确保 64-bit 指针正确传递）
-    dll.SolveAllBoardsBin.argtypes = [ctypes.POINTER(_boards), ctypes.POINTER(_solvedBoards)]
-    dll.SolveAllBoardsBin.restype = ctypes.c_int
-    ret = dll.SolveAllBoardsBin(ctypes.byref(bop), ctypes.byref(solvedp))
-    if ret != 1:
-        return [None] * n
+    dll.SolveAllBoardsBin(ctypes.byref(bop), ctypes.byref(solvedp))
 
     results = []
     for i in range(n):
@@ -382,7 +378,7 @@ def solve_all_boards_bits(
         dll.SolveAllBoardsBin.argtypes = [ctypes.POINTER(_boards), ctypes.POINTER(_solvedBoards)]
         dll.SolveAllBoardsBin.restype = ctypes.c_int
         ret = dll.SolveAllBoardsBin(ctypes.byref(bop), ctypes.byref(solvedp))
-        if ret != 1:
+        if ret == 0:  # 0 = failure, non-zero = success
             all_results.extend([None] * bn)
             continue
 

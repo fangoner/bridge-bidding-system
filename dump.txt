@@ -1,23 +1,23 @@
 Error code=-14
 
 Deal data:
-trump=N
-first=W
-index1=0 index2=0 remainCards=8720
-index1=0 index2=1 remainCards=16396
-index1=0 index2=2 remainCards=16408
-index1=0 index2=3 remainCards=16536
-index1=1 index2=0 remainCards=16384
-index1=1 index2=1 remainCards=6560
-index1=1 index2=2 remainCards=2976
-index1=1 index2=3 remainCards=10240
-index1=2 index2=0 remainCards=7236
-index1=2 index2=1 remainCards=1536
-index1=2 index2=2 remainCards=1088
-index1=2 index2=3 remainCards=4448
-index1=3 index2=0 remainCards=8
-index1=3 index2=1 remainCards=16
-index1=3 index2=2 remainCards=8192
+trump=S
+first=N
+index1=0 index2=0 remainCards=24576
+index1=0 index2=1 remainCards=0
+index1=0 index2=2 remainCards=0
+index1=0 index2=3 remainCards=0
+index1=1 index2=0 remainCards=0
+index1=1 index2=1 remainCards=0
+index1=1 index2=2 remainCards=0
+index1=1 index2=3 remainCards=0
+index1=2 index2=0 remainCards=4100
+index1=2 index2=1 remainCards=0
+index1=2 index2=2 remainCards=0
+index1=2 index2=3 remainCards=0
+index1=3 index2=0 remainCards=0
+index1=3 index2=1 remainCards=0
+index1=3 index2=2 remainCards=0
 index1=3 index2=3 remainCards=0
 
 target=-1
@@ -25,16 +25,16 @@ solutions=3
 mode=1
 
 
-        S K94
-        H A32
-        D A43
-        C A743
-S 3             S A
-H 4             H QJ875
-D K             D J9875
-C --            C KJ
-        S QJT62
-        H T9
-        D T6
-        C Q865
+        S AK
+        H --
+        D --
+        C --
+S --            S --
+H --            H --
+D --            D --
+C --            C --
+        S Q2
+        H --
+        D --
+        C --
 
