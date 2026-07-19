@@ -840,9 +840,14 @@ class AlphaMuSearch:
                     next_player = ns_info.get("new_current")
                     trick_state = ns_info.get("new_trick")
                     if trick_state is not None:
+                        # trick_state 是 dict {"cards": [...], "leader": ..., "trump": ...}
+                        if isinstance(trick_state, dict):
+                            cards_list = trick_state.get("cards", [])
+                        else:
+                            cards_list = trick_state
                         trick_cards = tuple(sorted(
-                            (p, c.suit, c.rank) for p, c in trick_state
-                        )) if hasattr(trick_state, '__iter__') else None
+                            (p, c.suit, c.rank) for p, c in cards_list
+                        ))
                     decl_t = ns_info.get("decl_tricks")
                     def_t = ns_info.get("def_tricks")
                 # bitmap 手牌：直接用 int 值哈希（比 Card 元组快 ~10x）
@@ -876,12 +881,18 @@ class AlphaMuSearch:
         return True
 
     def _vec_geq(self, v1: OutcomeVector, v2: OutcomeVector) -> bool:
-        """v1 >= v2 (per-index, considering useful_mask)。"""
+        """v1 >= v2 (per-index, considering useful_mask)。
+
+        v1 的 useful_mask 必须是 v2 的超集（v1 对 v2 关心的所有 world 都有信息）。
+        否则信息不足，无法判定支配。
+        """
         if len(v1.values) != len(v2.values):
             return False
         for i in range(len(v1.values)):
-            if not v1.useful_mask[i] or not v2.useful_mask[i]:
-                continue
+            if not v2.useful_mask[i]:
+                continue  # v2 不关心此 world，跳过
+            if not v1.useful_mask[i]:
+                return False  # v2 关心但 v1 无信息 → 无法判定 v1 >= v2
             if v1[i] < v2[i]:
                 return False
         return True

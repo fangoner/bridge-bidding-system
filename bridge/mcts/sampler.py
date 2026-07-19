@@ -158,6 +158,8 @@ def _sample_uniform(known_info: dict) -> Dict[str, List[Card]]:
     known_voids = known_info["known_voids"]
 
     idx = 0
+    # 收集 void 跳过的牌，后面回填（避免丢牌）
+    skipped: Dict[str, List[Card]] = {pos: [] for pos in POSITION_ORDER}
     for pos in POSITION_ORDER:
         if pos in result:
             continue
@@ -165,14 +167,21 @@ def _sample_uniform(known_info: dict) -> Dict[str, List[Card]]:
         void_suits = known_voids.get(pos, set())
         result[pos] = []
         for _ in range(count):
-            # 跳过 void 花色的牌
             while idx < len(pool) and pool[idx].suit in void_suits:
+                skipped[pos].append(pool[idx])
                 idx += 1
             if idx < len(pool):
                 result[pos].append(pool[idx])
                 idx += 1
-            # 如果 idx 超过 pool 长度，说明 void 约束太紧，fill with random
-            # 这种情况极罕见（仅当 void 保护不合理时发生）
+    # 回填：void 跳过的牌分配给不 void 该花色的后续位置
+    for pos in POSITION_ORDER:
+        while len(result.get(pos, [])) < remaining_counts.get(pos, 0):
+            for p2 in POSITION_ORDER:
+                if skipped.get(p2) and pos != p2:
+                    card = skipped[p2].pop()
+                    if card.suit not in known_voids.get(pos, set()):
+                        result.setdefault(pos, []).append(card)
+                        break
 
     return result
 

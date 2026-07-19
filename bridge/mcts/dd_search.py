@@ -689,7 +689,9 @@ class DDSearch:
         # 每个未知位置还需出多少张牌
         remaining_counts = {}
         for pos in unknown_positions:
-            remaining_counts[pos] = 13 - self.sampler._count_played(state, pos)
+            played = sum(1 for t in state.tricks for p, _ in t.cards if p == pos)
+            played += sum(1 for p, _ in state.current_trick.cards if p == pos)
+            remaining_counts[pos] = 13 - played
 
         total_needed = sum(remaining_counts.values())
         if total_needed != len(pool):
