@@ -411,7 +411,8 @@ class AlphaMuSearch:
                     move, actual_turn, M_remaining=current_M - 1,
                     declarer=declarer, dummy=dummy, trump=trump,
                     tricks_needed=tricks_needed, our_side=our_side,
-                    alpha=root_alpha,  # Bound Reuse: 累积最佳 front 作为 α
+                    alpha=root_alpha,
+                    deep_alpha=ParetoFront(),  # 根节点：无祖先
                 )
                 iter_move_fronts.append((move, front))
                 # Max 节点：累积最佳 front，收紧后续候选的 alpha 界限
@@ -548,11 +549,12 @@ class AlphaMuSearch:
         tricks_needed: int,
         our_side: frozenset,
         alpha: ParetoFront = None,
+        deep_alpha: ParetoFront = None,
     ) -> ParetoFront:
         """应用 move 后递归进入子节点。M_remaining 只在 Max 节点减 1。
 
-        论文 §4.3 alpha 参数：从上层 Max 传下来的 front，用于 Min 节点 early cut。
-        根节点调用时 alpha 为空 front。
+        论文 §4.3 alpha：直接父 Max 节点的累积 front。
+        deep_alpha（2021 Alg1）：所有祖先 Max 节点的 front 并集。
         """
         self._nodes_searched += 1
         n = len(worlds)
@@ -596,6 +598,7 @@ class AlphaMuSearch:
             declarer, dummy, trump, tricks_needed,
             our_side,
             alpha=alpha,
+            deep_alpha=deep_alpha,
         )
 
     def _evaluate_state(
@@ -610,10 +613,13 @@ class AlphaMuSearch:
         tricks_needed: int,
         our_side: frozenset,
         alpha: ParetoFront = None,
+        deep_alpha: ParetoFront = None,
     ) -> ParetoFront:
         """根据下一玩家是 Max 还是 Min，分发到对应节点评估。
 
         M_remaining = 剩余可递归的 Max 层数。
+        alpha = 直接父 Max 节点累积 front（论文 §4.3 Early Cut）。
+        deep_alpha = 所有祖先 Max 节点 front 并集（2021 Alg1 Deep Alpha Cut）。
 
         论文 Alg2 L2 stop function：M=0 时不分 Min/Max，一律触发叶子 DDS 评估。
         论文 §4.3 "Skipping Min nodes"：Min 节点搜一层 DDS 等价于直接 DDS，
@@ -622,6 +628,7 @@ class AlphaMuSearch:
         论文 §4.1 stop function：合同已定（无论后续怎么打都赢/输）时立即终止搜索。
         论文 §4.3 Transposition Table：缓存已搜索状态的 (front, best_move, M_used)。
         论文 §4.3 Early Cuts：Min 节点 front 被 alpha 支配时剪枝。
+        2021 Alg1 Deep Alpha Cut：Min 节点 front 被任何祖先 Max front 支配时剪枝。
         """
         if alpha is None:
             alpha = ParetoFront()
@@ -735,7 +742,8 @@ class AlphaMuSearch:
                     next_world_decl, next_world_def,
                     child_move, next_player, M_remaining - 1,
                     declarer, dummy, trump, tricks_needed, our_side,
-                    alpha=search_alpha,  # 累积最佳 front 作为子 Min 的 α
+                    alpha=search_alpha,
+                    deep_alpha=deep_alpha.union(search_alpha),  # 2021 Alg1
                 )
                 combined_front = combined_front.union(child_front)
                 search_alpha = search_alpha.union(child_front)  # 收紧剪枝界限
@@ -756,13 +764,17 @@ class AlphaMuSearch:
         else:
             # Min 节点：总是递归，M_remaining 不变
             # 论文 §4.3 Early Cuts: Alg2 L9-11 `if t.front ≤ α then return mini`
-            # 不做 M 深度区分——任何已存 front 被 α 支配即可安全剪枝
+            # 2021 Alg1 Deep Alpha Cut: 也检查祖先 Max 节点的 front
             if tt_key is not None and tt_key in self._tt:
                 t_front, _, stored_M = self._tt[tt_key]
-                if self._front_dominated_by(t_front, alpha):
+                # 检查 alpha（直接父）和 deep_alpha（所有祖先）
+                dominated = self._front_dominated_by(t_front, alpha)
+                if not dominated and deep_alpha is not None:
+                    dominated = self._front_dominated_by(t_front, deep_alpha)
+                if dominated:
                     self._err_stats["early_cut"] += 1
-                    if self._err_stats["early_cut"] <= 3:
-                        print(f"[αμ EarlyCut] HIT: t_front={len(t_front.vectors)}v vs alpha={len(alpha.vectors)}v, M_rem={M_remaining}")
+                    if dominated and deep_alpha is not None and deep_alpha.vectors:
+                        self._err_stats["deep_alpha_cut"] = self._err_stats.get("deep_alpha_cut", 0) + 1
                     return t_front
                 else:
                     self._err_stats["early_cut_miss"] = self._err_stats.get("early_cut_miss", 0) + 1
@@ -772,6 +784,7 @@ class AlphaMuSearch:
                 declarer, dummy, trump, tricks_needed,
                 our_side,
                 alpha=alpha,
+                deep_alpha=deep_alpha,  # Min 节点透传祖先 front
                 tt_key=tt_key,
             )
             if tt_key is not None:
@@ -886,9 +899,11 @@ class AlphaMuSearch:
         tricks_needed: int,
         our_side: frozenset,
         alpha: ParetoFront = None,
+        deep_alpha: ParetoFront = None,
         tt_key: Tuple = None,
     ) -> Tuple[ParetoFront, Optional[Card]]:
         """Min 节点递归（论文 §4.2 + Algorithm 2 lines 7-25）。
+        deep_alpha = 祖先 Max 节点 front 并集（2021 Alg1）。
 
         论文规则（§4.2 关键）：
         - Min 完美信息，每个 world 独立选 move。
@@ -995,6 +1010,7 @@ class AlphaMuSearch:
                 declarer, dummy, trump, tricks_needed,
                 our_side,
                 alpha=alpha,
+                deep_alpha=deep_alpha,  # Min 子节点透传
             )
             move_data.append((child_front, move_legal_mask, min_move))
             # 跟踪 Min 视角的最佳 move（最低 Max 成功率）
