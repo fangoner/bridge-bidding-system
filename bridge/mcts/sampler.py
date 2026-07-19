@@ -175,13 +175,22 @@ def _sample_uniform(known_info: dict) -> Dict[str, List[Card]]:
                 idx += 1
     # 回填：void 跳过的牌分配给不 void 该花色的后续位置
     for pos in POSITION_ORDER:
-        while len(result.get(pos, [])) < remaining_counts.get(pos, 0):
+        _retries = 0
+        while len(result.get(pos, [])) < remaining_counts.get(pos, 0) and _retries < 100:
+            _retries += 1
+            filled = False
             for p2 in POSITION_ORDER:
-                if skipped.get(p2) and pos != p2:
-                    card = skipped[p2].pop()
+                if pos == p2 or not skipped.get(p2):
+                    continue
+                for i, card in enumerate(skipped[p2]):
                     if card.suit not in known_voids.get(pos, set()):
-                        result.setdefault(pos, []).append(card)
+                        result.setdefault(pos, []).append(skipped[p2].pop(i))
+                        filled = True
                         break
+                if filled:
+                    break
+            if not filled:
+                break  # 无可用牌，放弃回填
 
     return result
 
