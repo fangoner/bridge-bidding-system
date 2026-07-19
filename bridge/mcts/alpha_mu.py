@@ -852,6 +852,27 @@ class AlphaMuSearch:
                 return False
         return True
 
+    @staticmethod
+    def _update_useful_worlds(front: ParetoFront, useful_mask: List[bool]) -> List[bool]:
+        """2021 论文 §Maintaining Useful Worlds: 标记 useless 世界。
+
+        若 Pareto front 中某 world 在所有向量中都是 0 → useless
+        （Min 节点能保证该 world 一定输，子树中永远是 0）。
+        返回更新后的 useful_mask。
+        """
+        n = len(useful_mask)
+        for i in range(n):
+            if not useful_mask[i]:
+                continue
+            # 检查是否有任何向量在这个 world 上是 1
+            has_one = any(
+                i < len(v.values) and v.useful_mask[i] and v.values[i] == 1
+                for v in front.vectors
+            )
+            if not has_one:
+                useful_mask[i] = False
+        return useful_mask
+
     def _min_node_evaluate(
         self,
         next_states: List[Tuple[Dict[str, List[Card]], dict]],
@@ -887,18 +908,23 @@ class AlphaMuSearch:
         """
         from bridge.mcts.state_utils import get_playable_from_hands, apply_play_to_state
 
-        # World Cuts：检查是否还有合法 world
-        useful_mask = [not ns_info.get("impossible") for _, ns_info in next_states]
-        useful_count = sum(useful_mask)
+        # 2021 论文 §Maintaining Useful Worlds: 跟踪 useful_worlds
+        useful_worlds = [not ns_info.get("impossible") for _, ns_info in next_states]
+        useful_count = sum(useful_worlds)
         if useful_count == 0:
             self._err_stats["world_cut_0"] += 1
             return ParetoFront([OutcomeVector([0] * n, [False] * n)]), None
 
-        # 1. 收集所有 worlds 中 Min 的候选 move 并集（bitmap 手牌）
+        # TT 中已存的前端可标记额外 useless worlds（已知必输的 world）
+        if tt_key is not None and tt_key in self._tt:
+            stored_front, _, _ = self._tt[tt_key]
+            useful_worlds = self._update_useful_worlds(stored_front, useful_worlds)
+
+        # 1. 论文 Alg2 L13-16: allMoves = 仅 useful worlds 的合法 move 并集
         from bridge.mcts.bit_hands import get_playable_from_bits, card_to_bit
         all_moves_set = set()
         for w_idx, (hands, ns_info) in enumerate(next_states):
-            if ns_info.get("impossible") or hands is None:
+            if not useful_worlds[w_idx] or hands is None:
                 continue
             hand_bits = hands.get(min_player, 0)
             if hand_bits == 0:
