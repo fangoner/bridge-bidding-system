@@ -88,7 +88,7 @@ def _extract_known_info(state: "PlayState", perspective: str) -> dict:
         known_cards.update(state.hands.get(declarer, []))
         known_cards.update(state.hands.get(dummy, []))
     elif dummy and perspective != dummy:
-        if state.phase != PlayPhase["LEAD"]:
+        if state.phase != PlayPhase.LEAD:
             known_cards.update(state.hands.get(dummy, []))
 
     # 已出牌张
@@ -142,7 +142,7 @@ def _extract_known_info(state: "PlayState", perspective: str) -> dict:
     else:
         if own_hand:
             result[perspective] = [Card(suit=c.suit, rank=c.rank) for c in own_hand]
-        if dummy and state.phase != PlayPhase["LEAD"]:
+        if dummy and state.phase != PlayPhase.LEAD:
             hand = state.hands.get(dummy, [])
             if hand:
                 result[dummy] = [Card(suit=c.suit, rank=c.rank) for c in hand]
@@ -239,6 +239,7 @@ class DealSampler:
 
     def __init__(self):
         self.constraints: Dict[str, BidConstraint] = {}
+        self.belief_tracker = None  # 已废弃，保留属性避免 AttributeError
 
     def set_constraints(self, constraints: Dict[str, BidConstraint]) -> None:
         """设置叫牌约束，后续 sample() 会验证采样结果。

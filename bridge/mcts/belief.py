@@ -62,7 +62,7 @@ def collect_signal_evidence(state: PlayState) -> List[Tuple[str, str, bool]]:
                 continue
             if card.suit != lead_suit:
                 continue
-            is_high = card.rank_value >= 8  # BELIEF_SIGNAL_MIN_RANK
+            is_high = card.rank_value >= 7  # T=10 rank_value, 8+ is high (T/J/Q/K/A)
             evidence.append((pos, lead_suit, is_high))
 
     for trick in state.tricks:

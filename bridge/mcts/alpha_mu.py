@@ -37,9 +37,12 @@
 import time
 from typing import Dict, List, Optional, Set, Tuple, FrozenSet
 
-from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER, PARTNERS
+from bridge.play_types import Card, PlayState, PARTNERS
 from bridge.mcts.state_utils import get_current_trick_state
-from bridge.mcts.sampler import DealSampler, ALL_CARDS
+from bridge.mcts.sampler import DealSampler
+
+# Phase 1a: ENDPLAY_AVAILABLE 兼容导出（DirectDDS 替代 endplay，总是可用）
+ENDPLAY_AVAILABLE = True
 
 
 # ── 数据结构 ──
@@ -939,7 +942,6 @@ class AlphaMuSearch:
         Returns: (ParetoFront, best_move)
           best_move = 最小化 Max 成功率的 move（Min 视角的"最佳"），用于 TT move ordering。
         """
-        from bridge.mcts.state_utils import get_playable_from_hands, apply_play_to_state
 
         # 2021 论文 §Maintaining Useful Worlds: 跟踪 useful_worlds
         useful_worlds = [not ns_info.get("impossible") for _, ns_info in next_states]

@@ -111,6 +111,41 @@ from bridge.mcts.direct_dds import (
 )
 
 
+# Phase 0b fix: DDS suit/rank maps with equals bitmask parsing
+_DDS_SUIT = {0: '♠', 1: '♥', 2: '♦', 3: '♣'}
+_DDS_RANK = {14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9',
+              8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2'}
+# Reverse: suit_char → suit_id for bit manipulation
+_DDS_SUIT_R = {'♠': 0, '♥': 1, '♦': 2, '♣': 3}
+# Reverse: rank_char → rank_bit
+_DDS_RANK_R = {c: b for b, c in _DDS_RANK.items()}
+
+
+def _dds_result_to_score_map(solved, exclude_cards=None):
+    """DDS 结果 → {(suit, rank): score}，含 equals bitmask 展开。
+
+    DDS equals bitmask: 某位=1 表示该 rank 的牌与结果中的牌等效。
+    例如 ♠A 得分=5, equals bit 含 ♠K → ♠K 也得 5。
+    """
+    score_map = {}
+    exclude = exclude_cards or set()
+    for suit_id, rank_bit, equals, score in solved:
+        s = _DDS_SUIT.get(suit_id)
+        if not s:
+            continue
+        # 主牌
+        r = _DDS_RANK.get(rank_bit)
+        if r and (s, r) not in exclude:
+            score_map[(s, r)] = score
+        # equals 展开
+        for rb in range(2, 15):
+            if equals & (1 << rb):
+                r2 = _DDS_RANK.get(rb)
+                if r2 and (s, r2) not in exclude:
+                    score_map[(s, r2)] = score
+    return score_map
+
+
 def _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
                        playable, state, perspective, actual_turn, declarer, dummy,
                        trump, card_scores, weight, sample_idx):
@@ -125,13 +160,7 @@ def _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
         if not solved_list or solved_list[0] is None:
             return
         solved = solved_list[0]
-        score_map = {}
-        for suit_id, rank_bit, equals, score in solved:
-            s = {0: '♠', 1: '♥', 2: '♦', 3: '♣'}.get(suit_id)
-            r = {14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9',
-                  8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2'}.get(rank_bit)
-            if s and r:
-                score_map[(s, r)] = score
+        score_map = _dds_result_to_score_map(solved)
         total_played = state.declarer_tricks + state.defender_tricks
         remaining_tricks = 13 - total_played
         cur_p = (_DD_POS.get(first_p, 0) + len(tc)) % 4
@@ -171,13 +200,7 @@ def _dd_eval_one_world_pure(world, all_played, trick_cards, trick_leader,
         if not solved_list or solved_list[0] is None:
             return None
         solved = solved_list[0]
-        score_map = {}
-        for suit_id, rank_bit, equals, score in solved:
-            s = {0: '♠', 1: '♥', 2: '♦', 3: '♣'}.get(suit_id)
-            r = {14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9',
-                  8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2'}.get(rank_bit)
-            if s and r:
-                score_map[(s, r)] = score
+        score_map = _dds_result_to_score_map(solved)
         total_played = state.declarer_tricks + state.defender_tricks
         remaining_tricks = 13 - total_played
         cur_p = (_DD_POS.get(first_p, 0) + len(tc)) % 4
@@ -302,13 +325,7 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
                     continue
                 _hands, _trump_str, first_p, _tc = batch[i]
                 # score_map: {(suit, rank_char): side_tricks}
-                score_map = {}
-                for suit_id, rank_bit, equals, score in solved:
-                    suit_char = {0: '♠', 1: '♥', 2: '♦', 3: '♣'}.get(suit_id)
-                    rank_char = {14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9',
-                                  8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2'}.get(rank_bit)
-                    if suit_char and rank_char:
-                        score_map[(suit_char, rank_char)] = score
+                score_map = _dds_result_to_score_map(solved)
 
                 # curplayer: (first + len(trick_cards)) % 4
                 cur_p = (_DD_POS.get(first_p, 0) + len(_tc)) % 4
@@ -352,13 +369,7 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
                 if not solved_list or solved_list[0] is None:
                     continue
                 solved = solved_list[0]
-                score_map = {}
-                for suit_id, rank_bit, equals, score in solved:
-                    suit_char = {0: '♠', 1: '♥', 2: '♦', 3: '♣'}.get(suit_id)
-                    rank_char = {14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9',
-                                  8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2'}.get(rank_bit)
-                    if suit_char and rank_char:
-                        score_map[(suit_char, rank_char)] = score
+                score_map = _dds_result_to_score_map(solved)
                 cur_p = (_DD_POS.get(first_p, 0) + len(tc)) % 4
                 curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
                 for card in playable:
@@ -533,7 +544,7 @@ class DDSearch:
         elapsed = time.time() - start_time
         _solve_avg = (_solve_total / _solve_count) if _solve_count > 0 else 0.0
         print(f"[DD] 全量模式完成: {samples_done} 世界, {elapsed:.1f}s"
-              f"{' (信念加权)' if particles else ' (纯约束等权)'} "
+              f"{' (均匀采样)'} "
               f"solve_avg={_solve_avg:.3f}s solve_max={_solve_max:.3f}s "
               f"solve_total={_solve_total:.1f}s prepare={_prepare_t:.2f}s")
         with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
@@ -784,13 +795,7 @@ class DDSearch:
                     if not solved_list or solved_list[0] is None:
                         continue
                     result = solved_list[0]
-                    score_map = {}
-                    for suit_id, rank_bit, equals, score in result:
-                        s = {0: '♠', 1: '♥', 2: '♦', 3: '♣'}.get(suit_id)
-                        r = {14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9',
-                              8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2'}.get(rank_bit)
-                        if s and r:
-                            score_map[(s, r)] = score
+                    score_map = _dds_result_to_score_map(result)
 
                     _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
                     cur_p = (_DD_POS.get(first_p, 0) + len(trick_cards)) % 4
@@ -960,13 +965,7 @@ class DDSearch:
         if not solved_list or solved_list[0] is None:
             return {"card": playable[0], "reasoning": "DD Perfect: DDS failed"}
         result = solved_list[0]
-        score_map = {}
-        for suit_id, rank_bit, equals, score in result:
-            s = {0: '♠', 1: '♥', 2: '♦', 3: '♣'}.get(suit_id)
-            r = {14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9',
-                  8: '8', 7: '7', 6: '6', 5: '5', 4: '4', 3: '3', 2: '2'}.get(rank_bit)
-            if s and r:
-                score_map[(s, r)] = score
+        score_map = _dds_result_to_score_map(result)
 
         _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
         cur_p = (_DD_POS.get(first_p, 0) + len(trick_cards)) % 4
