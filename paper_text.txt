@@ -1,0 +1,588 @@
+                                                            Optimizing µ
+
+                                        Tristan Cazenave1, Swann Legras2, Ve´ronique Ventos2
+
+                                             1 LAMSADE, Universite´ Paris-Dauphine, PSL, CNRS, France
+                                                                        2 Nukkai, France
+
+                                        Tristan.Cazenave@dauphine.psl.eu slegras@nukk.ai vventos@nukk.ai
+
+arXiv:2101.12639v1 [cs.AI] 29 Jan 2021                                Abstract                             to improve Monte Carlo Search made at a higher level of re-
+                                                                                                           cursion. Recursive Monte Carlo Search improves on PIMC
+                                           µ is a search algorithm which repairs two defaults of Perfect   for Skat and Bridge (Bouzy, Rimbaud, and Ventos 2020),
+                                           Information Monte Carlo search: strategy fusion and non lo-     however, it takes much more time to complete than PIMC.
+                                           cality. In this paper we optimize µ for the game of Bridge,
+                                           avoiding useless computations. The proposed optimizations          PIMC plays sub-optimally due to two main problems:
+                                           are general and apply to other imperfect information turn-      strategy fusion and non-locality (Frank and Basin 2001). µ
+                                           based games. We define multiple optimizations involving         (Cazenave and Ventos 2020) is an anytime heuristic search
+                                           Pareto fronts, and show that these optimizations speed up the   algorithm for incomplete information games that assumes
+                                           search. Some of these optimizations are cuts that stop the      perfect information for the opponents. µ addresses the
+                                           search at a node, while others keep track of which possible     strategy fusion and non-locality problems encountered by
+                                           worlds have become redundant, avoiding unnecessary, costly      PIMC. Other programs also address the strategy fusion prob-
+                                           evaluations. We also measure the benefits of parallelizing the  lem in endgame play, for example, GIB (Ginsberg 2001) in
+                                           double dummy searches at the leaves of the µ search tree.       Bridge (using a single dummy solver) and the Skat endgame
+                                                                                                           solver of Stefan Edelkamp (Edelkamp 2020).
+                                                              Introduction
+                                                                                                              In this paper we propose improvements to speedup the µ
+                                        The state of the art for imperfect information card games is       algorithm without affecting it's output.
+                                        Perfect Information Monte Carlo sampling (PIMC). It was
+                                        first proposed by Levy (Levy 1989) for Bridge, and used               The paper starts with a section on previous work in Bridge
+                                        in the popular program GIB (Ginsberg 2001). PIMC can be            and on the µ algorithm. The next section describes the opti-
+                                        used in other trick-taking card games such as Skat (Buro           mizations and the modified algorithm. The last section gives
+                                        et al. 2009; Kupferschmid and Helmert 2006), Spades and            experimental results.
+                                        Hearts (Sturtevant and White 2006). Long analyzed the rea-
+                                        sons why PIMC is successful in these games (Long et al.                    Prerequisites and Previous Work
+                                        2010). The principle of PIMC is to use determinization to
+                                        generate possible worlds. For each possible move, PIMC             In this section, we introduce some definitions used in the pa-
+                                        plays the move, samples from a set of possible worlds, and         per, we then briefly explain the game of Bridge, Computer
+                                        then solves each world exactly as if it was a perfect informa-     Bridge, previous work on dealing with strategy fusion, non-
+                                        tion game. It then computes the average of the results among       locality, the early cut and the root cut that were defined pre-
+                                        the possible worlds to evaluate each move.                         viously in the µ paper (Cazenave and Ventos 2020).
+
+                                           Other approaches to imperfect information games are In-         Definitions
+                                        formation Set Monte Carlo Tree Search (Cowling, Pow-
+                                        ley, and Whitehouse 2012), counterfactual regret minimiza-         We define general naming conventions used throughout the
+                                        tion that solved Poker (Zinkevich et al. 2008; Brown and           article.
+                                        Sandholm 2019), and Exploitability Descent (Lockhart et al.
+                                        2019). There are also various Reinforcement Learning algo-         Vectors Given n different possible worlds, a boolean vec-
+                                        rithms for incomplete information games are available in the       tor of size n keeps the status of the game for each possible
+                                        OpenSpiel framework (Lanctot et al. 2019).                         world: A zero at index w means that the game is lost for
+                                                                                                           world number w. A one means the game is won. Associated
+                                           Recursive Monte Carlo Search (Furtak and Buro 2013)             to the vector there is another vector of booleans indicating
+                                        is the adaptation of Nested Monte Carlo Search (Cazenave           whether the world is possible in the current state. At the root
+                                        2009) to multi-player and incomplete information games.            of the search all worlds are possible but when an opponent
+                                        The basic principle is the same: it uses Monte Carlo Search        makes a move, the move is usually only valid in some of the
+                                                                                                           worlds and the set of valid worlds is reduced.
+                                        Copyright © 2021, Association for the Advancement of Artificial
+                                        Intelligence (www.aaai.org). All rights reserved.                  Pareto Fronts A set of vectors that are not currently dom-
+                                                                                                           inated by other sets of vectors.
+   We say a Pareto front f1 dominate f2 iff:                           When playing in a NT contract, there is only one simple
+                                                                    rule : each player is required to follow suit if possible and
+   x2  f2, x1  f1, x1 dominates x2 or x1 = x2.                      can play any card of the suit.
+
+   We say a vector x1  {0, 1}n dominates x2 iff:                       When the four players have played a card, the
+                                                                    player who played the highest-ranked card in the suit
+   i  [1, n]: x1[i]  x2[i] and                                      (2<3<...<10,J,Q,K,A) wins the trick and they will be on
+                                                                    lead at the following trick.
+   i  [1, n] such that x1[i] > x2[i].
+                                                                       The board is over when all the cards have been played.
+   The score of a vector is the average among all possible
+worlds of the values contained in the vector.                       Computer Bridge
+
+Impossible worlds When the search reaches a node where              Since 1996, the best bridge programs can annually par-
+some worlds have disappeared because the moves that have            ticipate in the World Computer-Bridge Championship
+been played are not possible in these worlds. These worlds          (WCBC). The selected bridge AI used in our experiments
+are represented as "x" in figures in this article. New impos-       was developed by Yves Costel for the bridge program
+sible worlds appear at min nodes when we consider a move            Wbridge51. The boosted version of Wbridge5 (Ventos et al.
+from the defender possible in only a subset of all worlds.          2017) won the WCBC in 2016, 2017 and 2018.
+
+Useless worlds Worlds for which we know for sure that                  The best Bridge bots use PIMC, with a double-dummy
+nothing is lost by labelling them 0. These worlds are noted         solver (DDS) to evaluate each simulated world. They also
+"-" on figures.                                                     use some additional heuristics, for example to prefer the
+                                                                    less-revealing of equivalent actions.
+Comparison of Pareto Fronts When comparing two
+Pareto fronts from different depths in the tree or at min              DDS gives the number of tricks won by each side for
+node between two actions that contain different impossible          Spade, Heart, Diamond, Club or No Trump contracts when
+worlds, to test for the dominance of one over the other, one        all four players know the placement of the 52 cards, and each
+must carefully handle impossible worlds as they can be a win        player plays optimally.
+higher in the tree. Such impossible worlds must be evaluated
+as 1 unless proven useless higher in the tree when checking            A tree-search can then be used in this simplified game, as
+for dominance relation. As such, [1 x 0] is not dominated by        well as standard alpha-beta pruning methods. Values of the
+[1 0 0] but is dominated by [1 1 0] or even by [1 x -].             leaves are computed using the double-dummy solver. The
+                                                                    growing number of tricks won during the play is used as
+Bridge in short                                                     upper and lower bounds in the alpha-beta process.
+
+The interested reader can refer for instance to (Mahmood,              A very efficient DDS has been written (and made public)
+Grant, and Sharif 2014) for a more complete presentation of         by Bo Haglund (Haglund 2010).
+the game of Bridge.
+Bridge is a trick-taking card game with four players (denoted          Currently, the average level of the best current Bridge AIs
+by West, North, East and South or W,N,E,S) divided in two           are still far from the level of professional players, and closer
+partnerships (East-West and North-South). A standard 52             to the level of good amateurs. This is partly due to the afore-
+card deck is shuffled and each player receives a hand of 13         mentioned problems of PIMC: namely strategy fusion and
+cards that is only visible to them. A Bridge deal (or board) is     non-locality.
+divided into two major phases: the bidding (out of the scope
+of the paper) and the card play.                                       The strategy fusion problem of PIMC comes from the fact
+                                                                    that DDS plays different Max moves in the different worlds
+   The goal of the bidding is to reach a contract which de-         of an information set. In the real game, Max has to play the
+termines the minimum number of tricks the pair commits to           same move in all the worlds of an information set. µ ad-
+win during the card play, either with no trump (NT) or with         dresses this problem by evaluating every Max move jointly
+a determined suit as trump.                                         for all the possible worlds in the information set during its
+                                                                    search.
+   In the following, we assume that the North-South pair
+reached the contract of 3NT (resp. 7NT) and that South is              The second problem of PIMC is non-locality. It happens
+the agent who plays the board (i.e the declarer).                   that a move which is optimal at a node is not the best move to
+                                                                    backup from a global perspective. In some cases it is better
+   During the card play, the goal is to fulfill (for the declarer)  to keep a locally suboptimal move that gives a better result
+or to defeat (for the defenders) the contract reached during        at the root of the search tree than the locally optimal one. µ
+the bidding phase. For the contract of 3NT (resp. 7NT), the         addresses this problem by backing up Pareto fronts instead
+minimum number of tricks required to win the board is 9             of vectors.
+(resp. 13).
+                                                                    Previous Work: the µ Algorithm
+   The player on the left of the declarer exposes the first card
+of the game. The declarer's partner (called the Dummy) then         The µ algorithm repairs the strategy fusion and non-
+lays their cards face up on the table.                              locality problems of PIMC by searching multiple moves
+                                                                    ahead and by manipulating Pareto fronts at Max and Min
+
+                                                                        1http://www.wbridge5.com
+Figure 1: Example of an early cut at node c.                      Root Cut
+                    a
+                                                                  If a move at the root of µ for M Max moves gives the same
+b {[1 1 0], [0 1 1]}  c [1 1 0]  cut                              probability of winning than the best move of the previous
+                                                                  iteration of iterative deepening for M - 1 Max moves, the
+nodes. The µ algorithm assumes that the defence has per-          search can be safely be stopped since it is not possible to
+fect information whereas the declarer has incomplete infor-       find a better move.
+mation.
+                                                                                       Optimizations
+   At Max nodes, each possible move returns a Pareto front.
+The final Pareto front for a node is the union of all the Pareto  In this section we present different improvements of the µ
+fronts returned by the search beginning with each of the dif-     algorithm that make it faster but do not change the result of
+ferent possible moves. The idea is to keep all the possible       a search.
+options for Max, i.e. Max has the choice between all the vec-
+tors of the overall Pareto front. In order to optimize compu-     Maintaining Useful Worlds
+tations and memory, vectors that are dominated by another
+vector in the same Pareto front are removed.                      As we descend the tree it is possible to remove the worlds
+                                                                  that are useless to evaluate, allowing us to run fewer DDS
+   The Min players can choose different moves in different        evaluations at the leaves, and enabling cuts.
+possible worlds, so they take the minimum outcome over all
+possible moves for a possible world. When they can choose            A transposition table perfectly recalls the results of the
+between two vectors they take for each index the minimum          previous search at nodes. For example if the DDS result
+between the two values at this index of the two vectors.          stored in the transposition table for a world at a Min node is
+                                                                  zero, it will also be zero in the whole subtree. It is therefore
+   The µ algorithm is related to GIB single dummy solver          useless to calculate it again and the world can be marked as
+(Ginsberg 2001). However the single dummy solver of Gins-         useless.
+berg is limited to the endgame and its complexity explodes
+rapidly for earlier states that µ handles easily at the price        If at a Min node the maximum value of a world for the
+of incompleteness. Given enough time and using all possible       current Pareto front is zero, the world can be marked as use-
+worlds, µ converges to the single dummy solver results.           less as it will always have a zero value in the Pareto front
+                                                                  returned by the node.
+Generation of Possible Worlds
+                                                                     At the leaves only useful worlds are solved by DDS.
+The possible worlds are generated using random generation            At Min nodes it is useless to unify the set of possible
+followed by verification of the constraints. We currently use     moves with the possible moves of the useless worlds. We
+three types of constraints: the constraints coming from the       thus only take the union of the possible moves in useful
+bidding phase, the constraints on the West hand due to fol-       worlds.
+lowing rules for the opening lead, the constraints due to
+sluff.                                                            World Cuts
+
+Early Cut                                                         Cuts due to having only zero or one useful world are called
+                                                                  world cuts.
+If a Pareto front at a Min node is dominated by the Pareto
+front of the upper Max node it can safely be cut since the           If the search is at a node without useful worlds it can be
+evaluation is optimistic for the Max player. A deeper search      safely cut.
+will always return a worse (or the same) result for the Max
+player due to strategy fusion.                                       If there are no useful worlds left, search can be cut as the
+                                                                  Pareto front is known to be the vector with only zeros.
+   Figure 1 gives an example of an early cut at a Min node.
+The root node a is a Max node, the first move played at a            Search can also be cut if there is only one useful world
+returned {[1 1 0], [0 1 1]}. The second move is then tried        left. The reason for this is that all of the useless worlds will
+leading to node c and the initial Pareto front calculated with    eventually evaluate to zero at the root, and so we only need
+double dummy searches at node c is [1 1 0]. It is dominated       to compute the DDS result associated to the single useful
+by the Pareto front of node a so node c can be cut.               world and we can return a single vector containing the result
+                                                                  for the useful world.
+
+                                                                     Figure 2 gives an example of a world cut with no useful
+                                                                  worlds and figure 3 gives an example of a world cut with one
+                                                                  useful world.
+
+                                                                  Calculating Vectors at Interior Nodes
+
+                                                                  It happens that some moves are not explored due to root cut
+                                                                  for example. However when the evaluation of the best move
+                                                                  at the root gets worse with more search, these moves are then
+                                                                  explored to a depth greater than one. In order to verify if an
+                                                                  early cut is possible at a depth smaller than the search depth
+                                                                  for these moves, the algorithm has to calculate the Pareto
+                                                                  fronts at smaller depths. If it can cut with the resulting front
+                                                                  it has gained much search efficiency.
+Figure 2: Example of a world cut with no useful worlds at     We call this optimization the Empty Entry optimization.
+node c.
+                                                           Cut on Win
+                        ...
+                                                           If at a Max node a move is found for which all worlds are
+         a {[1 0 0]}                                       won for the current search depth, the search can be cut, as
+                                                           more search cannot improve on this result.
+         b {[1 0 0]}  c [x - -]  [0 0 0]
+                                                            Cut
+[1 0 0]               cut
+                                                           Figure 4 gives an example of an  cut at a Min node. The
+                                                           root node a is a Max node, the first move played at a returned
+                                                           {[1 1 0], [0 1 1]}. The second move is then tried leading to
+                                                           node c and the initial Pareto front calculated with double
+                                                           dummy searches at node c is [1 1 1]. The first Min move
+                                                           at c returns the [x 1 0] Pareto front. The x means that the
+                                                           Min move is not possible in the first world and thus there
+                                                           is no evaluation associated to this world for the first Min
+                                                           move. The current Pareto front at node c is updated by taking
+                                                           the minimum in all the possible and evaluated worlds of the
+                                                           outcomes, leading to a [1 1 0] Pareto front. This Pareto front
+                                                           is dominated by the Pareto front of the left move at node a
+                                                           and therefore the search can be cut.
+
+                                                              Figure 5 gives an example of a deep  cut at a Min node.
+                                                           For each max node earlier in the path, if there exists one node
+                                                           whose Pareto front dominates currently evaluated front, fur-
+                                                           ther search can be avoided.
+
+                                                              Algorithm 1 shows how to go up in the tree from a can-
+                                                           didate node to check if the candidate node can be cut. The
+                                                           principle of the algorithm is to check all upper Max nodes
+                                                           to see if one of them dominates the current candidate node.
+                                                           We first save the current node to be evaluated against upper
+                                                           node (line 2), we then crawl the tree upward until reaching
+                                                           a max node (line 4 to 7). If we do not find any Max node it
+                                                           means that we reached the tree root and can return false, oth-
+                                                           erwise we test for Pareto dominance (line 11). If the upper
+                                                           max node does not dominate the candidate node, we search
+                                                           for the next Max node in the tree (line 3).
+
+Figure 3: Example of a world cut with one useful world at  Algorithm 1 The deep  cut
+node c.
+                                                           1: cut(node)
+                           ...
+                                                           2: candidate  node
+
+                                                           3: while node exist do
+
+                                                           4: node  parent(node)
+
+                      a {[1 0 1], [0 1 1]}                 5: while node exist and Min parent(node) do
+
+                                                           6:   node  parent(node)
+
+                                                           7: end while
+
+                                                           8: if node doesn't exist then
+
+         b {[1 0 1], [0 1 1]} c [x x ?]  [x x DDS]         9:   return false
+
+                                                           10: end if
+
+                                                           11: if candidate.front  node.front then
+
+                                                           12:  return true
+
+[1 0 1]  [0 1 1]      cut                                  13: end if
+
+                                                           14: end while
+
+                                                           15: return false
+
+                                                           The µ Algorithm with Cuts
+
+                                                           Algorithm 2 gives the µ algorithm with cuts. M is the num-
+                                                           ber of Max moves to search. If this number is equal to zero
+Figure 4: Example of an  cut at node c.               or if the state is terminal or if there is at most one useful
+                           a {[1 1 0], [0 1 1]}       world left the search is stopped (lines 2-5).
+
+         b {[1 1 0], [0 1 1]}              c [1 1 0]     At a Min node if there is an early cut the search stops
+                                                      (lines 9-11). Otherwise the union of the sets of legal moves
+{[1 1 0], [0 1 1]} [1 1 1]     [x 1 0]           cut  of the useful worlds is calculated (lines 12-16). All moves
+                                                      are tried, maintaining the possible worlds (line 21), making
+Figure 5: Example of a deep  cut at node d.           a recursive call (line 22), updating the Pareto front (line 23),
+                      a {[1 1 0], [0 0 1]}            updating the useful worlds (line 24) and making a cut if pos-
+                                                      sible (lines 25-27).
+[1 1 0]                        ...
+                                                         At a Max node similar operations are performed, the root
+                               b [0 0 1]              cut is also tested (lines 43-47).
+
+                            c           d                             Experimental Results
+
+                            [0 0 1][1 0 0] cut        In the experiments we have µ play either the 3NT contract
+                                                      or the 7NT contract against PIMC with 20 simulated worlds
+                                                      at each decision point, or against WBridge5.
+
+                                                      Search Times with and without Optimizations
+
+                                                      We fix a number of cards for the initial state and we play a
+                                                      game from this state using µ, recording the average time
+                                                      per move. The initial number of cards is either 32 or 52. We
+                                                      play 100 games, and thus 3200 searches for 32 cards and
+                                                      5200 searches for 52 cards. We make experiments both for
+                                                      20 and 40 simulated worlds at each decision point. In all
+                                                      experiments the early cut and the root cut are enabled.
+
+                                                         Table 1 gives the average times used by the program with
+                                                      and without optimizations for deals with 52 cards, 20 worlds
+                                                      and three Max moves. Cards is the number of Cards for the
+                                                      starting hand of each game. M is the number of Max moves
+                                                      allowed during the search. Worlds is the number of worlds
+                                                      used by the search. U is for maintaining useful worlds. E is
+                                                      the use of the Empty Entry optimization.  is the use of the
+                                                       cut. W is the use of the World cuts. Win is the use of Cut
+                                                      on Win.
+
+                                                         Table 2 gives the times for deals with 32 cards, 20 worlds
+                                                      and three Max moves.
+
+                                                         Table 3 gives the times for deals with 32 cards, 40 worlds
+                                                      and three Max moves. We see that the speedup factor carries
+                                                      through to the case with twice as many simulated worlds.
+
+                                                      Games Against WBridge 5
+
+                                                      In order to compare two algorithms we use duplicate games.
+                                                      It means that the two algorithms play the same 10 000 deals
+                                                      against the same algorithm for defense. Table 4 shows the
+                                                      results of duplicate games against different algorithms. The
+                                                      P1 column shows the Max player associated to the winrate.
+                                                      The P2 column shows the other player to which it is com-
+                                                      pared. The D column indicates the algorithm used for play-
+                                                      ing the defense. P1 and P2 are playing the declarer for a 7 No
+                                                      Trump contract. The = column gives the number of games
+                                                      where P1 has a different outcome than P2. The Winrate col-
+                                                      umn shows the percentage of these different games that were
+                                                      won by P1 and lost by P2. The standard deviation is given in
+                                                      column . The players are µ, WBridge5 (WB5) the winner
+                                                      of the 2016, 2017 and 2018 World Computer-Bridge Cham-
+                                                      pionships, Perfect Information Monte Carlo (PIMC), and the
+                                                      Double Dummy Solver (DDS) which has complete informa-
+                                                      tion and plays knowing the hands of all players.
+Algorithm 2 The µ search algorithm with cuts.          Table 1: Comparison of the average time per move of dif-
+                                                       ferent configurations of µ with three Max moves and 20
+                                                       worlds on deals with 52 cards.
+
+1: Function µ (state, M, W orlds, )
+
+2: if stop(state, M, W orlds, result) then             Cards M Worlds U E  W Win Time
+
+3: update the transposition table
+
+4: return result                                       52 3  20 n n n n  n 3.020
+                                                       52 3  20 y n n n  n 2.916
+5: end if                                              52 3  20 n y n n  n 3.321
+                                                       52 3  20 n n y n  n 3.342
+6: t  entry in the transposition table                 52 3  20 n n n y  n 3.648
+                                                       52 3  20 n n n n  y 2.837
+7: if Min node then                                    52 3  20 y y y y  y 1.032
+                                                       52 3  20 n y y y  y 3.230
+8: mini                                                52 3  20 y n y y  y 1.438
+                                                       52 3  20 y y n y  y 1.469
+9: if t.f ront   then                                  52 3  20 y y y n  y 1.365
+                                                       52 3  20 y y y y  n 3.566
+10:       return mini
+
+11: end if
+
+12: W orlds = updateUsefulWorlds(t.f ront, W orlds)
+
+13: allM oves  
+
+14: for w  W orlds do
+
+15:       l  legalMoves (w)
+
+16:       allM oves = allM oves  l
+
+17: end for                                            Table 2: Comparison of the average time per move of dif-
+                                                       ferent configurations of µ with three Max moves and 20
+18: move t.move in front of allM oves                  worlds on deals with 32 cards.
+
+19: for move  allM oves do
+
+20:       s  play (move, state)
+
+21:       W1  {w  W orlds : move  w}                   Cards M Worlds U E  W Win Time
+
+22:       f  µ (s, M, W1, )
+
+23:       mini  min(mini, f )                          32 3  20 n n n n  n 2.016
+                                                       32 3  20 y n n n  n 1.465
+24:       W orlds = updateUsefulWorlds(mini, W orlds)  32 3  20 n y n n  n 1.739
+                                                       32 3  20 n n y n  n 1.704
+25:       if mini  to an upper front then              32 3  20 n n n y  n 1.972
+                                                       32 3  20 n n n n  y 1.259
+26:         break                                      32 3  20 y y y y  y 0.605
+                                                       32 3  20 n y y y  y 0.989
+27:       end if                                       32 3  20 y n y y  y 0.648
+                                                       32 3  20 y y n y  y 0.647
+28: end for                                            32 3  20 y y y n  y 0.629
+                                                       32 3  20 y y y y  n 1.207
+29: update the transposition table
+
+30: return mini
+
+31: else
+
+32: f ront  
+
+33: for w  W orlds do
+
+34:       l  legalMoves (w)
+
+35:       allM oves = allM oves  l
+
+36: end for                                            Table 3: Comparison of the average time per move of dif-
+                                                       ferent configurations of µ with three Max moves and 40
+37: move t.move in front of allM oves                  worlds on deals with 32 cards.
+
+38: for move  allM oves do
+
+39:       s  play (move, state)                        Cards M Worlds U E  W Win Time
+
+40:       W1  {w  W orlds : move  w}
+
+41:       f  µ (s, M - 1, W1, f ront)                  32 3  40 n n n n  n 4.381
+                                                       32 3  40 y n n n  n 2.891
+42:       f ront  max(f ront, f )                      32 3  40 n y n n  n 3.939
+                                                       32 3  40 n n y n  n 3.852
+43:       if root node then                            32 3  40 n n n y  n 4.338
+                                                       32 3  40 n n n n  y 2.989
+44:         if µ(f ront) = µ of previous search then   32 3  40 y y y y  y 1.297
+                                                       32 3  40 n y y y  y 2.420
+45:         break                                      32 3  40 y n y y  y 1.382
+                                                       32 3  40 y y n y  y 1.410
+46:         end if                                     32 3  40 y y y n  y 1.329
+                                                       32 3  40 y y y y  n 2.443
+47:       end if
+
+48: end for
+
+49: update the transposition table
+
+50: return f ront
+
+51: end if
+Table 4: Results of duplicate games against WBridge5 and         We can see on the first line that µ outperforms WBridge
+PIMC on 10 000 deals at 7 No Trump.                           5 against PIMC as the defense, but we see on the second line
+                                                              that WBridge5 performs better against itself playing as the
+P1 P2  D = Winrate                                            defense. After discussing with the author of WBridge5, this
+                                                              may be due to the fact that WBridge5 as a declarer partly
+µ WB5 PIMC 812   0.567  0.0174                                models itself as the defense during its search. The third line
+µ WB5 WB5 755    0.428  0.0180                                shows that µ performs much better than WBridge5 against
+µ WB5 DDS 567    0.697  0.0193                                a perfect complete information defense (DDS). The next
+µ PIMC PIMC 757  0.551  0.0181                                three lines deal with PIMC as the second player of the dupli-
+µ PIMC WB5 687   0.569  0.0189                                cate games. µ performs better than PIMC against the three
+µ PIMC DDS 467   0.647  0.0221                                defenders, and especially against DDS (as in the duplicate
+                                                              with WBridge5).
+Figure 6: The evolution of the winrate with the number of
+worlds and the depth of the search.                              Figure 6 shows the evolution of the winning percentage
+                                                              of different versions of µ against WBridge5. The x-axis
+Figure 7: The evolution of the thinking time with the number  is the number of worlds used by µ. It starts at 20 worlds
+of worlds and the depth of the search.                        and doubles the number of worlds until 320 worlds. There
+                                                              are curves for each number of Max moves between 1 and 4.
+                                                              Note that µ with 1 max Move is PIMC. We can observe that
+                                                              the curves are asymptotic and that the asymptote of PIMC
+                                                              is below the asymptote of µ with numbers of Max moves
+                                                              greater than 1. Going from 2 Max moves to 3 or 4 does not
+                                                              improve the results.
+
+                                                                 Figure 7 gives the average time per move of the differ-
+                                                              ent versions of µ. We can observe that µ with two Max
+                                                              moves is close to PIMC. However for equivalent thinking
+                                                              times for µ with two Max moves and for PIMC with 320
+                                                              worlds, if we refer to figure 6, µ with two Max moves has
+                                                              better results than PIMC for equivalent times.
+
+                                                              Leaf Parallelization
+
+                                                              Previous experiments did not use parallelization. We now
+                                                              present a simple parallelization of the algorithms with cuts.
+
+                                                                 In Monte Carlo Tree Search there are three kinds of par-
+                                                              allelization: root, leaf and tree parallelization (Cazenave
+                                                              and Jouandeau 2007; Chaslot, Winands, and van den Herik
+                                                              2008; Cazenave and Jouandeau 2008). Root parallelization
+                                                              runs independent searches in parallel and sums the result to
+                                                              choose the most simulated move. Tree parallelization has
+                                                              multiple threads sharing a common tree. Leaf parallelization
+                                                              parallelizes the playouts at the leaves of the tree.
+
+                                                                 In order to speedup µ, we are interested in the simplest
+                                                              form of parallelization, namely leaf parallelization. When
+                                                              reaching a leaf, µ does an  complete information double
+                                                              dummy search on each possible world compatible with the
+                                                              cards played so far. These  searches are independent and
+                                                              can safely be run in parallel. This is what we call the leaf
+                                                              parallelization of µ.
+
+                                                                 In order to optimize Leaf Parallelization each thread is
+                                                              assigned the next available world as soon as the thread be-
+                                                              comes available. There is a mutual exclusion on the assign-
+                                                              ment of a world to a thread.
+
+                                                                 Table 5 gives the comparison of the times spent per move
+                                                              for µ with and without parallelization for different num-
+                                                              bers of Max moves and different depth. Leaf parallelization
+                                                              was done with OpenMP and mutual exclusion to choose the
+                                                              next available thread. We can see that there is little to gain
+                                                              for PIMC with 20 worlds, going from 0.019 seconds for 1
+                                                              thread to 0.015 seconds for 6 threads. For PIMC with 80
+                                                              worlds going from 1 to 6 threads halves the average time per
+Table 5: Comparison of the average time per move with Leaf        Cazenave, T.; and Jouandeau, N. 2008. A Parallel Monte-
+Parallelization using 1 thread and 6 threads.                     Carlo Tree Search Algorithm. In Computers and Games, 6th
+                                                                  International Conference, CG 2008, Beijing, China, Septem-
+Cards M Worlds 1 thread 6 threads                                 ber 29 - October 1, 2008. Proceedings, 72­80.
+
+52 1 20  0.019 0.015                                              Cazenave, T.; and Ventos, V. 2020. The µ Search Algo-
+                                                                  rithm for the Game of Bridge. In Monte Carlo Search at
+52 1 40  0.041 0.024                                              IJCAI.
+
+52 1 80  0.083 0.041                                              Chaslot, G. M.-B.; Winands, M. H.; and van den Herik, H. J.
+                                                                  2008. Parallel monte-carlo tree search. In International
+52 1 160 0.160 0.078                                              Conference on Computers and Games, 60­71. Springer.
+
+52 2 20  0.067 0.042                                              Cowling, P. I.; Powley, E. J.; and Whitehouse, D. 2012. In-
+                                                                  formation set monte carlo tree search. IEEE Transactions on
+52 2 40  0.145 0.081                                              Computational Intelligence and AI in Games 4(2): 120­143.
+
+52 2 80  0.333 0.152                                              Edelkamp, S. 2020. Representing and Reducing Uncertainty
+                                                                  for Enumerating the Belief Space to Improve Endgame Play
+move. Similar speedups occur for µ with two Max moves:            in Skat. In ECAI 2020.
+the speedup factor is approximately two for 80 worlds. Leaf
+parallelized µ with two Max moves and 40 worlds has               Frank, I.; and Basin, D. 2001. A theoretical and empirical
+approximately the same thinking time as PIMC with 160             investigation of search in imperfect information games. The-
+worlds, and we can see in figure 6 that it has a better winrate.  oretical Computer Science 252(1-2): 217­256.
+
+                      Conclusion                                  Furtak, T.; and Buro, M. 2013. Recursive Monte Carlo
+                                                                  search for imperfect information games. In 2013 IEEE Con-
+We presented five different optimizations that speed up           ference on Computational Inteligence in Games (CIG), Nia-
+search for the µ algorithm, and showed how each opti-             gara Falls, ON, Canada, August 11-13, 2013, 1­8.
+mization contributes to the final speedup when combined. In
+our experiments, the algorithm with the optimizations was         Ginsberg, M. L. 2001. GIB: Imperfect Information in a
+shown to be three times faster than without the optimiza-         Computationally Challenging Game. J. Artif. Intell. Res. 14:
+tions. The optimized algorithm has also been parallelized         303­358.
+with leaf parallelization which gave a speedup factor of 2.
+The evolution of the winrate and the thinking time with the       Haglund, B. 2010. Search algorithms for a bridge double
+number of worlds has shown an asymptotic behavior both            dummy solver.
+for PIMC and µ with different numbers of Max moves.
+The asymptote of µ is higher than the asymptote of PIMC,          Kupferschmid, S.; and Helmert, M. 2006. A skat player
+meaning that for usual thinking times and number of worlds,       based on Monte-Carlo simulation. In International Confer-
+optimized µ performs better than PIMC. Moreover, opti-            ence on Computers and Games, 135­147. Springer.
+mized µ outperforms the former computer Bridge world
+champion WBridge5 in the 7NT contract when the defense            Lanctot, M.; Lockhart, E.; Lespiau, J.-B.; Zambaldi, V.;
+is played by PIMC or DDS.                                         Upadhyay, S.; Pe´rolat, J.; Srinivasan, S.; Timbers, F.; Tuyls,
+                                                                  K.; Omidshafiei, S.; et al. 2019. OpenSpiel: A frame-
+                  Acknowledgment                                  work for reinforcement learning in games. arXiv preprint
+                                                                  arXiv:1908.09453 .
+Thanks to Dan Braun for proofreading.
+                                                                  Levy, D. N. 1989. The million pound bridge program.
+                       References                                 Heuristic Programming in Artificial Intelligence The First
+                                                                  Computer Olympiad 95­103.
+Bouzy, B.; Rimbaud, A.; and Ventos, V. 2020. Recursive
+Monte Carlo Search for Bridge Card Play. In 2020 IEEE             Lockhart, E.; Lanctot, M.; Pe´rolat, J.; Lespiau, J.-B.; Mor-
+Conference on Games (CoG), 1­8.                                   rill, D.; Timbers, F.; and Tuyls, K. 2019. Computing Ap-
+                                                                  proximate Equilibria in Sequential Adversarial Games by
+Brown, N.; and Sandholm, T. 2019. Superhuman AI for mul-          Exploitability Descent. arXiv preprint arXiv:1903.05614 .
+tiplayer poker. Science 365(6456): 885­890.
+                                                                  Long, J. R.; Sturtevant, N. R.; Buro, M.; and Furtak, T.
+Buro, M.; Long, J. R.; Furtak, T.; and Sturtevant, N. 2009.       2010. Understanding the success of perfect information
+Improving state evaluation, inference, and search in trick-       monte carlo sampling in game tree search. In Twenty-Fourth
+based card games. In Twenty-First International Joint Con-        AAAI Conference on Artificial Intelligence.
+ference on Artificial Intelligence.
+                                                                  Mahmood, Z.; Grant, A.; and Sharif, O. 2014. Bridge for
+Cazenave, T. 2009. Nested Monte-Carlo Search. In                  Beginners: A Complete Course. Pavilion Books.
+Boutilier, C., ed., IJCAI, 456­461.
+                                                                  Sturtevant, N. R.; and White, A. M. 2006. Feature construc-
+Cazenave, T.; and Jouandeau, N. 2007. On the paralleliza-         tion for reinforcement learning in hearts. In International
+tion of UCT. In proceedings of the Computer Games Work-           Conference on Computers and Games, 122­134. Springer.
+shop, 93­101.
+Ventos, V.; Costel, Y.; Teytaud, O.; and The´paut Ventos, S.
+2017. Boosting a Bridge Artificial Intelligence. In Proc. In-
+ternational Conference on Tools with Artificial Intelligence
+(ICTAI), 1280­1287. IEEE.
+
+Zinkevich, M.; Johanson, M.; Bowling, M.; and Piccione,
+C. 2008. Regret minimization in games with incomplete
+information. In Advances in neural information processing
+systems, 1729­1736.
+
