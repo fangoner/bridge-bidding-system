@@ -1495,7 +1495,14 @@ def _merge_constraints(c1: BidConstraint, c2: BidConstraint) -> BidConstraint:
     p1 = _source_priority(c1.inference_source)
     p2 = _source_priority(c2.inference_source)
     merged.inference_source = c1.inference_source if p1 >= p2 else c2.inference_source
-    
+
+    # HCP 反转修正：合并后 min > max 时，保留较可靠来源的约束，放宽较弱方
+    if merged.min_hcp is not None and merged.max_hcp is not None and merged.min_hcp > merged.max_hcp:
+        if p1 >= p2:
+            merged.max_hcp = max(merged.max_hcp, merged.min_hcp)
+        else:
+            merged.min_hcp = min(merged.min_hcp, merged.max_hcp)
+
     return merged
 
 
@@ -1583,7 +1590,7 @@ def _apply_negative_inference(
                 existing = constraints[pos]
                 if existing.max_hcp is None or hcp_cap < existing.max_hcp:
                     existing.max_hcp = hcp_cap
-                    existing.inference_source = "negative_inference"
+                    # 保留原有硬约束标记，negative_inference 仅收紧 max_hcp
             else:
                 c = BidConstraint(
                     position=pos,

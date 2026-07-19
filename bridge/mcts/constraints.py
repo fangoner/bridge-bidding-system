@@ -183,60 +183,6 @@ def validate_sample(
     return validate_level1(hands, constraints)
 
 
-def compute_sample_violation_score(
-    hands: Dict[str, List[Card]],
-    constraints: Dict[str, BidConstraint],
-) -> float:
-    """计算采样违反约束的程度分数（用于粒子软加权）。
-
-    分数越高表示违反越严重，0表示完全满足。
-    """
-    score = 0.0
-    for pos, constraint in constraints.items():
-        cards = hands.get(pos, [])
-        if not cards:
-            continue
-
-        dist = _count_distribution(cards)
-        hcp = _compute_hcp(cards)
-        controls = _compute_controls(cards)
-
-        if constraint.min_hcp is not None and hcp < constraint.min_hcp:
-            score += (constraint.min_hcp - hcp) * 2.0
-        if constraint.max_hcp is not None and hcp > constraint.max_hcp:
-            score += (hcp - constraint.max_hcp) * 2.0
-
-        if constraint.min_controls is not None and controls < constraint.min_controls:
-            score += (constraint.min_controls - controls) * 1.5
-
-        for suit, min_len in constraint.suit_min.items():
-            deficit = min_len - dist.get(suit, 0)
-            if deficit > 0:
-                score += deficit * 3.0
-
-        for suit, max_len in constraint.suit_max.items():
-            excess = dist.get(suit, 0) - max_len
-            if excess > 0:
-                score += excess * 3.0
-
-        for suit, exact_len in constraint.exact_suit.items():
-            diff = abs(dist.get(suit, 0) - exact_len)
-            if diff > 0:
-                score += diff * 4.0
-
-        if constraint.balanced is not None:
-            is_balanced = _is_balanced(dist)
-            if constraint.balanced and not is_balanced:
-                score += 5.0
-            if not constraint.balanced and is_balanced:
-                score += 2.0
-
-        for (suit, rank) in constraint.specific_cards:
-            if not any(c.suit == suit and c.rank == rank for c in cards):
-                score += 8.0  # 缺失特定大牌重罚
-
-    return score
-
 
 HCP_MAP = {"A": 4, "K": 3, "Q": 2, "J": 1}
 
