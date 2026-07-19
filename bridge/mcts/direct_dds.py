@@ -13,6 +13,7 @@ DDS 数据格式 (from endplay._dds):
 import ctypes
 import os
 import sys
+import threading
 from typing import Dict, List, Optional, Tuple
 
 from bridge.play_types import Card
@@ -40,20 +41,23 @@ MAXNOOFBOARDS = 200
 
 # ── 加载 DDS DLL ──
 _dds_dll = None
+_dll_lock = threading.Lock()
 
 
 def _load_dll():
     global _dds_dll
     if _dds_dll is not None:
         return _dds_dll
-    # 从 endplay 目录加载 dds.dll
-    import endplay._dds
-    dds_dir = os.path.dirname(endplay._dds.__file__)
-    dll_path = os.path.join(dds_dir, "dds.dll")
-    if sys.platform == "win32":
-        _dds_dll = ctypes.WinDLL(dll_path)
-    else:
-        _dds_dll = ctypes.CDLL(dll_path)
+    with _dll_lock:
+        if _dds_dll is not None:
+            return _dds_dll
+        import endplay._dds
+        dds_dir = os.path.dirname(endplay._dds.__file__)
+        dll_path = os.path.join(dds_dir, "dds.dll")
+        if sys.platform == "win32":
+            _dds_dll = ctypes.WinDLL(dll_path)
+        else:
+            _dds_dll = ctypes.CDLL(dll_path)
     return _dds_dll
 
 
@@ -322,7 +326,7 @@ def _build_deal_from_bits(
         for i, (pos, card) in enumerate(trick_cards[:3]):
             if hasattr(card, 'suit'):
                 d.currentTrickSuit[i] = _SUIT_TO_IDX.get(card.suit, 0)
-                d.currentTrickRank[i] = _RANK_TO_BIT.get(card.rank, 2)
+                d.currentTrickRank[i] = _RANK_TO_BIT.get(card.rank, 0)
             elif isinstance(card, int) and card != 0:
                 s_idx = 0
                 for si in range(4):

@@ -300,13 +300,17 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
         batch_end = min(batch_start + MAXNOOFBOARDS, len(dds_data))
         batch = dds_data[batch_start:batch_end]
         _t_batch = _time.time()
+        solved_list = None
         try:
             solved_list = solve_all_boards_raw(batch)
-            _dt_batch = _time.time() - _t_batch
-            solve_total += _dt_batch
-            _per_deal = _dt_batch / max(len(batch), 1)
-            if _per_deal > solve_max:
-                solve_max = _per_deal
+        except Exception:
+            solved_list = None
+        _dt_batch = _time.time() - _t_batch
+        solve_total += _dt_batch
+        _per_deal = _dt_batch / max(len(batch), 1)
+        if _per_deal > solve_max:
+            solve_max = _per_deal
+        if solved_list is not None:
             # 累加结果
             for i, solved in enumerate(solved_list):
                 if solved is None:
@@ -335,10 +339,10 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
                     stats["mx"] = max(stats["mx"], total)
                 samples_done += 1
                 solve_times.append(_per_deal)
-        except Exception as _e:
+        else:
             with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
                 _f.write(f"[BATCH_FAIL_DD] batch_start={batch_start} "
-                         f"size={len(batch)} reason={type(_e).__name__}: {_e}\n")
+                         f"size={len(batch)}\n")
             # 降级到逐个求解
             for hands, t, first_p, tc in batch:
                 if _time.time() - start_time > time_limit:
