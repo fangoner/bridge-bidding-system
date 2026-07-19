@@ -1,5 +1,53 @@
 # 开发日志
 
+## 2026-07-19 (v1.50)
+
+### 世界采样对齐论文 + 2021 论文 5 项优化全部实现 + DD 引擎 DirectDDS 升级
+
+**背景**：v1.49 完成了 αμ M 语义修复和 DirectDDS/Bitmap 手牌 Python 层优化。v1.50 的目标是完整复现 2019 和 2021 两篇 αμ 论文的全部算法和优化。
+
+**Phase 0a: 世界采样对齐论文**
+- 约束按来源分级：hard_coded/convention/meaning_parsed → Level 1 硬约束；negative_inference/hcp_conservation → Level 3 忽略
+- 采样从三步有偏生成（shape→HCP→牌张分配）改为均匀随机分配 + 分级约束验证回退链
+  - Level 1（50 次）：硬约束验证
+  - Level 2（50 次）：放宽 HCP±2, suit_min 减半
+  - Level 0（20 次）：仅 void 保护
+- 新增 `_sample_uniform()`, `_extract_known_info()`, `sample_n()`；新增约束验证函数 `validate_level1/2/0`
+- **移除 BeliefTracker**（~150 行）：均匀采样不需要粒子加权。`collect_voids()` 保留为工具函数
+- αμ 粒子选择从 Top-20 加权改为随机均匀抽样；DD 所有样本等权
+- sampler.py 删除旧三步生成法死代码 ~1257 行（1806→549 行）
+
+**Phase 0b: DD 引擎升级 DirectDDS**
+- dd_search.py 全部 DDS 调用从 endplay（PBN→Deal→solve_board）改为 DirectDDS（ctypes 直调）
+- `_build_dds_data()` 替代 `_build_deal_for_world()`；`_solve_batch()` 用 `solve_all_boards_raw`
+- 新增 `_dds_result_to_score_map()` 统一解析 DDS 结果，含 equals bitmask 展开（修复等效牌得分=0 的 bug）
+- 移除 dd_search.py 对 endplay 的全部依赖
+
+**Phase 1: 2021 论文优化（3 项新实现）**
+- **Phase 1a: Cut on Win** — `OutcomeVector.is_all_won()` + Max 节点子循环全赢截断
+- **Phase 1b: Maintaining Useful Worlds** — `_update_useful_worlds()` Min 节点跟踪 useless/world 减少 DDS 调用
+- **Phase 1c: Leaf Parallelization** — `_evaluate_leaf` 用 ThreadPoolExecutor 并行 DDS 批次
+
+**Phase 2: 2021 论文深度优化**
+- **Phase 2a: Deep Alpha Cut (Algorithm 1)** — `deep_alpha` 参数传递祖先 Max 节点 front；Min 节点检查所有祖先支配
+- **Phase 2b: Empty Entry Optimization** — root cut 跳过的候选先浅层搜索（M=0）填 TT，后续深度搜索可利用
+
+**Phase 3: 清理 + 2019 偏差修正**
+- Mid-computation early cut：Min 节点每处理完一个子 move 检查 alpha/deep_alpha 支配
+- alpha_mu.py 删除 ~400 行 endplay 死代码（`_evaluate_min_dds` 等 6 个函数）
+- 恢复 `ENDPLAY_AVAILABLE = True` 兼容导出
+
+**Bug 修复（review 发现）**
+- `PlayPhase["LEAD"]` → `PlayPhase.LEAD`（会崩溃）
+- `DealSampler.__init__` 设 `self.belief_tracker = None`（AttributeError）
+- dd_search.py 移除未定义变量 `particles`（NameError）
+- DDS equals bitmask 6 处遗漏（等效牌得分错误）
+- 清理死导入/死函数
+
+**文件修改**：sampler.py (549), constraints.py, belief.py, dd_search.py, alpha_mu.py, play_service.py
+**净代码变化**：~ -1400 行
+**2021 论文 5 项优化全部实现**：World Cuts ✅, Cut on Win ✅, Useful Worlds ✅, Leaf Parallelization ✅, Deep Alpha Cut ✅, Empty Entry ✅
+
 ## 2026-07-19
 
 ### αμ 搜索引擎性能优化：M bug 修复 + DirectDDS + Bitmap 手牌

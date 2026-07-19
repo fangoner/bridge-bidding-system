@@ -1,41 +1,40 @@
-Error code=-13
+Error code=-14
 
 Deal data:
-trump=S
+trump=N
 first=W
-index=0 currentTrickSuit=H currentTrickRank= 8
-index1=0 index2=0 remainCards=8256
-index1=0 index2=1 remainCards=22656
-index1=0 index2=2 remainCards=9984
-index1=0 index2=3 remainCards=576
-index1=1 index2=0 remainCards=16388
-index1=1 index2=1 remainCards=8460
-index1=1 index2=2 remainCards=4288
-index1=1 index2=3 remainCards=24736
-index1=2 index2=0 remainCards=7088
-index1=2 index2=1 remainCards=32
-index1=2 index2=2 remainCards=40
-index1=2 index2=3 remainCards=3076
-index1=3 index2=0 remainCards=1032
-index1=3 index2=1 remainCards=1552
-index1=3 index2=2 remainCards=2068
-index1=3 index2=3 remainCards=4376
+index1=0 index2=0 remainCards=8720
+index1=0 index2=1 remainCards=16396
+index1=0 index2=2 remainCards=16408
+index1=0 index2=3 remainCards=16536
+index1=1 index2=0 remainCards=16384
+index1=1 index2=1 remainCards=6560
+index1=1 index2=2 remainCards=2976
+index1=1 index2=3 remainCards=10240
+index1=2 index2=0 remainCards=7236
+index1=2 index2=1 remainCards=1536
+index1=2 index2=2 remainCards=1088
+index1=2 index2=3 remainCards=4448
+index1=3 index2=0 remainCards=8
+index1=3 index2=1 remainCards=16
+index1=3 index2=2 remainCards=8192
+index1=3 index2=3 remainCards=0
 
-target=0
+target=-1
 solutions=3
 mode=1
 
 
-        S K6
-        H AQJ7
-        D KT98
-        C 96
-S T3            S A2
-H T94           H K832
-D J42           D Q76
-C Q843          C AK75
-        S QJ98754
-        H 5
-        D 53
-        C JT2
+        S K94
+        H A32
+        D A43
+        C A743
+S 3             S A
+H 4             H QJ875
+D K             D J9875
+C --            C KJ
+        S QJT62
+        H T9
+        D T6
+        C Q865
 
