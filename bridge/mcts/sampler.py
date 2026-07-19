@@ -4,8 +4,7 @@ import copy
 from typing import Dict, List, Set, Optional, Tuple
 
 from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER
-from bridge.mcts.state_utils import clone_hands, SUIT_DISPLAY_ORDER, RANK_DESC
-import math
+from bridge.mcts.state_utils import SUIT_DISPLAY_ORDER, RANK_DESC
 from bridge.mcts.constraints import (
     BidConstraint, validate_sample, compute_sample_violation_score,
     HCP_MAP, CONTROL_MAP,

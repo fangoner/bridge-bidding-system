@@ -1080,19 +1080,6 @@ class AlphaMuSearch:
 
         return min_front, best_min_move
 
-    @staticmethod
-    def _worlds_consistent(next_states) -> tuple:
-        ref = None
-        for _, ns_info in next_states:
-            if ns_info.get("impossible"):
-                continue
-            cur = ns_info.get("new_current")
-            if ref is None:
-                ref = cur
-            elif cur != ref:
-                return False, None
-        return True, ref
-
     def _build_min_child_state(
         self,
         state: PlayState,
