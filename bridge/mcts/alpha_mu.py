@@ -1053,6 +1053,7 @@ class AlphaMuSearch:
         # useful_mask 更新：m_new[i] = v1.useful_mask[i] or v2.useful_mask[i]
         #   初始 useful_mask = all False，每个 move 合法后对应 world 变 True
         #   这样不合法 move 的虚假初始值 1 不会参与支配消除
+        # 2019 论文补全：mid-computation early cut（每条 move 后检查 alpha/deep_alpha）
         min_front = ParetoFront([OutcomeVector([1] * n, [False] * n, [13] * n)])
         for child_front, legal_mask, _min_move in move_data:
             if self._time_up():
@@ -1077,6 +1078,14 @@ class AlphaMuSearch:
                         m_new[w_idx] = True
                     new_front.add(OutcomeVector(v_new, m_new, t_new, _copy=False))
             min_front = new_front
+            # 2019 论文补全：mid-computation early cut
+            # 每处理完一个子 move，检查当前 min_front 是否已被 alpha 支配
+            if alpha is not None and self._front_dominated_by(min_front, alpha):
+                self._err_stats["early_cut_mid"] = self._err_stats.get("early_cut_mid", 0) + 1
+                break
+            if deep_alpha is not None and self._front_dominated_by(min_front, deep_alpha):
+                self._err_stats["early_cut_mid_deep"] = self._err_stats.get("early_cut_mid_deep", 0) + 1
+                break
 
         return min_front, best_min_move
 
