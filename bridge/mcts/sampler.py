@@ -281,26 +281,3 @@ class DealSampler:
         _warn_fallback("FINAL_FALLBACK", known_info, self.constraints)
         return _sample_uniform(known_info)
 
-    def _sample_once(self, state: PlayState, perspective: str) -> Dict[str, List[Card]]:
-        """采样一套与当前信息一致的完整手牌（均匀分配 + void 保护）。
-
-        Phase 0a: 不再使用三步有偏生成，改为 _sample_uniform。
-        约束验证由 sample() 调用方在外部完成。
-
-        Args:
-            state: 当前PlayState
-            perspective: 当前出牌者位置
-
-        Returns:
-            完整4家手牌 Dict[str, List[Card]]
-        """
-        known_info = _extract_known_info(state, perspective)
-        return _sample_uniform(known_info)
-
-
-
-# ============================================================
-# 新的全局约束采样算法 v2
-# 核心思想：先全局分配牌型+HCP，再按骨架填充牌张
-# ============================================================
-

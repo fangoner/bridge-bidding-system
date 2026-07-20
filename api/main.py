@@ -1684,8 +1684,12 @@ async def get_play_state():
         )
 
 
-def _compute_dd_hints_for_state(service, state) -> dict:
-    """共享DD提示计算：给定打牌状态，返回当前玩家可出牌的DD评估。
+def _compute_dd_hints_from_state(state, playable) -> dict:
+    """共享 DD 提示计算：给定状态与可出牌列表，返回每张牌的 delta。
+
+    Args:
+        state: PlayState（含 contract/hands/declarer_tricks 等）
+        playable: 当前玩家可出牌列表
 
     Returns:
         hints dict like {"♠A": "+2", "♣K": "=", "♥5": "-1"}
@@ -1699,8 +1703,6 @@ def _compute_dd_hints_for_state(service, state) -> dict:
         from bridge.mcts.dd_search import solve_all_boards_raw, _dds_result_to_score_map
         from bridge.mcts.state_utils import get_current_trick_state
 
-        perspective = state.current_player
-        playable = service.get_playable_cards()
         if len(playable) <= 1:
             return {}
 
@@ -1724,10 +1726,8 @@ def _compute_dd_hints_for_state(service, state) -> dict:
         hands = {}
         for pos in ["北", "东", "南", "西"]:
             hands[pos] = list(state.hands.get(pos, []))
-        # DDS: trick_cards 不能出现在 hands 中（否则 remainCards 与 currentTrickSuit 双重计算）
-        # state.hands 已在 play_card 时移除 trick_cards，无需额外处理
 
-        first_p = trick_leader if trick_cards else perspective
+        first_p = trick_leader if trick_cards else state.current_player
         solved_list = solve_all_boards_raw([(hands, trump, first_p, trick_cards)])
         if not solved_list or solved_list[0] is None:
             return {}
@@ -1762,6 +1762,12 @@ def _compute_dd_hints_for_state(service, state) -> dict:
         return hints
     except Exception:
         return {}
+
+
+def _compute_dd_hints_for_state(service, state) -> dict:
+    """实战模式 DD 提示：从 PlayService 取 playable，委托共享函数。"""
+    playable = service.get_playable_cards()
+    return _compute_dd_hints_from_state(state, playable)
 
 
 def _record_dd_hint(service, state_before, state_after, tricks_before):
@@ -1939,81 +1945,12 @@ async def get_dd_hints_review(request: ReviewDDHintsRequest):
 
 
 def _compute_dd_hints_for_state_from_state(state) -> dict:
-    """从给定的 PlayState 计算 DD 提示（不依赖 PlayService）。"""
-    from bridge.mcts.dd_search import ENDPLAY_AVAILABLE
-    if not ENDPLAY_AVAILABLE:
+    """复盘模式 DD 提示：从 PlayState 取 playable，委托共享函数。"""
+    perspective = state.current_player
+    if not perspective:
         return {}
-
-    try:
-        from bridge.mcts.dd_search import solve_all_boards_raw, _dds_result_to_score_map
-        from bridge.mcts.state_utils import get_current_trick_state
-
-        perspective = state.current_player
-        if not perspective:
-            return {}
-
-        playable = state.get_playable_cards(perspective)
-        if len(playable) <= 1:
-            return {}
-
-        declarer = state.contract.declarer
-        dummy = state.dummy
-        trump = state.contract.suit
-
-        trick_state = get_current_trick_state(state)
-        trick_cards = trick_state["cards"]
-        trick_leader = trick_state.get("leader")
-
-        total_played = state.declarer_tricks + state.defender_tricks
-        remaining_tricks = 13 - total_played
-
-        has_incomplete_hands = any(
-            not state.hands.get(pos) for pos in ["北", "东", "南", "西"]
-        )
-        if has_incomplete_hands:
-            return {}
-
-        hands = {}
-        for pos in ["北", "东", "南", "西"]:
-            hands[pos] = list(state.hands.get(pos, []))
-        # DDS: trick_cards 不能出现在 hands 中（否则 remainCards 与 currentTrickSuit 双重计算）
-        # state.hands 已在 play_card 时移除 trick_cards，无需额外处理
-
-        first_p = trick_leader if trick_cards else perspective
-        solved_list = solve_all_boards_raw([(hands, trump, first_p, trick_cards)])
-        if not solved_list or solved_list[0] is None:
-            return {}
-        solved = solved_list[0]
-        score_map = _dds_result_to_score_map(solved)
-
-        _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
-        cur_p = (_DD_POS.get(first_p, 0) + len(trick_cards)) % 4
-        curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
-
-        contract_level = state.contract.level
-        target_tricks = contract_level + 6
-        hints = {}
-
-        for card in playable:
-            key = (card.suit, card.rank)
-            target_tricks_for_card = score_map.get(key, 0)
-            if curplayer_is_declarer:
-                decl_side_tricks = target_tricks_for_card
-            else:
-                decl_side_tricks = remaining_tricks - target_tricks_for_card
-            total = state.declarer_tricks + decl_side_tricks
-            delta = total - target_tricks
-            card_str = str(card)
-            if delta > 0:
-                hints[card_str] = f"+{delta}"
-            elif delta == 0:
-                hints[card_str] = "="
-            else:
-                hints[card_str] = str(delta)
-
-        return hints
-    except Exception:
-        return {}
+    playable = state.get_playable_cards(perspective)
+    return _compute_dd_hints_from_state(state, playable)
 
 
 # ── 样本数 / world数设置（原"粒子数"，Phase 0a 后改为直接控制引擎参数）──

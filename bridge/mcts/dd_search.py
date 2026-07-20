@@ -192,64 +192,6 @@ def _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
         pass
 
 
-def _dd_eval_one_world_pure(world, all_played, trick_cards, trick_leader,
-                            playable, state, perspective, actual_turn, declarer, dummy,
-                            trump, weight):
-    """Phase 0b: DirectDDS 纯函数版单世界求解，供并行调用。
-
-    返回: dict 或 None（失败时）。
-    """
-    _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
-    try:
-        hands, t, first_p, tc = _build_dds_data(world, all_played, trick_cards,
-                                                  trick_leader, perspective, actual_turn, trump)
-        if hands is None:
-            return None
-        solved_list = solve_all_boards_raw([(hands, t, first_p, tc)])
-        if not solved_list or solved_list[0] is None:
-            return None
-        solved = solved_list[0]
-        score_map = _dds_result_to_score_map(solved)
-        total_played = state.declarer_tricks + state.defender_tricks
-        remaining_tricks = 13 - total_played
-        cur_p = (_DD_POS.get(first_p, 0) + len(tc)) % 4
-        curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
-        partial = {}
-        for card in playable:
-            key = (card.suit, card.rank)
-            target_tricks = score_map.get(key, 0)
-            if curplayer_is_declarer:
-                decl_side_tricks = target_tricks
-            else:
-                decl_side_tricks = remaining_tricks - target_tricks
-            total = state.declarer_tricks + decl_side_tricks
-            partial[str(card)] = {
-                "weighted_sum": total * weight,
-                "total_weight": weight,
-                "scores": [total],
-                "mn": total,
-                "mx": total,
-            }
-        return partial
-    except Exception:
-        return None
-
-
-def _merge_partial_scores(card_scores, partial):
-    """将 partial scores 合并到 card_scores（线程安全由调用方保证）。"""
-    if partial is None:
-        return
-    for card_key, p in partial.items():
-        if card_key not in card_scores:
-            continue
-        stats = card_scores[card_key]
-        stats["weighted_sum"] += p["weighted_sum"]
-        stats["total_weight"] += p["total_weight"]
-        stats["scores"].extend(p["scores"])
-        stats["mn"] = min(stats["mn"], p["mn"])
-        stats["mx"] = max(stats["mx"], p["mx"])
-
-
 def _build_dds_data(world, all_played, trick_cards, trick_leader,
                       perspective, actual_turn, trump):
     """从 world 构建 DirectDDS 输入数据。

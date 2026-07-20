@@ -138,10 +138,6 @@ def analyze_all_contracts(hands: Union[Dict, object], hcp_dict: Dict = None) -> 
         }
 
 
-# 向后兼容别名（旧代码可能用 analyze_all_contracts_endplay）
-analyze_all_contracts_endplay = analyze_all_contracts
-
-
 def format_dd_results(results: Dict, hcp_dict: Dict = None) -> str:
     """格式化双明手分析结果为表格字符串。"""
     lines = []
@@ -183,72 +179,6 @@ def format_dd_results(results: Dict, hcp_dict: Dict = None) -> str:
 
     lines.append("=" * 60)
     return "\n".join(lines)
-
-
-def analyze_specific_contract(hands: Union[Dict, object], declarer: str, trump: str, level: int) -> Dict:
-    """分析特定定约能否完成。
-
-    使用 DirectDDS 的 solve_all_boards_raw 求解指定定约下的赢墩数。
-
-    Args:
-        hands: 手牌字典
-        declarer: 庄家位置 ("南"/"西"/"北"/"东")
-        trump: 将牌花色 ("S"/"H"/"D"/"C"/"NT")
-        level: 定约阶数 (1-7)
-
-    Returns:
-        分析结果字典
-    """
-    if not DDS_AVAILABLE:
-        return {"success": False, "error": "DirectDDS 未安装"}
-
-    try:
-        hands_dict = _normalize_hands_input(hands)
-        card_hands = _hands_dict_to_card_hands(hands_dict)
-
-        if any(not cards for cards in card_hands.values()):
-            return {"success": False, "error": "手牌不完整"}
-
-        from bridge.play_types import POSITION_ORDER as POS_ORDER
-        idx = POS_ORDER.index(declarer)
-        first_player = POS_ORDER[(idx + 1) % 4]
-
-        solved_list = solve_all_boards_raw([(card_hands, trump, first_player, [])])
-        if not solved_list or solved_list[0] is None:
-            return {"success": False, "error": "DDS 求解失败"}
-
-        solved = solved_list[0]
-        score_map = _dds_result_to_score_map(solved)
-
-        _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
-        dummy = POS_ORDER[(idx + 2) % 4]
-        cur_p = _DD_POS.get(first_player, 0)
-        curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
-
-        if curplayer_is_declarer:
-            tricks = max(score_map.values()) if score_map else 0
-        else:
-            tricks = 13 - max(score_map.values()) if score_map else 0
-
-        required_tricks = 6 + level
-        can_make = tricks >= required_tricks
-
-        return {
-            "success": True,
-            "declarer": declarer,
-            "trump": trump,
-            "level": level,
-            "contract": f"{level}{trump}",
-            "tricks": tricks,
-            "can_make": can_make,
-            "overtricks": tricks - required_tricks if can_make else 0,
-            "undertricks": required_tricks - tricks if not can_make else 0
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": f"分析特定定约失败: {str(e)}"
-        }
 
 
 def main():
