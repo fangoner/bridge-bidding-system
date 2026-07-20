@@ -25,6 +25,7 @@ backups/
 *.swp
 *.swo
 .claude/
+.trae/
 
 # OS
 .DS_Store
@@ -52,6 +53,11 @@ Deep Finesse 2014 v2/
 *.temp
 bidding_history.json
 ~$*.docx
+
+# DDS debug dumps and backups
+dump.txt
+api/dump.txt
+bridge_records_backup.json
 
 # Bidding cases (tracked - do not ignore)
 # bidding-cases/  # Uncomment to ignore, currently tracked

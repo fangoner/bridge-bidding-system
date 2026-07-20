@@ -31,36 +31,54 @@ def _card_rank_val(card_str: str) -> int:
 
 
 # ── 显著性阈值 ──
-# tricks 单次标准差经验值（桥牌 DD 评估中 tricks 的典型离散度）
-_SIGMA_TRICKS = 2.2
 # 显著性 Z 值（1.0 = 1σ ≈ 68% 置信，平衡灵敏度与噪声）
 _Z_SCORE = 1.0
 
 
-def _significance_threshold(n_samples: int) -> float:
-    """根据采样数动态计算 avg 显著性阈值。
+def _paired_diff_stats(a_scores, b_scores):
+    """计算两个候选牌配对采样的差值统计。
 
-    阈值 = Z × √2 × σ / √N
-    配对采样下差值标准差通常更小，此为保守上界。
-    N=500→0.14, N=1000→0.10, N=2000→0.07
+    返回 (mean_diff, threshold)：
+    - mean_diff = mean(a_scores - b_scores) = a_avg - b_avg
+    - threshold = Z × std_diff / √N （配对差值标准差，避免独立假设虚高）
+
+    配对采样下同 world 的 cov(a,b) > 0，配对 std 远小于独立假设的 √2·σ，
+    阈值更精确。N≤1 时 threshold=0（精确求解无需显著性检验）。
     """
-    if n_samples <= 1:
-        return 0.0  # 单次精确求解无需阈值
-    return _Z_SCORE * math.sqrt(2) * _SIGMA_TRICKS / math.sqrt(n_samples)
+    n = min(len(a_scores), len(b_scores))
+    if n == 0:
+        return 0.0, 0.0
+    total_diff = 0.0
+    for i in range(n):
+        total_diff += a_scores[i] - b_scores[i]
+    mean_diff = total_diff / n
+    if n <= 1:
+        return mean_diff, 0.0
+    sq_sum = 0.0
+    for i in range(n):
+        d = (a_scores[i] - b_scores[i]) - mean_diff
+        sq_sum += d * d
+    std_diff = math.sqrt(sq_sum / (n - 1))
+    threshold = _Z_SCORE * std_diff / math.sqrt(n)
+    return mean_diff, threshold
 
 
-def _compare_candidates(a_avg, a_rank_val, b_avg, b_rank_val, is_declarer_side, threshold):
-    """比较两个候选牌。
+def _compare_candidates(a_val, a_scores, a_rank_val, b_val, b_scores, b_rank_val, is_declarer_side):
+    """配对差值检验比较两个候选牌。
+
+    a_val, b_val: 用于决策方向的值（如 blended 或 avg）
+    a_scores, b_scores: 配对采样的 per-world 得分列表，用于计算配对差值阈值
 
     返回: 1 if a 优于 b, -1 if b 优于 a, 0 if 等价。
     分层决胜：
-    1. avg 差距 > threshold → 显著差异，按 avg 方向决胜
+    1. |a_val - b_val| > 配对阈值 → 显著差异，按 val 方向决胜
        （庄家方取高，防守方取低）
     2. rank 不同 → 小牌优先（保留大牌结构/进张）
-    3. rank 相同 → 回退到原始 avg（虽在阈值内属噪声，
+    3. rank 相同 → 回退到原始 val 方向（虽在阈值内属噪声，
        但仍比迭代顺序任意决定更合理）
     """
-    diff = a_avg - b_avg
+    _, threshold = _paired_diff_stats(a_scores, b_scores)
+    diff = a_val - b_val
     if is_declarer_side:
         if diff > threshold:
             return 1   # a 显著更高（庄家方更优）
@@ -76,7 +94,7 @@ def _compare_candidates(a_avg, a_rank_val, b_avg, b_rank_val, is_declarer_side, 
         return 1
     if a_rank_val > b_rank_val:
         return -1
-    # rank 也相同：回退到原始 avg 方向（避免迭代顺序任意决定）
+    # rank 也相同：回退到原始 val 方向（避免迭代顺序任意决定）
     if is_declarer_side:
         if diff > 0:
             return 1
@@ -101,8 +119,11 @@ def _has_duplicates(hands: Dict[str, List[Card]]) -> bool:
             seen.add(key)
     return False
 
-# Phase 0b: DirectDDS 替换 endplay，ctypes 直调 DDS 库
+# Phase 0b: DirectDDS — ctypes 直调 DDS C 库（dds.dll 随 endplay 包分发）
 from bridge.mcts.direct_dds import solve_all_boards_raw
+
+# 兼容导出：play_service 和 alpha_mu 依赖此标志判断 DDS 是否可用
+ENDPLAY_AVAILABLE = True
 
 
 # Phase 0b fix: DDS suit/rank maps with equals bitmask parsing
@@ -241,17 +262,20 @@ def _build_dds_data(world, all_played, trick_cards, trick_leader,
     # 深拷贝 world
     sampled = {pos: [Card(suit=c.suit, rank=c.rank) for c in hand]
                for pos, hand in world.items()}
-    # 1. 移除已出牌
+    # 1. 移除所有已出牌（包括已完成墩和当前墩）
+    #    注意：采样世界中的牌位置可能与实际出牌位置不同，
+    #    所以需要从所有位置中查找并移除。
+    all_played_set = set()
     for pos, card in all_played:
-        if pos in sampled:
-            sampled[pos] = [c for c in sampled[pos]
-                            if not (c.suit == card.suit and c.rank == card.rank)]
+        all_played_set.add((card.suit, card.rank))
+    for pos in list(sampled.keys()):
+        sampled[pos] = [c for c in sampled[pos]
+                        if (c.suit, c.rank) not in all_played_set]
     # 2. 检测重复牌
     if _has_duplicates(sampled):
         return None, None, None, None
-    # 3. 加回当前墩的牌
-    for pos, card in trick_cards:
-        sampled[pos].append(card)
+    # 3. 不把当前墩牌加回手牌：DDS 通过 currentTrickSuit/Rank 知道已出牌，
+    #    手牌中不应包含已出牌张。
     # 4. 确定 first player
     if trick_cards:
         first = trick_leader
@@ -540,13 +564,12 @@ class DDSearch:
 
         best_card = None
         best_blended = None
+        best_scores = None
         best_rank_val = None
         child_stats = []
+        blended_map = {}
+        scores_map = {}
         use_maximin = getattr(self, 'use_maximin', True)
-
-        # 计算显著性阈值（与采样数匹配）
-        _first_scores = card_scores[str(playable[0])]["scores"] if playable else []
-        _threshold = _significance_threshold(len(_first_scores))
 
         for card in playable:
             stats = card_scores[str(card)]
@@ -593,18 +616,22 @@ class DDSearch:
             else:
                 blended = w_avg
 
-            # 显著性比较：avg 差距 < 阈值视为平局，小牌优先
-            if best_card is None or _compare_candidates(blended, rank_val, best_blended, best_rank_val, is_declarer_side, _threshold) > 0:
+            blended_map[str(card)] = blended
+            scores_map[str(card)] = scores
+
+            # 配对差值检验：同 world 配对差值的样本标准差决定显著性阈值
+            if best_card is None or _compare_candidates(blended, scores, rank_val, best_blended, best_scores, best_rank_val, is_declarer_side) > 0:
                 best_card = card
                 best_blended = blended
+                best_scores = scores
                 best_rank_val = rank_val
 
         from functools import cmp_to_key
         child_stats.sort(key=cmp_to_key(
             lambda a, b: -_compare_candidates(
-                a["avg_tricks"], _card_rank_val(a["card"]),
-                b["avg_tricks"], _card_rank_val(b["card"]),
-                is_declarer_side, _threshold
+                blended_map[a["card"]], scores_map[a["card"]], _card_rank_val(a["card"]),
+                blended_map[b["card"]], scores_map[b["card"]], _card_rank_val(b["card"]),
+                is_declarer_side
             )
         ))
 
@@ -773,9 +800,8 @@ class DDSearch:
                     # 验证无重复牌
                     if _has_duplicates(hands):
                         continue
-                    # 加回当前墩牌
-                    for pos, card in trick_cards:
-                        hands[pos].append(card)
+                    # DDS: trick_cards 不能出现在 hands 中（否则 remainCards 与 currentTrickSuit 双重计算）
+                    # all_played 已包含 trick_cards，上面已移除，不再加回
 
                     # Phase 0b: DirectDDS 替换 endplay
                     first_p = trick_leader if trick_cards else actual_turn
@@ -813,12 +839,11 @@ class DDSearch:
 
         best_card = None
         best_blended = None
+        best_scores = None
         best_rank_val = None
         child_stats = []
-
-        # 计算显著性阈值（与采样数匹配）
-        _first_scores = card_scores[str(playable[0])] if playable else []
-        _threshold = _significance_threshold(len(_first_scores))
+        blended_map = {}
+        scores_map = {}
 
         for card in playable:
             scores = card_scores[str(card)]
@@ -856,18 +881,21 @@ class DDSearch:
                 blended = (1 - regret_weight) * avg + regret_weight * mn
             else:
                 blended = avg
-            # 显著性比较：avg 差距 < 阈值视为平局，小牌优先
-            if best_card is None or _compare_candidates(blended, rank_val, best_blended, best_rank_val, is_declarer_side, _threshold) > 0:
+            blended_map[str(card)] = blended
+            scores_map[str(card)] = scores
+            # 配对差值检验：同分布配对差值的样本标准差决定显著性阈值
+            if best_card is None or _compare_candidates(blended, scores, rank_val, best_blended, best_scores, best_rank_val, is_declarer_side) > 0:
                 best_blended = blended
+                best_scores = scores
                 best_rank_val = rank_val
                 best_card = card
 
         from functools import cmp_to_key
         child_stats.sort(key=cmp_to_key(
             lambda a, b: -_compare_candidates(
-                a["avg_tricks"], _card_rank_val(a["card"]),
-                b["avg_tricks"], _card_rank_val(b["card"]),
-                is_declarer_side, _threshold
+                blended_map[a["card"]], scores_map[a["card"]], _card_rank_val(a["card"]),
+                blended_map[b["card"]], scores_map[b["card"]], _card_rank_val(b["card"]),
+                is_declarer_side
             )
         ))
 
@@ -906,7 +934,7 @@ class DDSearch:
 
         与 search() 不同，此方法不采样，直接使用 state.hands 中的全部手牌。
         """
-        # DirectDDS 总是可用（依赖 endplay.dll，不含 Python 端依赖）
+        # DirectDDS 总是可用（ctypes 直调 dds.dll，无 Python 端依赖）
 
         perspective = state.current_player
         actual_turn = state.current_player
@@ -939,13 +967,8 @@ class DDSearch:
         for pos in POSITION_ORDER:
             hands[pos] = list(state.hands.get(pos, []))
 
-        # 移除当前墩已打出的牌（避免 PBN 中重复，之后通过 deal.play 重放）
-        for pos, card in trick_cards:
-            hands[pos] = [c for c in hands[pos]
-                          if not (c.suit == card.suit and c.rank == card.rank)]
-        # 加回当前墩牌（PBN 构建用）
-        for pos, card in trick_cards:
-            hands[pos].append(card)
+        # DDS: trick_cards 不能出现在 hands 中（否则 remainCards 与 currentTrickSuit 双重计算）
+        # state.hands 已在 play_card 时移除 trick_cards，无需额外处理
 
         # Phase 0b: DirectDDS Perfect 搜索
         first_p = trick_leader if trick_cards else actual_turn
@@ -961,9 +984,11 @@ class DDSearch:
 
         best_card = None
         best_blended = None
+        best_scores = None
         best_rank_val = None
         child_stats = []
-        _threshold = 0.0  # Perfect DD 是精确值，无需显著性阈值
+        blended_map = {}
+        scores_map = {}
 
         for card in playable:
             key = (card.suit, card.rank)
@@ -981,18 +1006,21 @@ class DDSearch:
                 "max_tricks": total,
             })
             rank_val = RANK_ORDER.get(card.rank, 0)
-            # 显著性比较：精确值 threshold=0，平局时小牌优先
-            if best_card is None or _compare_candidates(total, rank_val, best_blended, best_rank_val, is_declarer_side, _threshold) > 0:
+            # Perfect DD：单次精确求解，n=1 时配对阈值退化为 0（精确比较）
+            blended_map[str(card)] = total
+            scores_map[str(card)] = [total]
+            if best_card is None or _compare_candidates(total, [total], rank_val, best_blended, best_scores, best_rank_val, is_declarer_side) > 0:
                 best_blended = total
+                best_scores = [total]
                 best_rank_val = rank_val
                 best_card = card
 
         from functools import cmp_to_key
         child_stats.sort(key=cmp_to_key(
             lambda a, b: -_compare_candidates(
-                a["avg_tricks"], _card_rank_val(a["card"]),
-                b["avg_tricks"], _card_rank_val(b["card"]),
-                is_declarer_side, _threshold
+                blended_map[a["card"]], scores_map[a["card"]], _card_rank_val(a["card"]),
+                blended_map[b["card"]], scores_map[b["card"]], _card_rank_val(b["card"]),
+                is_declarer_side
             )
         ))
 

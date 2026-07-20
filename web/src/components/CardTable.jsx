@@ -2301,26 +2301,26 @@ function CardTable({
             position: 'fixed', zIndex: 9999, ...posStyle,
             bgcolor: isDark ? 'rgba(17,24,39,0.92)' : 'rgba(255,255,255,0.92)',
             backdropFilter: 'blur(12px)',
-            borderRadius: 2, p: 1,
+            borderRadius: 1, p: 0.67,
             border: '1px solid', borderColor: 'divider',
             boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-            display: 'flex', flexDirection: 'column', gap: 0.4,
+            display: 'flex', flexDirection: 'column', gap: 0.27,
             maxWidth: isMobile ? '96vw' : 'auto',
             cursor: dragging ? 'grabbing' : 'auto',
           }}>
             <Box
               sx={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.3, px: 0.5,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.2, px: 0.33,
                 cursor: 'grab', userSelect: 'none',
                 '&:active': { cursor: 'grabbing' },
               }}
               onMouseDown={onMouseDown}
             >
-              <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color: isDark ? '#e2e8f0' : '#333' }}>
+              <Typography sx={{ fontSize: '0.73rem', fontWeight: 700, color: isDark ? '#e2e8f0' : '#333' }}>
                 {cp}家 出牌{ledSuit ? ` (跟${ledSuit})` : ' (首攻)'}
-                {'  '}<span style={{ fontSize: '0.6rem', fontWeight: 400, color: isDark ? '#94a3b8' : '#aaa' }}>拖拽移动</span>
+                {'  '}<span style={{ fontSize: '0.67rem', fontWeight: 400, color: isDark ? '#94a3b8' : '#aaa' }}>拖拽移动</span>
               </Typography>
-              <Typography sx={{ fontSize: '0.65rem', color: isDark ? '#94a3b8' : '#888' }}>
+              <Typography sx={{ fontSize: '0.67rem', color: isDark ? '#94a3b8' : '#888' }}>
                 灰色=已出/他手
               </Typography>
             </Box>
@@ -2328,17 +2328,17 @@ function CardTable({
               const isLedSuit = ledSuit === symbol
               return (
                 <Box key={symbol} sx={{
-                  display: 'flex', alignItems: 'center', gap: 0.3,
+                  display: 'flex', alignItems: 'center', gap: 0.2,
                   bgcolor: isLedSuit ? (isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.08)') : 'transparent',
-                  borderRadius: 1, px: 0.3, py: 0.15,
+                  borderRadius: 0.5, px: 0.2, py: 0.11,
                   border: isLedSuit ? `1px solid ${isDark ? 'rgba(129,140,248,0.4)' : 'rgba(99,102,241,0.3)'}` : '1px solid transparent',
                 }}>
                   <Box sx={{
-                    width: 20, minWidth: 20, height: 24,
+                    width: 16, minWidth: 16, height: 19,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color, fontSize: '0.95rem', fontWeight: 700,
+                    color, fontSize: '0.93rem', fontWeight: 700,
                   }}>{symbol}</Box>
-                  <Box sx={{ display: 'flex', gap: 0.25, flexWrap: 'nowrap' }}>
+                  <Box sx={{ display: 'flex', gap: 0.17, flexWrap: 'nowrap' }}>
                     {RANKS.map((rank) => {
                       const cardKey = symbol + rank
                       const isTaken = takenSet.has(cardKey)
@@ -2350,8 +2350,8 @@ function CardTable({
                           disabled={isTaken}
                           onClick={() => handlePick(symbol, rank)}
                           sx={{
-                            minWidth: 0, width: isMobile ? 22 : 26, height: 24, p: 0,
-                            fontSize: '0.7rem', fontWeight: 700,
+                            minWidth: 0, width: isMobile ? 15 : 17, height: 19, p: 0,
+                            fontSize: '0.73rem', fontWeight: 700,
                             color: isTaken ? (isDark ? '#475569' : '#aaa') : color,
                             bgcolor: isTaken
                               ? (isDark ? 'rgba(100,116,139,0.08)' : 'rgba(148,163,184,0.1)')

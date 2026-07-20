@@ -14,9 +14,10 @@ SYMBOL_TO_SUIT = {"♠": "spades", "♥": "hearts", "♦": "diamonds", "♣": "c
 SUIT_DISPLAY_ORDER = ["♠", "♥", "♦", "♣"]
 RANK_DESC = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"]
 
-POSITION_TO_PLAYER = {"北": Player.north, "东": Player.east, "南": Player.south, "西": Player.west}
-PLAYER_TO_POSITION = {Player.north: "北", Player.east: "东", Player.south: "南", Player.west: "西"}
-SUIT_TO_DENOM = {"♠": Denom.spades, "♥": Denom.hearts, "♦": Denom.diamonds, "♣": Denom.clubs, "NT": Denom.nt}
+if ENDPLAY_AVAILABLE:
+    POSITION_TO_PLAYER = {"北": Player.north, "东": Player.east, "南": Player.south, "西": Player.west}
+    PLAYER_TO_POSITION = {Player.north: "北", Player.east: "东", Player.south: "南", Player.west: "西"}
+    SUIT_TO_DENOM = {"♠": Denom.spades, "♥": Denom.hearts, "♦": Denom.diamonds, "♣": Denom.clubs, "NT": Denom.nt}
 
 
 def cards_to_hand_str(cards: List[Card]) -> str:
@@ -79,39 +80,6 @@ def trick_winner(trick_cards: list, trump: str) -> str:
             if card.suit == lead_suit and card.rank_value > winning_card.rank_value:
                 winning_pos, winning_card = pos, card
     return winning_pos
-
-
-def playstate_to_deal(state: PlayState) -> Optional["Deal"]:
-    """从PlayState当前手牌构造endplay Deal对象"""
-    if not ENDPLAY_AVAILABLE:
-        return None
-    # 按北东南西顺序构建PBN手牌
-    pbn_hands = []
-    for pos_cn in ["北", "东", "南", "西"]:
-        cards = state.hands.get(pos_cn, [])
-        hand_str = cards_to_hand_str(cards)
-        # PBN格式：S.H.D.C，用.分隔，空花色用空字符串
-        parts = hand_str.split()
-        parts = ["" if p == "-" else p for p in parts]
-        while len(parts) < 4:
-            parts.append("")
-        pbn_hands.append(".".join(parts))
-    pbn_str = f"N:{' '.join(pbn_hands)}"
-    return Deal(pbn_str)
-
-
-def suit_to_endplay_denom(suit: str) -> "Denom":
-    """花色符号 → endplay Denom"""
-    if not ENDPLAY_AVAILABLE:
-        return None
-    return SUIT_TO_DENOM.get(suit, Denom.nt)
-
-
-def position_to_endplay_player(pos: str) -> "Player":
-    """中文位置 → endplay Player"""
-    if not ENDPLAY_AVAILABLE:
-        return None
-    return POSITION_TO_PLAYER.get(pos, Player.north)
 
 
 def get_current_trick_state(state: PlayState) -> dict:

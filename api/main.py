@@ -54,11 +54,11 @@ from config import (
 )
 
 try:
-    from endplay_integration import analyze_all_contracts_endplay
-    ENDPLAY_AVAILABLE = True
+    from dd_analysis import analyze_all_contracts, DDS_AVAILABLE
+    ENDPLAY_AVAILABLE = DDS_AVAILABLE  # 向后兼容别名
 except ImportError:
     ENDPLAY_AVAILABLE = False
-    print("警告: endplay_integration 模块不可用，双明手分析功能不可用")
+    print("警告: dd_analysis 模块不可用，双明手分析功能不可用")
 
 app = FastAPI(title="桥牌叫牌练习系统 API", version="1.0.0")
 
@@ -1216,7 +1216,7 @@ async def double_dummy_analysis(request: DoubleDummyRequest):
     if not ENDPLAY_AVAILABLE:
         return DoubleDummyResponse(
             success=False,
-            error="双明手分析功能不可用，请确保已安装 endplay 库"
+            error="双明手分析功能不可用，请确保 DirectDDS 模块可用"
         )
     
     try:
@@ -1238,7 +1238,7 @@ async def double_dummy_analysis(request: DoubleDummyRequest):
             )
             hands_dict[pos_name] = hand.to_simple_string()
         
-        result = analyze_all_contracts_endplay(hands_dict)
+        result = analyze_all_contracts(hands_dict)
         
         if result.get("success"):
             return DoubleDummyResponse(
@@ -1689,18 +1689,15 @@ def _compute_dd_hints_for_state(service, state) -> dict:
 
     Returns:
         hints dict like {"♠A": "+2", "♣K": "=", "♥5": "-1"}
-        如果无法计算（endplay不可用、手牌不完整等），返回空dict
+        如果无法计算（DDS不可用、手牌不完整等），返回空dict
     """
     from bridge.mcts.dd_search import ENDPLAY_AVAILABLE
     if not ENDPLAY_AVAILABLE:
         return {}
 
     try:
-        from endplay import Deal
-        from endplay.dds import solve_board
-        from endplay.types import Denom, Player
-        from bridge.mcts.dd_search import _hands_to_pbn, _to_ep, _DENOM_TO_SUIT, _RANK_TO_CHAR
-        from bridge.mcts.state_utils import get_current_trick_state, POSITION_TO_PLAYER, PLAYER_TO_POSITION, SUIT_TO_DENOM
+        from bridge.mcts.dd_search import solve_all_boards_raw, _dds_result_to_score_map
+        from bridge.mcts.state_utils import get_current_trick_state
 
         perspective = state.current_player
         playable = service.get_playable_cards()
@@ -1727,31 +1724,19 @@ def _compute_dd_hints_for_state(service, state) -> dict:
         hands = {}
         for pos in ["北", "东", "南", "西"]:
             hands[pos] = list(state.hands.get(pos, []))
-        for pos, card in trick_cards:
-            hands[pos] = [c for c in hands[pos]
-                          if not (c.suit == card.suit and c.rank == card.rank)]
-        for pos, card in trick_cards:
-            hands[pos].append(card)
+        # DDS: trick_cards 不能出现在 hands 中（否则 remainCards 与 currentTrickSuit 双重计算）
+        # state.hands 已在 play_card 时移除 trick_cards，无需额外处理
 
-        pbn = _hands_to_pbn(hands)
-        deal = Deal(pbn)
-        deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
+        first_p = trick_leader if trick_cards else perspective
+        solved_list = solve_all_boards_raw([(hands, trump, first_p, trick_cards)])
+        if not solved_list or solved_list[0] is None:
+            return {}
+        solved = solved_list[0]
+        score_map = _dds_result_to_score_map(solved)
 
-        if trick_cards:
-            deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
-            for _pos, card in trick_cards:
-                deal.play(_to_ep(card), from_hand=True)
-        else:
-            deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
-
-        result = solve_board(deal)
-        score_map = {}
-        for ep_card, side_score in result:
-            key = (_DENOM_TO_SUIT.get(ep_card.suit), _RANK_TO_CHAR.get(ep_card.rank))
-            score_map[key] = side_score
-
-        curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
-        curplayer_is_declarer = curplayer_pos in (declarer, dummy)
+        _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
+        cur_p = (_DD_POS.get(first_p, 0) + len(trick_cards)) % 4
+        curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
 
         contract_level = state.contract.level
         target_tricks = contract_level + 6
@@ -1960,22 +1945,15 @@ def _compute_dd_hints_for_state_from_state(state) -> dict:
         return {}
 
     try:
-        from endplay import Deal
-        from endplay.dds import solve_board
-        from endplay.types import Denom, Player
-        from bridge.mcts.dd_search import _hands_to_pbn, _to_ep, _DENOM_TO_SUIT, _RANK_TO_CHAR
-        from bridge.mcts.state_utils import get_current_trick_state, POSITION_TO_PLAYER, PLAYER_TO_POSITION, SUIT_TO_DENOM
+        from bridge.mcts.dd_search import solve_all_boards_raw, _dds_result_to_score_map
+        from bridge.mcts.state_utils import get_current_trick_state
 
         perspective = state.current_player
         if not perspective:
             return {}
 
         playable = state.get_playable_cards(perspective)
-        print(f"[DD-HINT] perspective={perspective}, playable={[str(c) for c in playable]}, "
-              f"hand_size={len(state.hands.get(perspective, []))}, "
-              f"trick_cards={[ (p, str(c)) for p, c in state.current_trick.cards]}")
         if len(playable) <= 1:
-            print(f"[DD-HINT] playable<=1, returning empty")
             return {}
 
         declarer = state.contract.declarer
@@ -1998,31 +1976,19 @@ def _compute_dd_hints_for_state_from_state(state) -> dict:
         hands = {}
         for pos in ["北", "东", "南", "西"]:
             hands[pos] = list(state.hands.get(pos, []))
-        for pos, card in trick_cards:
-            hands[pos] = [c for c in hands[pos]
-                          if not (c.suit == card.suit and c.rank == card.rank)]
-        for pos, card in trick_cards:
-            hands[pos].append(card)
+        # DDS: trick_cards 不能出现在 hands 中（否则 remainCards 与 currentTrickSuit 双重计算）
+        # state.hands 已在 play_card 时移除 trick_cards，无需额外处理
 
-        pbn = _hands_to_pbn(hands)
-        deal = Deal(pbn)
-        deal.trump = SUIT_TO_DENOM.get(trump, Denom.nt)
+        first_p = trick_leader if trick_cards else perspective
+        solved_list = solve_all_boards_raw([(hands, trump, first_p, trick_cards)])
+        if not solved_list or solved_list[0] is None:
+            return {}
+        solved = solved_list[0]
+        score_map = _dds_result_to_score_map(solved)
 
-        if trick_cards:
-            deal.first = POSITION_TO_PLAYER.get(trick_leader, Player.north)
-            for _pos, card in trick_cards:
-                deal.play(_to_ep(card), from_hand=True)
-        else:
-            deal.first = POSITION_TO_PLAYER.get(perspective, Player.north)
-
-        result = solve_board(deal)
-        score_map = {}
-        for ep_card, side_score in result:
-            key = (_DENOM_TO_SUIT.get(ep_card.suit), _RANK_TO_CHAR.get(ep_card.rank))
-            score_map[key] = side_score
-
-        curplayer_pos = PLAYER_TO_POSITION.get(deal.curplayer, perspective)
-        curplayer_is_declarer = curplayer_pos in (declarer, dummy)
+        _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
+        cur_p = (_DD_POS.get(first_p, 0) + len(trick_cards)) % 4
+        curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
 
         contract_level = state.contract.level
         target_tricks = contract_level + 6
@@ -2045,10 +2011,8 @@ def _compute_dd_hints_for_state_from_state(state) -> dict:
             else:
                 hints[card_str] = str(delta)
 
-        print(f"[DD-HINT] returning {len(hints)} hints: {hints}")
         return hints
-    except Exception as e:
-        print(f"[DD-HINT] exception: {e}")
+    except Exception:
         return {}
 
 

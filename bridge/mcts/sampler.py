@@ -252,18 +252,24 @@ class DealSampler:
         hard_constraints: Dict[str, "BidConstraint"],
     ) -> Dict[str, List[Card]]:
         """单次采样（复用 known_info，不重复提取）。"""
+        # 过滤：已知手牌的位置不验证（手牌由发牌固定，无法通过采样改变）
+        known_positions = set(known_info.get("result", {}).keys())
+        active_constraints = {
+            pos: c for pos, c in hard_constraints.items()
+            if pos not in known_positions
+        }
         # Level 1: 硬约束
         for _attempt in range(50):
             world = _sample_uniform(known_info)
-            if not hard_constraints:
+            if not active_constraints:
                 return world
-            if validate_level1(world, hard_constraints):
+            if validate_level1(world, active_constraints):
                 return world
         # Level 2: 放宽约束
         _warn_fallback("Level 1→2", known_info, self.constraints)
         for _attempt in range(50):
             world = _sample_uniform(known_info)
-            if validate_level2(world, hard_constraints):
+            if validate_level2(world, active_constraints):
                 return world
         # Level 0: 仅 void
         _warn_fallback("Level 2→0", known_info, self.constraints)

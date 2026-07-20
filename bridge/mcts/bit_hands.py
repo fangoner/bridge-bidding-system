@@ -231,17 +231,23 @@ def apply_play_to_state_bits(
     from bridge.mcts.state_utils import POSITION_ORDER
 
     hands = {pos: bits for pos, bits in world_bits.items()}
-    trick_cards = list(current_trick["cards"])
+    trick_cards = []
+    for pos, c in current_trick["cards"]:
+        # 兼容 Card 对象和已有的 int bit
+        if isinstance(c, Card):
+            trick_cards.append((pos, card_to_bit(c)))
+        else:
+            trick_cards.append((pos, c))
     trick_leader = current_trick.get("leader")
     trump = current_trick.get("trump")
 
-    # 添加牌到当前墩
-    trick_cards.append((position, card))
+    # 添加牌到当前墩（存 bitmap，不存 Card 对象）
+    card_bit = card_to_bit(card)
+    trick_cards.append((position, card_bit))
     if trick_leader is None:
         trick_leader = position
 
     # 从手牌中移除（位操作）
-    card_bit = card_to_bit(card)
     hands[position] &= ~card_bit
 
     trick_complete = len(trick_cards) == 4
@@ -265,7 +271,13 @@ def get_playable_from_bits(hand_bits: int, current_trick: dict) -> List[Card]:
     """Bitmap 版 get_playable_from_hands。返回 Card 列表保持 API 兼容。"""
     trick_cards = current_trick.get("cards", [])
     if trick_cards:
-        lead_suit = trick_cards[0][1].suit  # Card 对象，取 suit
+        # 兼容 Card 对象和 int bit 两种格式
+        first = trick_cards[0][1]
+        if isinstance(first, Card):
+            lead_suit = first.suit
+        else:
+            # int bit → 取花色
+            lead_suit = _SUIT_NAMES[card_bit_suit_idx(first)]
         if hand_has_suit(hand_bits, lead_suit):
             # 只跟出同花色
             off = _SUIT_OFFSET.get(lead_suit, 0)

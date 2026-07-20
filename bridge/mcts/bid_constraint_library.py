@@ -1186,8 +1186,16 @@ def extract_constraints_from_bid_history(bid_history: str, system: str = SYSTEM_
         
         # 常规叫品处理
         if constraint is None:
-            if idx == 0:
-                # 开叫
+            # 判断是否开叫：第一个实质性叫品（之前所有叫品都是 pass/X/XX）
+            is_opening = True
+            for prev_idx in range(idx):
+                prev_pos, prev_bid_str = bid_sequence[prev_idx]
+                prev_parsed = _normalize_bid(prev_bid_str)
+                if prev_parsed and prev_parsed[0] not in (SPECIAL_PASS, SPECIAL_DOUBLE, SPECIAL_REDOUBLE):
+                    is_opening = False
+                    break
+            if is_opening:
+                # 开叫（包括三家pass后的第四家开叫）
                 constraint = get_opening_bid_constraint(bid_str)
             elif parsed[0] == SPECIAL_DOUBLE:
                 # 加倍：第二家位置是技术性加倍
@@ -1282,10 +1290,14 @@ def extract_constraints_from_bid_history(bid_history: str, system: str = SYSTEM_
                     # 第一次叫牌：争叫或应叫
                     our_side_opened = False
                     if idx >= 2:
-                        # 检查是否是同伴开叫后的应叫（同伴已经在序列中叫过牌）
-                        prev_positions = [p for p, _ in bid_sequence[:idx]]
-                        if partner in prev_positions:
-                            our_side_opened = True
+                        # 检查是否是同伴开叫后的应叫（同伴在序列中已有实质性叫品）
+                        for prev_idx in range(idx):
+                            prev_pos, prev_bid_str = bid_sequence[prev_idx]
+                            if prev_pos == partner:
+                                prev_parsed = _normalize_bid(prev_bid_str)
+                                if prev_parsed and prev_parsed[0] not in (SPECIAL_PASS, SPECIAL_DOUBLE, SPECIAL_REDOUBLE):
+                                    our_side_opened = True
+                                    break
 
                     if our_side_opened:
                         # 应叫：找同伴的第一个叫品和第一个实质性花色叫品

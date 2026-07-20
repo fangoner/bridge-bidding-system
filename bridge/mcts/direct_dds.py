@@ -393,3 +393,61 @@ def solve_all_boards_bits(
                 all_results.append(None)
 
     return all_results
+
+
+# ── 双明手表（DD Table）──
+# 一次性计算 4 庄家 × 5 将牌 = 20 个组合的最大赢墩数
+# 对应 DDS C 库的 CalcDDtable 函数
+# 结构体定义与 endplay._dds.ddTableDeal / ddTableResults 完全一致
+
+
+class _ddTableDeal(ctypes.Structure):
+    _fields_ = [
+        ("cards", (ctypes.c_uint * 4) * 4),
+    ]
+
+
+class _ddTableResults(ctypes.Structure):
+    _fields_ = [
+        ("resTable", (ctypes.c_int * 4) * 5),
+    ]
+
+
+def calc_dd_table(hands: Dict[str, List[Card]]) -> Optional[List[List[int]]]:
+    """计算双明手表：4 庄家 × 5 将牌的赢墩数矩阵。
+
+    Args:
+        hands: {pos: [Card, ...]}，必须四家齐全且共 52 张
+
+    Returns:
+        resTable[denom][first] 二维列表（5×4）：
+        - denom: 0=S, 1=H, 2=D, 3=C, 4=NT（与 DDS C 库一致，NT 在最后）
+        - first: 0=N(北), 1=E(东), 2=S(南), 3=W(西)
+        - 值: 该位置作为庄家、该将牌时的赢墩数
+        失败返回 None。
+    """
+    dll = _load_dll()
+
+    tdeal = _ddTableDeal()
+    rc = _hands_to_remain_cards(hands)
+    for p in range(4):
+        for s in range(4):
+            tdeal.cards[p][s] = rc[p][s]
+
+    results = _ddTableResults()
+
+    try:
+        dll.CalcDDtable.argtypes = [_ddTableDeal, ctypes.POINTER(_ddTableResults)]
+        dll.CalcDDtable.restype = ctypes.c_int
+    except AttributeError:
+        return None
+
+    ret = dll.CalcDDtable(tdeal, ctypes.byref(results))
+    if ret == 0:
+        return None
+
+    table = []
+    for denom in range(5):
+        row = [results.resTable[denom][first] for first in range(4)]
+        table.append(row)
+    return table

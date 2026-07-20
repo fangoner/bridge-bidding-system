@@ -31,13 +31,13 @@ from llm.doubao_client import DoubaoVisionClient
 from config import JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM, SHOW_FULL_LLM_OUTPUT, OUTPUT_MODE_GRAPHIC, OUTPUT_MODE_COMPACT, OUTPUT_MODE_DEEP_FINESSE, OUTPUT_MODE_ALL, DEFAULT_OUTPUT_MODE, MAIN_PROMPT_TEMPERATURE, FALLBACK_PROMPT_TEMPERATURE
 from utils.history import HistoryManager
 
-# 导入 endplay 集成模块
+# 导入双明手分析模块
 try:
-    from endplay_integration import analyze_all_contracts_endplay, format_dd_results
-    ENDPLAY_INTEGRATION_AVAILABLE = True
+    from dd_analysis import analyze_all_contracts, format_dd_results
+    DD_ANALYSIS_AVAILABLE = True
 except ImportError:
-    ENDPLAY_INTEGRATION_AVAILABLE = False
-    print("注意: endplay_integration 模块导入失败，批量双明手分析功能不可用")
+    DD_ANALYSIS_AVAILABLE = False
+    print("注意: dd_analysis 模块导入失败，批量双明手分析功能不可用")
 
 
 class GameMode(Enum):
@@ -1601,13 +1601,12 @@ def batch_double_dummy_analysis(game):
     批量双明手分析 - 显示每个玩家在每门花色上坐庄的最高可完成定约
     """
     print("\n" + "=" * 60)
-    print("批量双明手分析（endplay）")
+    print("批量双明手分析（DD）")
     print("=" * 60)
 
-    if not ENDPLAY_INTEGRATION_AVAILABLE:
-        print("endplay 集成模块不可用")
-        print("请确保已安装 endplay 库: pip install endplay")
-        print("并且 endplay_integration.py 文件存在")
+    if not DD_ANALYSIS_AVAILABLE:
+        print("双明手分析模块不可用")
+        print("请确保 dd_analysis.py 文件存在且 DirectDDS 可用")
         return
 
     if not game.hands:
@@ -1628,7 +1627,7 @@ def batch_double_dummy_analysis(game):
     print("\n正在计算双明手分析...")
 
     try:
-        result = analyze_all_contracts_endplay(hands_dict, hcp_dict)
+        result = analyze_all_contracts(hands_dict, hcp_dict)
 
         if result.get("success"):
             print(result.get("formatted_output", "分析完成，但未找到格式化输出"))

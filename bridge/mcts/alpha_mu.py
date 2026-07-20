@@ -31,7 +31,7 @@
 - 当 perspective 是庄家方时：our_side = {庄家, 明手}，Min = 防守方
 - 当 perspective 是防守方时：our_side = {防守方A, 防守方B}，Min = 庄家方
 
-触发条件：每手 ≤8 张牌（残局），endplay 可用。
+触发条件：每手 ≤8 张牌（残局），DirectDDS 可用。
 """
 
 import time
@@ -41,7 +41,7 @@ from bridge.play_types import Card, PlayState, PARTNERS
 from bridge.mcts.state_utils import get_current_trick_state
 from bridge.mcts.sampler import DealSampler
 
-# Phase 1a: ENDPLAY_AVAILABLE 兼容导出（DirectDDS 替代 endplay，总是可用）
+# Phase 1a: ENDPLAY_AVAILABLE 兼容导出（实际使用 DirectDDS，总是可用）
 ENDPLAY_AVAILABLE = True
 
 
@@ -232,7 +232,7 @@ class AlphaMuSearch:
                  M: int = 2,
                  time_limit: float = 8.0,
                  dds_budget: int = 3000):
-        # DirectDDS: load dds.dll via ctypes (bundled with endplay)
+        # DirectDDS: load dds.dll via ctypes (DLL 随 endplay 包分发)
         try:
             from bridge.mcts.direct_dds import _load_dll
             _load_dll()

@@ -57,14 +57,13 @@ class PlayService:
         self.alpha_mu_search = None
         if ALPHA_MU_ENABLE:
             try:
-                from bridge.mcts.alpha_mu import AlphaMuSearch, ENDPLAY_AVAILABLE
-                if ENDPLAY_AVAILABLE:
-                    self.alpha_mu_search = AlphaMuSearch(
-                        sampler=self.dd_search.sampler,
-                        num_worlds=ALPHA_MU_NUM_WORLDS,
-                        M=ALPHA_MU_M,
-                        time_limit=ALPHA_MU_TIME_LIMIT,
-                    )
+                from bridge.mcts.alpha_mu import AlphaMuSearch
+                self.alpha_mu_search = AlphaMuSearch(
+                    sampler=self.dd_search.sampler,
+                    num_worlds=ALPHA_MU_NUM_WORLDS,
+                    M=ALPHA_MU_M,
+                    time_limit=ALPHA_MU_TIME_LIMIT,
+                )
             except Exception as e:
                 print(f"[PlayService] αμ 搜索器初始化失败: {e}")
                 self.alpha_mu_search = None
@@ -441,22 +440,19 @@ class PlayService:
 
         Phase 1 — 通用 (tricks≥0, cards>8): DD 采样 + 三信号升级 LLM
           Phase 2 — 残局 (cards≤8): αμ 搜索 → DD 枚举回退
-          endplay 不可用时所有阶段回退 MCTS
+          DirectDDS 总是可用（ctypes 直调 dds.dll）
         """
-        from bridge.mcts.dd_search import ENDPLAY_AVAILABLE
-
         perspective = state.current_player
         declarer = state.contract.declarer
         dummy = state.dummy
         is_declarer_side = perspective in (declarer, dummy)
 
         cards_in_hand = len(state.hands.get(perspective, []))
-        is_first_trick = len(state.tricks) == 0
 
         # ═══════════════════════════════════════════════════════════
         # Phase 1: 通用 — DD 采样 + 关键决策升级 LLM
         # ═══════════════════════════════════════════════════════════
-        if cards_in_hand > ALPHA_MU_ENDGAME_CARDS and ENDPLAY_AVAILABLE:
+        if cards_in_hand > ALPHA_MU_ENDGAME_CARDS:
             dd_result = self._dd_play(state, dd_samples)
             critical_reason = self._is_critical_decision(dd_result, state, is_declarer_side)
             if critical_reason:
@@ -475,60 +471,21 @@ class PlayService:
             dd_result.setdefault("full_output", {})["tiered_phase"] = "midgame"
             return dd_result
 
-        # endplay 不可用 — 全体回退 MCTS / LLM
-        if not ENDPLAY_AVAILABLE:
-            if is_first_trick:
-                if state.phase == PlayPhase.LEAD:
-                    result = self._llm_play(state, force_reasoning=True)
-                    result.setdefault("full_output", {})["tiered_phase"] = "opening_lead"
-                    return result
-                if state.phase == PlayPhase.DUMMY_REVEAL:
-                    result = self._llm_play(state, force_reasoning=True)
-                    result.setdefault("full_output", {})["tiered_phase"] = "dummy_reveal"
-                    return result
-            mcts_result = self._mcts_play(state)
-            critical_reason = self._is_critical_decision_mcts(mcts_result, state, is_declarer_side)
-            if critical_reason:
-                mcts_candidates = (mcts_result.get("full_output", {})
-                                   .get("mcts_stats", {}).get("candidates", []))
-                mcts_summary = ", ".join(
-                    f"{c['card']}({c.get('avg_tricks', 0):.1f})"
-                    for c in mcts_candidates[:3]
-                ) if mcts_candidates else "无候选数据"
-
-                llm_result = self._llm_play(state, use_reasoning=use_reasoning)
-                llm_result.setdefault("full_output", {})["tiered_phase"] = "critical_mcts"
-                llm_result["tiered_mcts_fallback"] = mcts_result
-                llm_result["reasoning"] = (
-                    f"[MCTS分析] {critical_reason}\n"
-                    f"MCTS候选: {mcts_summary}\n"
-                    f"--- 升级 LLM 深度推理 ---\n"
-                    f"{llm_result.get('reasoning', '')}"
-                )
-                llm_result["full_output"]["mcts_stats"] = (
-                    mcts_result.get("full_output", {}).get("mcts_stats", {})
-                )
-                return llm_result
-
-            mcts_result.setdefault("full_output", {})["tiered_phase"] = "midgame_mcts"
-            return mcts_result
-
         # ═══════════════════════════════════════════════════════════
         # Phase 2: 残局 — αμ 多步前瞻 或 DD 精确枚举 或 DD 采样兜底
         # ═══════════════════════════════════════════════════════════
-        if ENDPLAY_AVAILABLE:
-            if self.alpha_mu_search is not None and ALPHA_MU_ENABLE:
-                result = self._alpha_mu_play(state)
-                result.setdefault("full_output", {})["tiered_phase"] = "endgame_alpha_mu"
-                return result
-            if cards_in_hand <= TIERED_ENDGAME_CARDS:
-                result = self._dd_play(state, dd_samples)
-                result.setdefault("full_output", {})["tiered_phase"] = "endgame"
-                return result
-            # cards 7-8 且 αμ 不可用 → DD 采样兜底
+        if self.alpha_mu_search is not None and ALPHA_MU_ENABLE:
+            result = self._alpha_mu_play(state)
+            result.setdefault("full_output", {})["tiered_phase"] = "endgame_alpha_mu"
+            return result
+        if cards_in_hand <= TIERED_ENDGAME_CARDS:
             result = self._dd_play(state, dd_samples)
             result.setdefault("full_output", {})["tiered_phase"] = "endgame"
             return result
+        # cards 7-8 且 αμ 不可用 → DD 采样兜底
+        result = self._dd_play(state, dd_samples)
+        result.setdefault("full_output", {})["tiered_phase"] = "endgame"
+        return result
 
     def _is_critical_decision(self, dd_result: dict, state: PlayState,
                               is_declarer_side: bool) -> Optional[str]:
@@ -1093,32 +1050,19 @@ class PlayService:
         return constraints
 
     def _alpha_mu_play(self, state: PlayState) -> Dict[str, Any]:
-        """αμ 引擎单入口（论文实现）。
+        """αμ 引擎（论文实现，纯αμ无回退）。
 
-        参数随剩余牌数自适应：
-        - 牌数 > 8：M=1（退化为 PIMC，避免指数爆炸）
-        - 牌数 ≤ 8：M=2（论文推荐值，利用递归深搜解决 strategy fusion）
-        论文 §5 实验在 32 cards endings（每手 8 张）进行，M=2 的设计目标就是残局。
+        M 值由 ALPHA_MU_M 配置（默认 2），全程不降级。
+        注意：牌数多时 M=2 会非常慢（13 张牌约 30s+），研究用途可接受。
         """
-        from bridge.mcts.alpha_mu import AlphaMuSearch, ENDPLAY_AVAILABLE
-        from bridge.mcts.dd_search import ENDPLAY_AVAILABLE as _DD_OK
-
-        if not ENDPLAY_AVAILABLE or not _DD_OK:
-            return self._dd_play(state)
+        from bridge.mcts.alpha_mu import AlphaMuSearch
 
         perspective = state.current_player
         cards = len(state.hands.get(perspective, []))
 
         base_worlds = ALPHA_MU_NUM_WORLDS
         n_worlds = min(100, base_worlds * max(1, 14 - cards))
-
-        # M=2 为默认（论文推荐值）。
-        # 论文 §4.3 四项优化（TT/Early Cut/Root Cut/Iterative Deepening）已修复：
-        # - TT key 不含 M，M=k 可复用 M=k-1 的结果
-        # - Early Cut 用 M=k-1 的 front 作上界
-        # - Root Cut 候选按 M=k-1 得分排序，条件放宽为 >=
-        # 这些优化能把 M=2 的 DDS 调用数从 ~4461 降到 ~500-1000
-        M_value = ALPHA_MU_M  # 配置值（默认 2）
+        M_value = ALPHA_MU_M
 
         if cards <= 4:
             time_lim, dds_budget = 8.0, 5000
@@ -1127,15 +1071,12 @@ class PlayService:
         elif cards <= 10:
             time_lim, dds_budget = 25.0, 15000
         else:
-            # 13 张牌 M=2，靠 TT/Early Cut/Root Cut 优化控制 DDS 数
             time_lim, dds_budget = 30.0, 20000
 
         # 创建临时搜索器（复用 dd_search 的 sampler + 约束）
         constraints = self._get_bid_constraints()
         if constraints:
             self._apply_constraints(constraints)
-
-        # Phase 0a: 均匀采样，世界数由 αμ 参数控制
 
         search = AlphaMuSearch(
             sampler=self.dd_search.sampler,
@@ -1145,22 +1086,20 @@ class PlayService:
             dds_budget=dds_budget,
         )
 
-        try:
-            result = search.search(state)
-            card = result.get("card")
-            if card is None:
-                return self._dd_play(state)
-            full_output = result.get("full_output", {})
-            full_output["叫牌约束"] = self._format_constraints_for_display(constraints)
-            return {
-                "card": card.to_dict() if hasattr(card, "to_dict") else None,
-                "reasoning": result.get("reasoning", ""),
-                "full_output": full_output,
-                "prompt": "[αμ-full] no prompt",
-            }
-        except Exception as e:
-            print(f"[αμ-full] 搜索异常: {e}，回退 DD")
-            return self._dd_play(state)
+        result = search.search(state)
+        card = result.get("card")
+        if card is None:
+            # αμ 无结果时选第一张合法牌（不静默回退其他引擎）
+            playable = self.engine.get_playable_cards()
+            card = playable[0] if playable else None
+        full_output = result.get("full_output", {})
+        full_output["叫牌约束"] = self._format_constraints_for_display(constraints)
+        return {
+            "card": card.to_dict() if hasattr(card, "to_dict") else None,
+            "reasoning": result.get("reasoning", ""),
+            "full_output": full_output,
+            "prompt": "[αμ] no prompt",
+        }
 
     def _alphamu_llm_play(self, state: PlayState, use_reasoning: bool = False) -> Dict[str, Any]:
         """αμ搜索 + 分组LLM选组打牌。
