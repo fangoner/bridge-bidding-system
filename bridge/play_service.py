@@ -1061,17 +1061,27 @@ class PlayService:
         cards = len(state.hands.get(perspective, []))
 
         base_worlds = ALPHA_MU_NUM_WORLDS
-        n_worlds = min(100, base_worlds * max(1, 14 - cards))
+        # 世界数随牌数减少而增加（残局越小，采样越精确）
+        if cards <= 4:
+            n_worlds = min(100, base_worlds * 5)
+        elif cards <= 6:
+            n_worlds = min(60, base_worlds * 3)
+        elif cards <= 8:
+            n_worlds = min(30, base_worlds * 2)
+        else:
+            n_worlds = min(20, base_worlds)
         M_value = ALPHA_MU_M
 
         if cards <= 4:
             time_lim, dds_budget = 8.0, 5000
+        elif cards <= 6:
+            time_lim, dds_budget = 18.0, 8000
         elif cards <= 8:
-            time_lim, dds_budget = 12.0, 8000
+            time_lim, dds_budget = 32.0, 12000
         elif cards <= 10:
-            time_lim, dds_budget = 25.0, 15000
+            time_lim, dds_budget = 50.0, 15000
         else:
-            time_lim, dds_budget = 30.0, 20000
+            time_lim, dds_budget = 60.0, 20000
 
         # 创建临时搜索器（复用 dd_search 的 sampler + 约束）
         constraints = self._get_bid_constraints()

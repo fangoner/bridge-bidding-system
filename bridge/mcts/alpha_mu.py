@@ -49,10 +49,15 @@ ENDPLAY_AVAILABLE = True
 
 class OutcomeVector:
     """长度 N 的布尔向量。每元素 = 1（our_side 达成目标）或 0（未达成）。
-    useful_mask[i]=False 表示该 world 已 impossible，比较时跳过。
 
-    附加 tricks_list：每个 world 下我方实际赢墩数，用于成功率相同时的 tie-break
-    （宕牌时选少宕的，铁成时选超墩多的）。"""
+    论文 §3.1: 每个向量关联一个世界子集（useful_mask[i]=True 的世界）。
+    - useful_mask[i]=True: 该 move 在 world i 合法，values[i] 有效
+    - useful_mask[i]=False: 该 move 在 world i 不合法（impossible），
+      此世界不参与 score 计算，也不参与 dominance 比较。
+
+    score = sum(values[i] for i in useful) / |useful|  —— 只在关联世界上取平均。
+    dominance: same useful_mask, v1 >= v2 on all useful worlds, ∃ strict >.
+    tricks_list: 每个 world 下我方实际赢墩数，用于 tie-break。"""
 
     __slots__ = ("values", "useful_mask", "tricks_list")
 
@@ -74,7 +79,7 @@ class OutcomeVector:
         return self.values[idx]
 
     def success_rate(self) -> float:
-        """成功率（0.0-1.0）：useful worlds 中 1 的比例。"""
+        """论文 §3.1: average on associated (useful) worlds only。"""
         useful_vals = [v for v, m in zip(self.values, self.useful_mask) if m]
         if not useful_vals:
             return 0.0
@@ -88,40 +93,38 @@ class OutcomeVector:
         return min(useful_vals)
 
     def count_success(self) -> int:
-        """成功 world 的数量。"""
+        """useful worlds 中成功的数量。"""
         return sum(1 for v, m in zip(self.values, self.useful_mask) if m and v == 1)
+
+    def count_useful(self) -> int:
+        """useful worlds 数量。"""
+        return sum(1 for m in self.useful_mask if m)
 
     def is_all_won(self) -> bool:
         """所有 useful world 是否都赢了（全 1 向量）。
-
-        2021 论文 §Cut on Win: 若某子节点返回全 1 向量，Max 节点可立即截断。
-        """
+        2021 论文 §Cut on Win: 若某子节点返回全 1 向量，Max 节点可立即截断。"""
         for v, m in zip(self.values, self.useful_mask):
             if m and v == 0:
                 return False
-        return any(self.useful_mask)  # 至少有一个 useful world
+        return any(self.useful_mask)
 
     def avg_tricks(self) -> float:
-        """我方平均赢墩数（tie-break 用）。"""
+        """我方平均赢墩数（仅 useful worlds，tie-break 用）。"""
         useful_tricks = [t for t, m in zip(self.tricks_list, self.useful_mask) if m]
         if not useful_tricks:
             return 0.0
         return sum(useful_tricks) / len(useful_tricks)
 
     def min_tricks(self) -> int:
-        """我方最差赢墩数（tie-break 用，maximin 风格）。"""
+        """我方最差赢墩数（tie-break 用）。"""
         useful_tricks = [t for t, m in zip(self.tricks_list, self.useful_mask) if m]
         if not useful_tricks:
             return 0
         return min(useful_tricks)
 
     def dominates(self, other: "OutcomeVector") -> bool:
-        """self 是否支配 other。
-
-        论文 §3.1: "v1 dominates v2 iff they have the same associated worlds,
-        v1 >= v2 and exists i such that v1[i] > v2[i]"
-        即 useful_mask 必须完全相同才能比较支配关系。
-        """
+        """论文 §3.1: v1 dominates v2 iff same associated worlds,
+        v1 >= v2 on all useful worlds, strict > on at least one."""
         if len(self.values) != len(other.values):
             return False
         if self.useful_mask != other.useful_mask:
@@ -146,10 +149,12 @@ class OutcomeVector:
         return hash((tuple(self.values), tuple(self.useful_mask)))
 
     def __repr__(self) -> str:
-        n = len(self.values)
         won = self.count_success()
-        total = sum(1 for m in self.useful_mask if m)
-        s = "".join("x" if not m else str(v) for v, m in zip(self.values, self.useful_mask))
+        total = self.count_useful()
+        chars = []
+        for v, m in zip(self.values, self.useful_mask):
+            chars.append(str(v) if m else "x")
+        s = "".join(chars)
         avg_t = self.avg_tricks()
         return f"OV[{s}]({won}/{total}={self.success_rate():.2f}, avg_tricks={avg_t:.1f})"
 
@@ -230,7 +235,7 @@ class AlphaMuSearch:
     def __init__(self, sampler: DealSampler = None,
                  num_worlds: int = 20,
                  M: int = 2,
-                 time_limit: float = 8.0,
+                 time_limit: float = 60.0,
                  dds_budget: int = 3000):
         # DirectDDS: load dds.dll via ctypes (DLL 随 endplay 包分发)
         try:
@@ -378,11 +383,16 @@ class AlphaMuSearch:
         move_fronts: List[Tuple[Card, ParetoFront]] = []
         iterative_results: Dict[int, List[Tuple[Card, ParetoFront]]] = {}
         prev_iter_scores: Dict[Card, float] = {}  # M=k-1 各候选得分
+        timing_stats: List[dict] = []
 
         for current_M in range(1, self.M + 1):
             if self._time_up():
                 break
             self._is_root = True
+            iter_start_time = time.time()
+            iter_start_dds = self._dds_calls
+            iter_start_nodes = self._nodes_searched
+            root_cut_index = -1
             print(f"[αμ] Iterative Deepening M={current_M}/{self.M}, prev_best={self._prev_best_score:.3f}")
             iter_move_fronts: List[Tuple[Card, ParetoFront]] = []
             iter_best_score = -1.0
@@ -407,7 +417,7 @@ class AlphaMuSearch:
             # 这使 Min 节点 Early Cut 能利用 TT 中 M=k-1 的结果进行剪枝
             root_alpha = ParetoFront()
             if current_M > 1 and (current_M - 1) in iterative_results:
-                for _, prev_front in iterative_results[current_M - 1]:
+                for _, prev_front, _ in iterative_results[current_M - 1]:
                     root_alpha = root_alpha.union(prev_front)
                 print(f"[αμ] Bound Reuse: M={current_M} 初始 alpha 含 {len(root_alpha.vectors)} vectors (来自 M={current_M-1})")
 
@@ -435,7 +445,7 @@ class AlphaMuSearch:
                     alpha=root_alpha,
                     deep_alpha=ParetoFront(),  # 根节点：无祖先
                 )
-                iter_move_fronts.append((move, front))
+                iter_move_fronts.append((move, front, f"M={current_M}"))
                 # Max 节点：累积最佳 front，收紧后续候选的 alpha 界限
                 root_alpha = root_alpha.union(front)
                 move_score = front.best_score()
@@ -449,6 +459,7 @@ class AlphaMuSearch:
                         and abs(move_score - self._prev_best_score) < 0.001
                         and current_M > 1):
                     self._err_stats["root_cut"] += 1
+                    root_cut_index = i + 1
                     print(f"[αμ] Root Cut: {move} score={move_score:.3f} >= prev_best={self._prev_best_score:.3f}, 停止搜索")
                     break
 
@@ -457,12 +468,46 @@ class AlphaMuSearch:
 
             self._is_root = False
             self._prev_best_score = iter_best_score
-            prev_iter_scores = {m: f.best_score() for m, f in iter_move_fronts}
+            prev_iter_scores = {m: front.best_score() for m, front, _ in iter_move_fronts}
+
+            # Root Cut 或超时提前终止时，未评估的候选继承 M-1 的结果
+            # 让用户能看到所有候选的对比，同时不浪费搜索时间
+            inherited_this_iter = False
+            inherited_count = 0
+            if len(iter_move_fronts) < len(playable) and current_M > 1 and (current_M - 1) in iterative_results:
+                evaluated_moves = {m for m, _, _ in iter_move_fronts}
+                prev_results = {m: (f, p) for m, f, p in iterative_results[current_M - 1]}
+                inherited = 0
+                for move in playable:
+                    if move not in evaluated_moves and move in prev_results:
+                        prev_front, _ = prev_results[move]
+                        iter_move_fronts.append((move, prev_front, f"M={current_M-1} (inherited)"))
+                        inherited += 1
+                if inherited > 0:
+                    inherited_this_iter = True
+                    inherited_count = inherited
+                    print(f"[αμ] M={current_M} 提前终止，从 M={current_M-1} 继承 {inherited} 个候选结果")
+
+            evaluated_count = sum(
+                1 for _, _, prec in iter_move_fronts
+                if not prec.endswith("(inherited)")
+            )
+            timing_stats.append({
+                "M": current_M,
+                "time_sec": round(time.time() - iter_start_time, 2),
+                "dds_calls": self._dds_calls - iter_start_dds,
+                "nodes": self._nodes_searched - iter_start_nodes,
+                "evaluated": evaluated_count,
+                "inherited": inherited_count,
+                "root_cut_at": root_cut_index,
+                "total_candidates": len(playable),
+            })
+
             iterative_results[current_M] = iter_move_fronts
             move_fronts = iter_move_fronts  # 用最新迭代的结果
 
-            # 如果当前迭代没完成所有候选（超时），用更深的迭代意义不大
-            if len(iter_move_fronts) < len(playable):
+            # 如果当前迭代没完成所有候选（超时或Root Cut），用更深的迭代意义不大
+            if len(iter_move_fronts) < len(playable) or inherited_this_iter:
                 break
 
         if not move_fronts:
@@ -481,16 +526,19 @@ class AlphaMuSearch:
         best_move = None
         best_score = -1.0
 
-        for move, front in move_fronts:
+        for move, front, precision in move_fronts:
             score = front.best_score()
             best_vec = front.best_vector()
             move_scores.append({
                 "card": str(move),
                 "best_score": round(score, 3),
+                "success_rate": round(score, 3),
+                "avg_tricks": round(best_vec.avg_tricks(), 1) if best_vec else 0,
                 "front_size": len(front),
                 "best_vector": repr(best_vec) if best_vec else "∅",
                 "success_count": best_vec.count_success() if best_vec else 0,
                 "total_useful": sum(1 for m in best_vec.useful_mask if m) if best_vec else 0,
+                "precision": precision,
             })
             if score > best_score:
                 best_score = score
@@ -549,6 +597,7 @@ class AlphaMuSearch:
                     "algorithm": "alpha_mu",
                     "err_stats": dict(self._err_stats),
                     "err_samples": dict(self._err_samples),
+                    "timing_stats": timing_stats,
                 },
             },
         }
@@ -881,35 +930,32 @@ class AlphaMuSearch:
         return True
 
     def _vec_geq(self, v1: OutcomeVector, v2: OutcomeVector) -> bool:
-        """v1 >= v2 (per-index, considering useful_mask)。
-
-        v1 的 useful_mask 必须是 v2 的超集（v1 对 v2 关心的所有 world 都有信息）。
-        否则信息不足，无法判定支配。
-        """
+        """v1 >= v2 on all worlds that v2 cares about。
+        用于 Early Cut：alpha(v1) 是否覆盖 min_front(v2)。
+        v2 只在 useful_mask[i]=True 的世界有信息需求；
+        v1 必须对所有 v2 关心的世界有信息且 value >= v2 的值。"""
         if len(v1.values) != len(v2.values):
             return False
         for i in range(len(v1.values)):
             if not v2.useful_mask[i]:
-                continue  # v2 不关心此 world，跳过
+                continue
             if not v1.useful_mask[i]:
-                return False  # v2 关心但 v1 无信息 → 无法判定 v1 >= v2
+                return False  # v1 缺少 v2 关心世界的信息
             if v1[i] < v2[i]:
                 return False
         return True
 
     @staticmethod
     def _update_useful_worlds(front: ParetoFront, useful_mask: List[bool]) -> List[bool]:
-        """2021 论文 §Maintaining Useful Worlds: 标记 useless 世界。
+        """2021 论文 §Maintaining Useful Worlds。
 
-        若 Pareto front 中某 world 在所有向量中都是 0 → useless
-        （Min 节点能保证该 world 一定输，子树中永远是 0）。
-        返回更新后的 useful_mask。
+        若 Pareto front 中某 world 在所有向量中都是 0 → 从 useful 中移除。
+        Min 节点能保证该 world 一定输，后续搜索中不再考虑。
         """
         n = len(useful_mask)
         for i in range(n):
             if not useful_mask[i]:
                 continue
-            # 检查是否有任何向量在这个 world 上是 1
             has_one = any(
                 i < len(v.values) and v.useful_mask[i] and v.values[i] == 1
                 for v in front.vectors
@@ -961,7 +1007,7 @@ class AlphaMuSearch:
             self._err_stats["world_cut_0"] += 1
             return ParetoFront([OutcomeVector([0] * n, [False] * n)]), None
 
-        # TT 中已存的前端可标记额外 useless worlds（已知必输的 world）
+        # TT 中已存的前端可标记额外必输 worlds（已知全 0 的 world）
         if tt_key is not None and tt_key in self._tt:
             stored_front, _, _ = self._tt[tt_key]
             useful_worlds = self._update_useful_worlds(stored_front, useful_worlds)
@@ -1058,12 +1104,10 @@ class AlphaMuSearch:
         # 每个 move 后：min_front = min(min_front, child_front)
         #   = { per-index min(v1, v2) for v1 in min_front for v2 in child_front }
         #   再做支配消除。
-        # per-index min 考虑 world cuts：
-        #   - 若 move 在 world i 合法：v_new[i] = min(v1[i], v2[i])
-        #   - 若 move 在 world i 不合法：v_new[i] = v1[i]（沿用，Min 不能选此 move）
-        # useful_mask 更新：m_new[i] = v1.useful_mask[i] or v2.useful_mask[i]
-        #   初始 useful_mask = all False，每个 move 合法后对应 world 变 True
-        #   这样不合法 move 的虚假初始值 1 不会参与支配消除
+        # per-index min：
+        #   - move 在 world i 合法：v_new[i] = min(v1[i], v2[i])，标记 useful
+        #   - move 在 world i 不合法：world i 沿用 v1（该 world 依赖其他 move）
+        # useful_mask 更新：m_new[i] = v1.useful_mask[i] or (legal[i] and v2.useful_mask[i])
         # 2019 论文补全：mid-computation early cut（每条 move 后检查 alpha/deep_alpha）
         min_front = ParetoFront([OutcomeVector([1] * n, [False] * n, [13] * n)])
         for child_front, legal_mask, _min_move in move_data:
@@ -1071,7 +1115,11 @@ class AlphaMuSearch:
                 break
             new_front = ParetoFront()
             for v1 in min_front.vectors:
+                if self._time_up():
+                    break
                 for v2 in child_front.vectors:
+                    if self._time_up():
+                        break
                     v_new = list(v1.values)
                     t_new = list(v1.tricks_list)
                     m_new = list(v1.useful_mask)
@@ -1089,8 +1137,6 @@ class AlphaMuSearch:
                         m_new[w_idx] = True
                     new_front.add(OutcomeVector(v_new, m_new, t_new, _copy=False))
             min_front = new_front
-            # 2019 论文补全：mid-computation early cut
-            # 每处理完一个子 move，检查当前 min_front 是否已被 alpha 支配
             if alpha is not None and self._front_dominated_by(min_front, alpha):
                 self._err_stats["early_cut_mid"] = self._err_stats.get("early_cut_mid", 0) + 1
                 break
@@ -1315,7 +1361,9 @@ class AlphaMuSearch:
         return rank_values.get(card.rank, 0.0)
 
     def _time_up(self) -> bool:
-        return time.time() - self._start_time > self.time_limit
+        if self._start_time <= 0:
+            return False
+        return (time.time() - self._start_time) > self.time_limit
 
 
 def Trick_from_dict(trick_dict: dict):

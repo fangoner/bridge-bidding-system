@@ -276,7 +276,9 @@ function PlayDetailPanel({
                         : `${isDD ? 'DDMC' : 'MCTS'}: ${mctsData.iterations}次搜索 · ${mctsData.time_sec}s · ${mctsData.iters_per_sec}it/s · 剩${mctsData.remaining_cards}张`
                       }
                     </Typography>
-                    {candidates.map((c, i) => (
+                    {candidates.map((c, i) => {
+                      const isInherited = isAlphaMu && typeof c.precision === 'string' && c.precision.includes('inherited')
+                      return (
                       <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.15 }}>
                         <Typography variant="caption" sx={{ minWidth: 28, fontSize: '0.7rem', fontWeight: 600, color: isDark ? '#e0e0e0' : '#333' }}>
                           {c.card}
@@ -286,20 +288,66 @@ function PlayDetailPanel({
                             width: `${(Math.abs(barValues[i]) / maxVal) * 100}%`,
                             height: '100%',
                             bgcolor: barColors[i] || '#90caf9',
+                            opacity: isInherited ? 0.45 : 1,
                             borderRadius: 0.5,
-                            transition: 'width 0.3s',
+                            transition: 'width 0.3s, opacity 0.3s',
                           }} />
                         </Box>
                         <Typography variant="caption" sx={{ minWidth: 110, fontSize: '0.65rem', color: colorMuted, textAlign: 'right' }}>
                           {isAlphaMu
-                            ? `${((c.success_rate || 0) * 100).toFixed(0)}% · ${c.avg_tricks ?? '?'}墩 · ${c.success_count || 0}/${c.total_useful || '?'} · front${c.front_size || 1}`
+                            ? `${((c.success_rate || 0) * 100).toFixed(0)}% · ${c.avg_tricks ?? '?'}墩 · ${c.success_count || 0}/${c.total_useful || '?'} · front${c.front_size || 1}${isInherited ? ' · 继承' : ''}`
                             : isDD
                               ? `${c.avg_tricks}墩 [${c.min_tricks}-${c.max_tricks}]`
                               : `${c.visits}次 · ${c.avg_tricks}墩`
                           }
                         </Typography>
                       </Box>
-                    ))}
+                      )
+                    })}
+                    {isAlphaMu && Array.isArray(mctsData.timing_stats) && mctsData.timing_stats.length > 0 && (() => {
+                      const ts = mctsData.timing_stats
+                      const maxTime = Math.max(...ts.map(t => t.time_sec || 0), 0.1)
+                      const maxDds = Math.max(...ts.map(t => t.dds_calls || 0), 1)
+                      const totalEval = ts.reduce((s, t) => s + (t.evaluated || 0), 0)
+                      const totalInh = ts.reduce((s, t) => s + (t.inherited || 0), 0)
+                      return (
+                        <Box sx={{ mt: 0.75, p: 0.5, borderRadius: 0.5, bgcolor: isDark ? 'rgba(255,255,255,0.03)' : '#fafafa', border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : '#eee'}` }}>
+                          <Typography variant="caption" sx={{ fontSize: '0.65rem', color: colorMuted, fontWeight: 600, display: 'block', mb: 0.25 }}>
+                            ⏱ 时间监控 · {ts.length}次迭代 · 累计评估{totalEval}候选 · 继承{totalInh}
+                          </Typography>
+                          {ts.map((t, i) => {
+                            const pct = (t.time_sec || 0) / maxTime * 100
+                            const ddsPct = (t.dds_calls || 0) / maxDds * 100
+                            const cutInfo = (t.root_cut_at && t.root_cut_at > 0)
+                              ? ` · RootCut@${t.root_cut_at}`
+                              : ''
+                            const inhInfo = (t.inherited || 0) > 0
+                              ? ` · 继承${t.inherited}`
+                              : ''
+                            return (
+                              <Box key={i} sx={{ mt: 0.25 }}>
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <Typography variant="caption" sx={{ fontSize: '0.65rem', color: isDark ? '#e0e0e0' : '#333', fontWeight: 500 }}>
+                                    M={t.M} · {t.time_sec}s · {t.dds_calls} DDS · {t.evaluated}/{t.total_candidates}评估{inhInfo}{cutInfo}
+                                  </Typography>
+                                  <Typography variant="caption" sx={{ fontSize: '0.6rem', color: colorMuted }}>
+                                    {t.nodes || 0} nodes
+                                  </Typography>
+                                </Box>
+                                <Box sx={{ display: 'flex', gap: 0.25, mt: 0.15, height: 4 }}>
+                                  <Box sx={{ flex: t.time_sec || 1, height: '100%', bgcolor: '#7b1fa2', borderRadius: 0.5, minWidth: 2 }} title={`耗时 ${t.time_sec}s`} />
+                                  <Box sx={{ flex: t.dds_calls || 1, height: '100%', bgcolor: '#26a69a', borderRadius: 0.5, minWidth: 2 }} title={`DDS ${t.dds_calls}次`} />
+                                </Box>
+                              </Box>
+                            )
+                          })}
+                          <Box sx={{ display: 'flex', gap: 1, mt: 0.4, justifyContent: 'flex-end' }}>
+                            <Typography variant="caption" sx={{ fontSize: '0.6rem', color: '#7b1fa2' }}>■ 耗时</Typography>
+                            <Typography variant="caption" sx={{ fontSize: '0.6rem', color: '#26a69a' }}>■ DDS调用</Typography>
+                          </Box>
+                        </Box>
+                      )
+                    })()}
                   </Box>
                 )
               } catch (e) { console.error('[Stats] viz error:', e); return null }

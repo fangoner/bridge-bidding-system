@@ -139,4 +139,4 @@ ALPHA_MU_ENDGAME_CARDS = 8        # 每手剩余牌数≤此值时启用 αμ（
 ALPHA_MU_NUM_WORLDS = 20          # possible worlds 数量
 ALPHA_MU_M = 2                    # 论文 M 参数：Max 递归层数（M=1 退化为 PIMC，Min 不减 M）
 ALPHA_MU_MAX_DEPTH = ALPHA_MU_M   # 兼容旧引用
-ALPHA_MU_TIME_LIMIT = 8.0         # 时间限制（秒）
+ALPHA_MU_TIME_LIMIT = 60.0        # 时间限制（秒）
