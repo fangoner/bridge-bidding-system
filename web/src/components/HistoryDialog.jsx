@@ -1,4 +1,4 @@
-import { useState, useCallback, memo } from 'react'
+import { useState, useCallback, useEffect, memo } from 'react'
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   List, ListItem, Box, Typography, Button, Checkbox, Divider, TextField,
@@ -94,6 +94,10 @@ function HistoryDialog({
   onError,
 }) {
   const [selectedIds, setSelectedIds] = useState(new Set())
+  // 每次打开对话框清除上次选中
+  useEffect(() => {
+    if (open) setSelectedIds(new Set())
+  }, [open])
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [editingNote, setEditingNote] = useState('')

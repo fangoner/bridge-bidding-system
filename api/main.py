@@ -1703,9 +1703,6 @@ def _compute_dd_hints_from_state(state, playable) -> dict:
         from bridge.mcts.dd_search import solve_all_boards_raw, _dds_result_to_score_map
         from bridge.mcts.state_utils import get_current_trick_state
 
-        if len(playable) <= 1:
-            return {}
-
         declarer = state.contract.declarer
         dummy = state.dummy
         trump = state.contract.suit
@@ -1717,22 +1714,13 @@ def _compute_dd_hints_from_state(state, playable) -> dict:
         total_played = state.declarer_tricks + state.defender_tricks
         remaining_tricks = 13 - total_played
 
-        has_incomplete_hands = any(
-            not state.hands.get(pos) for pos in ["北", "东", "南", "西"]
-        )
-        if has_incomplete_hands:
-            return {}
-
         hands = {}
         for pos in ["北", "东", "南", "西"]:
-            hands[pos] = list(state.hands.get(pos, []))
+            hands[pos] = list(state.hands.get(pos) or [])
 
         first_p = trick_leader if trick_cards else state.current_player
         solved_list = solve_all_boards_raw([(hands, trump, first_p, trick_cards)])
-        if not solved_list or solved_list[0] is None:
-            return {}
-        solved = solved_list[0]
-        score_map = _dds_result_to_score_map(solved)
+        score_map = _dds_result_to_score_map(solved_list[0]) if (solved_list and solved_list[0]) else {}
 
         _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
         cur_p = (_DD_POS.get(first_p, 0) + len(trick_cards)) % 4
@@ -1760,7 +1748,11 @@ def _compute_dd_hints_from_state(state, playable) -> dict:
                 hints[card_str] = str(delta)
 
         return hints
-    except Exception:
+    except Exception as e:
+        import traceback, os
+        with open(os.path.join(os.path.dirname(__file__), "..", "dd_hint_error.log"), "a", encoding="utf-8") as _f:
+            _f.write(f"[DD-HINT-ERROR] {e}\n")
+            traceback.print_exc(file=_f)
         return {}
 
 

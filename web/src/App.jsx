@@ -337,12 +337,35 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     // 兼容新旧格式
     const board = record.board || record
     const bidding = record.bidding || record
-    setHands(board.hands || record.hands)
+    // 有打牌记录 → 从 tricks 重建完整四家手牌，完成后不区分来源
+    let resolvedHands = board.hands || record.hands || {}
+    // 从打牌记录 tricks 重建完整四家手牌
+    const playTricks = record.play?.tricks
+    const hasPlayState = !!(playTricks && playTricks.length > 0)
+    if (hasPlayState) {
+      const ALL_POS = ['北', '东', '南', '西']
+      const playedByPos = Object.fromEntries(ALL_POS.map(p => [p, []]))
+      for (const t of playTricks) {
+        for (const [p, c] of (t.cards || [])) playedByPos[p].push(c)
+      }
+      const sm = { '♠': 'spades', '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs' }
+      resolvedHands = {}
+      for (const p of ALL_POS) {
+        const hand = { spades: '', hearts: '', diamonds: '', clubs: '' }
+        const seen = new Set()
+        for (const c of (playedByPos[p] || [])) {
+          const key = `${c.suit}${c.rank}`
+          if (!seen.has(key)) { seen.add(key); const sk = sm[c.suit]; if (sk) hand[sk] += c.rank }
+        }
+        resolvedHands[p] = hand
+      }
+    }
+    setHands(resolvedHands)
     setBiddingSequence(board.bidding_sequence || record.biddingSequence || [])
     setDealer(board.dealer || record.dealer)
     setImageOpeningLead(board.opening_lead || null)
-    // 恢复叫牌设置
-    if (board.game_mode || record.gameMode) {
+    // 有打牌记录时不恢复 gameMode，完成后与发牌练习走同样路径
+    if (!hasPlayState && (board.game_mode || record.gameMode)) {
       setGameMode(board.game_mode || record.gameMode)
     }
     if (board.practice_direction) {
@@ -364,6 +387,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     }
     setBiddingStarted(true)
     setStopBidding(true) // 加载历史记录后允许切换发牌人
+    setShowPartnerHand(true)
+    setShowOpponentHands(true)
     setHistoryDialogOpen(false)
     setOutputFormats(null) // 重置输出格式
     setShowDoubleDummy(false) // 切换到显示叫牌过程
@@ -372,35 +397,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     setLastCompletedTrick(null)
     setReviewCursor(null)
     setSelectedPlayRecord(null)
-    // 预加载打牌数据（记录含打牌数据时保存到 loadedPlayRecord，切换到打牌时直接使用）
-    if (record.play && record.play.state) {
-      // 保存中有完整打牌状态对象（进行中或已完成）
-      const ps = record.play.state
-      const reconstructedState = ps.contract ? ps : (ps ? {
-        ...ps,
-        contract: board.contract ? {
-          level: board.contract.level,
-          suit: board.contract.suit,
-          declarer: board.contract.declarer,
-          doubled: board.contract.isDouble || false,
-          redoubled: board.contract.isRedouble || false,
-          tricks_needed: (board.contract.level || 0) + 6,
-        } : null,
-        dummy: board.contract ? ({ 'North': 'South', 'South': 'North', 'East': 'West', 'West': 'East' }[board.contract.declarer]) : null,
-        player_roles: board.player_roles || {},
-        bidding_sequence: board.bidding_sequence || '',
-        hands: ps.hands || {},
-      } : null)
-      setLoadedPlayRecord({
-        playState: reconstructedState,
-        aiPlayHistory: record.play.ai_play_history || [],
-      })
-      setShowPlayPanel(false)
-      setPlayState(null)
-      setAiPlayHistory([])
-      setIsPlayPaused(false)
-    } else if (record.play && record.play.tricks && record.play.tricks.length > 0) {
-      // 兼容旧格式：完整记录含 tricks 数组
+    // 预加载打牌数据
+    if (record.play && record.play.tricks && record.play.tricks.length > 0) {
+      // 完整记录含 tricks 数组
       const contractFromRecord = board.contract
       const suitMap = { S: '♠', H: '♥', D: '♦', C: '♣', NT: 'NT' }
       const partnerMap = { '北': '南', '南': '北', '东': '西', '西': '东' }
@@ -433,17 +432,11 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         playState: restoredPlayState,
         aiPlayHistory: record.play.ai_play_history || [],
       })
-      setShowPlayPanel(false)
-      setPlayState(null)
-      setAiPlayHistory([])
-      setIsPlayPaused(false)
-    } else {
-      setLoadedPlayRecord(null)
-      setShowPlayPanel(false)
-      setPlayState(null)
-      setAiPlayHistory([])
-      setIsPlayPaused(false)
     }
+    setShowPlayPanel(false)
+    setPlayState(null)
+    setAiPlayHistory([])
+    setIsPlayPaused(false)
 
     // 判断手牌齐全：四家各13张 → 恢复4AI可操作；不齐全 → 只读
     const loadedHands = board.hands || record.hands
@@ -1348,83 +1341,166 @@ function AppShell({ darkMode, onToggleDarkMode }) {
 
   // ==================== 打牌相关函数 ====================
 
-  // 开始打牌
-  const handleStartPlay = async () => {
-    // 如果有从历史记录预加载的打牌数据，先初始化后端状态
-    if (loadedPlayRecord) {
-      const savedState = loadedPlayRecord.playState
-      if (savedState?.contract) {
-        setPlayLoading(true)
-        setError(null)
-        try {
-          const contract = savedState.contract
-          let biddingStr = null
-          let meaningLines = ''
-          let seqStr = ''
-          if (biddingSequence.length > 0) {
-            seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
-            meaningLines = aiBiddingHistory
-              .filter(r => r.result?.meaning)
-              .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
-              .join('\n')
-            biddingStr = meaningLines
-              ? `${seqStr}\n\n叫牌含义:\n${meaningLines}`
-              : seqStr
-          }
-          const initResult = await playInit(
-            hands,
-            `${contract.level}${contract.suit}`,
-            contract.declarer,
-            positionRoles,
-            contract.doubled || contract.isDouble || false,
-            contract.redoubled || contract.isRedouble || false,
-            biddingStr,
-            seqStr,
-            meaningLines
-          )
-          if (initResult.success) {
-            // 重放已完成的出牌，保持后端状态与历史记录一致
-            const allPlayedCards = []
-            if (savedState.tricks) {
-              for (const trick of savedState.tricks) {
-                for (const [pos, card] of trick.cards || []) {
-                  allPlayedCards.push({ position: pos, card })
-                }
-              }
-            }
-            if (savedState.current_trick?.cards) {
-              for (const [pos, card] of savedState.current_trick.cards) {
-                allPlayedCards.push({ position: pos, card })
-              }
-            }
-            for (const { position, card } of allPlayedCards) {
-              try {
-                await playCard(position, card)
-              } catch (e) {
-                console.warn('重放出牌失败（可忽略）:', position, card, e)
-              }
-            }
-          } else {
-            console.error('后端初始化打牌失败，但尝试继续加载记录:', initResult.error)
-          }
-        } catch (err) {
-          console.error('后端初始化打牌失败，但尝试继续加载记录:', err)
-        } finally {
-          setPlayLoading(false)
+  // 统一复盘/重打初始化：playInit + 回放 keepCount 张牌
+  // keepCount: 0=重新打牌, N=倒回到第N张, 'all'=全部回放
+  const replayInitAndPlay = async (keepCount) => {
+    const savedState = loadedPlayRecord?.playState
+    if (!savedState?.contract) return { error: '无打牌记录' }
+
+    const contract = savedState.contract
+
+    // 构建叫牌字符串（三方共用）
+    let biddingStr = null, seqStr = '', meaningLines = ''
+    if (biddingSequence.length > 0) {
+      seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
+      meaningLines = aiBiddingHistory
+        .filter(r => r.result?.meaning)
+        .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
+        .join('\n')
+      biddingStr = meaningLines
+        ? `${seqStr}\n\n叫牌含义:\n${meaningLines}`
+        : seqStr
+    }
+
+    // 收集所有已出牌（按顺序）
+    const allPlayed = []
+    for (const t of (savedState.tricks || [])) {
+      for (const [pos, card] of (t.cards || [])) allPlayed.push({ pos, card })
+    }
+    for (const [pos, card] of (savedState.current_trick?.cards || [])) allPlayed.push({ pos, card })
+
+    const actualKeep = keepCount === 'all' ? allPlayed.length : Math.max(0, Math.min(keepCount, allPlayed.length))
+
+    // 计算保留的完整墩数和部分墩牌数
+    let completedTricksToKeep = 0, cardsInPartialTrick = 0, accum = 0
+    for (let i = 0; i < (savedState.tricks || []).length; i++) {
+      const trickLen = (savedState.tricks[i].cards || []).length
+      if (accum + trickLen <= actualKeep) { completedTricksToKeep++; accum += trickLen }
+      else { cardsInPartialTrick = actualKeep - accum; break }
+    }
+    if (cardsInPartialTrick === 0 && accum < actualKeep) cardsInPartialTrick = actualKeep - accum
+
+    // playInit
+    const initResult = await playInit(
+      hands,
+      `${contract.level}${contract.suit}`,
+      contract.declarer,
+      positionRoles,
+      contract.doubled || contract.isDouble || false,
+      contract.redoubled || contract.isRedouble || false,
+      biddingStr,
+      seqStr,
+      meaningLines
+    )
+    if (!initResult.success) return { error: initResult.error }
+
+    // 回放前 actualKeep 张牌
+    let lastReplayState = initResult.state
+    for (let i = 0; i < actualKeep; i++) {
+      const { pos, card } = allPlayed[i]
+      try {
+        const reply = await playCard(pos, card)
+        if (reply?.success) lastReplayState = reply.state
+      } catch (e) { console.warn('回放出牌失败:', pos, card, e) }
+    }
+
+    // 构建截断后的 playState
+    const keptTricks = (savedState.tricks || []).slice(0, completedTricksToKeep)
+    const partialCards = cardsInPartialTrick > 0
+      ? (savedState.tricks?.[completedTricksToKeep]?.cards || []).slice(0, cardsInPartialTrick)
+      : []
+    const isLead = actualKeep === 0
+
+    const truncatedState = lastReplayState
+      ? {
+          ...lastReplayState,
+          tricks: keptTricks,
+          current_trick: partialCards.length > 0
+            ? { cards: partialCards, leader: partialCards[0]?.[0] || null, trump: contract.suit || null }
+            : { cards: [], leader: null, trump: contract.suit || null },
+          phase: isLead ? 'lead' : 'playing',
+        }
+      : {
+          ...savedState,
+          tricks: keptTricks,
+          current_trick: partialCards.length > 0
+            ? { cards: partialCards, leader: partialCards[0]?.[0] || null, trump: contract.suit || null }
+            : { cards: [], leader: null, trump: contract.suit || null },
+          current_player: null,
+          phase: isLead ? 'lead' : 'playing',
+          declarer_tricks: keptTricks.filter(t =>
+            t.winner === contract.declarer || t.winner === savedState.dummy
+          ).length,
+          defender_tricks: keptTricks.filter(t =>
+            t.winner && t.winner !== contract.declarer && t.winner !== savedState.dummy
+          ).length,
+        }
+
+    // 裁剪 aiPlayHistory
+    let trimmedHistory = []
+    if (loadedPlayRecord.aiPlayHistory?.length > 0) {
+      const aiPositions = new Set(
+        Object.entries(loadedPlayRecord.position_roles || positionRoles)
+          .filter(([, role]) => role === 'ai')
+          .map(([pos]) => pos)
+      )
+      let historyIdx = 0
+      for (let i = 0; i < actualKeep; i++) {
+        const pos = allPlayed[i].pos
+        if (aiPositions.has(pos) && historyIdx < loadedPlayRecord.aiPlayHistory.length) {
+          trimmedHistory.push(loadedPlayRecord.aiPlayHistory[historyIdx])
+          historyIdx++
         }
       }
-      setPlayState(savedState)
-      setAiPlayHistory(loadedPlayRecord.aiPlayHistory)
+    }
+
+    return { success: true, allPlayed, actualKeep, truncatedState, trimmedHistory, seqStr, meaningLines }
+  }
+
+  // ── 统一回放入口：导入查看 / 倒回 / 重新打牌 共用 ──
+  // keepCount: 'all'=全部回放(查看), 0=全新开始(重打), N=回放到第N张(倒回)
+  const startReplay = async (keepCount) => {
+    const savedState = loadedPlayRecord?.playState
+    if (!savedState?.contract) return
+
+    setPlayLoading(true)
+    setError(null)
+    try {
+      const result = await replayInitAndPlay(keepCount)
+      if (result?.error) { console.error('回放失败:', result.error); return }
+
+      const isFresh = (keepCount === 0)
+
+      setPlayState(result.truncatedState)
+      setAiPlayHistory(isFresh ? [] : result.trimmedHistory)
+      setLastCompletedTrick(null)
       setShowPlayPanel(true)
-      setIsPlayPaused(true)
+      setIsPlayPaused(isFresh ? false : true)
       setPlayInitiated(true)
-      setPlayStarted(true)
-      // 已完成记录 → 进入复盘模式，停在全部已出位置
-      if (savedState.phase === 'complete') {
-        const totalCards = (savedState.tricks || []).reduce((s, t) => s + (t.cards?.length || 0), 0)
-          + (savedState.current_trick?.cards?.length || 0)
-        setReviewCursor(totalCards)
+      setPlayStarted(isFresh ? false : result.actualKeep > 0)
+      setReviewCursor(null)
+      if (isFresh) {
+        setLoadedPlayRecord(null)
+        setCurrentRecordId(null)
+        setSelectedPlayRecord(null)
+        setPlayCenterView('play')
       }
+    } catch (err) {
+      console.error('回放失败:', err)
+    } finally {
+      setPlayLoading(false)
+    }
+  }
+
+  // 开始打牌
+  const handleStartPlay = async () => {
+    if (loadedPlayRecord) {
+      await startReplay('all')
+      // 完成后定位到末尾，方便复盘翻牌
+      const savedState = loadedPlayRecord.playState
+      const totalCards = (savedState.tricks || []).reduce((s, t) => s + (t.cards?.length || 0), 0)
+        + (savedState.current_trick?.cards?.length || 0)
+      setReviewCursor(totalCards)
       return
     }
 
@@ -1476,7 +1552,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       }
     }
     if (cardsInPartialTrick === 0 && accum < keepCount) {
-      // 保留的牌延伸到 current_trick
       cardsInPartialTrick = keepCount - accum
     }
     setPlayLoading(true)
@@ -1542,7 +1617,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       const partialTrickCards = cardsInPartialTrick > 0
         ? (savedState.tricks?.[completedTricksToKeep]?.cards || []).slice(0, cardsInPartialTrick)
         : []
-      // 后端回放后的状态已包含完整墩（如有）；若存在部分墩，需手动设置 current_trick
       const truncatedState = lastReplayState
         ? {
             ...lastReplayState,
@@ -1573,7 +1647,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       setPlayInitiated(true)
       setPlayStarted(keepCount > 0)
       setReviewCursor(null)
-      setCurrentRecordId(null) // 不覆盖原记录，保存时新建
+      setCurrentRecordId(null)
     } catch (err) {
       console.error('重打失败:', err)
     } finally {
@@ -1977,13 +2051,11 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   }
 
   const doResetPlay = async (contract) => {
-    setAiPlayHistory([])
-    setSelectedPlayRecord(null)
-    setLastCompletedTrick(null)
-    setPlayCenterView('play')
-    setLoadedPlayRecord(null)
-    setCurrentRecordId(null)
-    await doPlayInit(contract, biddingSequence, aiBiddingHistory)
+    if (loadedPlayRecord) {
+      await startReplay(0)
+    } else {
+      await doPlayInit(contract, biddingSequence, aiBiddingHistory)
+    }
   }
 
   const handleResetOpeningLeadConfirm = (action) => {
@@ -2026,87 +2098,46 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   }
 
   // 牌桌DD提示获取
-  // 统一逻辑：只要四家手牌都已知（顶层 hands 完整），就计算 DD
-  // 复盘模式（reviewCursor != null）：游标 = 已出牌数量，游标位置的牌回到手牌加亮，轮到该位置出牌
-  // 实战模式（reviewCursor == null）：直接用后端当前状态计算
   useEffect(() => {
     if (!showPlayPanel || !playState) return
     if (!showDDHints) { setDDHints(null); return }
 
-    // 统一逻辑：四家手牌都已知才计算 DD
-    // 手牌来源优先级：顶层 hands（发牌时完整）> playState.hands（剩余）+ tricks（已出）重建
+    // 只要四家手牌都已知就计算 DD（导入时已从 tricks 重建）
+    const ALL_POS = ['南', '北', '东', '西']
     const suitMap = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' }
     const fullHands = {}
-    let allHandsKnown = true
-
-    // 先从顶层 hands 构建已知手牌
-    for (const pos of ['南', '北', '东', '西']) {
-      const h = hands?.[pos]
-      if (h && (h.spades || h.hearts || h.diamonds || h.clubs)) {
-        const cards = []
-        for (const suitKey of ['spades', 'hearts', 'diamonds', 'clubs']) {
-          const suitStr = h[suitKey] || ''
-          for (const rank of suitStr) {
-            const r = rank.toUpperCase()
-            if ('AKQJT98765432'.includes(r)) {
-              cards.push({ suit: suitMap[suitKey], rank: r })
-            }
+    let allKnown = true
+    for (const p of ALL_POS) {
+      const h = hands?.[p]
+      if (h && ((h.spades || '') + (h.hearts || '') + (h.diamonds || '') + (h.clubs || '')).length > 0) {
+        fullHands[p] = []
+        for (const sk of ['spades', 'hearts', 'diamonds', 'clubs']) {
+          for (const r of (h[sk] || '')) {
+            if ('AKQJT98765432'.includes(r.toUpperCase())) fullHands[p].push({ suit: suitMap[sk], rank: r.toUpperCase() })
           }
         }
-        fullHands[pos] = cards
       } else {
-        fullHands[pos] = null  // 待重建
+        allKnown = false
       }
     }
+    if (!allKnown) { setDDHints(null); return }
 
-    // 对手牌不全的位置，从 playState.hands（剩余）+ tricks/current_trick（已出）重建
-    const needRebuild = ['南', '北', '东', '西'].filter(p => !fullHands[p])
-    if (needRebuild.length > 0) {
-      // 收集所有已出牌，按位置分组
-      const playedByPos = { '南': [], '北': [], '东': [], '西': [] }
-      for (const t of (playState.tricks || [])) {
-        for (const [pos, card] of (t.cards || [])) {
-          if (playedByPos[pos]) playedByPos[pos].push({ suit: card.suit, rank: card.rank })
-        }
-      }
-      for (const [pos, card] of (playState.current_trick?.cards || [])) {
-        if (playedByPos[pos]) playedByPos[pos].push({ suit: card.suit, rank: card.rank })
-      }
-      // 重建：剩余手牌 + 已出牌
-      for (const pos of needRebuild) {
-        const remaining = playState.hands?.[pos] || []
-        const played = playedByPos[pos] || []
-        const combined = [...remaining, ...played]
-        if (combined.length === 0) {
-          // 该位置完全无手牌信息
-          allHandsKnown = false
-          break
-        }
-        fullHands[pos] = combined
-      }
-    }
-
-    if (!allHandsKnown) { setDDHints(null); return }
-
-    // 复盘模式
+    // 复盘：通过游标重建牌局快照
     if (reviewCursor != null) {
-      // 游标 = 已出牌数量；游标位置 = 下一个出牌者
       const totalCards = (playState.tricks || []).reduce((s, t) => s + (t.cards?.length || 0), 0)
         + (playState.current_trick?.cards?.length || 0)
-      // 全部已出时无当前出牌者，不显示 DD
       if (reviewCursor >= totalCards) { setDDHints(null); return }
-      const psWithHands = { ...playState, hands: fullHands }
       setDDHints(null)
       setDDHintsLoading(true)
       let cancelled = false
-      getDDHintsReview(psWithHands, reviewCursor)
+      getDDHintsReview({ ...playState, hands: fullHands }, reviewCursor)
         .then(data => { if (!cancelled && data?.success) setDDHints(data.hints) })
         .catch(err => { if (!cancelled) console.error('DD hints review fetch failed:', err) })
         .finally(() => { if (!cancelled) setDDHintsLoading(false) })
       return () => { cancelled = true }
     }
 
-    // 实战模式：phase=complete 时不再请求（无当前出牌者）
+    // 实战：直接用后端当前状态
     if (playState.phase === 'complete') return
     setDDHints(null)
     setDDHintsLoading(true)
