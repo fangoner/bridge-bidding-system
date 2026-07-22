@@ -78,9 +78,16 @@ function SettingsPanel({
   dealMode,
   setDealMode,
   mode,
+  hands,
   availableModels,
 }) {
   const theme = useTheme()
+
+  // 完美DD：发牌练习模式直接可用，其他模式有四家完整手牌也可用
+  const allHandsComplete = hands && ['南','北','东','西'].every(p => {
+    const h = hands[p]
+    return h && ((h.spades || '') + (h.hearts || '') + (h.diamonds || '') + (h.clubs || '')).length > 0
+  })
 
   // 解析当前模型为基础名 + 是否思考模式
   const biddingParsed = parseModelValue(fallbackModel)
@@ -183,7 +190,7 @@ function SettingsPanel({
                 <MenuItem value="llm">LLM 大模型</MenuItem>
                 <MenuItem value="mcts">MCTS 搜索</MenuItem>
                 <MenuItem value="dd">DD 蒙地卡罗</MenuItem>
-                <MenuItem value="perfect" disabled={mode !== 'practice'} title={mode !== 'practice' ? '完美DD需要四家完整手牌，仅发牌练习模式可用' : ''}>完美DD (全知)</MenuItem>
+                <MenuItem value="perfect" disabled={mode !== 'practice' && !allHandsComplete} title={mode !== 'practice' && !allHandsComplete ? '完美DD需要四家完整手牌，暂不可用' : ''}>完美DD (全知)</MenuItem>
                 <MenuItem value="tiered">Tiered 分层</MenuItem>
                 <MenuItem value="alphamu">αμ 搜索</MenuItem>
                 <MenuItem value="alphamu_llm">αμ+LLM策略审查</MenuItem>
