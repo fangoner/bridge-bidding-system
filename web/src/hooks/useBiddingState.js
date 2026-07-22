@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 
 function useBiddingState() {
   const [biddingSequence, setBiddingSequence] = useState([])
@@ -66,7 +66,7 @@ function useBiddingState() {
     setBiddingStartTime(Date.now())
   }, [])
 
-  return {
+  return useMemo(() => ({
     biddingSequence,
     setBiddingSequence,
     currentBidder,
@@ -99,7 +99,26 @@ function useBiddingState() {
     initBiddingState,
     toggleStopBiddingState,
     markBiddingStarted,
-  }
+  }), [
+    biddingSequence,
+    currentBidder,
+    bidSuggestion,
+    aiBiddingHistory,
+    currentBiddingPosition,
+    selectedBiddingIndex,
+    simpleDisplayMode,
+    biddingStarted,
+    stopBidding,
+    passedAIPositions,
+    biddingStartTime,
+    biddingTotalTime,
+    customBidMeaning,
+    suggestionLoading,
+    isBiddingComplete,
+    initBiddingState,
+    toggleStopBiddingState,
+    markBiddingStarted,
+  ])
 }
 
 export default useBiddingState

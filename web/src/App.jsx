@@ -50,6 +50,40 @@ import useDealing from './hooks/useDealing'
 import { getPartnerPosition, BRIDGE_POSITIONS } from './utils/position'
 import { formatElapsedTime } from './utils/biddingUtils'
 import './App.css'
+
+/** 确保手牌每门花色按 A→2 排序，并计算 HCP */
+const ensureSortedHands = (hands) => {
+  if (!hands || typeof hands !== 'object') return hands
+  const rankOrder = 'AKQJT98765432'
+  const sortSuit = (s) => {
+    if (!s || typeof s !== 'string') return ''
+    return s.split('').sort((a, b) => rankOrder.indexOf(a) - rankOrder.indexOf(b)).join('')
+  }
+  const calcHCP = (cards) => {
+    let h = 0
+    for (const c of cards.toUpperCase()) {
+      if (c === 'A') h += 4
+      else if (c === 'K') h += 3
+      else if (c === 'Q') h += 2
+      else if (c === 'J') h += 1
+    }
+    return h
+  }
+  const suits = ['spades', 'hearts', 'diamonds', 'clubs']
+  const result = { ...hands }
+  for (const p of Object.keys(result)) {
+    const h = result[p]
+    if (h && typeof h === 'object') {
+      let allCards = ''
+      for (const sk of suits) {
+        h[sk] = sortSuit(h[sk] || '')
+        allCards += h[sk]
+      }
+      h.hcp = calcHCP(allCards)
+    }
+  }
+  return result
+}
 import { GameProvider, useGame } from './context/GameContext'
 import { BiddingProvider, useBidding } from './context/BiddingContext'
 import { PlayProvider, usePlay } from './context/PlayContext'
@@ -210,7 +244,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       if (!draftStr) return
       const draft = JSON.parse(draftStr)
       draftRestoredRef.current = true
-      setHands(draft.hands)
+      // 确保草稿手牌经过排序和 HCP 计算（兼容旧版草稿）
+      const sortedDraftHands = ensureSortedHands(draft.hands)
+      setHands(sortedDraftHands)
       setDealer(draft.dealer)
       setGameMode(draft.gameMode)
       setPositionRoles(draft.positionRoles)
@@ -360,7 +396,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         resolvedHands[p] = hand
       }
     }
-    setHands(resolvedHands)
+    setHands(ensureSortedHands(resolvedHands))
     setBiddingSequence(board.bidding_sequence || record.biddingSequence || [])
     setDealer(board.dealer || record.dealer)
     setImageOpeningLead(board.opening_lead || null)
@@ -439,9 +475,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     setIsPlayPaused(false)
 
     // 判断手牌齐全：四家各13张 → 恢复4AI可操作；不齐全 → 只读
-    const loadedHands = board.hands || record.hands
-    const allComplete = loadedHands && ['南','北','东','西'].every(pos => {
-      const h = loadedHands[pos]
+    // 用重建后的 resolvedHands（含从 tricks 重建的手牌）
+    const allComplete = resolvedHands && ['南','北','东','西'].every(pos => {
+      const h = resolvedHands[pos]
       if (!h) return false
       const total = (h.spades?.length || 0) + (h.hearts?.length || 0) + (h.diamonds?.length || 0) + (h.clubs?.length || 0)
       return total === 13
@@ -2372,6 +2408,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         setDealMode={setDealMode}
         loading={loading}
         mode={mode}
+        hands={hands}
         availableModels={availableModels}
       />
 

@@ -12,6 +12,7 @@ import DoubleDummyTable from './DoubleDummyTable';
 import { isHumanPosition, hasAnyHuman, getHumanPositions, BRIDGE_POSITIONS } from '../utils/position';
 import { calcScore } from '../utils/score';
 import { useGame } from '../context/GameContext';
+import { usePlay } from '../context/PlayContext';
 
 const MODEL_LABELS = {
   'deepseek-v4-flash': 'DSF',
@@ -87,6 +88,17 @@ function CardTable({
   reviewTrick,
 }) {
   const { fallbackModel, playModel } = useGame()
+  const { playEngine } = usePlay()
+
+  /** 手牌信息框中显示的角色/引擎标签 */
+  const engineLabel = useCallback((isPlayPanel) => {
+    if (!isPlayPanel) return modelLabel(fallbackModel)
+    // 非 LLM 引擎统一显示 "AI"
+    if (playEngine && playEngine !== 'llm' && playEngine !== 'tiered' && playEngine !== 'alphamu_llm') {
+      return 'AI'
+    }
+    return modelLabel(playModel)
+  }, [fallbackModel, playModel, playEngine])
   const [handInputs, setHandInputs] = useState({
     '南': '',
     '北': '',
@@ -150,7 +162,7 @@ function CardTable({
     color: 'white',
     border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(255,255,255,0.3)',
     '&:hover': { bgcolor: isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.55)' },
-    transition: 'all 0.2s ease',
+    transition: 'background-color 0.2s ease',
     width: 30, height: 30,
   }
   const textMuted = theme.palette.text.secondary
@@ -385,15 +397,16 @@ function CardTable({
     return playedCardCache?.playedByPosition[position] ?? []
   }
 
-  const drawHandFromPlayedCards = (position, manualCards) => {
+  /** 统一排序：将 card 对象数组按 S-H-D-C 花色 + A-2 牌点排序输出 hand 字符串 */
+  const sortCardsToHand = (cards) => {
     const suitNames = { '♠': 'spades', '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs' }
+    const rankOrder = 'AKQJT98765432'
     const newHand = { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 }
     const groups = { spades: [], hearts: [], diamonds: [], clubs: [] }
-    for (const c of manualCards) {
+    for (const c of cards) {
       const sn = suitNames[c.suit]
       if (sn) groups[sn].push(c.rank)
     }
-    const rankOrder = 'AKQJT98765432'
     for (const [suitName, ranks] of Object.entries(groups)) {
       ranks.sort((a, b) => rankOrder.indexOf(a) - rankOrder.indexOf(b))
       newHand[suitName] = ranks.join('')
@@ -404,40 +417,30 @@ function CardTable({
   // 打牌阶段的手牌：隐藏模式下用剩余手牌，显示模式下用原始手牌+已出标记
   const getPlayHand = (position) => {
     if (!showPlayPanel || !playState) return hands[position]
-    
+
+    const remainingCards = playState.hands?.[position] || []
+
     if (showPlayedCards) {
-      const originalHand = hands[position]
-      if (hasHand(position)) return originalHand
-      const psHand = playState.hands?.[position]
+      // 显示已出模式：合并剩余牌+已出牌 = 完整13张，统一排序保证和隐藏模式顺序一致
       const manualCards = getManualPlayedCards(position)
-      const allCards = []
-      if (psHand) allCards.push(...psHand)
-      if (manualCards.length > 0) allCards.push(...manualCards)
-      if (allCards.length > 0) return drawHandFromPlayedCards(position, allCards)
-      return originalHand
+      const allCards = [...remainingCards, ...manualCards]
+      if (allCards.length > 0) return sortCardsToHand(allCards)
+      return hands[position]
     }
-    
-    // 隐藏模式（默认）：用后端返回的剩余手牌，转为 HandDisplay 格式
-    const remainingCards = playState.hands?.[position]
-    if (!remainingCards) return hands[position]
-    
-    const suitNames = { '♠': 'spades', '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs' }
-    const rankOrder = 'AKQJT98765432'
-    const newHand = { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 }
-    // 按花色分组，每个花色内按从大到小排序
-    const suitGroups = { spades: [], hearts: [], diamonds: [], clubs: [] }
-    for (const card of remainingCards) {
-      const suitName = suitNames[card.suit]
-      if (suitName) {
-        suitGroups[suitName].push(card.rank)
-      }
-    }
-    for (const [suitName, ranks] of Object.entries(suitGroups)) {
-      ranks.sort((a, b) => rankOrder.indexOf(a) - rankOrder.indexOf(b))
-      newHand[suitName] = ranks.join('')
-    }
-    return newHand
+
+    // 隐藏模式（默认）：只用剩余手牌，统一排序
+    if (remainingCards.length > 0) return sortCardsToHand(remainingCards)
+    return hands[position]
   }
+
+  // 预计算四家显示手牌：稳定引用，让 React.memo(HandDisplay) 跳过未变化手的渲染
+  const displayHands = useMemo(() => {
+    const result = {}
+    for (const pos of ['北', '南', '东', '西']) {
+      result[pos] = getPlayHand(pos)
+    }
+    return result
+  }, [hands, showPlayPanel, playState?.hands, showPlayedCards, playedCardCache?.playedByPosition])
 
   const parseHandInput = (input) => {
     const suits = input.trim().split(/\s+/)
@@ -940,8 +943,8 @@ function CardTable({
         display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0,
         bgcolor: isDeclarerInfo
           ? '#FFB6C1'
-          : (isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.7)'),
-        backdropFilter: 'blur(4px)', borderRadius: 1, px: 0.8, py: 0.2,
+          : (isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.85)'),
+        borderRadius: 1, px: 0.8, py: 0.2,
         ...sx,
       }}>
         {isCurrentlyBidding && (
@@ -970,7 +973,7 @@ function CardTable({
               bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.15)' : 'action.hover',
               color: positionRoles[position] === 'human' ? '#6366f1' : (isDark ? '#60a5fa' : '#2563eb'),
             }}
-          >{positionRoles[position] === 'human' ? '人类' : modelLabel(showPlayPanel ? playModel : fallbackModel)}</ToggleButton>
+          >{positionRoles[position] === 'human' ? '人类' : engineLabel(showPlayPanel)}</ToggleButton>
         )}
       </Box>
     )
@@ -1094,7 +1097,8 @@ function CardTable({
       { s: '♦', c: '#7c3aed' },
       { s: '♣', c: isDark ? '#cbd5e1' : '#1a1a2e' },
     ]
-    const ranks = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2']
+    const ranksRow1 = ['A', 'K', 'Q', 'J', 'T', '9', '8']
+    const ranksRow2 = ['7', '6', '5', '4', '3', '2']
     const rd = (r) => r === 'T' ? '10' : r
 
     const btnBase = (w, h, fs) => ({
@@ -1116,7 +1120,8 @@ function CardTable({
           border: '1px solid', borderColor: 'divider',
           boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
           display: 'flex', flexDirection: 'column', gap: 0.5,
-          width: 380,
+          width: 'auto',
+          maxWidth: 320,
         }} onClick={e => e.stopPropagation()}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 0.5 }}>
             <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, color: isDark ? '#e2e8f0' : '#333' }}>
@@ -1163,30 +1168,36 @@ function CardTable({
             ))}
           </Box>
 
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.3, px: 0.5, justifyContent: 'center' }}>
-            {ranks.map((rank) => {
-              const cardKey = pickSuit ? pickSuit + rank : null
-              const sel = cardKey && !!selections[cardKey]
-              const taken = cardKey && takenSet.has(cardKey)
-              return (
-                <Button key={rank} size="small"
-                  disabled={taken || !pickSuit}
-                  onClick={() => pickSuit && toggleCard(pickSuit, rank)}
-                  sx={{
-                    ...btnBase(30, 30, '0.7rem'),
-                    color: taken ? (isDark ? '#64748b' : '#aaa')
-                      : sel ? '#fff' : (isDark ? '#cbd5e1' : '#333'),
-                    borderColor: taken ? (isDark ? '#374151' : '#ddd')
-                      : sel ? '#ef4444' : (isDark ? '#334155' : '#ccc'),
-                    bgcolor: taken ? 'transparent'
-                      : sel ? (isDark ? '#dc2626' : '#ef4444') : 'transparent',
-                    '&:hover': { bgcolor: taken ? 'transparent'
-                      : sel ? '#f87171' : (isDark ? '#334155' : '#f0f0f0') },
-                    '&.Mui-disabled': { color: isDark ? '#475569' : '#bbb', borderColor: isDark ? '#374151' : '#ddd' },
-                  }}
-                >{rd(rank)}</Button>
-              )
-            })}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, px: 0.5, alignItems: 'center' }}>
+            {[ranksRow1, ranksRow2].map((row, ri) => (
+              <Box key={ri} sx={{ display: 'flex', gap: 0.3, justifyContent: 'center' }}>
+                {row.map((rank) => {
+                  const cardKey = pickSuit ? pickSuit + rank : null
+                  const sel = cardKey && !!selections[cardKey]
+                  const taken = cardKey && takenSet.has(cardKey)
+                  return (
+                    <Button key={rank} size="small"
+                      disabled={taken || !pickSuit}
+                      onClick={() => pickSuit && toggleCard(pickSuit, rank)}
+                      sx={{
+                        ...btnBase(34, 34, '0.75rem'),
+                        // 已知在其他位置手牌中的牌直接隐藏，但保留 DOM 避免 React 重挂载
+                        display: taken ? 'none' : undefined,
+                        color: taken ? (isDark ? '#64748b' : '#aaa')
+                          : sel ? '#fff' : (isDark ? '#cbd5e1' : '#333'),
+                        borderColor: taken ? (isDark ? '#374151' : '#ddd')
+                          : sel ? '#ef4444' : (isDark ? '#334155' : '#ccc'),
+                        bgcolor: taken ? 'transparent'
+                          : sel ? (isDark ? '#dc2626' : '#ef4444') : 'transparent',
+                        '&:hover': { bgcolor: taken ? 'transparent'
+                          : sel ? '#f87171' : (isDark ? '#334155' : '#f0f0f0') },
+                        '&.Mui-disabled': { color: isDark ? '#475569' : '#bbb', borderColor: isDark ? '#374151' : '#ddd' },
+                      }}
+                    >{rd(rank)}</Button>
+                  )
+                })}
+              </Box>
+            ))}
           </Box>
         </Box>
       </Box>
@@ -1264,6 +1275,7 @@ function CardTable({
             color="secondary"
             sx={{ fontSize: '0.7rem', py: 0.3, px: 1, fontWeight: 'bold' }}
             onClick={() => {
+              setHandPickerSelections(prev => ({ ...prev, [position]: {} }))
               setHandPickerPanelFor(position)
               setHandPickerPanelOpen(true)
             }}
@@ -1384,8 +1396,8 @@ function CardTable({
       && playState.current_player !== playState.dummy
       && playState.phase !== 'complete'
     
-    // 打牌阶段：根据模式选择手牌数据和已出牌标记
-    const displayHand = getPlayHand(position)
+    // 使用预计算的手牌（稳定引用，避免 HandDisplay 无效重渲染）
+    const displayHand = displayHands[position] || hand
     const playedCardsSet = (showPlayedCards && showPlayPanel && playState) ? getPlayedCardsSet() : null
     
     return (
@@ -1411,7 +1423,6 @@ function CardTable({
           boxShadow: `0 0 0 2px ${theme.palette.primary.main}, 0 4px 14px rgba(0,0,0,0.2)`,
           borderRadius: '8px',
         }),
-        transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
       }}>
           {/* 信息栏：可通过 noInfo 隐藏 */}
           {!sxProps?.noInfo && sxProps?.infoSide === 'top' && (
@@ -1438,7 +1449,7 @@ function CardTable({
                     bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.15)' : 'action.hover',
                     color: positionRoles[position] === 'human' ? '#6366f1' : (isDark ? '#60a5fa' : '#2563eb'),
                   }}
-                >{positionRoles[position] === 'human' ? '人类' : modelLabel(showPlayPanel ? playModel : fallbackModel)}</ToggleButton>
+                >{positionRoles[position] === 'human' ? '人类' : engineLabel(showPlayPanel)}</ToggleButton>
               )}
             </Box>
           )}
@@ -1513,7 +1524,7 @@ function CardTable({
                     bgcolor: positionRoles[position] === 'human' ? 'rgba(91,95,227,0.15)' : 'action.hover',
                     color: positionRoles[position] === 'human' ? '#6366f1' : (isDark ? '#60a5fa' : '#2563eb'),
                   }}
-                >{positionRoles[position] === 'human' ? '人类' : modelLabel(showPlayPanel ? playModel : fallbackModel)}</ToggleButton>
+                >{positionRoles[position] === 'human' ? '人类' : engineLabel(showPlayPanel)}</ToggleButton>
               )}
             </Box>
           )}
@@ -2046,8 +2057,8 @@ function CardTable({
             left: bidBoxPos.left,
             top: bidBoxPos.top,
             zIndex: 9999,
-            bgcolor: isDark ? 'rgba(17,24,39,0.88)' : 'rgba(255,255,255,0.88)',
-            backdropFilter: 'blur(12px)', borderRadius: 2, p: 0.75,
+            bgcolor: isDark ? 'rgba(17,24,39,0.95)' : 'rgba(255,255,255,0.95)',
+            borderRadius: 2, p: 0.75,
             border: '1px solid', borderColor: 'divider',
             boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
             display: 'flex', flexDirection: 'column', gap: '4px',
@@ -2299,8 +2310,7 @@ function CardTable({
         const panelContent = (
           <Box sx={{
             position: 'fixed', zIndex: 9999, ...posStyle,
-            bgcolor: isDark ? 'rgba(17,24,39,0.92)' : 'rgba(255,255,255,0.92)',
-            backdropFilter: 'blur(12px)',
+            bgcolor: isDark ? 'rgba(17,24,39,0.96)' : 'rgba(255,255,255,0.96)',
             borderRadius: 1, p: 0.67,
             border: '1px solid', borderColor: 'divider',
             boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
@@ -2385,4 +2395,4 @@ function CardTable({
   );
 }
 
-export default CardTable;
+export default React.memo(CardTable);

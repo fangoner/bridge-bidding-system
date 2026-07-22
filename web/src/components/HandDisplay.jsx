@@ -315,7 +315,6 @@ function HandDisplay({
       borderRadius: 0,
       fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", Roboto, sans-serif',
       fontWeight: 600,
-      transition: 'all 0.25s ease',
       color: isDark ? '#f5f5f5' : '#1a1a1a',
     }}>
       {!hideTitle && (
@@ -343,4 +342,4 @@ function HandDisplay({
   );
 }
 
-export default HandDisplay;
+export default React.memo(HandDisplay);
