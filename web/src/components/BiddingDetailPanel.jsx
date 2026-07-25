@@ -3,6 +3,22 @@ import { Box, Typography, Paper, FormControlLabel, Checkbox, Select, MenuItem, C
 import { PANEL_LAYOUT } from '../styles/constants'
 import { isHumanPosition } from '../utils/position'
 
+/** hand对象 → 展示字符串 "♠AKQ ♥J32 ♦KT9 ♣6542 15点"；空手牌返回 "未知" */
+const formatHandDisplay = (hand) => {
+  if (!hand || typeof hand !== 'object') return '未知'
+  const suits = [
+    { key: 'spades', sym: '♠' },
+    { key: 'hearts', sym: '♥' },
+    { key: 'diamonds', sym: '♦' },
+    { key: 'clubs', sym: '♣' },
+  ]
+  const allEmpty = suits.every(({ key }) => !hand[key] || hand[key] === '-')
+  if (allEmpty) return '未知'
+  const parts = suits.map(({ key, sym }) => `${sym}${hand[key] || '-'}`)
+  if (hand.hcp !== undefined) parts.push(`${hand.hcp}点`)
+  return parts.join(' ')
+}
+
 function BiddingDetailPanel({
   isMobile,
   positionRoles,
@@ -37,6 +53,7 @@ function BiddingDetailPanel({
   fallbackModel,
 }) {
   const theme = useTheme()
+  const [viewMode, setViewMode] = useState('output') // 'input' | 'output'
   const isDark = theme.palette.mode === 'dark'
   const bgWhite = isDark ? 'rgba(30, 41, 59, 0.7)' : 'white'
   const bgCode = isDark ? 'rgba(255,255,255,0.05)' : '#f8f9fa'
@@ -100,92 +117,133 @@ function BiddingDetailPanel({
 
     return (
       <Box sx={{ p: 2, background: isDark ? 'rgba(30, 41, 59, 0.7)' : 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-        <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 'bold', color: '#1976d2' }}>
-          {record.timestamp} - {record.position}家
-          {positionRoles?.[record.position] === 'ai' && fallbackModel && (
-            <Typography component="span" variant="caption" sx={{
-              ml: 1, px: 0.8, py: 0.2, borderRadius: 1,
-              bgcolor: 'action.hover', color: 'text.secondary',
-              fontSize: '0.65rem', fontWeight: 500, verticalAlign: 'middle',
-            }}>
-              {fallbackModel}
-            </Typography>
-          )}
-        </Typography>
-        <Typography variant="body2" sx={{ mt: 1 }}>
-          <strong>手牌:</strong> {record.hand?.display || '未知'}
-        </Typography>
-        <Typography variant="body2" sx={{ mt: 1 }}>
-          <strong>叫牌序列:</strong> {record.biddingSequence || '空（开叫位置）'}
-        </Typography>
-        
-        {/* 动态渲染 fullOutput 所有字段（跳过下方已单独显示的） */}
-        {Object.keys(fullOutput).length > 0 ? (
-          Object.entries(fullOutput).filter(([key]) => ![
-            '选定叫品', '叫品含义', '叫品筛选过程',
-            '完整叫牌序列', '当前叫牌序列', '自己pass次数',
-          ].includes(key)).map(([key, value]) => {
-            if (value == null || value === '') return null
-            const isLongText = typeof value === 'string' && value.length > 60
-            const isObject = typeof value === 'object'
-            return (
-              <Typography key={key} variant="body2" component="div" sx={{ mt: 1 }}>
-                <strong>{key}:</strong>
-                {isObject ? (
-                  <Box component="pre" sx={{
-                    mt: 0.5, p: 1, background: bgCode, borderRadius: 1,
-                    fontSize: '0.7rem', lineHeight: 1.4,
-                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                    border: borderCode, maxHeight: '200px', overflow: 'auto'
-                  }}>
-                    {JSON.stringify(value, null, 2)}
-                  </Box>
-                ) : isLongText ? (
-                  <Box component="pre" sx={{
-                    mt: 0.5, p: 1, background: bgCode, borderRadius: 1,
-                    fontSize: '0.7rem', lineHeight: 1.4,
-                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                    border: borderCode, maxHeight: '200px', overflow: 'auto'
-                  }}>
-                    {value}
-                  </Box>
-                ) : (
-                  <span> {value}</span>
-                )}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 'bold', color: '#1976d2' }}>
+            {record.timestamp} - {record.position}家
+            {positionRoles?.[record.position] === 'ai' && fallbackModel && (
+              <Typography component="span" variant="caption" sx={{
+                ml: 1, px: 0.8, py: 0.2, borderRadius: 1,
+                bgcolor: 'action.hover', color: 'text.secondary',
+                fontSize: '0.65rem', fontWeight: 500, verticalAlign: 'middle',
+              }}>
+                {fallbackModel}
               </Typography>
-            )
-          })
-        ) : positionRoles?.[record.position] === 'ai' ? (
-          <Typography variant="body2" sx={{ mt: 1, color: colorMuted }}>
-            （LLM 已处理，无额外结构化输出）
+            )}
           </Typography>
-        ) : (
-          <Typography variant="body2" sx={{ mt: 1, color: colorMuted, fontStyle: 'italic' }}>
-            无结构化字段（该叫品未调用 LLM 或匹配自 JF 约定）
-          </Typography>
+          <ToggleButtonGroup
+            value={viewMode}
+            exclusive
+            onChange={(_, v) => v && setViewMode(v)}
+            size="small"
+            sx={{ ml: 'auto', height: 24, '& .MuiToggleButton-root': { py: 0, px: 1, fontSize: '0.7rem', textTransform: 'none' } }}
+          >
+            <ToggleButton value="output">输出</ToggleButton>
+            <ToggleButton value="input">输入</ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
+
+        {/* 输入视图：仅显示发给 LLM 的完整提示词 */}
+        {viewMode === 'input' && (
+          <Box sx={{ mt: 1 }}>
+            <Typography variant="body2" sx={{ mb: 0.5 }}>
+              <strong>发送给 LLM 的提示词:</strong>
+            </Typography>
+            <Box component="pre" sx={{
+              mt: 0.5, p: 1, background: bgCode, borderRadius: 1,
+              fontSize: '0.7rem', lineHeight: 1.4,
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              border: borderCode, maxHeight: '400px', overflow: 'auto'
+            }}>
+              {fullOutput._prompt || '（提示词未返回，请重新叫牌）'}
+            </Box>
+          </Box>
         )}
 
-        {/* record.result 顶层字段 */}
-        <Typography variant="body2" sx={{ mt: 1 }}>
-          <strong>选定叫品:</strong> <span style={{ fontWeight: 'bold', color: '#d32f2f' }}>{record.result.bid}</span>
-        </Typography>
-        {record.result.meaning && (
-          <Typography variant="body2" sx={{ mt: 1 }}>
-            <strong>叫品含义:</strong> {record.result.meaning}
-          </Typography>
+        {/* 输出视图：LLM 分析字段 */}
+        {viewMode === 'output' && (
+          <>
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              <strong>手牌:</strong> {formatHandDisplay(record.hand)}
+            </Typography>
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              <strong>叫牌序列:</strong> {record.biddingSequence || '空（开叫位置）'}
+            </Typography>
+            {/* 动态渲染 fullOutput 所有字段（跳过下方已单独显示的） */}
+            {Object.keys(fullOutput).length > 0 ? (
+              Object.entries(fullOutput).filter(([key]) => ![
+                '选定叫品', '叫品含义', '叫品筛选过程',
+                '完整叫牌序列', '当前叫牌序列', '自己pass次数',
+                '_prompt',
+              ].includes(key)).map(([key, value]) => {
+                if (value == null || value === '') return null
+                const isLongText = typeof value === 'string' && value.length > 60
+                const isObject = typeof value === 'object'
+                return (
+                  <Typography key={key} variant="body2" component="div" sx={{ mt: 1 }}>
+                    <strong>{key}:</strong>
+                    {isObject ? (
+                      <Box component="pre" sx={{
+                        mt: 0.5, p: 1, background: bgCode, borderRadius: 1,
+                        fontSize: '0.7rem', lineHeight: 1.4,
+                        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                        border: borderCode, maxHeight: '200px', overflow: 'auto'
+                      }}>
+                        {JSON.stringify(value, null, 2)}
+                      </Box>
+                    ) : isLongText ? (
+                      <Box component="pre" sx={{
+                        mt: 0.5, p: 1, background: bgCode, borderRadius: 1,
+                        fontSize: '0.7rem', lineHeight: 1.4,
+                        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                        border: borderCode, maxHeight: '200px', overflow: 'auto'
+                      }}>
+                        {value}
+                      </Box>
+                    ) : (
+                      <span> {value}</span>
+                    )}
+                  </Typography>
+                )
+              })
+            ) : positionRoles?.[record.position] === 'ai' ? (
+              <Typography variant="body2" sx={{ mt: 1, color: colorMuted }}>
+                （LLM 已处理，无额外结构化输出）
+              </Typography>
+            ) : (
+              <Typography variant="body2" sx={{ mt: 1, color: colorMuted, fontStyle: 'italic' }}>
+                无结构化字段（该叫品未调用 LLM 或匹配自 JF 约定）
+              </Typography>
+            )}
+
+            {/* record.result 顶层字段 */}
+            {record.result.selection_process && (
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                <strong>叫品筛选过程:</strong>
+                <Box component="pre" sx={{
+                  mt: 1, p: 1, background: bgCode, borderRadius: 1,
+                  fontSize: '0.75rem', lineHeight: 1.4,
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  border: borderCode, maxHeight: '200px', overflow: 'auto'
+                }}>
+                  {record.result.selection_process}
+                </Box>
+              </Typography>
+            )}
+          </>
         )}
-        {record.result.selection_process && (
-          <Typography variant="body2" sx={{ mt: 1 }}>
-            <strong>叫品筛选过程:</strong>
-            <Box component="pre" sx={{
-              mt: 1, p: 1, background: bgCode, borderRadius: 1,
-              fontSize: '0.75rem', lineHeight: 1.4,
-              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              border: borderCode, maxHeight: '200px', overflow: 'auto'
-            }}>
-              {record.result.selection_process}
-            </Box>
-          </Typography>
+
+        {/* 输出视图：选定叫品和含义 */}
+        {viewMode === 'output' && (
+          <>
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              <strong>选定叫品:</strong> <span style={{ fontWeight: 'bold', color: '#d32f2f' }}>{record.result.bid}</span>
+            </Typography>
+            {record.result.meaning && (
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                <strong>叫品含义:</strong> {record.result.meaning}
+              </Typography>
+            )}
+          </>
         )}
         {/* fullOutput 以外的 result 字段（兜底显示原始 JSON） */}
         {Object.keys(fullOutput).length === 0 && (

@@ -31,6 +31,7 @@ export function GameProvider({ children }) {
   // ── 游戏设置 ──
   const [gameMode, setGameMode] = useState('four') // 'four' 或 'pair'
   const [dealer, setDealer] = useState('南') // 发牌人位置
+  const [vulnerability, setVulnerability] = useState('NV') // 局况: 'NV'双无/'NS'南北有局/'EW'东西有局/'All'双有局
   const [practiceDirection, setPracticeDirection] = useState('NS') // 双人模式练习方向
   const [positionRoles, setPositionRoles] = useState({
     '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai',
@@ -81,6 +82,7 @@ export function GameProvider({ children }) {
       warning, setWarning,
       gameMode, setGameMode,
       dealer, setDealer,
+      vulnerability, setVulnerability,
       practiceDirection, setPracticeDirection,
       positionRoles, setPositionRoles,
       showPartnerHand, setShowPartnerHand,
@@ -106,7 +108,7 @@ export function GameProvider({ children }) {
     }),
     [
       hands, loading, aiThinking, error, warning,
-      gameMode, dealer, practiceDirection, positionRoles,
+      gameMode, dealer, vulnerability, practiceDirection, positionRoles,
       showPartnerHand, showOpponentHands, showAIBiddingOutput, useFallback,
       dealMode, showSettings, dealSystem,
       fallbackModel, playModel,

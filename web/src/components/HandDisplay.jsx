@@ -20,6 +20,35 @@ const HiddenHand = styled(Box)(({ theme }) => ({
   color: theme.palette.mode === 'dark' ? '#607080' : '#94a3b8',
 }))
 
+function CardBack({ size }) {
+  const cardW = size
+  const cardH = size * CARD_ASPECT
+  return (
+    <Box sx={{
+      width: cardW,
+      height: cardH,
+      flexShrink: 0,
+      bgcolor: '#1e3a5f',
+      borderRadius: `${Math.max(2, cardW * 0.1)}px`,
+      border: '1px solid rgba(0,0,0,0.25)',
+      boxShadow: '0 2px 5px rgba(0,0,0,0.14), 0 1px 2px rgba(0,0,0,0.06)',
+      position: 'relative',
+      overflow: 'hidden',
+      backgroundImage: `repeating-linear-gradient(45deg, transparent, transparent ${cardW * 0.08}px, rgba(255,255,255,0.06) ${cardW * 0.08}px, rgba(255,255,255,0.06) ${cardW * 0.16}px), repeating-linear-gradient(-45deg, transparent, transparent ${cardW * 0.08}px, rgba(255,255,255,0.06) ${cardW * 0.08}px, rgba(255,255,255,0.06) ${cardW * 0.16}px)`,
+      '&::before': {
+        content: '""',
+        position: 'absolute',
+        top: '50%', left: '50%',
+        transform: 'translate(-50%, -50%)',
+        width: cardW * 0.4,
+        height: cardH * 0.4,
+        borderRadius: '50%',
+        bgcolor: 'rgba(255,255,255,0.08)',
+      },
+    }} />
+  )
+}
+
 const HCPBadge = styled(Box)(({ theme }) => ({
   display: 'inline-flex',
   alignItems: 'center',
@@ -217,7 +246,7 @@ function HandDisplay({
         flexShrink: 0,
       }}>
           {allCards.map((card, i) => {
-            const isPlayed = (playedCards && playedCards.has(card.cardKey)) || dimmed
+            const isPlayed = playedCards && playedCards.has(card.cardKey)
             const isPlayable = !playableSet || playableSet.has(card.cardKey)
             const isSelected = selectedCardKey === card.cardKey
             const hint = cardHints?.[card.cardKey]
@@ -252,6 +281,8 @@ function HandDisplay({
                     ? 'translateX(-50%)'
                     : 'none',
                   zIndex: zIdx,
+                  opacity: dimmed ? 0.4 : 1,
+                  transition: 'opacity 0.2s ease',
                 }}
               >
                 <Box
@@ -331,13 +362,45 @@ function HandDisplay({
 
       {showContent && hasCards ? (
         renderCards()
-      ) : (
-        <HiddenHand>
-          <Typography variant="body2" sx={{ color: '#94a3b8', fontSize: '0.8rem' }}>
-            {hasCards ? '[隐藏]' : '[待输入]'}
-          </Typography>
-        </HiddenHand>
-      )}
+      ) : (() => {
+        const cardHeight = cardWidth * CARD_ASPECT
+        const totalLength = cardWidth + 12 * cardWidth * (1 - overlapRatio)
+        return (
+        <Box sx={{
+          display: 'flex',
+          flexDirection: isVertical ? 'column' : 'row',
+          position: 'relative',
+          width: isVertical ? cardHeight : totalLength,
+          height: isVertical ? totalLength : cardHeight,
+          overflow: 'visible',
+          flexShrink: 0,
+        }}>
+          {Array.from({ length: 13 }, (_, i) => {
+            const offset = i * cardWidth * (1 - overlapRatio)
+            const zIdx = isVertical && popDirection === 'left' ? 13 - i : i + 1
+            const rotateDeg = popDirection === 'left' ? -90 : 90
+            return (
+              <Box
+                key={i}
+                sx={{
+                  position: 'absolute',
+                  left: isVertical ? '50%' : offset,
+                  top: isVertical ? offset - (cardHeight - cardWidth) / 2 : 0,
+                  transform: isVertical ? 'translateX(-50%)' : 'none',
+                  zIndex: zIdx,
+                }}
+              >
+                <Box sx={{
+                  transform: isVertical ? `rotate(${rotateDeg}deg)` : 'none',
+                }}>
+                  <CardBack size={cardWidth} />
+                </Box>
+              </Box>
+            )
+          })}
+        </Box>
+        )
+      })()}
     </Box>
   );
 }

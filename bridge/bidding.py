@@ -176,7 +176,7 @@ def extract_retrieval_keyword(bidding_str: str, deal_system: str = "2D/2H/2S：�
                 elif second_bid[0] == '2':
                     result = "对方二阶争叫："
                 else:
-                    result = "我方开叫1低花"
+                    result = "JF尚未实现"
             elif first_bid == '1D':
                 if second_bid == 'X':
                     result = "12.1.1 对方加倍后"
@@ -189,7 +189,7 @@ def extract_retrieval_keyword(bidding_str: str, deal_system: str = "2D/2H/2S：�
                 elif second_bid[0] == '2':
                     result = "对方二阶争叫："
                 else:
-                    result = "我方开叫1低花"
+                    result = "JF尚未实现"
             elif first_bid == '1H':
                 if second_bid == 'X':
                     result = "12.2.1 敌方加倍"
@@ -197,10 +197,10 @@ def extract_retrieval_keyword(bidding_str: str, deal_system: str = "2D/2H/2S：�
                     result = "对抗对方已明确的 55 双套争叫："
                 elif second_bid == '2H':
                     result = "对抗对方只已知一套的 55 双套争叫："
-                elif second_bid not in ['pass']:
+                elif second_bid[0] in '12':
                     result = "12.2.2 敌方争叫花色"
                 else:
-                    result = "我方开叫1高花"
+                    result = "JF尚未实现"
             elif first_bid == '1S':
                 if second_bid == 'X':
                     result = "12.2.1 敌方加倍"
@@ -208,16 +208,19 @@ def extract_retrieval_keyword(bidding_str: str, deal_system: str = "2D/2H/2S：�
                     result = "对抗对方已明确的 55 双套争叫："
                 elif second_bid == '2S':
                     result = "对抗对方只已知一套的 55 双套争叫："
-                elif second_bid not in ['pass']:
+                elif second_bid[0] in '12':
                     result = "12.2.2 敌方争叫花色"
                 else:
-                    result = "我方开叫1高花"
+                    result = "JF尚未实现"
             elif first_bid[0] == '1':
-                result = "我方开叫1高花"
+                result = "JF尚未实现"
             elif first_bid[0] in '2345' and first_bid != '2NT':
                 result = "我方开叫阻击"
             elif first_bid == "2NT":
-                result = "2NT均型强牌"
+                if second_bid == "pass":
+                    result = "2NT均型强牌"
+                else:
+                    result = "JF尚未实现"
     elif len(bids) == 3:
         if second_bid == "pass" and third_bid != "pass":
             result = "第四家争叫"

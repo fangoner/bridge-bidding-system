@@ -170,14 +170,16 @@ def parse_hand_string(hand_str: str) -> Hand:
 
 
 def parse_deal_input(input_text: str) -> Dict[Position, Hand]:
-    lines = [l.strip() for l in input_text.strip().split("\n") if l.strip()]
-    
-    if len(lines) == 4:
-        return {
-            Position.SOUTH: parse_hand_string(lines[0]),
-            Position.WEST: parse_hand_string(lines[1]),
-            Position.NORTH: parse_hand_string(lines[2]),
-            Position.EAST: parse_hand_string(lines[3])
-        }
-    
-    return {}
+    # 按行分割，不过滤空行（保留位置信息：第1行=南，第2行=西，第3行=北，第4行=东）
+    raw_lines = input_text.split("\n")
+    lines = [l.strip() for l in raw_lines]
+    # 只取前4行
+    lines = lines[:4]
+
+    result = {}
+    positions = [Position.SOUTH, Position.WEST, Position.NORTH, Position.EAST]
+    for i, pos in enumerate(positions):
+        if i < len(lines) and lines[i]:
+            result[pos] = parse_hand_string(lines[i])
+
+    return result

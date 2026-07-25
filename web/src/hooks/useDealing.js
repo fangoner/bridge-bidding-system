@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react'
-import { dealCards, customDeal, imageDeal, triggerScreenshot, readClipboardDeal } from '../services/api'
+import { dealCards, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, readSingleHandClipboard } from '../services/api'
 import { BRIDGE_POSITIONS } from '../utils/position'
 import { useGame } from '../context/GameContext'
 import { useBidding } from '../context/BiddingContext'
@@ -9,22 +9,33 @@ import { usePlay } from '../context/PlayContext'
 // 格式: "(北)pass-(东)pass-(南)1NT-(西)pass-..."
 export function parseBiddingSequenceStr(biddingStr) {
   if (!biddingStr) return []
-  const items = biddingStr.split('-').filter(s => s.trim())
+  // 用正则按 "-(位置)" 切分，保留每个叫品单元，避免 "-" 作为 pass 被误切
+  // 格式: "(南)1S-(西)pass-(北)-..." 中 "-" 也可能表示 pass
+  const items = biddingStr.split(/-(?=\()/).filter(s => s.trim())
   // 花色符号→字母的规范化（统一显示为字母格式）
   const suitSymbolToLetter = { '♠': 'S', '♥': 'H', '♦': 'D', '♣': 'C' }
-  const result = items.map(item => {
-    const match = item.trim().match(/^\(([^)]+)\)(.+)$/)
+  const result = []
+  let endedByMarker = false
+  items.forEach(item => {
+    if (endedByMarker) return // "=" 之后的所有叫品一律丢弃（叫牌已结束）
+    const match = item.trim().match(/^\(([^)]+)\)(.*)$/)
     if (match) {
-      let bid = match[2]
-      if (bid === '不叫' || bid === 'Pass' || bid === 'PASS') bid = 'pass'
-      if (bid === '加倍' || bid === 'Double') bid = 'X'
-      if (bid === '再加倍' || bid === 'Redouble') bid = 'XX'
+      let bid = (match[2] || '').trim()
+      // 检测并去除 "=" 叫牌结束标记
+      const hasEndMarker = bid.includes('=')
+      // 去除 "=" 后再去除首尾的 "-"、"/" 等符号（处理 "pass-"、"pass--"、"-p" 等情况）
+      bid = bid.replace(/=/g, '').trim().replace(/^[-/]+|[-/]+$/g, '').trim()
+      if (bid === '不叫' || bid === 'Pass' || bid === 'PASS' || bid === 'P' || bid === 'p' || bid === '-' || bid === '/' || bid === '' || bid.toLowerCase() === 'pass') bid = 'pass'
+      if (bid === '加倍' || bid === 'Double' || bid === 'D' || bid === 'd') bid = 'X'
+      if (bid === '再加倍' || bid === 'Redouble' || bid === 'RD' || bid === 'rd') bid = 'XX'
+      // 若原叫品只是"="或符号（去除后为空），按pass处理
+      if (hasEndMarker && bid === '') bid = 'pass'
       // 花色符号转字母（如 1♠ → 1S）
       bid = bid.replace(/[♠♥♦♣]/g, sym => suitSymbolToLetter[sym] || sym)
-      return { position: match[1], bid }
+      result.push({ position: match[1], bid })
+      if (hasEndMarker) endedByMarker = true
     }
-    return null
-  }).filter(Boolean)
+  })
 
   // 补齐或裁剪结束叫牌的pass：最后一个实质性叫品后必须恰好3个pass
   if (result.length > 0) {
@@ -61,6 +72,7 @@ export function useDealing({ clearBiddingDraft }) {
     setError,
     setWarning,
     dealer, setDealer,
+    setVulnerability,
     setPositionRoles,
     setShowPartnerHand,
     setShowOpponentHands,
@@ -204,12 +216,14 @@ export function useDealing({ clearBiddingDraft }) {
         setHands(data.hands)
         if (data.message && data.message !== '牌局已加载') setWarning(data.message)
         if (data.dealer) setDealer(data.dealer)
-        const parsedBidding = parseBiddingSequenceStr(data.bidding_sequence)
-        setBiddingSequence(parsedBidding)
+        if (data.vulnerability) setVulnerability(data.vulnerability)
+        // 先 reset 再 set，避免 resetGameState 内部清空 biddingSequence
         resetGameState({
           directPlayInfo: buildDirectPlayInfo(data),
           imageOpeningLead: data.opening_lead || null,
         })
+        const parsedBidding = parseBiddingSequenceStr(data.bidding_sequence)
+        setBiddingSequence(parsedBidding)
         // dealer 已被更新，需要重新设置 currentBidder
         if (data.dealer) setCurrentBidder(data.dealer)
       } else {
@@ -221,7 +235,7 @@ export function useDealing({ clearBiddingDraft }) {
       setLoading(false)
     }
   }, [clearBiddingDraft, setCurrentRecordId, setLoading, setError, setWarning,
-      setHands, setDealer, setBiddingSequence, setCurrentBidder, resetGameState])
+      setHands, setDealer, setVulnerability, setBiddingSequence, setCurrentBidder, resetGameState])
 
   // 4. 截屏识别牌局
   const handleScreenshotDeal = useCallback(async ({ setShowSettings = null } = {}) => {
@@ -229,7 +243,7 @@ export function useDealing({ clearBiddingDraft }) {
     if (setShowSettings) setShowSettings(false)
     setLoading(true)
     screenshotCancelledRef.current = false
-    setError('截屏已触发，请完成截图后等待识别...')
+    setError('截屏已触发，请在截屏工具中选择区域后等待识别...')
     setWarning(null)
     try {
       const result = await triggerScreenshot()
@@ -262,12 +276,14 @@ export function useDealing({ clearBiddingDraft }) {
       setHands(data.hands)
       if (data.message && data.message !== '识别成功') setWarning(data.message)
       if (data.dealer) setDealer(data.dealer)
-      const parsedBidding = parseBiddingSequenceStr(data.bidding_sequence)
-      setBiddingSequence(parsedBidding)
+      if (data.vulnerability) setVulnerability(data.vulnerability)
+      // 先 reset 再 set，避免 resetGameState 内部清空 biddingSequence
       resetGameState({
         directPlayInfo: buildDirectPlayInfo(data),
         imageOpeningLead: data.opening_lead || null,
       })
+      const parsedBidding = parseBiddingSequenceStr(data.bidding_sequence)
+      setBiddingSequence(parsedBidding)
       if (data.dealer) setCurrentBidder(data.dealer)
       setError(null)
     } catch {
@@ -275,8 +291,58 @@ export function useDealing({ clearBiddingDraft }) {
     } finally {
       setLoading(false)
     }
-  }, [loading, setLoading, setError, setWarning, setHands, setDealer,
+  }, [loading, setLoading, setError, setWarning, setHands, setDealer, setVulnerability,
       setBiddingSequence, setCurrentBidder, resetGameState])
+
+  // 4b. 单家手牌截屏识别
+  const handleSingleHandScreenshot = useCallback(async (position, { setShowSettings = null } = {}) => {
+    if (loading) return
+    if (!position || !['南','西','北','东'].includes(position)) return
+    if (setShowSettings) setShowSettings(false)
+    setLoading(true)
+    screenshotCancelledRef.current = false
+    setError(`截屏识别 ${position} 家手牌中，请在截屏工具中选择该家手牌区域...`)
+    setWarning(null)
+    try {
+      const result = await triggerScreenshot()
+      if (!result.success) {
+        setError(result.message || '触发截屏失败')
+        setLoading(false)
+        return
+      }
+      let data = null
+      for (let i = 0; i < 10; i++) {
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        if (screenshotCancelledRef.current) {
+          setLoading(false)
+          return
+        }
+        try {
+          const resp = await readSingleHandClipboard(position)
+          if (resp.success) { data = resp; break }
+        } catch {
+          // 剪贴板还没有图片，继续等待
+        }
+        setError(`等待 ${position} 家截屏中... (${i + 1}/10)`)
+      }
+      if (!data) {
+        setError(`${position} 家截屏识别超时，请确保已完成截图并重试`)
+        setLoading(false)
+        return
+      }
+      // 合并更新：只更新目标位置，保留其他三家
+      setHands(prev => {
+        const prevHand = prev?.[position] || { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 }
+        return { ...(prev || {}), [position]: { ...prevHand, ...data.hand } }
+      })
+      if (data.message && data.message !== '识别成功') setWarning(`${position}家: ${data.message}`)
+      setError(null)
+    } catch {
+      setError(`${position} 家截屏识别失败，请检查API服务是否正常运行`)
+    } finally {
+      setLoading(false)
+    }
+  }, [loading, setLoading, setError, setWarning, setHands])
 
   // 5. 清除所有手牌
   const clearAllHands = useCallback(() => {
@@ -327,6 +393,7 @@ export function useDealing({ clearBiddingDraft }) {
     handleCustomDeal,
     handleImageDeal,
     handleScreenshotDeal,
+    handleSingleHandScreenshot,
     clearAllHands,
     cancelScreenshot,
     parseBiddingSequenceStr,

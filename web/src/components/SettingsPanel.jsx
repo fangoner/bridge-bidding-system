@@ -80,6 +80,8 @@ function SettingsPanel({
   mode,
   hands,
   availableModels,
+  vulnerability,
+  setVulnerability,
 }) {
   const theme = useTheme()
 
@@ -159,6 +161,16 @@ function SettingsPanel({
               <Select value={dealSystem} label="阻击叫牌体系" onChange={(e) => setDealSystem(e.target.value)}>
                 <MenuItem value="2D/2H/2S：自然阻击">2D/2H/2S：自然阻击</MenuItem>
                 <MenuItem value="2D：多功能，2H/S：麦德伯格，2NT：双低花">多功能/麦德伯格</MenuItem>
+              </Select>
+            </FormControl>
+
+            <FormControl sx={{ minWidth: 100 }} size="small">
+              <InputLabel>局况</InputLabel>
+              <Select value={vulnerability} label="局况" onChange={(e) => setVulnerability(e.target.value)}>
+                <MenuItem value="NV">双无局</MenuItem>
+                <MenuItem value="NS">南北有局</MenuItem>
+                <MenuItem value="EW">东西有局</MenuItem>
+                <MenuItem value="All">双有局</MenuItem>
               </Select>
             </FormControl>
           </Box>

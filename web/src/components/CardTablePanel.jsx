@@ -15,19 +15,21 @@ function CardTablePanel({
   isMobile,
   // 派生值（App 端计算后传入）
   declarer,
+  finalContract,
+  directPlayContractInfo,
   // 业务回调
   onAnalyzeContract,
   onToggleDoubleDummy,
   onDealerChange,
   onPositionRoleChange,
   onClearAllHands,
-  onSimulatedReset,
   onEditHands,
   onEditBidding,
   onPlayCardClick,
   onSetPlayHand,
   onImageDeal,
   onScreenshotDeal,
+  onSingleHandScreenshot,
   onCustomDeal,
   onDeal,
   onHandCardClick,
@@ -42,7 +44,7 @@ function CardTablePanel({
   const {
     hands, setHands,
     loading, aiThinking,
-    gameMode, dealer,
+    gameMode, dealer, vulnerability, setVulnerability,
     showPartnerHand, setShowPartnerHand,
     showOpponentHands, setShowOpponentHands,
     positionRoles,
@@ -191,7 +193,7 @@ function CardTablePanel({
               }}
               size="small"
               sx={{ height: 24 }}
-              disabled={!isBiddingComplete()}
+              disabled={!allHandsComplete}
             >
               <ToggleButton value="table" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 50 }}>
                 叫牌过程
@@ -369,6 +371,8 @@ function CardTablePanel({
           hands={hands}
           currentBidder={currentBidder}
           dealer={dealer}
+          vulnerability={vulnerability}
+          setVulnerability={setVulnerability}
           gameMode={gameMode}
           showPartnerHand={showPartnerHand}
           showOpponentHands={showOpponentHands}
@@ -388,13 +392,14 @@ function CardTablePanel({
           onPositionRoleChange={onPositionRoleChange}
           onDealerChange={onDealerChange}
           onClearAllHands={onClearAllHands}
-          onSimulatedReset={onSimulatedReset}
           onEditHands={onEditHands}
           onEditBidding={onEditBidding}
           setHands={setHands}
           biddingStarted={biddingStarted}
           stopBidding={stopBidding}
           declarer={declarer}
+          finalContract={finalContract}
+          directPlayContractInfo={directPlayContractInfo}
           playState={playState}
           showPlayPanel={showPlayPanel}
           lastCompletedTrick={lastCompletedTrick}
@@ -418,6 +423,7 @@ function CardTablePanel({
           startBidding={startBidding}
           reviewCursor={reviewCursor}
           reviewTrick={reviewTrick}
+          onSingleHandScreenshot={onSingleHandScreenshot}
         />
       </Box>
     </Paper>

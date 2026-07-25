@@ -71,21 +71,47 @@ VISION_PROMPT = """你的任务是从桥牌游戏图片中提取四项关键信�
 - 如果某手牌不足13张或总张数超过13，仔细复查图片
 - 注意区分相似字符：♠和♣、8和B、T和7
 
+**严禁脑补——这是最高纪律！**
+- **只输出图片中实际可见的手牌**，图片中没有显示的玩家手牌一律输出为 null
+- **绝不**根据叫牌过程、定约、HCP推断或编造任何手牌
+- **绝不**为了让四家凑齐52张而虚构未显示位置的手牌
+- **绝不**参考"标准自然/JF叫牌体系的合理持牌"等先验知识来填充缺失手牌
+- 例如：图片只显示南北两家手牌，东西家未显示 → 东家手牌和西家手牌都必须输出 null
+- 例如：图片只显示南家手牌，其他三家未显示 → 西家手牌/北家手牌/东家手牌都输出 null
+- 即使图片只显示一家手牌，也要如实输出，其他三家为 null，由后续流程处理
+
 ═══════════════════════════════════════
 二、叫牌序列
 ═══════════════════════════════════════
 - **叫牌表中空着的位置不等于pass！** 第一轮中，发牌人之前的空位只是还没轮到叫牌，不要记录为pass
-- **pass 的多种表示形式**：pass 可能显示为"不叫"、"-"、"/"、"Pass"等，这些都是pass，必须记录。与之区别的是**完全空白的格子**，那才是未叫牌，不能记录
-- 发牌人（dealer）的判断方法：叫牌表第一行中，第一个有叫品（pass/不叫/-//具体叫品）的位置就是发牌人
-  * 例如第一行南为空、西为空、北为"-"、东为"1H" → 发牌人是北，序列从北的pass开始
-  * 例如第一行南是"不叫"、西是"不叫"、北是"1H"、东是pass → 发牌人是南，序列从南开始
-- 从发牌人开始，按顺时针方向（南→西→北→东→南→...）依次记录每个位置的叫品
+- **pass 的多种表示形式**：pass 可能显示为"不叫"、"-"、"/"、"Pass"、"P"、"pass"等，这些都是pass，必须记录为"pass"。与之区别的是**完全空白的格子**（无任何字符），那才是未叫牌，不能记录
+- **叫品标准化**：无论图片中显示的是"不叫"、"-"、"/"、"P"，输出JSON时统一写成"pass"
+- **"=" 是叫牌结束标记**：最后一个pass后面有时会带"="符号（如"pass="、"P="、"-"=），表示叫牌到此结束。遇到带"="的叫品，仍然按pass处理，但**输出JSON时去掉"="符号**，只写"pass"。不要单独输出"="作为一条叫品
+- **发牌人（dealer）的判断方法——极其重要！**：
+  - 叫牌表第一行中，**第一个有内容（pass/不叫/-//具体叫品）的位置就是发牌人**
+  - **绝不能跳过发牌人！** 即使发牌人pass，也必须从发牌人开始记录序列
+  - 即使第一行的"-"/"P"/"不叫"看起来像"空"，那也是发牌人发出的pass，必须记录
+  * 例如第一行南为空白、西为空白、北为"-"、东为"1H" → 发牌人是北（北pass），序列从北的pass开始：["北:pass", "东:1H", ...]
+  * 例如第一行南为空白、西为空白、北为空白、东为"-" → 发牌人是东（东pass），序列从东的pass开始：["东:pass", ...]
+  * 例如第一行南为"-"、西为"1S"、北为空白、东为空白 → 发牌人是南（南pass），序列从南的pass开始：["南:pass", "西:1S", ...]
+  * 例如第一行东为"-"、南为"1NT"、西为"pass"、北为"3NT" → 发牌人是东（东pass），序列：["东:pass", "南:1NT", "西:pass", "北:3NT", ...]
+- **从发牌人开始**，按顺时针方向（南→西→北→东→南→...）依次记录每个位置的叫品
 - **只记录叫牌表中有内容的格子**（pass/不叫/-//具体叫品），完全空白的格子一律跳过
 - 如果整个叫牌表第一行全空，则查看图片中是否有"发牌"或dealer标注来确定起始位置
 - 所有实际存在的叫品都必须记录，包括pass
 - 最终定约叫品之后通常还有三个pass结束叫牌，也可能有加倍/再加倍
 - 仔细观察叫牌区域，每个叫品框通常有位置标签，不要混淆相邻位置的叫品
 - 如果图片中没有叫牌区域或叫牌序列完全不显示，则为null
+
+**BBO/桥友圈等平台的叫牌表识别要点**：
+- 叫牌表通常是**纵向排列**的，每一行代表一轮叫牌，列代表方位（北/东/南/西 或 N/E/S/W）
+- **必须按行从上到下识别**，每一行从左到右依次读取4个位置的叫品
+- **同一轮叫牌中，每个位置只能出现一次**！如果识别到同一位置在同一轮中出现两次，说明识别错误
+- **每个位置（南/西/北/东）的叫品总数应基本相等**（相差不超过1），如果某位置叫品数远多于其他位置，说明识别错误
+- **后续轮次的叫品必须比前一轮叫品阶数更高**（同类花色），如果识别到叫品阶数倒退，说明识别错误
+- **同一玩家不可能连续叫两次**（中间必须隔其他玩家），如果出现连续两次同位置叫品，说明识别错误
+- 识别时请仔细核对每个格子的位置标签（N/E/S/W 或 北/东/南/西），不要把列看错
+- 如果叫牌表区域较小或模糊，优先识别能看清的部分，不要猜测不清晰的叫品
 
 ═══════════════════════════════════════
 三、当前定约（重要！）
@@ -130,18 +156,61 @@ VISION_PROMPT = """你的任务是从桥牌游戏图片中提取四项关键信�
   - 牌桌中央没有任何出牌
 
 ═══════════════════════════════════════
+五、局况（Vulnerability）
+═══════════════════════════════════════
+局况是桥牌的基础元素，影响叫牌决策。桥牌有四种局况：
+
+识别要点：
+  - 通常在牌桌上方/角落以缩写或颜色显示
+  - BBO/新睿：以"NS"/"EW"/"Both"/"None"或红绿配色标识
+  - 桥友圈：以中文"双无"/"南北有局"/"东西有局"/"双有"标识
+  - 桥牌书籍：可能在牌局标题旁标注"None vul"/"NS vul"/"EW vul"/"Both vul"
+  - 红色 = 有局，绿色 = 无局
+
+格式要求（必须输出以下四个值之一）：
+  - "NV" = 双无局（None Vulnerable）
+  - "NS" = 南北有局（North-South Vulnerable）
+  - "EW" = 东西有局（East-West Vulnerable）
+  - "All" = 双有局（Both Vulnerable）
+  - 无法识别时返回 null
+
+═══════════════════════════════════════
 输出格式（严格JSON）
 ═══════════════════════════════════════
 请严格按照以下JSON格式输出，不要添加任何额外说明文字：
 {
-  "南家手牌": "如 ♠KT85 ♥AT863 ♦- ♣63（♦缺门用-占位）",
-  "西家手牌": "...",
-  "北家手牌": "...",
-  "东家手牌": "...",
+  "南家手牌": "如 ♠KT85 ♥AT863 ♦- ♣63（♦缺门用-占位）" 或 null（图片中未显示该家）,
+  "西家手牌": "..." 或 null,
+  "北家手牌": "..." 或 null,
+  "东家手牌": "..." 或 null,
   "叫牌序列": ["北:pass", "东:pass", "南:1NT", ...] 或 null,
   "当前定约": "如 4H 由南做庄" 或 null,
   "首攻": "如 西:S5" 或 null,
+  "局况": "NV/NS/EW/All 之一" 或 null,
   "页面类型": "BBO/桥友圈/桥牌教程书籍/新睿桥牌/其他"
+}
+
+**再次强调**：未在图片中显示的手牌，对应字段必须输出 null，绝不能虚构。"""
+
+
+SINGLE_HAND_VISION_PROMPT = """你的任务是从桥牌游戏截图中识别**单独一家手牌**。
+
+═══════════════════════════════════════
+识别规则
+═══════════════════════════════════════
+- 图片中只包含一家玩家手牌，不要脑补其他玩家手牌
+- **牌面10必须用T表示**，例如：♠KT85 而不是 ♠K1085
+- 花色符号用 ♠ ♥ ♦ ♣，牌面从大到小排列（A K Q J T 9 8 7 6 5 4 3 2）
+- **缺门花色必须用"-"占位**，例如：♠KT85 ♥AT863 ♦- ♣63（方块缺门）
+- 四个花色必须按♠♥♦♣顺序全部列出，即使缺门也不能省略
+- 截图可能裁剪不全，张数可能不足13张，按实际识别到的牌张返回
+- 注意区分相似字符：♠和♣、8和B、T和7
+
+═══════════════════════════════════════
+输出格式（严格JSON，不要markdown代码块）
+═══════════════════════════════════════
+{
+  "手牌": "如 ♠KT85 ♥AT863 ♦- ♣63（♦缺门用-占位）"
 }"""
 
 
@@ -259,7 +328,81 @@ class DoubaoVisionClient:
             return {"error": f"图片文件不存在: {image_path}"}
         except Exception as e:
             return {"error": str(e)}
-    
+
+    def read_single_hand_from_image(self, image_path: str, position: str = "") -> Dict[str, Any]:
+        if not self.client:
+            return {"error": "Doubao API Key未配置，请设置环境变量 DOUBAO_API_KEY"}
+
+        if not self.endpoint or self.endpoint == "YOUR_VISION_ENDPOINT_ID":
+            return {"error": "Doubao Vision Endpoint未配置"}
+
+        try:
+            t0 = time.time()
+
+            with open(image_path, "rb") as f:
+                raw_bytes = f.read()
+            print(f"[DoubaoVision-单家] 位置={position}, 原始图片: {len(raw_bytes)/1024:.1f} KB")
+
+            try:
+                from PIL import Image
+                img = Image.open(io.BytesIO(raw_bytes))
+                orig_w, orig_h = img.size
+                if max(orig_w, orig_h) > VISION_MAX_IMAGE_SIZE:
+                    ratio = VISION_MAX_IMAGE_SIZE / max(orig_w, orig_h)
+                    new_w, new_h = int(orig_w * ratio), int(orig_h * ratio)
+                    img = img.resize((new_w, new_h), Image.LANCZOS)
+                buf = io.BytesIO()
+                img.convert("RGB").save(buf, format="JPEG", quality=VISION_JPEG_QUALITY)
+                compressed_bytes = buf.getvalue()
+                mime_type = "image/jpeg"
+            except Exception as e:
+                print(f"[DoubaoVision-单家] 图片压缩失败({e})，使用原始图片")
+                compressed_bytes = raw_bytes
+                ext = image_path.lower().split(".")[-1]
+                mime_type = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}.get(ext, "image/jpeg")
+
+            image_b64 = base64.b64encode(compressed_bytes).decode("utf-8")
+
+            t2 = time.time()
+            print(f"[DoubaoVision-单家] 开始调用API...")
+            response = self.client.chat.completions.create(
+                model=self.endpoint,
+                messages=[
+                    {"role": "system", "content": SINGLE_HAND_VISION_PROMPT},
+                    {
+                        "role": "user",
+                        "content": [{
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime_type};base64,{image_b64}"}
+                        }]
+                    }
+                ],
+                temperature=0,
+                max_tokens=1024,
+                extra_body={"thinking": {"type": "disabled"}}
+            )
+            print(f"[DoubaoVision-单家] API耗时: {time.time()-t2:.1f}s")
+
+            result_text = response.choices[0].message.content
+
+            try:
+                if "```json" in result_text:
+                    json_match = result_text.split("```json")[1].split("```")[0]
+                elif "```" in result_text:
+                    json_match = result_text.split("```")[1].split("```")[0]
+                else:
+                    json_match = result_text
+                parsed = json.loads(json_match.strip())
+                print(f"[DoubaoVision-单家] 总耗时: {time.time()-t0:.1f}s")
+                return parsed
+            except json.JSONDecodeError:
+                return {"raw_response": result_text, "error": "JSON解析失败"}
+
+        except FileNotFoundError:
+            return {"error": f"图片文件不存在: {image_path}"}
+        except Exception as e:
+            return {"error": str(e)}
+
     def parse_hands_to_format(self, vision_result: Dict) -> Dict[str, str]:
         if "error" in vision_result:
             return vision_result

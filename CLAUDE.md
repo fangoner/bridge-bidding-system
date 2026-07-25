@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Bridge bidding practice system with AI integration. Supports two-player/four-player bidding and card play practice using JF bidding conventions. Uses DeepSeek API for AI bidding/play decisions, Doubao Vision API for screenshot recognition, Deep Finesse (external exe) and endplay (Python library) for contract analysis. Card play supports three engines: LLM, MCTS (determinization + UCT tree search), and DD (pure Monte Carlo + double-dummy evaluation).
+Bridge bidding and card play practice system with AI integration. Bidding: two-player/four-player using JF conventions, DeepSeek API for AI decisions, 5-path fallback mechanism with keyword extraction from JF convention document. Card play: full trick-taking state machine with 7 engines — LLM, MCTS (determinization + UCT tree search), DD (Monte Carlo + DirectDDS), Perfect DD (full-info double-dummy), Tiered (multi-engine auto-scheduling), αμ (Pareto search solving PIMC defects), and αμ+LLM (αμ + LLM strategy review). Also uses Doubao Vision API for screenshot recognition, Deep Finesse (external exe) and endplay (Python library) for contract analysis.
 
 ## Development Commands
 
@@ -85,13 +85,20 @@ DOUBAO_SEED_ENDPOINT=your_seed_endpoint_id
 │   ├── play_service.py     # AI play service (declarer/defender prompts)
 │   ├── deep_finesse.py     # Deep Finesse external exe integration
 │   ├── output_format.py    # Graphical/compact/DF output generation
-│   └── mcts/               # MCTS/DD play engines (determinization + search)
+│   └── mcts/               # MCTS/DD/αμ play engines (determinization + search)
 │       ├── __init__.py      # Exports MctsSearch, DealSampler, HeuristicRollout, RandomizedRollout, DDSearch
 │       ├── search.py        # MCTS determinization + UCT tree search
-│       ├── dd_search.py     # Pure Monte Carlo + endplay double-dummy evaluation
-│       ├── sampler.py       # DealSampler: samples unknown hands with bid-constraint filtering
-│       ├── rollout.py       # HeuristicRollout + RandomizedRollout: fast playout to hand completion
-│       ├── constraints.py   # BidConstraint: extracted bidding constraints for sample validation
+│       ├── dd_search.py     # Monte Carlo + DirectDDS evaluation, endgame enumeration
+│       ├── alpha_mu.py      # αμ Pareto search engine (2019 Cazenave & Ventos)
+│       ├── direct_dds.py    # ctypes direct DDS C library wrapper (v1.50)
+│       ├── sampler.py       # DealSampler: uniform sampling with level-based constraint validation
+│       ├── rollout.py       # HeuristicRollout + RandomizedRollout: fast playout
+│       ├── constraints.py   # BidConstraint: constraint validation (L1/L2/L0 levels)
+│       ├── bid_constraint_library.py  # Bidding constraint definitions
+│       ├── bit_hands.py     # Bit-level hand representation for DDS
+│       ├── belief.py        # Utility functions: void detection, signal evidence collection
+│       ├── signals.py       # Defense signal models (attitude/count/suit preference)
+│       ├── llm_validator.py # LLM play validation layer (rule-based checks)
 │       └── state_utils.py   # Shared utilities: hand cloning, card application, PBN/endplay conversion
 ├── knowledge/
 │   └── loader.py           # JF document parsing, tree retrieval
@@ -103,10 +110,11 @@ DOUBAO_SEED_ENDPOINT=your_seed_endpoint_id
 │   ├── history.py          # JSON-based bidding history storage
 │   └── screenshot.py       # Screen capture via MSS
 ├── endplay_integration.py  # Batch double dummy analysis via endplay library
-└── web/                    # React frontend
+└── web/                    # React frontend (React 19 + Vite + MUI)
     ├── src/App.jsx         # Main app with all game state (~2375 lines)
-    ├── src/components/     # 14+ React components + layout/, mobile/ subdirs
-    ├── src/hooks/          # 6 custom hooks
+    ├── src/components/     # 14+ React components + layout/ subdir
+    ├── src/context/        # 3 context providers (BiddingContext, PlayContext, GameContext)
+    ├── src/hooks/          # 7 custom hooks
     ├── src/services/       # API service layer (api.js)
     ├── src/theme/          # Theme system (colorSchemes.js, dark mode)
     ├── src/constants/      # Shared constants (suits.js)
@@ -120,7 +128,7 @@ DOUBAO_SEED_ENDPOINT=your_seed_endpoint_id
 - **`bridge/bidding_service.py`**: `BiddingService` class - orchestrates keyword extraction, JF retrieval, main/fallback prompt switching, bid meanings accumulation.
 - **`knowledge/loader.py`**: `JFLoader` loads docx, segments by headings; `JFRetriever` matches keywords, builds tree from indentation (`│----`), `navigate_tree_by_bids()` for multi-bid decomposition and preprocessing.
 - **`bridge/play_engine.py`**: `PlayEngine` - state machine for card play with lead/dummy_reveal/playing/complete phases; card following rules; undo support (per-card and per-trick).
-- **`bridge/play_service.py`**: `PlayService` - AI card play logic. Supports 5 engines: LLM, MCTS, DD (Monte Carlo + DirectDDS), αμ (Pareto search), Tiered (multi-engine). Engine selected via `play_engine` param. v1.50: BeliefTracker removed, uniform sampling with level-based constraint validation.
+- **`bridge/play_service.py`**: `PlayService` - AI card play logic. Supports 7 engines: LLM, MCTS, DD, Perfect DD, Tiered, αμ, αμ+LLM. Engine selected via `play_engine` param. v1.50: BeliefTracker removed, uniform sampling with level-based constraint validation.
 - **`bridge/mcts/search.py`**: `MctsSearch` - Single-dummy MCTS with determinization. Each iteration samples unknown hands, then runs Selection→Expansion→Simulation→Backpropagation using UCT. Adaptive iteration scaling based on remaining unknown cards.
 - **`bridge/mcts/dd_search.py`**: `DDSearch` - Pure Monte Carlo + DirectDDS (v1.50). Uniform samples, batch DDS via `solve_all_boards_raw()`, 3-layer tie-breaking. Supports `search()` (MC), `search_perfect()` (full-info DD), endgame enumeration. v1.50 removed endplay dependency entirely.
 - **`bridge/mcts/sampler.py`**: `DealSampler` - Uniform random sampling (v1.50) with level-based constraint validation fallback chain. `_sample_uniform()` shuffles unknown pool and distributes per remaining counts. Constraint levels: L1 (hard: convention/meaning_parsed, 50 retries) → L2 (relaxed, 50) → L0 (voids only, 20). Removed BeliefTracker and old 3-step biased generation.
@@ -129,6 +137,10 @@ DOUBAO_SEED_ENDPOINT=your_seed_endpoint_id
 - **`bridge/mcts/direct_dds.py`**: ctypes direct DDS library wrapper (v1.50). `solve_all_boards_raw()` (Card-based) and `solve_all_boards_bits()` (bitmap-based) bypass endplay PBN/Deal conversion. ~6x faster than endplay path.
 - **`bridge/mcts/alpha_mu.py`**: `AlphaMuSearch` - Pareto search engine (2019 Cazenave & Ventos). Implements all 5 optimizations from 2021 paper (v1.50): Cut on Win, Maintaining Useful Worlds, World Cuts, Deep Alpha Cut, Empty Entry, Leaf Parallelization. Uses OutcomeVector/ParetoFront data structures, iterative deepening M=1..M, transposition table, DirectDDS bitmap leaf evaluation.
 - **`bridge/mcts/belief.py`**: Utility functions only (v1.50). `collect_voids()` for void detection, `collect_signal_evidence()` for LLM prompt injection. BeliefTracker class removed.
+- **`bridge/mcts/bid_constraint_library.py`**: Bid constraint definitions — maps bidding sequences to HCP/suit length/control constraints for sample validation.
+- **`bridge/mcts/bit_hands.py`**: Bit-level hand representation for efficient DDS board construction.
+- **`bridge/mcts/signals.py`**: Defense signal models — attitude (high=welcome/low=not), count, suit preference. `collect_all_signals()` gathers evidence from tricks; `format_partner_signals_for_prompt()` injects into LLM defense prompts.
+- **`bridge/mcts/llm_validator.py`**: Rule-based LLM play validation. Checks: (1) card legality, (2) 4th seat "can win but plays small", (3) 2nd seat "small covers big". Falls back to `_select_best_card` on validation failure.
 - **`bridge/deep_finesse.py`**: Integration with Deep Finesse 2014 v2 executable for contract analysis.
 - **`bridge/output_format.py`**: Three display formats (graphic, compact, Deep Finesse) generated programmatically without LLM calls.
 - **`llm/prompts.py`**: All prompt templates (bidding main/fallback/human, play declarer/defender/common rules).
@@ -168,11 +180,15 @@ DOUBAO_SEED_ENDPOINT=your_seed_endpoint_id
 1. **Init**: After bidding, `PlayService.initialize()` creates `PlayState` with contract, hands, player roles.
 2. **Lead phase**: Opening lead from left of declarer.
 3. **Dummy reveal**: After opening lead, dummy's hand is revealed (visible to all).
-4. **Playing**: 4-player trick-taking with follow-suit rules. AI decisions via one of three engines:
-   - **LLM engine** ("llm"): Uses declarer/defender prompts with played cards tracking, defense signals, and trump-cleared detection.
-   - **MCTS engine** ("mcts"): Determinization + UCT tree search. Samples unknown hands, builds search tree over legal plays, runs heuristic rollouts to evaluate leaf nodes. Adaptive iteration count scales with remaining unknown cards.
-   - **DD engine** ("dd"): Pure Monte Carlo + endplay `solve_board()`. Samples unknown hands, evaluates each legal card via double-dummy solver, picks best average outcome.
-   - Engine selection via `play_engine` API param or `DEFAULT_PLAY_ENGINE` config. MCTS search mode switchable via `MCTS_SEARCH_MODE` ("mcts" vs "dd").
+4. **Playing**: 4-player trick-taking with follow-suit rules. AI decisions via one of seven engines:
+   - **LLM** ("llm"): Uses declarer/defender prompts with played cards tracking, defense signals, and trump-cleared detection.
+   - **MCTS** ("mcts"): Determinization + UCT tree search. Samples unknown hands, builds search tree over legal plays, runs heuristic rollouts to evaluate leaf nodes.
+   - **DD** ("dd"): Pure Monte Carlo + DirectDDS. Uniform samples, batch DDS via `solve_all_boards_raw()`, 3-layer tie-breaking (avg significance → small card preference → avg fallback).
+   - **Perfect DD** ("perfect"): Full-info double-dummy. Single `solve_board` gives exact tricks for all legal cards. Only in deal-practice mode.
+   - **Tiered** ("tiered"): Multi-engine auto-scheduling. Opening lead → DD+LLM fusion, midgame → DD+tiered LLM upgrade, endgame (≤6 cards) → αμ or DD enumeration.
+   - **αμ** ("alphamu"): Pareto search (Cazenave & Ventos 2019). OutcomeVector + ParetoFront, solves PIMC strategy fusion/non-locality defects. Adaptive depth by remaining cards.
+   - **αμ+LLM** ("alphamu_llm"): αμ search + LLM strategy review. Groups candidate cards by suit+rank tier, triggers LLM when groups are close in success rate.
+   - Engine selection via `play_engine` API param or `DEFAULT_PLAY_ENGINE` config.
 5. **Undo**: Supports per-card undo (restores hand, phase, current_player). Recursive undo across completed tricks.
 6. **Complete**: After 13 tricks, result calculated (made/undertricks).
 
@@ -207,19 +223,26 @@ DOUBAO_SEED_ENDPOINT=your_seed_endpoint_id
 - Config keys in `config.py`: `DEFAULT_MAIN_PROMPT_MODEL`, `DEFAULT_FALLBACK_MODEL`, `DEFAULT_AI_PROVIDER`, `SHOW_FULL_LLM_OUTPUT`.
 
 ### Play Engine Configuration
-- `DEFAULT_PLAY_ENGINE`: "llm" (default), "mcts", "dd", "alphamu", or "tiered".
+- `DEFAULT_PLAY_ENGINE`: "llm" (default), "mcts", "dd", "perfect", "tiered", "alphamu", "alphamu_llm".
 - `MCTS_ITERATIONS`: Max iterations per play decision (default 5000).
 - `MCTS_TIME_LIMIT`: Hard time cap per decision in seconds (default 10.0).
 - `MCTS_EXPLORATION_CONSTANT`: UCT exploration weight (default 1.414).
 - `ROLLOUT_GREEDY_PROB`: Heuristic play probability (default 0.80).
-- `DD_NUM_SAMPLES`: Max samples per DD decision (default 100). Adaptively scaled.
+- `DD_NUM_SAMPLES`: Max samples per DD decision (default 200). Adaptively scaled.
 - `DD_MIN_SAMPLES`: Floor for adaptive sample scaling (default 15).
-- `DD_TIME_LIMIT`: Time cap for DD decisions (default 60.0).
+- `DD_TIME_LIMIT`: Time cap for DD decisions (default 30.0).
+- `DD_MAXIMIN_ENABLE`: Maximin card selection (default True). Mixes avg and min to prefer stable cards.
+- `DD_ENDGAME_CARD_THRESHOLD`: Cards/hand ≤ this triggers enumeration (default 4).
 - `ALPHA_MU_ENABLE`: Enable αμ engine (default True).
 - `ALPHA_MU_NUM_WORLDS`: Worlds per αμ search (default 20).
-- `ALPHA_MU_M`: Max recursion depth (default 2).
-- `ALPHA_MU_TIME_LIMIT`: Time cap per αμ decision (default 8.0).
-- `BELIEF_ENABLE` / `BELIEF_*`: Deprecated (v1.50), BeliefTracker removed.
+- `ALPHA_MU_M`: Max recursion depth (default 2; forced to 1 when >8 cards remain).
+- `ALPHA_MU_TIME_LIMIT`: Time cap per αμ decision (default 60.0).
+- `ALPHA_MU_ENDGAME_CARDS`: Cards/hand ≤ this triggers αμ in Tiered engine (default 8).
+- `DD_PARTICLES_MIN/MAX`: DD sample count bounds for API config (100/2000).
+- `MCTS_PARTICLES_MIN/MAX`: MCTS iteration bounds for API config (300/1000).
+- `ALPHA_MU_WORLDS_MIN/MAX`: αμ world count bounds for API config (30/500).
+- `SIGNAL_MIN_RANK`: Minimum rank for high-card defense signal (default 8).
+- `TIERED_ENDGAME_CARDS`, `TIERED_*`: Tiered engine thresholds (see config.py).
 
 ### Double Dummy Analysis
 - **endplay integration** (`endplay_integration.py`): Batch analysis of all 20 declarer-trump combos via `calc_dd_table()`.
@@ -244,6 +267,7 @@ DOUBAO_SEED_ENDPOINT=your_seed_endpoint_id
 - Follow patterns in `bridge/dealer.py` and `bridge/bidding.py` for new code.
 
 ## References
-- `DEVELOPMENT.md` - detailed development notes
-- `.env.example` - environment template
-- `CHANGELOG.md` - version history
+- `AGENTS.md` — companion file with critical gotchas, alpha cut rules, DeepSeek thinking mode, and non-obvious behaviors
+- `DEVELOPMENT.md` — detailed development notes, version history, and architecture deep-dives
+- `.env.example` — environment template
+- `CHANGELOG.md` — version history

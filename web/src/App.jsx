@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useCallback, useMemo, useState } from 'react'
 import {
   Container,
   Typography,
@@ -48,6 +48,7 @@ import useBridgeRecords from './hooks/useBridgeRecords'
 import useModelSettings from './hooks/useModelSettings'
 import useDealing from './hooks/useDealing'
 import { getPartnerPosition, BRIDGE_POSITIONS } from './utils/position'
+import { validateHands, validateBidding } from './utils/validation'
 import { formatElapsedTime } from './utils/biddingUtils'
 import './App.css'
 
@@ -109,6 +110,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     warning, setWarning,
     gameMode, setGameMode,
     dealer, setDealer,
+    vulnerability, setVulnerability,
     practiceDirection, setPracticeDirection,
     positionRoles, setPositionRoles,
     setShowPartnerHand,
@@ -131,6 +133,12 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     mode, setMode,
     setReadonlyMode,
   } = useGame()
+
+  // 修正手牌/编辑叫牌对话框的校验信息（仅在该对话框内显示）
+  const [handsValidationError, setHandsValidationError] = useState([])
+  const [handsValidationWarning, setHandsValidationWarning] = useState([])
+  const [biddingValidationError, setBiddingValidationError] = useState([])
+  const [biddingValidationWarning, setBiddingValidationWarning] = useState([])
 
   // 将当前手牌转换为自定义牌局文本格式（带花色符号，便于阅读编辑）
   const handsToEditText = (handsObj) => {
@@ -486,7 +494,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       setPositionRoles({ '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai' })
       setReadonlyMode(false)
     } else {
-      setReadonlyMode(true)
+      // 手牌不全时不锁定界面：模拟实战中人类手牌未知是正常的，
+      // 用户应能重新叫牌、编辑叫牌、切换角色、补输手牌
+      setReadonlyMode(false)
     }
 
     // 加载历史记录后获取更多输出格式
@@ -543,7 +553,10 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       const snapshot = biddingHistory[historyIndex - 1]
       setBiddingSequence(snapshot.biddingSequence)
       setCurrentBidder(snapshot.currentBidder)
-      setAiBiddingHistory(snapshot.aiBiddingHistory)
+      // snapshot.aiBiddingHistory 可能比 biddingSequence 少一条（React 批处理时序问题），
+      // 用 biddingSequence 长度截断 aiBiddingHistory 保证两者一致
+      const targetLen = snapshot.biddingSequence.length
+      setAiBiddingHistory(prev => prev.slice(0, targetLen))
       setHistoryIndex(historyIndex - 1)
       setBidSuggestion(null)
     }
@@ -650,6 +663,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     handleCustomDeal,
     handleImageDeal,
     handleScreenshotDeal,
+    handleSingleHandScreenshot,
     clearAllHands,
     parseBiddingSequenceStr,
     screenshotCancelledRef,
@@ -795,7 +809,14 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         // 没有自定义含义，调用API获取（传递数组，后端处理格式）
         setCurrentBiddingPosition(currentBidder)
         try {
-          const result = await humanBid(biddingSequence, currentBidder, bid, dealSystem)
+          const bidHistory = aiBiddingHistory.map(record => {
+            const bidPrefix = `${record.result.bid}：`
+            const meaning = record.result.meaning?.startsWith(bidPrefix)
+              ? record.result.meaning.slice(bidPrefix.length)
+              : (record.result.meaning || '')
+            return `(${record.position})${record.result.bid}：${meaning}`
+          }).join('\n')
+          const result = await humanBid(biddingSequence, currentBidder, bid, dealSystem, bidHistory)
           
           setAiBiddingHistory(prev => [...prev, {
             position: currentBidder,
@@ -1006,9 +1027,14 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       const biddingStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-') + (biddingSequence.length > 0 ? '-' : '')
       
       // 构建累积的叫牌历史（与终端版格式一致）
-      const bidHistory = aiBiddingHistory.map(record => 
-        `\n(${record.position})${record.result.meaning}`
-      ).join('')
+      const bidHistory = aiBiddingHistory.map(record => {
+        // 含义可能已包含 "叫品：" 前缀（JF匹配），先去重再统一添加
+        const bidPrefix = `${record.result.bid}：`
+        const meaning = record.result.meaning?.startsWith(bidPrefix)
+          ? record.result.meaning.slice(bidPrefix.length)
+          : (record.result.meaning || '')
+        return `(${record.position})${record.result.bid}：${meaning}`
+      }).join('\n')
       
       // 获取当前叫牌者的手牌
       const currentHand = hands[currentBidder]
@@ -1446,6 +1472,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       ? (savedState.tricks?.[completedTricksToKeep]?.cards || []).slice(0, cardsInPartialTrick)
       : []
     const isLead = actualKeep === 0
+    const allReplayed = actualKeep >= allPlayed.length
 
     const truncatedState = lastReplayState
       ? {
@@ -1454,7 +1481,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           current_trick: partialCards.length > 0
             ? { cards: partialCards, leader: partialCards[0]?.[0] || null, trump: contract.suit || null }
             : { cards: [], leader: null, trump: contract.suit || null },
-          phase: isLead ? 'lead' : 'playing',
+          phase: allReplayed ? savedState.phase : (isLead ? 'lead' : 'playing'),
         }
       : {
           ...savedState,
@@ -1463,7 +1490,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
             ? { cards: partialCards, leader: partialCards[0]?.[0] || null, trump: contract.suit || null }
             : { cards: [], leader: null, trump: contract.suit || null },
           current_player: null,
-          phase: isLead ? 'lead' : 'playing',
+          phase: allReplayed ? savedState.phase : (isLead ? 'lead' : 'playing'),
           declarer_tricks: keptTricks.filter(t =>
             t.winner === contract.declarer || t.winner === savedState.dummy
           ).length,
@@ -2384,6 +2411,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         darkMode={darkMode}
         onToggleDarkMode={onToggleDarkMode}
         aiThinking={aiThinking}
+        vulnerability={vulnerability}
+        setVulnerability={setVulnerability}
       />
       {/* 游戏设置 */}
       <SettingsPanel
@@ -2406,6 +2435,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         setDealSystem={setDealSystem}
         dealMode={dealMode}
         setDealMode={setDealMode}
+        vulnerability={vulnerability}
+        setVulnerability={setVulnerability}
         loading={loading}
         mode={mode}
         hands={hands}
@@ -2423,30 +2454,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           severity="warning"
           onClose={() => setWarning(null)}
           sx={{ mb: 3 }}
-          action={
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-              <Button
-                size="small" color="warning" variant="outlined"
-                onClick={() => {
-                  setWarning(null)
-                  setCustomDealText(handsToEditText(hands))
-                  setCustomDealOpen(true)
-                }}
-              >
-                修正手牌
-              </Button>
-              <Button
-                size="small" color="warning" variant="outlined"
-                onClick={() => {
-                  setWarning(null)
-                  setEditBiddingText(biddingToEditText(biddingSequence))
-                  setShowEditBiddingDialog(true)
-                }}
-              >
-                编辑叫牌
-              </Button>
-            </Box>
-          }
         >
           {warning}
         </Alert>
@@ -2457,12 +2464,13 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         <MainTableArea
           isMobile={isMobile}
           declarer={finalContract?.declarer || directPlayContractInfo?.declarer}
+          finalContract={finalContract}
+          directPlayContractInfo={directPlayContractInfo}
           onAnalyzeContract={handleAnalyzeContract}
           onToggleDoubleDummy={toggleDoubleDummy}
           onDealerChange={handleDealerChange}
           onPositionRoleChange={handlePositionRoleChange}
           onClearAllHands={clearAllHands}
-          onSimulatedReset={mode === 'simulated' ? clearAllHands : undefined}
           onEditHands={() => {
             setCustomDealText(handsToEditText(hands))
             setCustomDealOpen(true)
@@ -2475,6 +2483,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           onSetPlayHand={handleSetPlayHand}
           onImageDeal={() => setImageDealOpen(true)}
           onScreenshotDeal={onScreenshotDeal}
+          onSingleHandScreenshot={handleSingleHandScreenshot}
           onCustomDeal={() => setCustomDealOpen(true)}
           onDeal={handleDeal}
           onHandCardClick={handleHandCardClick}
@@ -2562,7 +2571,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       />
 
       {/* 自定义牌局对话框 */}
-      <Dialog open={customDealOpen} onClose={() => setCustomDealOpen(false)} maxWidth="md" fullWidth>
+      <Dialog open={customDealOpen} onClose={() => { setCustomDealOpen(false); setHandsValidationError([]); setHandsValidationWarning([]) }} maxWidth="md" fullWidth>
         <DialogTitle>修正手牌</DialogTitle>
         <DialogContent>
           <Alert severity="info" sx={{ mb: 2 }}>
@@ -2573,23 +2582,56 @@ function AppShell({ darkMode, onToggleDarkMode }) {
             ♠KT85 ♥AT863 ♦Q42 ♣63<br />
             格式3 - Deep Finesse格式<br />
             <br />
-            用 - 或空字符串表示缺门。行内用空格分隔四个花色。
+            用 - 或空字符串表示缺门。行内用空格分隔四个花色。<br />
+            允许只修改部分玩家：未编辑的位置（0张）保留原手牌数据。
           </Alert>
           <TextField
             multiline
             rows={8}
             fullWidth
             value={customDealText}
-            onChange={(e) => setCustomDealText(e.target.value)}
+            onChange={(e) => { setCustomDealText(e.target.value); setHandsValidationError([]); setHandsValidationWarning([]) }}
             placeholder="请输入牌局..."
           />
+          {handsValidationError.length > 0 && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {handsValidationError.map((err, i) => (<div key={i}>• {err}</div>))}
+            </Alert>
+          )}
+          {handsValidationWarning.length > 0 && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              {handsValidationWarning.map((w, i) => (<div key={i}>• {w}</div>))}
+            </Alert>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCustomDealOpen(false)}>取消</Button>
+          <Button onClick={() => { setCustomDealOpen(false); setHandsValidationError([]); setHandsValidationWarning([]) }}>取消</Button>
           <Button onClick={async () => {
             if (!customDealText.trim()) return
+            // 解析原始文本，记录每行是否为空（用于区分"未编辑"和"主动清空"）
+            const rawLines = customDealText.split('\n')
+            const posOrder = ['南', '西', '北', '东']
+            const lineIsEmpty = posOrder.map((_, i) => !(rawLines[i] || '').trim())
+
             const newHands = await handleCustomDeal(customDealText)
             if (!newHands) return
+            // 校验手牌：每家13张或0张、无重复、四家52张（仅当四家都有牌时）
+            const validation = validateHands(newHands)
+            if (!validation.valid) {
+              setHandsValidationError(validation.errors)
+              setHandsValidationWarning(validation.warnings)
+              return
+            }
+            // 合并：空行保留原数据（未编辑），非空行使用新数据（包括0张主动清空）
+            const mergedHands = { ...newHands }
+            for (let i = 0; i < 4; i++) {
+              if (lineIsEmpty[i] && hands?.[posOrder[i]]) {
+                mergedHands[posOrder[i]] = { ...hands[posOrder[i]] }
+              }
+            }
+            setHands(mergedHands)
+            setHandsValidationError([])
+            setHandsValidationWarning([])
             setCustomDealOpen(false)
             setCustomDealText('')
             // 修正后立即保存牌局，确保历史记录中是完整手牌
@@ -2598,7 +2640,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
               timestamp: new Date().toLocaleString(),
               type: 'bidding_in_progress',
               board: {
-                hands: newHands,
+                hands: mergedHands,
                 bidding_sequence: [],
                 contract: null,
                 dealer: dealer,
@@ -2618,7 +2660,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       </Dialog>
 
       {/* 编辑叫牌对话框 */}
-      <Dialog open={showEditBiddingDialog} onClose={() => setShowEditBiddingDialog(false)} maxWidth="md" fullWidth>
+      <Dialog open={showEditBiddingDialog} onClose={() => { setShowEditBiddingDialog(false); setBiddingValidationError([]); setBiddingValidationWarning([]) }} maxWidth="md" fullWidth>
         <DialogTitle>编辑叫牌序列</DialogTitle>
         <DialogContent>
           <Alert severity="info" sx={{ mb: 2 }}>
@@ -2629,21 +2671,41 @@ function AppShell({ darkMode, onToggleDarkMode }) {
             rows={4}
             fullWidth
             value={editBiddingText}
-            onChange={(e) => setEditBiddingText(e.target.value)}
+            onChange={(e) => { setEditBiddingText(e.target.value); setBiddingValidationError([]); setBiddingValidationWarning([]) }}
             placeholder="输入叫牌序列..."
           />
+          {biddingValidationError.length > 0 && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {biddingValidationError.map((err, i) => (<div key={i}>• {err}</div>))}
+            </Alert>
+          )}
+          {biddingValidationWarning.length > 0 && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              {biddingValidationWarning.map((w, i) => (<div key={i}>• {w}</div>))}
+            </Alert>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShowEditBiddingDialog(false)}>取消</Button>
+          <Button onClick={() => { setShowEditBiddingDialog(false); setBiddingValidationError([]); setBiddingValidationWarning([]) }}>取消</Button>
           <Button onClick={() => {
             if (editBiddingText.trim()) {
               const parsed = parseBiddingSequenceStr(editBiddingText)
-              if (parsed.length > 0) {
-                setBiddingSequence(parsed)
-                setShowEditBiddingDialog(false)
-              } else {
-                setError('叫牌格式解析失败，请检查格式')
+              if (parsed.length === 0) {
+                setBiddingValidationError(['叫牌格式解析失败，请检查格式'])
+                return
               }
+              // 校验叫牌：位置连续性、叫品合法性、阶数递增、X/XX合法性
+              const validation = validateBidding(parsed, dealer)
+              if (!validation.valid) {
+                setBiddingValidationError(validation.errors)
+                setBiddingValidationWarning(validation.warnings)
+                return
+              }
+              setBiddingValidationError([])
+              setBiddingValidationWarning(validation.warnings)
+              // 使用标准化后的序列（处理pass=、X、XX等）
+              setBiddingSequence(validation.normalized)
+              setShowEditBiddingDialog(false)
             }
           }} variant="contained">
             确定

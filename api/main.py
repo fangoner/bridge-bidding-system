@@ -5,7 +5,9 @@
 """
 
 import sys
+import subprocess
 import os
+import io
 import re
 import json
 import time
@@ -48,9 +50,9 @@ from config import (
     ALL_MODELS, ALL_BASE_MODELS, DOUBAO_MODEL_NAMES,
     is_doubao_model, is_reasoning_model, get_base_model,
     DOUBAO_MODEL_2_1_PRO, DOUBAO_MODEL_2_1_TURBO,
-    BELIEF_DD_PARTICLES, BELIEF_DD_PARTICLES_MIN, BELIEF_DD_PARTICLES_MAX,
-    BELIEF_MCTS_PARTICLES, BELIEF_MCTS_PARTICLES_MIN, BELIEF_MCTS_PARTICLES_MAX,
-    BELIEF_ALPHA_MU_PARTICLES, BELIEF_ALPHA_MU_PARTICLES_MIN, BELIEF_ALPHA_MU_PARTICLES_MAX,
+    DD_PARTICLES_MIN, DD_PARTICLES_MAX,
+    MCTS_PARTICLES_MIN, MCTS_PARTICLES_MAX,
+    ALPHA_MU_WORLDS_MIN, ALPHA_MU_WORLDS_MAX,
 )
 
 try:
@@ -170,6 +172,7 @@ class HumanBidRequest(BaseModel):
     position: str
     user_input: str
     deal_system: str = DEFAULT_DEAL_SYSTEM
+    bid_history: str = ""  # 已累积的叫牌含义文本，供 LLM 理解上下文
 
 
 class HumanBidResponse(BaseModel):
@@ -267,6 +270,7 @@ async def human_bid(request: HumanBidRequest):
             bidding_str = "-".join([f"({b['position']}){b['bid']}" for b in request.bidding_sequence]) + "-"
         
         bidding_service = BiddingService(llm_client, jf_retriever)
+        bidding_service.set_bid_meanings(request.bid_history if request.bid_history else "")
         result = bidding_service.human_bid(
             user_input=request.user_input,
             position=request.position,
@@ -283,7 +287,7 @@ async def human_bid(request: HumanBidRequest):
         meaning = result.get("叫品含义", "")
         if isinstance(meaning, dict):
             meaning = json.dumps(meaning, ensure_ascii=False)
-        
+        result["_prompt"] = bidding_service._last_prompt
         return HumanBidResponse(
             bid=bid,
             meaning=meaning,
@@ -471,10 +475,12 @@ async def bid(request: BidRequest):
         selection_process = result.get("叫品筛选过程") or ""
         if isinstance(selection_process, dict):
             selection_process = json.dumps(selection_process, ensure_ascii=False)
+        # 附带发给 LLM 的完整提示词
+        result["_prompt"] = bidding_service._last_prompt
 
         if not use_doubao and target_model and original_model:
             current_llm_client.model = original_model
-        
+
         return BidResponse(
             bid=bid,
             meaning=meaning,
@@ -665,14 +671,58 @@ def _format_bidding_sequence(bidding):
         return None
     if isinstance(bidding, list):
         formatted_bids = []
+        ended_by_marker = False
         for item in bidding:
+            if ended_by_marker:
+                # "=" 之后的所有叫品一律丢弃（叫牌已结束）
+                continue
             if ":" in item:
                 pos, bid = item.split(":", 1)
+                pos = pos.strip()
+                # 检测并去除 "=" 叫牌结束标记
+                has_end_marker = "=" in bid
+                # 去除 "=" 后再去除首尾的 "-"、"/" 等符号（处理 "pass-"、"pass--"、"-p" 等情况）
+                cleaned = bid.replace("=", "").strip().strip("-/").strip()
+                # 标准化 pass 的多种表示形式
+                if cleaned.lower() in ["pass", "p", "不叫"] or cleaned in ["-", "/", ""]:
+                    bid = "pass"
+                else:
+                    bid = cleaned
+                # 若原叫品只是"="或符号（无实质内容），按pass处理
+                if has_end_marker and bid == "":
+                    bid = "pass"
                 formatted_bids.append(f"({pos}){bid}")
+                if has_end_marker:
+                    ended_by_marker = True
             else:
                 formatted_bids.append(item)
         return "-".join(formatted_bids) + "-"
     return bidding
+
+
+def _normalize_vulnerability(vul):
+    """将AI识别返回的局况标准化为 'NV'/'NS'/'EW'/'All' 之一"""
+    if not vul or vul == "null":
+        return None
+    if isinstance(vul, str):
+        v = vul.strip().lower()
+        if v in ("nv", "none", "none vul", "none vulnerable", "双无", "双无局"):
+            return "NV"
+        if v in ("ns", "ns vul", "n-s", "n/s", "南北", "南北有局", "南北方有局"):
+            return "NS"
+        if v in ("ew", "ew vul", "e-w", "e/w", "东西", "东西有局", "东西方有局"):
+            return "EW"
+        if v in ("all", "both", "both vul", "both vulnerable", "双有", "双有局"):
+            return "All"
+        if "双无" in v or "none" in v:
+            return "NV"
+        if "双有" in v or "both" in v:
+            return "All"
+        if "南北" in v or "ns" in v:
+            return "NS"
+        if "东西" in v or "ew" in v:
+            return "EW"
+    return None
 
 
 def _parse_contract_string(contract_str):
@@ -874,14 +924,21 @@ def _hands_to_response_dict(hands):
 
 @app.post("/api/custom-deal", response_model=CustomDealResponse)
 async def custom_deal(request: CustomDealRequest):
-    """自定义牌局接口"""
+    """自定义牌局接口
+
+    支持部分输入：用户可只修改1-3行，空缺位置返回空手牌（由前端保留原数据或清空）
+    空行表示未编辑，非空行（即使0张牌）表示主动修改/清空
+    """
     try:
-        lines = [l.strip() for l in request.input_text.strip().split("\n") if l.strip()]
-        
-        if any(line.strip().startswith("Deal:") for line in lines):
+        # 不过滤空行，保留位置信息
+        raw_lines = request.input_text.split("\n")
+        lines = [l.strip() for l in raw_lines]
+        non_empty_lines = [l for l in lines if l]
+
+        if any(line.startswith("Deal:") for line in non_empty_lines):
             df_result = parse_df_deal(request.input_text)
             hands = {}
-            
+
             if df_result.get("north"):
                 hands[Position.NORTH] = parse_hand_string(df_format_to_hand(df_result["north"]))
             if df_result.get("west"):
@@ -890,7 +947,7 @@ async def custom_deal(request: CustomDealRequest):
                 hands[Position.EAST] = parse_hand_string(df_format_to_hand(df_result["east"]))
             if df_result.get("south"):
                 hands[Position.SOUTH] = parse_hand_string(df_format_to_hand(df_result["south"]))
-            
+
             if len(hands) == 4:
                 hands_dict = _hands_to_response_dict(hands)
                 # 提取首攻信息：DF格式中 OnLead + Lead 组合为 "位置:牌张"
@@ -913,11 +970,15 @@ async def custom_deal(request: CustomDealRequest):
                     success=False,
                     message=f"牌局解析不完整，缺少 {4 - len(hands)} 家手牌"
                 )
-        elif len(lines) == 4:
+        elif 1 <= len(non_empty_lines) <= 4:
             input_text = convert_10_to_T(request.input_text)
             hands = parse_deal_input(input_text)
             if hands:
                 hands_dict = _hands_to_response_dict(hands)
+                # 补齐缺失位置为空手牌（前端根据原始文本决定保留原数据或清空）
+                for pos_name in ["南", "西", "北", "东"]:
+                    if pos_name not in hands_dict:
+                        hands_dict[pos_name] = {"spades": "", "hearts": "", "diamonds": "", "clubs": "", "hcp": 0}
                 return CustomDealResponse(
                     hands=hands_dict,
                     dealer="南",
@@ -936,7 +997,7 @@ async def custom_deal(request: CustomDealRequest):
                 hands={},
                 dealer="南",
                 success=False,
-                message=f"需要输入4行标准格式或Deep Finesse格式，当前输入了{len(lines)}行"
+                message=f"需要输入1-4行标准格式或Deep Finesse格式，当前输入了{len(non_empty_lines)}行"
             )
     except Exception as e:
         print(f"[ERROR] 自定义牌局失败: {str(e)}")
@@ -963,6 +1024,7 @@ class ImageDealResponse(BaseModel):
     contract_redoubled: Optional[bool] = None
     opening_lead: Optional[str] = None
     page_type: Optional[str] = None
+    vulnerability: Optional[str] = None
 
 
 @app.post("/api/image-deal", response_model=ImageDealResponse)
@@ -1000,60 +1062,46 @@ async def image_deal(image: bytes = File(..., description="图片文件")):
                 success=False,
                 message=f"识别失败: {result['error']}"
             )
-        
+
         hands, validation_errors = _parse_vision_hands(result)
 
-        # 解析叫牌、定约、首攻（手牌不完整时也尽量提取）
+        # 解析叫牌、定约、首攻、局况（手牌不完整时也尽量提取）
         bidding_str = _format_bidding_sequence(result.get("叫牌序列"))
         contract_str = result.get("当前定约")
         contract_info = _parse_contract_string(contract_str)
         lead_info = _parse_opening_lead(result.get("首攻"))
         dealer = _extract_dealer_from_bidding(result.get("叫牌序列"))
+        vulnerability = _normalize_vulnerability(result.get("局况"))
 
-        # 宽松接受：有3+手牌即可
-        if len(hands) >= 3:
-            hands_dict = _hands_to_response_dict(hands)
-            warnings = []
-            if validation_errors:
-                warnings.extend(validation_errors)
-            if len(hands) < 4:
-                missing = [p for p in ["南", "西", "北", "东"] if p not in [get_position_name(pos) for pos in hands]]
-                warnings.append(f"缺少{','.join(missing)}的手牌")
-
-            print(f"[INFO] 图片识别总耗时: {time.time() - t_start:.1f}s")
-            return ImageDealResponse(
-                hands=hands_dict,
-                dealer=dealer,
-                success=True,
-                message=("牌局已加载" if not warnings else "识别完成（" + "; ".join(warnings) + "）"),
-                bidding_sequence=bidding_str,
-                contract=contract_str,
-                contract_level=contract_info.get("level"),
-                contract_suit=contract_info.get("suit"),
-                contract_declarer=contract_info.get("declarer"),
-                contract_doubled=contract_info.get("doubled", False),
-                contract_redoubled=contract_info.get("redoubled", False),
-                opening_lead=f"{lead_info['position']}:{lead_info['card']}" if lead_info else None,
-                page_type=result.get("页面类型", "未知")
-            )
-
-        # ≤2手牌才真正失败
+        # 无最低家数要求：识别到几家就是几家，缺失位置填空牌
+        hands_dict = _hands_to_response_dict(hands)
+        for pos_name in ["南", "西", "北", "东"]:
+            if pos_name not in hands_dict:
+                hands_dict[pos_name] = {"spades": "", "hearts": "", "diamonds": "", "clubs": "", "hcp": 0}
+        warnings = []
         if validation_errors:
-            error_msg = "; ".join(validation_errors)
-            print(f"[WARN] 手牌验证失败: {error_msg}")
-            return ImageDealResponse(
-                hands={},
-                dealer="南",
-                success=False,
-                message=f"手牌验证失败: {error_msg}"
-            )
-        else:
-            return ImageDealResponse(
-                hands={},
-                dealer="南",
-                success=False,
-                message=f"仅识别到{len(hands)}家手牌，至少需要3家"
-            )
+            warnings.extend(validation_errors)
+        missing = [p for p in ["南", "西", "北", "东"] if p not in [get_position_name(pos) for pos in hands]]
+        if missing:
+            warnings.append(f"缺少{','.join(missing)}的手牌（显示为未知）")
+
+        print(f"[INFO] 图片识别总耗时: {time.time() - t_start:.1f}s")
+        return ImageDealResponse(
+            hands=hands_dict,
+            dealer=dealer,
+            success=True,
+            message=("牌局已加载" if not warnings else "识别完成（" + "; ".join(warnings) + "）"),
+            bidding_sequence=bidding_str,
+            contract=contract_str,
+            contract_level=contract_info.get("level"),
+            contract_suit=contract_info.get("suit"),
+            contract_declarer=contract_info.get("declarer"),
+            contract_doubled=contract_info.get("doubled", False),
+            contract_redoubled=contract_info.get("redoubled", False),
+            opening_lead=f"{lead_info['position']}:{lead_info['card']}" if lead_info else None,
+            page_type=result.get("页面类型", "未知"),
+            vulnerability=vulnerability
+        )
     except Exception as e:
         print(f"[ERROR] 图片识别失败: {str(e)}")
         traceback.print_exc()
@@ -1071,23 +1119,33 @@ class TriggerScreenshotResponse(BaseModel):
     screenshot_path: Optional[str] = None
 
 
+# 记录触发截屏前的剪贴板内容哈希，轮询时只接受不同的内容
+_pre_screenshot_hash: Optional[str] = None
+# 单家截屏识别的独立哈希（避免与整体识别互相干扰）
+_pre_single_hand_hash: Optional[str] = None
+
+
 @app.post("/api/trigger-screenshot")
 async def trigger_screenshot():
     """触发系统截屏快捷键，同时记录当前剪贴板内容的哈希"""
-    global _pre_screenshot_hash
-    # 在触发截屏前，读取当前剪贴板内容的哈希，后续轮询只接受不同的内容
+    global _pre_screenshot_hash, _pre_single_hand_hash
+    # 先读当前剪贴板内容并记录哈希，轮询时跳过旧内容（避免误识别旧图片）
     try:
         result = read_clipboard_image()
         if result is not None:
             image_data, _ = result
-            _pre_screenshot_hash = hashlib.md5(image_data).hexdigest()
-            print(f"[INFO] 触发截屏前，记录剪贴板哈希: {_pre_screenshot_hash[:8]}...")
+            old_hash = hashlib.md5(image_data).hexdigest()
+            _pre_screenshot_hash = old_hash
+            _pre_single_hand_hash = old_hash
+            print(f"[INFO] 触发截屏，记录旧剪贴板哈希: {old_hash[:8]}...")
         else:
             _pre_screenshot_hash = None
-            print(f"[INFO] 触发截屏前，剪贴板无图片")
-    except Exception:
+            _pre_single_hand_hash = None
+            print(f"[INFO] 触发截屏，剪贴板为空")
+    except Exception as e:
         _pre_screenshot_hash = None
-
+        _pre_single_hand_hash = None
+        print(f"[INFO] 触发截屏，读取剪贴板失败: {e}")
     success = trigger_screenshot_shortcut()
     if success:
         return {"success": True, "message": "截屏已触发，请在截屏工具中选择区域后点击识别"}
@@ -1095,8 +1153,92 @@ async def trigger_screenshot():
         return {"success": False, "message": "触发截屏失败"}
 
 
-# 记录触发截屏前的剪贴板内容哈希，轮询时只接受不同的内容
-_pre_screenshot_hash: Optional[str] = None
+@app.post("/api/read-hand-clipboard")
+async def read_hand_clipboard(position: str = ""):
+    """从剪贴板读取截图，识别单家手牌"""
+    global _pre_single_hand_hash
+    try:
+        if position not in ["南", "西", "北", "东"]:
+            return {"success": False, "message": f"无效的位置: {position}"}
+
+        result = read_clipboard_image()
+        if result is None:
+            return {"success": False, "message": "剪贴板中没有图片，请先截屏"}
+
+        image_data, fmt = result
+
+        current_hash = hashlib.md5(image_data).hexdigest()
+        if current_hash == _pre_single_hand_hash:
+            print(f"[INFO] 单家识别剪贴板图片无变化（哈希: {current_hash[:8]}...），跳过")
+            return {"success": False, "message": "剪贴板图片无变化（已处理过），请先截取新截图"}
+
+        print(f"[INFO] 单家识别 {position}家，新剪贴板内容（哈希: {current_hash[:8]}...）")
+
+        import time
+        t_clipboard = time.time()
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{fmt}") as tmp:
+            tmp.write(image_data)
+            image_path = tmp.name
+
+        print(f"[INFO] 单家截图已保存到: {image_path} ({fmt})")
+
+        result = vision_client.read_single_hand_from_image(image_path, position)
+
+        os.unlink(image_path)
+
+        if "error" in result:
+            return {
+                "success": False,
+                "message": f"识别失败: {result['error']}"
+            }
+
+        hand_str = result.get("手牌") or ""
+        if not hand_str:
+            return {"success": False, "message": "未识别到手牌"}
+
+        hand_str = convert_10_to_T(hand_str)
+        suit_map = {"♠": "spades", "♥": "hearts", "♦": "diamonds", "♣": "clubs"}
+        suits = {"spades": "", "hearts": "", "diamonds": "", "clubs": ""}
+        suit_positions = [(m.start(), m.group()) for m in re.finditer(r'[♠♥♦♣]', hand_str)]
+        for i, (pos, symbol) in enumerate(suit_positions):
+            start = pos + 1
+            end = suit_positions[i + 1][0] if i + 1 < len(suit_positions) else len(hand_str)
+            card_str = hand_str[start:end].strip()
+            card_str = re.sub(r'[-—–－―‐]', '-', card_str)
+            card_str = re.sub(r'[^AKQJT98765432]', '', card_str)
+            suits[suit_map[symbol]] = card_str
+
+        hand = Hand(spades=suits["spades"], hearts=suits["hearts"], diamonds=suits["diamonds"], clubs=suits["clubs"])
+        total_cards = len(hand.spades) + len(hand.hearts) + len(hand.diamonds) + len(hand.clubs)
+
+        _pre_single_hand_hash = current_hash
+
+        warnings = []
+        if total_cards != 13:
+            warnings.append(f"识别到{total_cards}张牌（标准为13张）")
+
+        hand_dict = hand_to_dict(hand)
+        hand_dict["hcp"] = sum(4 if c == "A" else 3 if c == "K" else 2 if c == "Q" else 1 if c == "J" else 0
+                              for c in (hand.spades + hand.hearts + hand.diamonds + hand.clubs).upper())
+
+        print(f"[INFO] 单家识别 {position}家完成: {total_cards}张, 耗时: {time.time() - t_clipboard:.1f}s")
+        return {
+            "success": True,
+            "message": "识别成功" if not warnings else "识别完成（" + "; ".join(warnings) + "）",
+            "position": position,
+            "hand": hand_dict,
+            "total_cards": total_cards
+        }
+
+    except Exception as e:
+        print(f"[ERROR] 单家识别失败: {str(e)}")
+        traceback.print_exc()
+        return {
+            "success": False,
+            "message": f"单家识别失败: {str(e)}"
+        }
+
 
 @app.post("/api/read-clipboard")
 async def read_clipboard():
@@ -1109,22 +1251,22 @@ async def read_clipboard():
 
         image_data, fmt = result
 
-        # 计算当前剪贴板内容的哈希值，与触发截屏前的哈希比较
+        # 哈希防重：与上一轮已处理过的图片比较，避免重复识别同一截图
         current_hash = hashlib.md5(image_data).hexdigest()
         if current_hash == _pre_screenshot_hash:
-            print(f"[INFO] 剪贴板内容未变化（哈希: {current_hash[:8]}...），等待新截图")
-            return {"success": False, "message": "剪贴板内容未变化，请先截取新截图"}
+            print(f"[INFO] 剪贴板图片无变化（哈希: {current_hash[:8]}...），跳过")
+            return {"success": False, "message": "剪贴板图片无变化（已处理过），请先截取新截图"}
 
-        print(f"[INFO] 检测到新剪贴板内容（当前: {current_hash[:8]}...，截屏前: {_pre_screenshot_hash[:8] if _pre_screenshot_hash else 'None'}）")
+        print(f"[INFO] 检测到新剪贴板内容（当前: {current_hash[:8]}...）")
 
         import time
         t_clipboard = time.time()
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{fmt}') as tmp:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{fmt}") as tmp:
             tmp.write(image_data)
             image_path = tmp.name
 
-        print(f"[INFO] 截图已保存到: {image_path}")
+        print(f"[INFO] 截图已保存到: {image_path} ({fmt})")
 
         result = vision_client.read_cards_from_image(image_path)
         print(f"[DEBUG] vision_client返回结果: {result}")
@@ -1149,47 +1291,35 @@ async def read_clipboard():
         lead_info = _parse_opening_lead(result.get("首攻"))
         dealer = _extract_dealer_from_bidding(result.get("叫牌序列"))
 
-        # 宽松接受：有3+手牌即可，警告放在message中
-        if len(hands) >= 3:
-            hands_dict = _hands_to_response_dict(hands)
-            warnings = []
-            if validation_errors:
-                warnings.extend(validation_errors)
-            if len(hands) < 4:
-                missing = [p for p in ["南", "西", "北", "东"] if p not in [get_position_name(pos) for pos in hands]]
-                warnings.append(f"缺少{','.join(missing)}的手牌")
-
-            print(f"[INFO] 截屏识别总耗时: {time.time() - t_clipboard:.1f}s")
-            return {
-                "success": True,
-                "message": ("识别成功" if not warnings else "识别完成（" + "; ".join(warnings) + "）"),
-                "hands": hands_dict,
-                "dealer": dealer,
-                "bidding_sequence": bidding_str,
-                "contract": contract_str,
-                "contract_level": contract_info.get("level"),
-                "contract_suit": contract_info.get("suit"),
-                "contract_declarer": contract_info.get("declarer"),
-                "contract_doubled": contract_info.get("doubled", False),
-                "contract_redoubled": contract_info.get("redoubled", False),
-                "opening_lead": f"{lead_info['position']}:{lead_info['card']}" if lead_info else None,
-                "page_type": result.get("页面类型", "未知")
-            }
-
-        # ≤2手牌才真正失败
+        # 无最低家数要求：识别到几家就是几家，缺失位置填空牌
+        hands_dict = _hands_to_response_dict(hands)
+        for pos_name in ["南", "西", "北", "东"]:
+            if pos_name not in hands_dict:
+                hands_dict[pos_name] = {"spades": "", "hearts": "", "diamonds": "", "clubs": "", "hcp": 0}
+        warnings = []
         if validation_errors:
-            error_msg = "; ".join(validation_errors)
-            return {
-                "success": False,
-                "message": f"手牌验证失败: {error_msg}",
-                "bidding_sequence": bidding_str,
-                "contract": contract_str,
-            }
-        else:
-            return {
-                "success": False,
-                "message": f"仅识别到{len(hands)}家手牌，至少需要3家"
-            }
+            warnings.extend(validation_errors)
+        missing = [p for p in ["南", "西", "北", "东"] if p not in [get_position_name(pos) for pos in hands]]
+        if missing:
+            warnings.append(f"缺少{','.join(missing)}的手牌（显示为未知）")
+
+        print(f"[INFO] 截屏识别总耗时: {time.time() - t_clipboard:.1f}s")
+        return {
+            "success": True,
+            "message": ("识别成功" if not warnings else "识别完成（" + "; ".join(warnings) + "）"),
+            "hands": hands_dict,
+            "dealer": dealer,
+            "bidding_sequence": bidding_str,
+            "contract": contract_str,
+            "contract_level": contract_info.get("level"),
+            "contract_suit": contract_info.get("suit"),
+            "contract_declarer": contract_info.get("declarer"),
+            "contract_doubled": contract_info.get("doubled", False),
+            "contract_redoubled": contract_info.get("redoubled", False),
+            "opening_lead": f"{lead_info['position']}:{lead_info['card']}" if lead_info else None,
+            "vulnerability": vulnerability,
+            "page_type": result.get("页面类型", "未知")
+        }
 
     except Exception as e:
         print(f"[ERROR] 读取剪贴板失败: {str(e)}")
@@ -1198,6 +1328,39 @@ async def read_clipboard():
             "success": False,
             "message": f"读取剪贴板失败: {str(e)}"
         }
+
+
+@app.get("/api/diag-clipboard")
+async def diag_clipboard():
+    """诊断：测试剪贴板读取，返回详细耗时和结果"""
+    import time as _time
+    results = []
+
+    # 测试1：启动PowerShell时间
+    t0 = _time.time()
+    try:
+        subprocess.run(["powershell", "-Command", "Write-Output 'POWERSHELL_OK'"],
+                       capture_output=True, text=True, timeout=5)
+        ps_launch_time = _time.time() - t0
+        results.append(f"PowerShell启动: {ps_launch_time:.2f}s")
+    except Exception as e:
+        results.append(f"PowerShell启动失败: {e}")
+        return {"success": False, "diagnostics": results}
+
+    # 测试2：测试剪贴板读取（含耗时）
+    t0 = _time.time()
+    img_result = read_clipboard_image()
+    clipboard_time = _time.time() - t0
+
+    if img_result is None:
+        results.append(f"剪贴板读取: {clipboard_time:.2f}s → 无图片")
+        results.append("提示：请先使用 Win+Shift+S 手动截屏，或在测试前在网页中完成截屏")
+    else:
+        image_data, fmt = img_result
+        results.append(f"剪贴板读取: {clipboard_time:.2f}s → 有图片 ({len(image_data)}字节, {fmt})")
+        results.append("图片识别管道正常！如果截屏识别仍然超时，问题在前端轮询环节。")
+
+    return {"success": True, "diagnostics": results}
 
 
 class DoubleDummyRequest(BaseModel):
@@ -1961,14 +2124,14 @@ async def get_particle_settings():
     amu_val = service.alpha_mu_search.num_worlds if service.alpha_mu_search else ALPHA_MU_NUM_WORLDS
     return {
         "dd_particles": dd_val,
-        "dd_min": BELIEF_DD_PARTICLES_MIN,
-        "dd_max": BELIEF_DD_PARTICLES_MAX,
+        "dd_min": DD_PARTICLES_MIN,
+        "dd_max": DD_PARTICLES_MAX,
         "mcts_particles": mcts_val,
-        "mcts_min": BELIEF_MCTS_PARTICLES_MIN,
-        "mcts_max": BELIEF_MCTS_PARTICLES_MAX,
+        "mcts_min": MCTS_PARTICLES_MIN,
+        "mcts_max": MCTS_PARTICLES_MAX,
         "alpha_mu_particles": amu_val,
-        "alpha_mu_min": BELIEF_ALPHA_MU_PARTICLES_MIN,
-        "alpha_mu_max": BELIEF_ALPHA_MU_PARTICLES_MAX,
+        "alpha_mu_min": ALPHA_MU_WORLDS_MIN,
+        "alpha_mu_max": ALPHA_MU_WORLDS_MAX,
     }
 
 
@@ -1978,15 +2141,15 @@ async def set_particle_settings(request: ParticleSettingsRequest):
     service = get_play_service()
     updates = {}
     if request.dd_particles is not None:
-        val = max(BELIEF_DD_PARTICLES_MIN, min(BELIEF_DD_PARTICLES_MAX, request.dd_particles))
+        val = max(DD_PARTICLES_MIN, min(DD_PARTICLES_MAX, request.dd_particles))
         service.dd_search.num_samples = val
         updates["dd_particles"] = val
     if request.mcts_particles is not None:
-        val = max(BELIEF_MCTS_PARTICLES_MIN, min(BELIEF_MCTS_PARTICLES_MAX, request.mcts_particles))
+        val = max(MCTS_PARTICLES_MIN, min(MCTS_PARTICLES_MAX, request.mcts_particles))
         service.mcts.iterations = val
         updates["mcts_particles"] = val
     if request.alpha_mu_particles is not None:
-        val = max(BELIEF_ALPHA_MU_PARTICLES_MIN, min(BELIEF_ALPHA_MU_PARTICLES_MAX, request.alpha_mu_particles))
+        val = max(ALPHA_MU_WORLDS_MIN, min(ALPHA_MU_WORLDS_MAX, request.alpha_mu_particles))
         if service.alpha_mu_search is not None:
             service.alpha_mu_search.num_worlds = val
         updates["alpha_mu_particles"] = val

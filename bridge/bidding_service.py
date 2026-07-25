@@ -19,11 +19,13 @@ class BiddingService:
         self.use_fallback = False
         self.bid_meanings = ""
         self._slam_cache = None
+        self._last_prompt = None
 
     def reset(self):
         self.use_fallback = False
         self.bid_meanings = ""
         self._slam_cache = None
+        self._last_prompt = None
 
     def _get_slam_result(self, bidding_sequence, partner_name):
         if self._slam_cache is None:
@@ -309,6 +311,7 @@ class BiddingService:
                 bid_meaning=self.bid_meanings if self.bid_meanings else "无",
                 deal_system=deal_system
             )
+            self._last_prompt = prompt
 
             try:
                 result = self.llm_client.chat_bidding(prompt, temperature=MAIN_PROMPT_TEMPERATURE, thinking=self._use_reasoning)
@@ -317,7 +320,9 @@ class BiddingService:
 
                 if self._is_no_valid_bid(result):
                     # 无合格叫品，恢复 bid_meanings 并走 fallback
+                    # 主提示词已用备选叫品列表验证过，原始结构性JF片段对fallback无帮助，用"成局与满贯"兜底
                     self.bid_meanings = original_bid_meanings
+                    slam_result = self._get_slam_result(bidding_sequence, partner_name)
                     if not is_opener:
                         # P0-2 修复：不再设置 self.use_fallback = True
                         # 原逻辑会通过前端 setUseFallback 闭环传播，导致后续轮次跳过主提示词
@@ -327,7 +332,7 @@ class BiddingService:
                             "叫品筛选过程": result.get("叫品筛选过程", "N/A")
                         }
                         fallback_result = self._fallback_bid(
-                            "",
+                            slam_result.get("original_content", ""),
                             "",
                             player_name,
                             partner_name,
@@ -336,14 +341,14 @@ class BiddingService:
                             dist,
                             bidding_sequence,
                             is_structural,
-                            from_main_prompt=True,
+                            jf_keyword="成局与满贯",
                             deal_system=deal_system,
                             verbose=verbose
                         )
                         fallback_result["主提示词输出"] = main_prompt_output
                         return fallback_result
                     return self._fallback_bid(
-                        "",
+                        slam_result.get("original_content", ""),
                         "",
                         player_name,
                         partner_name,
@@ -352,7 +357,7 @@ class BiddingService:
                         dist,
                         bidding_sequence,
                         is_structural,
-                        from_main_prompt=True,
+                        jf_keyword="成局与满贯",
                         deal_system=deal_system,
                         verbose=verbose
                     )
@@ -378,6 +383,7 @@ class BiddingService:
                 return {"error": str(e), "选定叫品": "pass", "叫品含义": f"主提示词异常: {e}"}
 
         # 主路径重试耗尽，走 fallback
+        # 主提示词已用备选叫品列表验证过，原始结构性JF片段对fallback无帮助，用"成局与满贯"兜底
         self.bid_meanings = original_bid_meanings
         if verbose:
             print(f"[ai_bid] 主提示词连续 {MAIN_PROMPT_MAX_RETRIES+1} 次叫品非法({last_violation})，走 fallback")
@@ -387,8 +393,9 @@ class BiddingService:
             "叫品筛选过程": (last_result.get("叫品筛选过程", "N/A") if last_result else "N/A") + f"\n[合规性重试耗尽] {last_violation}",
             "合规性违规": last_violation
         }
+        slam_result = self._get_slam_result(bidding_sequence, partner_name)
         fallback_result = self._fallback_bid(
-            "",
+            slam_result.get("original_content", ""),
             "",
             player_name,
             partner_name,
@@ -397,7 +404,7 @@ class BiddingService:
             dist,
             bidding_sequence,
             is_structural,
-            from_main_prompt=True,
+            jf_keyword="成局与满贯",
             deal_system=deal_system,
             verbose=verbose
         )
@@ -415,7 +422,6 @@ class BiddingService:
         dist: str,
         bidding_sequence: str,
         is_structural: bool,
-        from_main_prompt: bool = False,
         jf_keyword: str = None,
         deal_system: str = "2D/2H/2S：自然阻击",
         verbose: bool = False
@@ -423,12 +429,6 @@ class BiddingService:
         actual_jf_content = jf_content
         actual_subsequent_bids = subsequent_bids_str
         actual_jf_keyword = jf_keyword
-
-        if from_main_prompt:
-            slam_result = self._get_slam_result(bidding_sequence, partner_name)
-            actual_jf_content = slam_result.get("original_content", "")
-            actual_subsequent_bids = ""
-            actual_jf_keyword = "成局与满贯"
 
         # 合规性检查重试循环：不合规时重新调用 LLM，重试时附加反馈
         original_bid_meanings = self.bid_meanings
@@ -457,6 +457,7 @@ class BiddingService:
                 is_structural="是" if is_structural else "否",
                 deal_system=deal_system
             )
+            self._last_prompt = prompt
 
             try:
                 result = self.llm_client.chat_bidding_fallback(prompt, temperature=FALLBACK_PROMPT_TEMPERATURE, thinking=self._use_reasoning)
@@ -520,19 +521,19 @@ class BiddingService:
         bid = user_input.strip().upper()
         if bid == "P":
             bid = "pass"
-        
+
         if bid.lower() == "pass":
             player_name = position
             bidding_prefix = bidding_sequence if bidding_sequence else ""
             full_sequence = f"{bidding_prefix}({player_name})pass-"
             return {"选定叫品": "pass", "叫品含义": "pass：不叫", "JF约定": "", "完整叫牌序列": full_sequence}
-        
+
         player_name = position
         partner_name = get_partner_position(position)
-        
+
         jf_keyword = extract_retrieval_keyword(bidding_sequence, deal_system, player_name)
         jf_result = self.jf_retriever.retrieve_with_preprocess(jf_keyword, bidding_sequence, partner_name)
-        
+
         subsequent_bids = jf_result.get("subsequent_bids", [])
         for item in subsequent_bids:
             if item.get("bid", "").upper() == bid.upper():
@@ -542,41 +543,48 @@ class BiddingService:
                         print(f"[human_bid] 从JF约定匹配到 {bid} 含义: {meaning}")
                     full_sequence = f"{bidding_sequence}({player_name}){bid}-"
                     return {"选定叫品": bid, "叫品含义": meaning, "JF约定": jf_keyword, "完整叫牌序列": full_sequence}
-        
+
         if not self.llm_client.is_configured():
             full_sequence = f"{bidding_sequence}({player_name}){bid}-"
             return {"选定叫品": bid, "叫品含义": "API Key未配置，无法获取叫品含义", "JF约定": jf_keyword, "完整叫牌序列": full_sequence}
-        
-        is_opener = self._check_is_opener(bidding_sequence)
-        
-        is_structural = jf_result.get("is_structural_convention", False)
+
         has_subsequent = len(subsequent_bids) > 0
-        
-        if is_structural and has_subsequent:
-            jf_content = ""
-            subsequent_bids_str = self._format_subsequent_bids(jf_result, partner_name, is_opener)
-        else:
-            jf_content = jf_result.get("original_content", "")
-            subsequent_bids_str = ""
-        
+
+        if has_subsequent:
+            if verbose:
+                print(f"[human_bid] 结构性JF片段，{bid} 不在备选叫品中，无需调用LLM")
+            full_sequence = f"{bidding_sequence}({player_name}){bid}-"
+            return {"选定叫品": bid, "叫品含义": f"叫品 {bid} 不在JF约定（{jf_keyword}）的备选叫品中", "JF约定": jf_keyword, "完整叫牌序列": full_sequence}
+
+        jf_content = jf_result.get("original_content", "")
+        actual_jf_keyword = jf_keyword
+
+        if not jf_content:
+            slam_result = self._get_slam_result(bidding_sequence, partner_name)
+            jf_content = slam_result.get("original_content", "")
+            actual_jf_keyword = "成局与满贯"
+            if verbose:
+                print(f"[human_bid] PATH: fallback - no jf_content, using 成局与满贯")
+
         if verbose:
-            print(f"[human_bid] JF约定未匹配到 {bid}，调用AI推断")
-        
+            print(f"[human_bid] 非结构性JF片段，注入原始内容调用AI推断")
+
         prompt = HUMAN_BID_PROMPT.format(
             bidding=bidding_sequence if bidding_sequence else "空",
             player=player_name,
             user_input=user_input,
             jf_content=jf_content,
-            subsequent_bids=subsequent_bids_str,
-            deal_system=deal_system
+            deal_system=deal_system,
+            bid_meaning=self.bid_meanings if self.bid_meanings else "（暂无）"
         )
-        
+        self._last_prompt = prompt
+
         try:
             result = self.llm_client.chat_human_bid(prompt, temperature=0, thinking=use_reasoning)
-            result["JF约定"] = jf_keyword
+            result["JF约定"] = actual_jf_keyword
             if "完整叫牌序列" not in result:
                 result["完整叫牌序列"] = f"{bidding_sequence}({player_name}){bid}-"
             return result
         except Exception as e:
             full_sequence = f"{bidding_sequence}({player_name}){bid}-"
-            return {"选定叫品": bid, "叫品含义": f"获取叫品含义失败: {e}", "JF约定": jf_keyword, "完整叫牌序列": full_sequence}
+            return {"选定叫品": bid, "叫品含义": f"获取叫品含义失败: {e}", "JF约定": actual_jf_keyword, "完整叫牌序列": full_sequence}

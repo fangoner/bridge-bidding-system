@@ -1,4 +1,4 @@
-import { Button, Badge, CircularProgress, Tooltip, IconButton } from '@mui/material'
+import { Button, Badge, CircularProgress, Tooltip, IconButton, FormControl, InputLabel, Select, MenuItem } from '@mui/material'
 import HistoryIcon from '@mui/icons-material/History'
 import DarkModeIcon from '@mui/icons-material/DarkMode'
 import LightModeIcon from '@mui/icons-material/LightMode'
@@ -15,10 +15,12 @@ function ControlButtons({
   darkMode,
   onToggleDarkMode,
   aiThinking,
+  vulnerability,
+  setVulnerability,
 }) {
   const isLarge = size === 'large'
   const buttonSize = isLarge ? 'large' : 'small'
-  
+
   return (
     <>
       <Button
@@ -29,7 +31,7 @@ function ControlButtons({
         {showSettings ? '隐藏设置' : '设置'}
       </Button>
 
-      <Badge 
+      <Badge
         badgeContent={biddingRecords.length} 
         color="primary"
         max={999}

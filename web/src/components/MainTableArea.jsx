@@ -13,19 +13,21 @@ import { usePlay } from '../context/PlayContext'
 export default function MainTableArea({
   isMobile,
   declarer,
+  finalContract,
+  directPlayContractInfo,
   // CardTablePanel 业务回调
   onAnalyzeContract,
   onToggleDoubleDummy,
   onDealerChange,
   onPositionRoleChange,
   onClearAllHands,
-  onSimulatedReset,
   onEditHands,
   onEditBidding,
   onPlayCardClick,
   onSetPlayHand,
   onImageDeal,
   onScreenshotDeal,
+  onSingleHandScreenshot,
   onCustomDeal,
   onDeal,
   onHandCardClick,
@@ -64,18 +66,20 @@ export default function MainTableArea({
       <CardTablePanel
         isMobile={isMobile}
         declarer={declarer}
+        finalContract={finalContract}
+        directPlayContractInfo={directPlayContractInfo}
         onAnalyzeContract={onAnalyzeContract}
         onToggleDoubleDummy={onToggleDoubleDummy}
         onDealerChange={onDealerChange}
         onPositionRoleChange={onPositionRoleChange}
         onClearAllHands={onClearAllHands}
-        onSimulatedReset={onSimulatedReset}
         onEditHands={onEditHands}
         onEditBidding={onEditBidding}
         onPlayCardClick={onPlayCardClick}
         onSetPlayHand={onSetPlayHand}
         onImageDeal={onImageDeal}
         onScreenshotDeal={onScreenshotDeal}
+        onSingleHandScreenshot={onSingleHandScreenshot}
         onCustomDeal={onCustomDeal}
         onDeal={onDeal}
         onHandCardClick={onHandCardClick}

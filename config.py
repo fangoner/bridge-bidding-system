@@ -94,7 +94,7 @@ MCTS_TIME_LIMIT = 10.0  # seconds per play decision
 MCTS_EXPLORATION_CONSTANT = 1.414
 MCTS_MIN_ITERATIONS = 500  # floor for adaptive iteration scaling
 ROLLOUT_GREEDY_PROB = 0.80  # probability of heuristic vs random in rollout
-DD_NUM_SAMPLES = 200  # DD采样数（信念禁用回退时用，正常路径由 BELIEF_DD_PARTICLES 控制）
+DD_NUM_SAMPLES = 200  # DD 引擎默认采样数
 DD_MIN_SAMPLES = 15   # floor for adaptive sample scaling
 DD_TIME_LIMIT = 30.0  # seconds per DD play decision (30秒预算，允许首攻冷启动)
 DD_MAXIMIN_ENABLE = True   # 最大化选牌：混合avg和min，偏好稳定牌
@@ -117,21 +117,18 @@ TIERED_CLUSTER_SE = 2.0       # 距 #1 N×SE 内视为同一集群
 TIERED_TYPICAL_SD = 1.5       # solve_board 赢墩典型标准差，用于动态 SE 估计
 TIERED_MCTS_CLUSTER_THRESHOLD = 0.5  # MCTS回退路径固定集群阈值（墩）
 
-# 信念状态跟踪 / 粒子滤波参数
-BELIEF_ENABLE = True            # 是否启用信念跟踪（False回退到纯随机采样）
-BELIEF_NUM_PARTICLES = 60       # 默认粒子数（回退用）
-BELIEF_DD_PARTICLES = 200       # DD引擎粒子数（不抽取，全量加权平均，100-1500）
-BELIEF_DD_PARTICLES_MIN = 100
-BELIEF_DD_PARTICLES_MAX = 2000
-BELIEF_MCTS_PARTICLES = 500     # MCTS引擎粒子数（加权draw池，300-1000）
-BELIEF_MCTS_PARTICLES_MIN = 300
-BELIEF_MCTS_PARTICLES_MAX = 1000
-BELIEF_ALPHA_MU_PARTICLES = 100  # αμ引擎粒子数（possible worlds，30-500）
-BELIEF_ALPHA_MU_PARTICLES_MIN = 30
-BELIEF_ALPHA_MU_PARTICLES_MAX = 500
-BELIEF_SIGNAL_WEIGHT = 1.3      # 信号一致时权重乘数
-BELIEF_SIGNAL_PENALTY = 0.7     # 信号不一致时权重乘数
-BELIEF_SIGNAL_MIN_RANK = 8      # ≥此值（8=8）视为高牌信号（欢迎）
+# 引擎粒子数/采样数范围（供 API 配置端点校验用）
+DD_PARTICLES_MIN = 100
+DD_PARTICLES_MAX = 2000
+MCTS_PARTICLES_MIN = 300
+MCTS_PARTICLES_MAX = 1000
+ALPHA_MU_WORLDS_MIN = 30
+ALPHA_MU_WORLDS_MAX = 500
+
+# 防守信号参数
+SIGNAL_WEIGHT = 1.3      # 信号一致时权重乘数
+SIGNAL_PENALTY = 0.7     # 信号不一致时权重乘数
+SIGNAL_MIN_RANK = 8      # ≥此值（8=8）视为高牌信号（欢迎）
 
 # αμ 搜索参数（残局多步前瞻，解决 strategy fusion）
 ALPHA_MU_ENABLE = True            # 是否启用 αμ 搜索

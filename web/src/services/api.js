@@ -112,13 +112,14 @@ export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H
 };
 
 // 人类叫牌 - 获取叫品含义
-export const humanBid = async (biddingSequence, position, userInput, dealSystem = '2D/2H/2S：自然阻击') => {
+export const humanBid = async (biddingSequence, position, userInput, dealSystem = '2D/2H/2S：自然阻击', bidHistory = '') => {
   try {
     const response = await api.post('/api/human-bid', {
       bidding_sequence: biddingSequence,
       position,
       user_input: userInput,
-      deal_system: dealSystem
+      deal_system: dealSystem,
+      bid_history: bidHistory,
     });
     return response.data;
   } catch (error) {
@@ -202,6 +203,17 @@ export const readClipboardDeal = async () => {
     return response.data;
   } catch (error) {
     console.error('读取剪贴板失败:', error);
+    throw error;
+  }
+};
+
+// 从剪贴板读取截图并识别单家手牌
+export const readSingleHandClipboard = async (position) => {
+  try {
+    const response = await api.post(`/api/read-hand-clipboard?position=${encodeURIComponent(position)}`);
+    return response.data;
+  } catch (error) {
+    console.error('单家识别失败:', error);
     throw error;
   }
 };

@@ -18,7 +18,7 @@ from typing import List, Dict, Tuple, Optional, Set
 from collections import defaultdict
 
 from bridge.play_types import Card, PlayState, POSITION_ORDER, PARTNERS
-from config import BELIEF_SIGNAL_MIN_RANK
+from config import SIGNAL_MIN_RANK
 
 
 # 花色级别（用于花色偏好信号解读）
@@ -94,7 +94,7 @@ def collect_all_signals(state: PlayState) -> List[SignalEvidence]:
 
             # 情况1：跟领出花色 → 态度信号
             if card.suit == lead_suit:
-                is_high = card.rank_value >= BELIEF_SIGNAL_MIN_RANK
+                is_high = card.rank_value >= SIGNAL_MIN_RANK
                 # 判断是否是该花色第一次跟牌（态度信号），还是第二次（张数信号）
                 history = follow_history[pos][lead_suit]
                 if len(history) == 0:
@@ -122,7 +122,7 @@ def collect_all_signals(state: PlayState) -> List[SignalEvidence]:
             # 情况2：不跟领出花色（垫牌/将吃后垫牌）→ 花色偏好信号
             elif card.suit != lead_suit and card.suit != state.contract.suit:
                 # 垫牌花色偏好：高牌=高级别，低牌=低级别
-                is_high = card.rank_value >= BELIEF_SIGNAL_MIN_RANK
+                is_high = card.rank_value >= SIGNAL_MIN_RANK
                 signals.append(SignalEvidence(
                     signal_type="suit_preference",
                     position=pos, suit=card.suit,

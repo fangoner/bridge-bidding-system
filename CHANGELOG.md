@@ -1,5 +1,57 @@
 # 开发日志
 
+## 2026-07-25
+
+### 局况（Vulnerability）功能
+
+**背景**: 桥牌局况（双无/NS有局/EW有局/双有局）影响叫牌决策和得分，需要支持手动选择和截屏识别
+
+**改进**:
+- GameContext 新增 vulnerability/setVulnerability 状态
+- 视觉识别提示词（VISION_PROMPT）新增局况识别章节
+- 后端新增 _normalize_vulnerability 标准化函数
+- 截屏/图片识别端点返回局况字段
+- 前端 useDealing 在识别成功后自动设置局况
+- 右上角新增局况下拉选择器（始终可见，不依赖定约）
+- 移除设置面板（SettingsPanel）中的局况下拉（统一到牌桌）
+- 从 ControlButtons 移除局况下拉框（统一到牌桌）
+
+**修改文件**: GameContext.jsx, CardTable.jsx, CardTablePanel.jsx, ControlButtons.jsx, useDealing.js, doubao_client.py, api/main.py
+
+**测试验证**: 手动选择局况下拉框切换正常，截屏识别后局况自动设置
+
+### 右上角/右下角信息面板布局统一
+
+**背景**: 右上角局况/定约/庄家标签高度不一致，右下角得分与右上角宽度不对齐
+
+**改进**:
+- 右上角容器固定宽度 100px，alignItems stretch
+- 局况下拉框高度改为 20px，字号 0.65rem
+- 定约/庄家 Chip 高度改为 20px，字号 0.6rem，标签缩为"庄:"
+- 首攻 Chip 高度改为 20px，字号 0.6rem
+- 右下角容器宽度统一为 100px，alignItems stretch
+- 右下第一行（庄防墩数）height 20，去掉 py 改用固定高度
+- 右下得分合并为单个 Chip（"无+620 / 有+650"），字号 0.6rem，height 20
+
+**修改文件**: CardTable.jsx
+
+**测试验证**: 四角信息面板高度/宽度一致，内容完整显示
+
+### 历史记录回放 phase 修复
+
+**背景**: 从历史记录载入已完成打牌记录时，右下角得分不显示
+
+**原因**: replayInitAndPlay 回放完所有牌后 phase 被强制设为 'playing'，而非保留原始 'complete'
+
+**修复** (web/src/App.jsx):
+- 新增 allReplayed 变量检测是否回放了所有牌
+- 全部回放时保留 savedState.phase（'complete'）
+- 仅部分回放时走原有逻辑（'lead'/'playing'）
+
+**修改文件**: App.jsx
+
+**测试验证**: 从历史记录载入打牌记录后，右下角正确显示墩数和得分
+
 ## 2026-07-20
 
 ### Bug 修复（GLM review 第 2-4 轮）

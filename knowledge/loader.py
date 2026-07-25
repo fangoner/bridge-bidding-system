@@ -50,12 +50,18 @@ class JFLoader:
     def _extract_keywords(self, text: str) -> List[str]:
         keywords = []
         lines = text.split("\n")
-        
+
         for i, line in enumerate(lines[:3]):
             line = line.strip()
             if line:
                 keywords.append(line)
-        
+
+        for line in lines[3:]:
+            stripped = line.strip()
+            if re.match(r"^\d+\.\d+(\.\d+)*\s", stripped):
+                if stripped not in keywords:
+                    keywords.append(stripped)
+
         return keywords
 
 
@@ -632,11 +638,17 @@ class JFRetriever:
         for i, segment in enumerate(self.segments):
             content = segment["content"]
             lines = content.split("\n")
-            
+
             for j, line in enumerate(lines[:3]):
                 line = line.strip()
                 if line and line not in self.keyword_index:
                     self.keyword_index[line] = i
+
+            for line in lines[3:]:
+                stripped = line.strip()
+                if re.match(r"^\d+\.\d+(\.\d+)*\s", stripped):
+                    if stripped not in self.keyword_index:
+                        self.keyword_index[stripped] = i
     
     def retrieve(self, query: str) -> str:
         if query in self.keyword_index:
