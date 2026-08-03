@@ -1,5 +1,6 @@
 import { useCallback, useRef } from 'react'
 import { dealCards, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, readSingleHandClipboard } from '../services/api'
+import { setPlayHand as apiSetPlayHand } from '../services/api'
 import { BRIDGE_POSITIONS } from '../utils/position'
 import { useGame } from '../context/GameContext'
 import { useBidding } from '../context/BiddingContext'
@@ -335,6 +336,15 @@ export function useDealing({ clearBiddingDraft }) {
         const prevHand = prev?.[position] || { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 }
         return { ...(prev || {}), [position]: { ...prevHand, ...data.hand } }
       })
+      // 同步更新打牌状态（如在打牌阶段），确保 showPlayHandInput 和 AI 自动出牌能正确识别
+      try {
+        const playResult = await apiSetPlayHand(position, data.hand)
+        if (playResult.success && playResult.state) {
+          setPlayState(playResult.state)
+        }
+      } catch {
+        // 不在打牌阶段时 API 调用可能失败，忽略即可
+      }
       if (data.message && data.message !== '识别成功') setWarning(`${position}家: ${data.message}`)
       setError(null)
     } catch {

@@ -1492,8 +1492,52 @@ function CardTable({
       }}>
         {(() => {
           // 牌局数据可用条件：桌面上有手牌数据（任意来源：自动发牌/手动/图片/截屏）
-          // 进入打牌阶段后不在此处显示（已切换到打牌面板）
-          if (showPlayPanel) return null
+          // 叫牌阶段无条件显示；打牌阶段仅显示修正手牌和编辑叫牌按钮（便于修正截屏识别错误的明手牌）
+          if (showPlayPanel) {
+            // 打牌阶段：明手出牌前显示修正手牌/编辑叫牌按钮（便于修正截屏识别错误的明手牌）
+            // 明手出牌后（至少完成1墩）自动隐藏
+            if (playState?.tricks?.length > 0) return null
+            const hasHandsData = ['南','北','东','西'].some(pos => {
+              const h = hands?.[pos]
+              if (!h) return false
+              return (h.spades?.length || 0) + (h.hearts?.length || 0) + (h.diamonds?.length || 0) + (h.clubs?.length || 0) > 0
+            })
+            if (!hasHandsData) return null
+            return (
+              <>
+                <Box sx={{ display: 'flex', gap: 0.5 }}>
+                  {onEditHands && (
+                    <Tooltip title="修正手牌" arrow slotProps={{
+                      tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
+                      arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
+                    }}>
+                      <IconButton
+                        size="small"
+                        onClick={onEditHands}
+                        sx={{ ...iconBtnStyle, bgcolor: isDark ? 'rgba(30,41,59,0.85)' : 'rgba(255,255,255,0.85)', color: isDark ? '#e2e8f0' : '#333' }}
+                      >
+                        <BorderColorIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                  {onEditBidding && (
+                    <Tooltip title="编辑叫牌" arrow slotProps={{
+                      tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
+                      arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
+                    }}>
+                      <IconButton
+                        size="small"
+                        onClick={onEditBidding}
+                        sx={{ ...iconBtnStyle, bgcolor: isDark ? 'rgba(30,41,59,0.85)' : 'rgba(255,255,255,0.85)', color: isDark ? '#e2e8f0' : '#333' }}
+                      >
+                        <FormatListBulletedIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                </Box>
+              </>
+            )
+          }
           const hasHandsData = ['南','北','东','西'].some(pos => {
             const h = hands?.[pos]
             if (!h) return false
@@ -1587,11 +1631,11 @@ function CardTable({
         alignItems: 'stretch',
         width: 100,
       }}>
-        <FormControl size="small" sx={{ width: '100%', bgcolor: 'rgba(255,255,255,0.92)', borderRadius: 1 }}>
+        <FormControl size="small" sx={{ width: '100%', bgcolor: isDark ? 'rgba(30,41,59,0.85)' : 'rgba(255,255,255,0.92)', borderRadius: 1 }}>
           <Select
             value={vulnerability || 'NV'}
             onChange={(e) => setVulnerability && setVulnerability(e.target.value)}
-            sx={{ fontSize: '0.65rem', height: 20, '& .MuiSelect-select': { py: 0, px: 0.5 } }}
+            sx={{ fontSize: '0.65rem', height: 20, color: isDark ? '#e2e8f0' : '#1a1a2e', '& .MuiSelect-select': { py: 0, px: 0.5 } }}
             disableUnderline
           >
             <MenuItem value="NV" sx={{ fontSize: '0.65rem' }}>双无局</MenuItem>
@@ -1606,7 +1650,9 @@ function CardTable({
             : (!showPlayPanel ? (finalContract || directPlayContractInfo) : null)
           if (!contract) return null
           const suit = contract.suit || 'NT'
-          const suitColor = { '♠': '#1a1a2e', '♥': '#d32f2f', '♦': '#7c3aed', '♣': '#1a1a2e', 'NT': '#1a1a2e' }[suit] || '#1a1a2e'
+          const suitColor = isDark
+            ? { '♠': '#e2e8f0', '♥': '#f87171', '♦': '#c4b5fd', '♣': '#e2e8f0', 'NT': '#e2e8f0' }[suit] || '#e2e8f0'
+            : { '♠': '#1a1a2e', '♥': '#d32f2f', '♦': '#7c3aed', '♣': '#1a1a2e', 'NT': '#1a1a2e' }[suit] || '#1a1a2e'
           const doubledSuffix = contract.redoubled ? 'XX' : contract.doubled ? 'X' : contract.isRedouble ? 'XX' : contract.isDouble ? 'X' : ''
           return (
             <>
@@ -1614,20 +1660,20 @@ function CardTable({
                 <Chip
                   label={`${contract.level || '?'}${suit}${doubledSuffix}`}
                   size="small"
-                  sx={{ flex: 1, height: 20, fontSize: '0.6rem', bgcolor: 'rgba(255,255,255,0.92)', color: suitColor, fontWeight: 700, '& .MuiChip-label': { px: 0.3 } }}
+                  sx={{ flex: 1, height: 20, fontSize: '0.6rem', bgcolor: isDark ? 'rgba(30,41,59,0.85)' : 'rgba(255,255,255,0.92)', color: suitColor, fontWeight: 700, '& .MuiChip-label': { px: 0.3 } }}
                 />
                 <Chip
                   label={`庄: ${contract.declarer || '?'}`}
                   variant="outlined"
                   size="small"
-                  sx={{ flex: 1, height: 20, fontSize: '0.6rem', bgcolor: 'rgba(255,255,255,0.88)', color: '#333', '& .MuiChip-label': { px: 0.3 } }}
+                  sx={{ flex: 1, height: 20, fontSize: '0.6rem', bgcolor: isDark ? 'rgba(30,41,59,0.85)' : 'rgba(255,255,255,0.88)', color: isDark ? '#e2e8f0' : '#333', '& .MuiChip-label': { px: 0.3 } }}
                 />
               </Box>
               {showPlayPanel && imageOpeningLead && (
                 <Chip
                   label={`首攻: ${imageOpeningLead}`}
                   size="small"
-                  sx={{ width: '100%', height: 20, fontSize: '0.6rem', bgcolor: 'rgba(255,243,205,0.92)', color: '#e65100', fontWeight: 500, '& .MuiChip-label': { px: 0.3 } }}
+                  sx={{ width: '100%', height: 20, fontSize: '0.6rem', bgcolor: isDark ? 'rgba(69,26,3,0.55)' : 'rgba(255,243,205,0.92)', color: isDark ? '#fdba74' : '#e65100', fontWeight: 500, '& .MuiChip-label': { px: 0.3 } }}
                 />
               )}
             </>

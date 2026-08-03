@@ -4,7 +4,9 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).parent
 
-load_dotenv(BASE_DIR / ".env")
+# override=True：让 .env 中的配置始终优先于系统/父进程环境变量，
+# 避免旧环境变量（如 DEEPSEEK_API_KEY）压过 .env 中的新值
+load_dotenv(BASE_DIR / ".env", override=True)
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")

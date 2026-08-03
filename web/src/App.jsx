@@ -34,7 +34,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import HistoryIcon from '@mui/icons-material/History'
-import { aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, doubleDummyAnalysis, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles, undoPlay, setPlayHand, getDDHints, getDDHintsReview } from './services/api'
+import { aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, doubleDummyAnalysis, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles, undoPlay, setPlayHand, getDDHints, getDDHintsReview, customDeal as apiCustomDeal } from './services/api'
 import HandDisplay from './components/HandDisplay'
 import Header from './components/layout/Header'
 import BiddingDetailPanel from './components/BiddingDetailPanel'
@@ -2613,23 +2613,72 @@ function AppShell({ darkMode, onToggleDarkMode }) {
             const posOrder = ['南', '西', '北', '东']
             const lineIsEmpty = posOrder.map((_, i) => !(rawLines[i] || '').trim())
 
-            const newHands = await handleCustomDeal(customDealText)
-            if (!newHands) return
+            // 直接调用解析API，不使用 handleCustomDeal（避免 resetGameState 清空打牌/叫牌状态）
+            setLoading(true)
+            let parsedHands
+            try {
+              const resp = await apiCustomDeal(customDealText)
+              if (!resp.success) {
+                setHandsValidationError([resp.message || '牌局解析失败'])
+                return
+              }
+              parsedHands = resp.hands
+            } catch {
+              setHandsValidationError(['牌局解析失败，请检查API服务'])
+              return
+            } finally {
+              setLoading(false)
+            }
+
             // 校验手牌：每家13张或0张、无重复、四家52张（仅当四家都有牌时）
-            const validation = validateHands(newHands)
+            const validation = validateHands(parsedHands)
             if (!validation.valid) {
               setHandsValidationError(validation.errors)
               setHandsValidationWarning(validation.warnings)
               return
             }
             // 合并：空行保留原数据（未编辑），非空行使用新数据（包括0张主动清空）
-            const mergedHands = { ...newHands }
+            const mergedHands = { ...parsedHands }
             for (let i = 0; i < 4; i++) {
               if (lineIsEmpty[i] && hands?.[posOrder[i]]) {
                 mergedHands[posOrder[i]] = { ...hands[posOrder[i]] }
               }
             }
             setHands(mergedHands)
+            // 打牌阶段：同步后端 playState（"修正后的完整牌 - 已打出牌 = 剩余牌"再同步，
+            // 确保修正后的明手牌能正确驱动 AI 出牌，且不会把已打出的牌加回）
+            if (showPlayPanel && playState) {
+              const suitToKey = { '♠': 'spades', '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs' }
+              const played = {} // pos -> Set("suit rank")
+              const collectPlayed = (trick) => {
+                ;(trick?.cards || []).forEach(([pos, card]) => {
+                  if (!played[pos]) played[pos] = new Set()
+                  played[pos].add(`${card.suit}${card.rank}`)
+                })
+              }
+              ;(playState.tricks || []).forEach(collectPlayed)
+              collectPlayed(playState.current_trick)
+              for (const pos of ['南', '西', '北', '东']) {
+                const h = mergedHands[pos]
+                if (!h) continue
+                const cards = []
+                for (const key of ['spades', 'hearts', 'diamonds', 'clubs']) {
+                  for (const r of (h[key] || '')) {
+                    cards.push({ suit: { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' }[key], rank: r.toUpperCase() })
+                  }
+                }
+                const remainingCards = cards.filter(c => !played[pos]?.has(`${c.suit}${c.rank}`))
+                if (remainingCards.length === 0) continue
+                const remainingHand = { spades: '', hearts: '', diamonds: '', clubs: '' }
+                remainingCards.forEach(c => { remainingHand[suitToKey[c.suit]] += c.rank })
+                try {
+                  const playResult = await setPlayHand(pos, remainingHand)
+                  if (playResult?.success && playResult.state) setPlayState(playResult.state)
+                } catch {
+                  // 非打牌阶段调用失败，忽略
+                }
+              }
+            }
             setHandsValidationError([])
             setHandsValidationWarning([])
             setCustomDealOpen(false)
