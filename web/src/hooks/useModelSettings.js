@@ -8,6 +8,7 @@ const DD_SAMPLE_COUNT_KEY = 'bridge_dd_sample_count'
 const DD_PARTICLES_KEY = 'bridge_dd_particles'
 const MCTS_PARTICLES_KEY = 'bridge_mcts_particles'
 const ALPHA_MU_PARTICLES_KEY = 'bridge_alpha_mu_particles'
+const SWITCH_CARDS_KEY = 'bridge_dd_alphamu_switch_cards'
 
 // 解析组合模型值 "model::reasoning" → { model, reasoning }
 export function parseModelValue(value) {
@@ -90,6 +91,22 @@ export function useModelSettings() {
 
   const [alphaMuParticlesRange] = useState({ min: 30, max: 500 })
 
+  // DD-αμ-LLM 引擎：中盘DD/残局αμ切换分界（每手剩余牌数≤此值切αμ，0=全程DD，13=全程αμ）
+  const [switchCards, setSwitchCards] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem(SWITCH_CARDS_KEY), 10)
+      return Number.isNaN(v) ? 8 : v
+    } catch { return 8 }
+  })
+  const [switchCardsRange] = useState({ min: 0, max: 13 })
+
+  const handleSwitchCardsChange = useCallback((value) => {
+    const v = parseInt(value, 10)
+    const num = Number.isNaN(v) ? 8 : v
+    setSwitchCards(num)
+    try { localStorage.setItem(SWITCH_CARDS_KEY, num) } catch {/* empty */}
+  }, [])
+
   const handleParticleChange = useCallback((engine, value) => {
     const setters = {
       dd: [setDDParticles, DD_PARTICLES_KEY],
@@ -171,6 +188,9 @@ export function useModelSettings() {
     mctsParticles, mctsParticlesRange,
     alphaMuParticles, alphaMuParticlesRange,
     handleParticleChange,
+    // DD-αμ-LLM 分界
+    switchCards, switchCardsRange,
+    handleSwitchCardsChange,
   }
 }
 

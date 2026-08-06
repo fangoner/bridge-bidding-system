@@ -4,12 +4,10 @@ import {
 } from '@mui/material'
 import { parseModelValue } from '../hooks/useModelSettings'
 
-// 4 个基础模型（不含 ::reasoning 后缀），思考模式通过 ToggleButton 控制
+// 基础模型（不含 ::reasoning 后缀），思考模式通过 ToggleButton 控制
 const BASE_MODELS = [
   { label: 'V4-Flash', value: 'deepseek-v4-flash' },
   { label: 'V4-Pro', value: 'deepseek-v4-pro' },
-  { label: '豆包 Pro', value: 'doubao-seed-2.1-pro' },
-  { label: '豆包 Turbo', value: 'doubao-seed-2.1-turbo' },
 ]
 
 // ── 模型选择器 + 思考切换（模块级组件）──
@@ -73,6 +71,8 @@ function SettingsPanel({
   mctsParticles, mctsParticlesRange,
   alphaMuParticles, alphaMuParticlesRange,
   handleParticleChange,
+  switchCards, switchCardsRange,
+  handleSwitchCardsChange,
   dealSystem,
   setDealSystem,
   dealMode,
@@ -188,7 +188,7 @@ function SettingsPanel({
               parsed={playParsed}
               onModelChange={onPlayModelChange}
               onReasoningChange={onPlayReasoningChange}
-              disabled={playEngine !== 'llm' && playEngine !== 'tiered' && playEngine !== 'alphamu_llm'}
+              disabled={playEngine !== 'llm' && playEngine !== 'dd_alphamu_llm'}
               models={visibleModels}
             />
 
@@ -199,13 +199,12 @@ function SettingsPanel({
                 onChange={(e) => handlePlayEngineChange(e.target.value)}
                 label="打牌引擎"
               >
+                <MenuItem value="dd_alphamu_llm">DD-αμ-LLM (主力)</MenuItem>
                 <MenuItem value="llm">LLM 大模型</MenuItem>
                 <MenuItem value="mcts">MCTS 搜索</MenuItem>
                 <MenuItem value="dd">DD 蒙地卡罗</MenuItem>
                 <MenuItem value="perfect" disabled={mode !== 'practice' && !allHandsComplete} title={mode !== 'practice' && !allHandsComplete ? '完美DD需要四家完整手牌，暂不可用' : ''}>完美DD (全知)</MenuItem>
-                <MenuItem value="tiered">Tiered 分层</MenuItem>
                 <MenuItem value="alphamu">αμ 搜索</MenuItem>
-                <MenuItem value="alphamu_llm">αμ+LLM策略审查</MenuItem>
               </Select>
             </FormControl>
             {playEngine === 'dd' && (
@@ -217,34 +216,18 @@ function SettingsPanel({
                 <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 600, minWidth: 24 }}>{ddParticles}</Typography>
               </Box>
             )}
-            {playEngine === 'tiered' && (
+            {playEngine === 'dd_alphamu_llm' && (
               <>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>中盘</Typography>
-                  <input type="range" min={ddParticlesRange.min} max={ddParticlesRange.max} step={10}
-                    value={ddParticles} onChange={(e) => handleParticleChange('dd', Number(e.target.value))}
+                  <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>分界</Typography>
+                  <input type="range" min={switchCardsRange.min} max={switchCardsRange.max} step={1}
+                    value={switchCards} onChange={(e) => handleSwitchCardsChange(Number(e.target.value))}
                     style={{ width: 60, height: 16 }} />
-                  <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 600, minWidth: 24 }}>{ddParticles}</Typography>
-                </Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>残局</Typography>
-                  <input type="range" min={alphaMuParticlesRange.min} max={alphaMuParticlesRange.max} step={10}
-                    value={alphaMuParticles} onChange={(e) => handleParticleChange('alphaMu', Number(e.target.value))}
-                    style={{ width: 60, height: 16 }} />
-                  <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 600, minWidth: 24 }}>{alphaMuParticles}</Typography>
+                  <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 600, minWidth: 16 }}>{switchCards}</Typography>
                 </Box>
               </>
             )}
             {playEngine === 'alphamu' && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>粒子</Typography>
-                <input type="range" min={alphaMuParticlesRange.min} max={alphaMuParticlesRange.max} step={10}
-                  value={alphaMuParticles} onChange={(e) => handleParticleChange('alphaMu', Number(e.target.value))}
-                  style={{ width: 72, height: 16 }} />
-                <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 600, minWidth: 24 }}>{alphaMuParticles}</Typography>
-              </Box>
-            )}
-            {playEngine === 'alphamu_llm' && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>粒子</Typography>
                 <input type="range" min={alphaMuParticlesRange.min} max={alphaMuParticlesRange.max} step={10}

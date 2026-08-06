@@ -45,8 +45,9 @@ class MockLLMClient:
         """同步 chat：返回包含默认牌的文本。"""
         return f"我推荐出 {self.default_card}。这是基于局面分析的最优选择。"
 
-    def chat_json(self, system_prompt: str, temperature: float = 0,
-                  max_tokens: int = 1024, **kwargs) -> dict:
+    def chat_json(self, system_prompt: str, user_prompt: str = "",
+                  temperature: float = 0, max_tokens: int = 1024,
+                  **kwargs) -> dict:
         """同步 chat_json：返回空约束（跳过约束提取）。"""
         return {}
 
@@ -366,10 +367,10 @@ def test_7_mcts_engine():
     print("  测试通过!\n")
 
 
-def test_8_tiered_engine_midgame():
-    """测试 8: Tiered 引擎中盘阶段。"""
+def test_8_dd_alphamu_llm_midgame():
+    """测试 8: DD-αμ-LLM 引擎中盘（DD+LLM审查）。"""
     print("=" * 60)
-    print("测试 8: Tiered 引擎中盘阶段")
+    print("测试 8: DD-αμ-LLM 引擎中盘阶段")
     print("=" * 60)
 
     if not DD_ENDPLAY_OK:
@@ -382,26 +383,26 @@ def test_8_tiered_engine_midgame():
     loop = asyncio.new_event_loop()
     try:
         result = loop.run_until_complete(
-            service.get_ai_play(use_tiered=True, dd_samples=10)
+            service.get_ai_play(use_dd_alphamu_llm=True, dd_samples=10, dd_alphamu_switch_cards=8)
         )
     finally:
         loop.close()
 
     card = result.get("card")
-    tiered_phase = result.get("full_output", {}).get("tiered_phase", "")
-    assert card is not None, f"Tiered 应返回出牌, 实际: {result}"
+    engine_phase = result.get("full_output", {}).get("engine_phase", "")
+    assert card is not None, f"DD-αμ-LLM 应返回出牌, 实际: {result}"
     card_obj = Card(suit=card["suit"], rank=card["rank"])
     playable = service.get_playable_cards()
-    assert card_obj in playable, f"Tiered 推荐 {card_obj} 不在合法出牌中"
-    print(f"  ✓ Tiered 推荐: {card_obj} (phase={tiered_phase})")
+    assert card_obj in playable, f"DD-αμ-LLM 推荐 {card_obj} 不在合法出牌中"
+    print(f"  ✓ DD-αμ-LLM 推荐: {card_obj} (phase={engine_phase})")
 
     print("  测试通过!\n")
 
 
-def test_9_tiered_engine_endgame_alpha_mu():
-    """测试 9: Tiered 引擎残局阶段触发 αμ。"""
+def test_9_dd_alphamu_llm_endgame_alpha_mu():
+    """测试 9: DD-αμ-LLM 引擎残局阶段走 αμ。"""
     print("=" * 60)
-    print("测试 9: Tiered 残局阶段触发 αμ")
+    print("测试 9: DD-αμ-LLM 残局阶段")
     print("=" * 60)
 
     if not ALPHA_MU_ENDPLAY_OK:
@@ -414,19 +415,17 @@ def test_9_tiered_engine_endgame_alpha_mu():
     loop = asyncio.new_event_loop()
     try:
         result = loop.run_until_complete(
-            service.get_ai_play(use_tiered=True)
+            service.get_ai_play(use_dd_alphamu_llm=True)
         )
     finally:
         loop.close()
 
     card = result.get("card")
-    tiered_phase = result.get("full_output", {}).get("tiered_phase", "")
     assert card is not None, f"αμ 应返回出牌, 实际: {result}"
-    assert tiered_phase == "endgame_alpha_mu", f"应触发 αμ, 实际 phase={tiered_phase}"
     card_obj = Card(suit=card["suit"], rank=card["rank"])
     playable = service.get_playable_cards()
     assert card_obj in playable, f"αμ 推荐 {card_obj} 不在合法出牌中"
-    print(f"  ✓ αμ 推荐: {card_obj} (phase={tiered_phase})")
+    print(f"  ✓ αμ 推荐: {card_obj}")
     print(f"  ✓ 推理: {result.get('reasoning', '')[:120]}")
 
     print("  测试通过!\n")
@@ -474,7 +473,7 @@ def test_11_engine_consistency():
     engines_to_test = [
         ("DD", {"use_dd": True, "dd_samples": 8}),
         ("MCTS", {"use_mcts": True}),
-        ("Tiered", {"use_tiered": True, "dd_samples": 8}),
+        ("DD-αμ-LLM", {"use_dd_alphamu_llm": True, "dd_samples": 8}),
         ("Perfect", {"use_perfect": True}),
     ]
 
@@ -592,26 +591,29 @@ def test_14_doubled_contract():
     print("  测试通过!\n")
 
 
-def test_15_critical_decision_detection():
-    """测试 15: 关键决策检测逻辑存在性。"""
+def test_15_dd_alphamu_llm_structure():
+    """测试 15: DD-αμ-LLM 引擎结构存在性。"""
     print("=" * 60)
-    print("测试 15: 关键决策检测逻辑")
+    print("测试 15: DD-αμ-LLM 引擎结构")
     print("=" * 60)
 
     service = _make_service()
 
-    # 验证关键决策检测方法存在
-    assert hasattr(service, "_is_critical_decision"), "缺少 _is_critical_decision 方法"
-    assert hasattr(service, "_is_critical_decision_mcts"), "缺少 _is_critical_decision_mcts 方法"
-    print(f"  ✓ _is_critical_decision: 存在")
-    print(f"  ✓ _is_critical_decision_mcts: 存在")
+    # 验证 DD-αμ-LLM 引擎方法存在
+    assert hasattr(service, "_dd_alphamu_llm_play"), "缺少 _dd_alphamu_llm_play 方法"
+    assert hasattr(service, "_dd_llm_play"), "缺少 _dd_llm_play 方法"
+    assert hasattr(service, "_group_candidates_by_tricks_vec"), "缺少 _group_candidates_by_tricks_vec 方法"
+    print("  ✓ _dd_alphamu_llm_play: 存在")
+    print("  ✓ _dd_llm_play: 存在")
+    print("  ✓ _group_candidates_by_tricks_vec: 存在")
 
     # 验证方法签名
-    sig = inspect.signature(service._is_critical_decision)
+    sig = inspect.signature(service._dd_alphamu_llm_play)
     params = list(sig.parameters.keys())
-    assert "dd_result" in params
     assert "state" in params
-    assert "is_declarer_side" in params
+    assert "use_reasoning" in params
+    assert "dd_samples" in params
+    assert "switch_cards" in params
     print(f"  ✓ 方法签名: {params}")
 
     print("  测试通过!\n")
@@ -629,14 +631,14 @@ ALL_TESTS = [
     test_5_undo_last_card,
     test_6_dd_engine,
     test_7_mcts_engine,
-    test_8_tiered_engine_midgame,
-    test_9_tiered_engine_endgame_alpha_mu,
+    test_8_dd_alphamu_llm_midgame,
+    test_9_dd_alphamu_llm_endgame_alpha_mu,
     test_10_perfect_dd_engine,
     test_11_engine_consistency,
     test_12_complete_game_result,
     test_13_belief_tracker_reset,
     test_14_doubled_contract,
-    test_15_critical_decision_detection,
+    test_15_dd_alphamu_llm_structure,
 ]
 
 

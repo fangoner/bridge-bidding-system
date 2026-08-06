@@ -528,6 +528,7 @@ class DDSearch:
                 "avg_tricks": round(w_avg, 2),
                 "min_tricks": mn,
                 "max_tricks": mx,
+                "scores": scores,
             })
 
             rank_val = RANK_ORDER.get(card.rank, 0)
@@ -798,6 +799,7 @@ class DDSearch:
                 "avg_tricks": round(avg, 2),
                 "min_tricks": mn,
                 "max_tricks": mx,
+                "scores": scores,
             })
             rank_val = RANK_ORDER.get(card.rank, 0)
             # 残局枚举同样适用 maximin（精确分布下 min 更可靠）
@@ -946,6 +948,7 @@ class DDSearch:
                 "avg_tricks": total,
                 "min_tricks": total,
                 "max_tricks": total,
+                "scores": [total],
             })
             rank_val = RANK_ORDER.get(card.rank, 0)
             # Perfect DD：单次精确求解，n=1 时配对阈值退化为 0（精确比较）

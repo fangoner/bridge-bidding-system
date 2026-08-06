@@ -309,6 +309,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     mctsParticles, mctsParticlesRange,
     alphaMuParticles, alphaMuParticlesRange,
     handleParticleChange,
+    switchCards, switchCardsRange,
+    handleSwitchCardsChange,
     handleFallbackModelChange,
     handlePlayModelChange,
     checkApiStatus,
@@ -1729,6 +1731,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     prevTricksCountRef.current = 0
     setLastCompletedTrick(null)
     setReviewCursor(null)
+    setAiPlayHistory([])
 
     let biddingStr = null
     let meaningLines = ''
@@ -1900,7 +1903,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     
     try {
       const pm = parseModelValue(playModel)
-      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal)
+      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, switchCards)
       if (controller.signal.aborted) return
       console.log('[AI Play] engine:', result.used_engine, 'elapsed:', result.elapsed_ms + 'ms', 'model:', result.used_model)
 
@@ -2431,6 +2434,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         mctsParticles={mctsParticles} mctsParticlesRange={mctsParticlesRange}
         alphaMuParticles={alphaMuParticles} alphaMuParticlesRange={alphaMuParticlesRange}
         handleParticleChange={handleParticleChange}
+        switchCards={switchCards} switchCardsRange={switchCardsRange}
+        handleSwitchCardsChange={handleSwitchCardsChange}
         dealSystem={dealSystem}
         setDealSystem={setDealSystem}
         dealMode={dealMode}

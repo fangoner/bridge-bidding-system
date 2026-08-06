@@ -278,7 +278,7 @@ export const undoPlay = async () => {
 };
 
 // AI出牌
-export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null) => {
+export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null, ddAlphamuSwitchCards = null) => {
   try {
     const requestData = {
       use_reasoning: useReasoning,
@@ -292,6 +292,9 @@ export const aiPlay = async (playModel = null, useReasoning = false, playEngine 
     }
     if (ddSampleCount) {
       requestData.dd_sample_count = ddSampleCount;
+    }
+    if (ddAlphamuSwitchCards != null) {
+      requestData.dd_alphamu_switch_cards = ddAlphamuSwitchCards;
     }
     
     const timeout = useReasoning ? 300000 : 120000;

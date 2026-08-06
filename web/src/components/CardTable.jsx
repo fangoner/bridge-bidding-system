@@ -99,7 +99,7 @@ function CardTable({
   const engineLabel = useCallback((isPlayPanel) => {
     if (!isPlayPanel) return modelLabel(fallbackModel)
     // 非 LLM 引擎统一显示 "AI"
-    if (playEngine && playEngine !== 'llm' && playEngine !== 'tiered' && playEngine !== 'alphamu_llm') {
+    if (playEngine && playEngine !== 'llm' && playEngine !== 'dd_alphamu_llm') {
       return 'AI'
     }
     return modelLabel(playModel)
@@ -978,7 +978,7 @@ function CardTable({
       <Box sx={{
         display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0,
         bgcolor: isDeclarerInfo
-          ? '#FFB6C1'
+          ? '#dc2626'
           : (isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.85)'),
         borderRadius: 1, px: 0.8, py: 0.2,
         ...sx,
@@ -989,14 +989,14 @@ function CardTable({
         <Typography variant="caption"
           onClick={(!readonlyMode && !showPlayPanel && onDealerChange) ? () => onDealerChange(position) : undefined}
           sx={{
-            fontWeight: 700, fontSize: '0.75rem', color: isDark ? '#e2e8f0' : '#333',
+            fontWeight: 700, fontSize: '0.75rem', color: isDeclarerInfo ? '#fff' : (isDark ? '#e2e8f0' : '#333'),
             cursor: (!readonlyMode && !showPlayPanel && onDealerChange) ? 'pointer' : 'default',
             userSelect: 'none',
           }}>
           {position}{dealer === position ? '*' : ''}
         </Typography>
         {hasHandData && hand?.hcp !== undefined && !showInput && shouldShowHandContent(position) && (
-          <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.75rem', color: isDark ? '#fbbf24' : '#d97706' }}>
+          <Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.75rem', color: isDeclarerInfo ? '#fff' : (isDark ? '#fbbf24' : '#d97706') }}>
             {hand.hcp}点
           </Typography>
         )}
@@ -2271,10 +2271,10 @@ function CardTable({
           <Box sx={{
             position: 'fixed', zIndex: 9999, ...posStyle,
             bgcolor: isDark ? 'rgba(17,24,39,0.96)' : 'rgba(255,255,255,0.96)',
-            borderRadius: 2, p: 1.5,
+            borderRadius: 3.56, p: 2.67,
             border: '1px solid', borderColor: 'divider',
             boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
-            display: 'flex', flexDirection: 'column', gap: 0.3,
+            display: 'flex', flexDirection: 'column', gap: 0.53,
             cursor: dragging && dragTarget === 'play' ? 'grabbing' : 'auto',
           }}>
             <Box
@@ -2285,10 +2285,10 @@ function CardTable({
               }}
               onMouseDown={onMouseDown}
             >
-              <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, color: isDark ? '#e2e8f0' : '#333', flexShrink: 0 }}>
+              <Typography sx={{ fontSize: '1.51rem', fontWeight: 700, color: isDark ? '#e2e8f0' : '#333', flexShrink: 0 }}>
                 {cp}家 出牌{ledSuit ? ` (跟${ledSuit})` : ' (首攻)'}
               </Typography>
-              <Typography sx={{ fontSize: '0.68rem', color: isDark ? '#94a3b8' : '#888' }}>
+              <Typography sx={{ fontSize: '1.21rem', color: isDark ? '#94a3b8' : '#888' }}>
                 拖拽移动 · 灰色=已出/他手
               </Typography>
             </Box>
@@ -2296,17 +2296,17 @@ function CardTable({
               const isLedSuit = ledSuit === symbol
               return (
                 <Box key={symbol} sx={{
-                  display: 'flex', alignItems: 'center', gap: 0.3,
+                  display: 'flex', alignItems: 'center', gap: 0.53,
                   bgcolor: isLedSuit ? (isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.08)') : 'transparent',
-                  borderRadius: 0.5, px: 0.2, py: 0.11,
+                  borderRadius: 0.89, px: 0.36, py: 0.2,
                   border: isLedSuit ? `1px solid ${isDark ? 'rgba(129,140,248,0.4)' : 'rgba(99,102,241,0.3)'}` : '1px solid transparent',
                 }}>
                   <Typography sx={{
-                    width: 20, minWidth: 20, textAlign: 'center',
-                    color, fontSize: '0.95rem', fontWeight: 700, lineHeight: 1,
+                    width: 36, minWidth: 36, textAlign: 'center',
+                    color, fontSize: '1.69rem', fontWeight: 700, lineHeight: 1,
                     userSelect: 'none',
                   }}>{symbol}</Typography>
-                  <Box sx={{ display: 'flex', gap: 0.2, flexWrap: 'nowrap' }}>
+                  <Box sx={{ display: 'flex', gap: 0.36, flexWrap: 'nowrap' }}>
                     {RANKS.map((rank) => {
                       const cardKey = symbol + rank
                       const isTaken = takenSet.has(cardKey)
@@ -2317,8 +2317,8 @@ function CardTable({
                           disabled={isTaken}
                           onClick={() => handlePick(symbol, rank)}
                           sx={{
-                            minWidth: 0, width: 26, height: 26, p: 0,
-                            fontSize: '0.7rem', fontWeight: 600, borderRadius: 0.5,
+                            minWidth: 0, width: 47, height: 47, p: 0,
+                            fontSize: '1.24rem', fontWeight: 600, borderRadius: 0.89,
                             border: '1px solid',
                             color: isTaken ? (isDark ? '#475569' : '#aaa') : color,
                             bgcolor: isTaken

@@ -276,16 +276,16 @@ function PlayPanel({
             </Typography>
           )}
         </Box>
-        <Paper sx={{ 
-          p: 1, 
-          bgcolor: is_human_turn 
+        <Paper sx={{
+          p: 1,
+          bgcolor: is_human_turn
             ? (isDark ? 'rgba(255, 253, 231, 0.12)' : '#fffde7')
-            : (isDark ? 'rgba(255,255,255,0.04)' : '#fafafa'), 
+            : (isDark ? 'rgba(255,255,255,0.04)' : '#fafafa'),
           border: is_human_turn ? '2px solid #ffc107' : (isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd'),
           flex: 1,
-          overflow: 'hidden'
+          overflow: 'auto'
         }}>
-          <Box sx={{ display: 'flex', flexWrap: 'nowrap', gap: 0.5, alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
             {currentHand.map((card, idx) => {
               const isPlayable = playableCards.some(
                 c => c.suit === card.suit && c.rank === card.rank
@@ -302,8 +302,8 @@ function PlayPanel({
                   key={idx}
                   onClick={() => handleCardClick(card)}
                   sx={{
-                    width: 38,
-                    height: 48,
+                    width: 68,
+                    height: 85,
                     cursor: canClick ? 'pointer' : 'default',
                     bgcolor: isSelected 
                       ? (isDark ? 'rgba(25, 118, 210, 0.25)' : '#bbdefb')
@@ -321,7 +321,7 @@ function PlayPanel({
                     } : {},
                   }}
                 >
-                  <Typography sx={{ color, fontSize: '0.95rem', fontWeight: 500 }}>
+                  <Typography sx={{ color, fontSize: '1.69rem', fontWeight: 500 }}>
                     {card.suit}{card.rank}
                   </Typography>
                 </MuiCard>
@@ -447,7 +447,7 @@ function PlayPanel({
       </Box>
       
       {/* 出牌选择 - 固定高度 */}
-      <Box sx={{ mb: 1.5, flexShrink: 0, height: '90px', overflow: 'hidden' }}>
+      <Box sx={{ mb: 1.5, flexShrink: 0, height: '160px', overflow: 'auto' }}>
         {renderCardSelector()}
       </Box>
       

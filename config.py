@@ -89,7 +89,7 @@ def expand_model_list(base_models: list) -> list:
 ALL_MODELS = expand_model_list(ALL_BASE_MODELS)
 
 # MCTS / DD play engine settings
-DEFAULT_PLAY_ENGINE = "llm"  # "llm" | "mcts" | "dd" | "tiered" | "perfect" | "alphamu"
+DEFAULT_PLAY_ENGINE = "dd_alphamu_llm"  # 主力引擎；可选 "llm" | "mcts" | "dd" | "perfect" | "alphamu" | "dd_alphamu_llm"
 MCTS_SEARCH_MODE = "mcts"  # "mcts" (tree+rollout) | "dd" (pure Monte Carlo + double-dummy)
 MCTS_ITERATIONS = 5000
 MCTS_TIME_LIMIT = 10.0  # seconds per play decision
@@ -106,18 +106,8 @@ DD_REGRET_BASE = 0.25      # 领先时 min 权重（保守）；落后时 min �
 DD_ENDGAME_CARD_THRESHOLD = 4    # 每手剩余牌数≤此值时触发枚举所有分布
 DD_ENDGAME_MAX_ENUMERATIONS = 5000  # 枚举总数超过此值时回退采样
 
-# Tiered 分层引擎参数
-TIERED_CRITICAL_SPREAD_DECLARER = 0.2  # 庄家方：DD候选分差≤此值→升级LLM（MCTS回退路径仍用）
-TIERED_CRITICAL_SPREAD_DEFENDER = 0.3  # 防守方：DD候选分差≤此值→升级LLM（MCTS回退路径仍用）
-TIERED_ENDGAME_CARDS = 6               # 每手剩余牌数≤此值进入残局精确枚举
-TIERED_MIN_SAMPLES = 30                # DD有效样本<此值时不升级（统计不可靠）
-TIERED_OVERRIDE_THRESHOLD = 1.5        # LLM选择与DD最优差>此值墩时否决LLM
-
-# Tiered 三信号关键决策检测（DD路径，替代固定阈值）
-TIERED_FUSION_SPREAD = 3      # 候选牌 min-max 跨度≥此值 → strategy fusion 信号
-TIERED_CLUSTER_SE = 2.0       # 距 #1 N×SE 内视为同一集群
-TIERED_TYPICAL_SD = 1.5       # solve_board 赢墩典型标准差，用于动态 SE 估计
-TIERED_MCTS_CLUSTER_THRESHOLD = 0.5  # MCTS回退路径固定集群阈值（墩）
+# DD-αμ-LLM 主力引擎：中盘DD与残局αμ的切换分界（每手剩余牌数≤此值切到αμ）
+DD_ALPHAMU_SWITCH_CARDS = 8
 
 # 引擎粒子数/采样数范围（供 API 配置端点校验用）
 DD_PARTICLES_MIN = 100

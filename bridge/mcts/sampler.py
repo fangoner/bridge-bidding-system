@@ -132,6 +132,27 @@ def _extract_known_info(state: "PlayState", perspective: str) -> dict:
                     if (c.suit, c.rank) not in assigned
                     and (c.suit, c.rank) not in played_set]
 
+    # 4.7 统计每家已出牌（中局约束扣减用：初始约束 = 已出部分 + 剩余部分）
+    played_stats = {
+        p: {"hcp": 0, "controls": 0, "suit": {"♠": 0, "♥": 0, "♦": 0, "♣": 0}}
+        for p in POSITION_ORDER
+    }
+    for _trick in state.tricks:
+        for p, c in _trick.cards:
+            _st = played_stats.get(p)
+            if _st is None:
+                continue
+            _st["hcp"] += HCP_MAP.get(c.rank, 0)
+            _st["controls"] += CONTROL_MAP.get(c.rank, 0)
+            _st["suit"][c.suit] = _st["suit"].get(c.suit, 0) + 1
+    for p, c in state.current_trick.cards:
+        _st = played_stats.get(p)
+        if _st is None:
+            continue
+        _st["hcp"] += HCP_MAP.get(c.rank, 0)
+        _st["controls"] += CONTROL_MAP.get(c.rank, 0)
+        _st["suit"][c.suit] = _st["suit"].get(c.suit, 0) + 1
+
     # 5. 收集已知缺门
     known_voids = collect_voids(state)
 
@@ -143,6 +164,7 @@ def _extract_known_info(state: "PlayState", perspective: str) -> dict:
         "own_hand": own_hand,
         "dummy_hand": state.hands.get(dummy, []) if dummy else [],
         "result": result,
+        "played": played_stats,
     }
 
 
@@ -195,6 +217,65 @@ def _sample_uniform(known_info: dict) -> Dict[str, List[Card]]:
                 break  # 无可用牌，放弃回填
 
     return result
+
+
+def _constraint_trivially_satisfied(c: "BidConstraint", remaining_count: int) -> bool:
+    """剩余约束是否无条件满足（采样无需再验证该位置）。"""
+    if c.min_hcp not in (None, 0):
+        return False
+    if c.max_hcp is not None and c.max_hcp < remaining_count * 4:
+        return False
+    if c.min_controls not in (None, 0):
+        return False
+    if any(c.suit_min.values()):
+        return False
+    if any(c.suit_max.values()):
+        return False
+    if c.exact_suit:
+        return False
+    if c.specific_cards:
+        return False
+    if c.balanced is not None:
+        return False
+    return True
+
+
+def _reduce_constraint_for_played(
+    c: "BidConstraint",
+    played: dict,
+    remaining_count: int,
+) -> Optional["BidConstraint"]:
+    """中局扣减：把整手约束按已出牌折算为剩余部分约束。
+
+    物理意义：初始约束 = 已出部分 + 剩余部分。返回副本，不修改原约束。
+    折算后若无条件满足则返回 None（采样跳过该位置验证）。
+    """
+    if not played:
+        return c
+    reduced = copy.deepcopy(c)
+    played_hcp = played.get("hcp", 0)
+    played_controls = played.get("controls", 0)
+    played_suit = played.get("suit", {})
+    # HCP：剩余范围 = [初始min - 已出HCP, 初始max - 已出HCP]
+    if reduced.min_hcp is not None:
+        reduced.min_hcp = max(0, reduced.min_hcp - played_hcp)
+    if reduced.max_hcp is not None:
+        reduced.max_hcp = max(reduced.max_hcp - played_hcp, reduced.min_hcp or 0)
+    # 控制数同样按已出牌扣减
+    if reduced.min_controls is not None:
+        reduced.min_controls = max(0, reduced.min_controls - played_controls)
+    # 花色张数：suit_min/exact_suit 扣减后不超剩余张数；suit_max 扣减已出张数
+    for s in list(reduced.suit_min.keys()):
+        reduced.suit_min[s] = max(0, min(reduced.suit_min[s] - played_suit.get(s, 0), remaining_count))
+    for s in list(reduced.exact_suit.keys()):
+        reduced.exact_suit[s] = max(0, min(reduced.exact_suit[s] - played_suit.get(s, 0), remaining_count))
+    for s in list(reduced.suit_max.keys()):
+        reduced.suit_max[s] = max(0, reduced.suit_max[s] - played_suit.get(s, 0))
+    # 均型是整手 13 张属性，剩余碎片无法判断 → 转为不约束
+    reduced.balanced = None
+    if _constraint_trivially_satisfied(reduced, remaining_count):
+        return None
+    return reduced
 
 
 def _warn_fallback(level: str, known_info: dict, constraints: dict) -> None:
@@ -254,10 +335,19 @@ class DealSampler:
         """单次采样（复用 known_info，不重复提取）。"""
         # 过滤：已知手牌的位置不验证（手牌由发牌固定，无法通过采样改变）
         known_positions = set(known_info.get("result", {}).keys())
-        active_constraints = {
-            pos: c for pos, c in hard_constraints.items()
-            if pos not in known_positions
-        }
+        played_stats = known_info.get("played", {})
+        remaining_counts = known_info.get("remaining_counts", {})
+        # 中局扣减：把整手约束按已出牌折算为剩余部分约束，再用于验证
+        active_constraints = {}
+        for pos, c in hard_constraints.items():
+            if pos in known_positions:
+                continue
+            reduced = _reduce_constraint_for_played(
+                c, played_stats.get(pos), remaining_counts.get(pos, 0)
+            )
+            if reduced is None:
+                continue
+            active_constraints[pos] = reduced
         # Level 1: 硬约束
         for _attempt in range(50):
             world = _sample_uniform(known_info)

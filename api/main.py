@@ -47,7 +47,7 @@ from config import (
     JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM,
     AI_PROVIDER_DEEPSEEK, AI_PROVIDER_DOUBAO, DEFAULT_AI_PROVIDER,
     DEFAULT_PLAY_ENGINE,
-    ALL_MODELS, ALL_BASE_MODELS, DOUBAO_MODEL_NAMES,
+    ALL_MODELS, ALL_BASE_MODELS,
     is_doubao_model, is_reasoning_model, get_base_model,
     DOUBAO_MODEL_2_1_PRO, DOUBAO_MODEL_2_1_TURBO,
     DD_PARTICLES_MIN, DD_PARTICLES_MAX,
@@ -90,19 +90,6 @@ def get_available_models() -> list:
     if llm_client.is_configured():
         available.extend(["deepseek-v4-flash", "deepseek-v4-flash::reasoning",
                           "deepseek-v4-pro", "deepseek-v4-pro::reasoning"])
-    # 豆包模型：需对应 endpoint 已配置
-    for model_name in DOUBAO_MODEL_NAMES:
-        # 保存当前模型，测试每个模型是否有可用 endpoint
-        saved = doubao_client.model
-        doubao_client.set_model(model_name)
-        if doubao_client.endpoint:
-            available.append(model_name)
-        # 也测试 reasoning 版本
-        reasoning_name = f"{model_name}::reasoning"
-        doubao_client.set_model(reasoning_name)
-        if doubao_client.endpoint:
-            available.append(reasoning_name)
-        doubao_client.set_model(saved)  # 恢复
     return available
 
 def get_llm_client(ai_provider: str = None):
@@ -1611,8 +1598,9 @@ async def undo_play():
 class PlayAIRequest(BaseModel):
     use_reasoning: bool = False
     play_model: Optional[str] = None
-    play_engine: Optional[str] = None  # "llm" | "mcts" | "dd" | "tiered" | "perfect" | "alphamu" | "alphamu_llm"
+    play_engine: Optional[str] = None  # "llm" | "mcts" | "dd" | "perfect" | "alphamu" | "dd_alphamu_llm"
     dd_sample_count: Optional[int] = None  # DD 蒙地卡罗采样数
+    dd_alphamu_switch_cards: Optional[int] = None  # DD-αμ-LLM 引擎中盘/残局切换分界
 
 
 class SetHandRequest(BaseModel):
@@ -1699,12 +1687,12 @@ async def ai_play(request: PlayAIRequest):
                 engine = request.play_engine or DEFAULT_PLAY_ENGINE
                 use_mcts = engine == "mcts"
                 use_dd = engine == "dd"
-                use_tiered = engine == "tiered"
                 use_perfect = engine == "perfect"
                 use_alphamu = engine == "alphamu"
-                use_alphamu_llm = engine == "alphamu_llm"
+                use_dd_alphamu_llm = engine == "dd_alphamu_llm"
                 dd_samples = (request.dd_sample_count
-                              if (use_dd or use_tiered) else None)
+                              if (use_dd or use_dd_alphamu_llm) else None)
+                dd_switch_cards = request.dd_alphamu_switch_cards if use_dd_alphamu_llm else None
                 t0 = time.time()
                 # 记录DD提示所需的出牌前状态
                 state_before = service.get_state()
@@ -1713,11 +1701,11 @@ async def ai_play(request: PlayAIRequest):
                     use_reasoning=use_reasoning,
                     use_mcts=use_mcts,
                     use_dd=use_dd,
-                    use_tiered=use_tiered,
                     use_perfect=use_perfect,
                     use_alphamu=use_alphamu,
-                    use_alphamu_llm=use_alphamu_llm,
-                    dd_samples=dd_samples)
+                    use_dd_alphamu_llm=use_dd_alphamu_llm,
+                    dd_samples=dd_samples,
+                    dd_alphamu_switch_cards=dd_switch_cards)
                 elapsed_ms = int((time.time() - t0) * 1000)
 
                 if result.get("card"):

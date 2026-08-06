@@ -251,6 +251,8 @@ class AlphaMuSearch:
         self._start_time: float = 0
         self._nodes_searched: int = 0
         self._dds_calls: int = 0
+        self._dds_time_total: float = 0.0
+        self._dds_count_total: int = 0
         self._err_stats: Dict[str, int] = {
             "path_A_move_not_in_hand": 0,
             "path_B_duplicates": 0,
@@ -283,6 +285,8 @@ class AlphaMuSearch:
     def search(self, state: PlayState) -> dict:
         self._nodes_searched = 0
         self._dds_calls = 0
+        self._dds_time_total = 0.0
+        self._dds_count_total = 0
         self._err_stats = {k: 0 for k in self._err_stats}
         self._err_samples = {}
         self._debug_dds_log = []
@@ -547,8 +551,8 @@ class AlphaMuSearch:
         move_scores.sort(key=lambda s: s["best_score"], reverse=True)
 
         elapsed = time.time() - self._start_time
-        _dds_total_s = getattr(self, "_dds_time_total", 0.0)
-        _dds_count = getattr(self, "_dds_count_total", 0)
+        _dds_total_s = self._dds_time_total
+        _dds_count = self._dds_count_total
         _dds_pct = (_dds_total_s / elapsed * 100) if elapsed > 0 else 0
         _dds_per = (_dds_total_s * 1000 / _dds_count) if _dds_count > 0 else 0
         print(f"[αμ] 搜索完成: {self._nodes_searched} nodes, {self._dds_calls} DDS calls, {elapsed:.1f}s")
@@ -1258,8 +1262,11 @@ class AlphaMuSearch:
                     except Exception:
                         pass
 
-        self._dds_calls += sum(1 for r in raw_results if r is not None and len(r) > 0)
+        _solved_count = sum(1 for r in raw_results if r is not None and len(r) > 0)
+        self._dds_calls += _solved_count
         _solve_ms = (time.time() - _t_solve_start) * 1000
+        self._dds_time_total += _solve_ms / 1000.0
+        self._dds_count_total += _solved_count
 
         for i, (w_idx, hands, trump, first, trick_cards, trick_count, ns_info) in enumerate(batch_items):
             solved = raw_results[i] if i < len(raw_results) else None

@@ -91,24 +91,8 @@ function PlayDetailPanel({
     const fullOutput = record.full_output || {}
     const prompt = record.prompt || ''
 
-    // Tiered 阶段标签
-    const TIERED_PHASE_LABELS = {
-      opening_lead: '首攻',
-      dummy_reveal: '明手亮开',
-      first_trick: '第一墩',
-      first_trick_third: '第一墩·三家',
-      first_trick_fourth: '第一墩·四家',
-      midgame: '中盘DD',
-      midgame_mcts: '中盘MCTS',
-      critical: '关键LLM',
-      critical_mcts: '关键LLM',
-      endgame: '残局DD',
-      endgame_alpha_mu: '残局αμ',
-    }
-    const tieredPhaseLabel = TIERED_PHASE_LABELS[fullOutput.tiered_phase] || ''
-
     // 输出模式：显示 fullOutput 中所有有效字段（排除内部/已渲染的）
-    const SKIP_KEYS = ['mcts_stats', 'tiered_phase', 'tiered_dd_fallback', 'tiered_mcts_fallback', 'validation_warning', 'llm_review']
+    const SKIP_KEYS = ['mcts_stats', 'tiered_phase', 'tiered_dd_fallback', 'tiered_mcts_fallback', 'validation_warning', 'llm_review', 'engine_phase', 'llm_review_status']
     const FIELD_COLORS = ['#e65100', 'text.primary', '#2e7d32', '#1976d2', '#37474f', '#1565c0']
     const fields = Object.keys(fullOutput)
       .filter(k => !SKIP_KEYS.includes(k) && fullOutput[k] != null && fullOutput[k] !== '')
@@ -167,13 +151,32 @@ function PlayDetailPanel({
                 }
                 const base = (record.used_model || '').replace('::reasoning', '')
                 const label = MODEL_LABELS[base] || base || 'LLM'
+                const hasLLM = !!(fullOutput && fullOutput.llm_review)
                 const isReasoning = (record.used_model || '').includes('::reasoning')
-                return `αμ+${label}${isReasoning ? '·思考' : '·快答'}`
+                if (hasLLM) return `αμ·${label}${isReasoning ? '·思考' : '·快答'}`
+                return 'αμ'
               })()}
             </Typography>
-          ) : record.used_engine === 'tiered' ? (
+          ) : record.used_engine === 'dd_alphamu_llm' ? (
             <Typography variant="caption" sx={{ color: '#e65100', fontSize: '0.7rem', fontWeight: 500 }}>
-              Tiered·{tieredPhaseLabel}
+              {(() => {
+                const MODEL_LABELS = {
+                  'deepseek-v4-flash': 'V4-Flash',
+                  'deepseek-v4-pro': 'V4-Pro',
+                  'doubao-seed-2.1-pro': '豆包Pro',
+                  'doubao-seed-2.1-turbo': '豆包Turbo',
+                }
+                const base = (record.used_model || '').replace('::reasoning', '')
+                const label = MODEL_LABELS[base] || base || 'LLM'
+                // 仅当 LLM 审查实际触发（llm_review 存在）时才显示 LLM
+                const hasLLM = !!(fullOutput && fullOutput.llm_review)
+                const isMidgame = !!(fullOutput && fullOutput.engine_phase === 'midgame_dd')
+                const isReasoning = (record.used_model || '').includes('::reasoning')
+                if (hasLLM) {
+                  return `${isMidgame ? 'DD' : 'αμ'}·${label}${isReasoning ? '·思考' : '·快答'}`
+                }
+                return isMidgame ? 'DD' : 'αμ'
+              })()}
             </Typography>
           ) : record.used_model && (
             <Typography variant="caption" sx={{ color: colorMuted, fontSize: '0.7rem' }}>
@@ -247,7 +250,7 @@ function PlayDetailPanel({
                 </Box>
               )
             })}
-            {(record.used_engine === 'mcts' || (record.used_engine || '') === 'dd' || record.used_engine === 'tiered' || record.used_engine === 'perfect' || record.used_engine === 'alphamu' || record.used_engine === 'alphamu_llm') && (() => {
+            {(record.used_engine === 'mcts' || (record.used_engine || '') === 'dd' || record.used_engine === 'tiered' || record.used_engine === 'perfect' || record.used_engine === 'alphamu' || record.used_engine === 'alphamu_llm' || record.used_engine === 'dd_alphamu_llm') && (() => {
               try {
                 const mctsRaw = fullOutput.mcts_stats
                 if (!mctsRaw) { console.log('[Stats] no mcts_stats'); return null }
@@ -352,7 +355,12 @@ function PlayDetailPanel({
                 )
               } catch (e) { console.error('[Stats] viz error:', e); return null }
             })()}
-            {record.used_engine === 'alphamu_llm' && (() => {
+            {(record.used_engine === 'alphamu_llm' || record.used_engine === 'dd_alphamu_llm') && fullOutput.llm_review_status && (
+              <Typography variant="caption" sx={{ fontSize: '0.65rem', color: fullOutput.llm_review_status === '已激活' ? '#6a1b9a' : colorMuted, display: 'block', mt: 0.5 }}>
+                LLM审查: {fullOutput.llm_review_status}
+              </Typography>
+            )}
+            {(record.used_engine === 'alphamu_llm' || record.used_engine === 'dd_alphamu_llm') && (() => {
               try {
                 const reviewRaw = fullOutput.llm_review
                 if (!reviewRaw) return null
@@ -364,8 +372,9 @@ function PlayDetailPanel({
                 const planValid = review.plan_valid === true
                 const planInvalid = review.plan_valid === false
                 const hasGroup = groupIdx > 0 && Boolean(reviewCard)
+                const engineName = record.used_engine === 'dd_alphamu_llm' ? 'DD' : 'αμ'
                 let labelColor = '#757575'
-                let labelText = '采纳αμ选择'
+                let labelText = `采纳${engineName}选择`
                 if (hasGroup) {
                   labelColor = '#6a1b9a'
                   labelText = `选组${groupIdx}出${reviewCard}（${reason}）`
