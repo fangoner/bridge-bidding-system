@@ -1565,7 +1565,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       const savedState = loadedPlayRecord.playState
       const totalCards = (savedState.tricks || []).reduce((s, t) => s + (t.cards?.length || 0), 0)
         + (savedState.current_trick?.cards?.length || 0)
-      setReviewCursor(totalCards)
+      // 停在最后一墩首张（有待出牌的位置），使 DD 提示直接可见
+      setReviewCursor(Math.max(0, totalCards - 1))
       return
     }
 
@@ -2294,7 +2295,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       // 新完成的打牌停在全部已出位置
       const totalCards = (playState.tricks || []).reduce((s, t) => s + (t.cards?.length || 0), 0)
         + (playState.current_trick?.cards?.length || 0)
-      setReviewCursor(totalCards)
+      // 停在最后一墩首张（有待出牌的位置），使 DD 提示直接可见
+      setReviewCursor(Math.max(0, totalCards - 1))
     }
 
     prevTricksCountRef.current = currentTricksCount

@@ -50,9 +50,9 @@ export function PlayProvider({ children }) {
   // ── 打牌引擎 ──
   const [playEngine, setPlayEngineState] = useState(() => {
     try {
-      return localStorage.getItem(PLAY_ENGINE_KEY) || 'llm'
+      return localStorage.getItem(PLAY_ENGINE_KEY) || 'dd_alphamu_llm'
     } catch {
-      return 'llm'
+      return 'dd_alphamu_llm'
     }
   })
 
