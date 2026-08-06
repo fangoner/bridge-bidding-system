@@ -479,7 +479,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         aiPlayHistory: record.play.ai_play_history || [],
       })
     }
-    setShowPlayPanel(false)
+    setShowPlayPanel(hasPlayState)
     setPlayState(null)
     setAiPlayHistory([])
     setIsPlayPaused(false)
@@ -1561,12 +1561,11 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const handleStartPlay = async () => {
     if (loadedPlayRecord) {
       await startReplay('all')
-      // 完成后定位到末尾，方便复盘翻牌
+      // 完成后停在全部已出位置，牌桌显示完整结果（最后一张也在桌上）
       const savedState = loadedPlayRecord.playState
       const totalCards = (savedState.tricks || []).reduce((s, t) => s + (t.cards?.length || 0), 0)
         + (savedState.current_trick?.cards?.length || 0)
-      // 停在最后一墩首张（有待出牌的位置），使 DD 提示直接可见
-      setReviewCursor(Math.max(0, totalCards - 1))
+      setReviewCursor(totalCards)
       return
     }
 
@@ -1588,6 +1587,18 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     }
     setContractDialogOpen(true)
     return
+  }
+
+  // 复盘：从历史记录载入最新一条打牌完成的记录，与"从历史记录载入"走同一路径
+  const handleReviewCompletedPlay = () => {
+    const latest = [...bridgeRecords]
+      .filter(r => r.type === 'play_complete' && r.play?.tricks?.length > 0)
+      .sort((a, b) => String(b.id || 0).localeCompare(String(a.id || 0)))[0]
+    if (!latest) {
+      setError('没有可复盘的记录')
+      return
+    }
+    loadRecordToTable(latest)
   }
 
   const handleRewindToTrick = async (targetCardIdx) => {
@@ -2218,7 +2229,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
 
   // 加载记录后自动进入打牌界面（记录含打牌数据时）
   useEffect(() => {
-    if (loadedPlayRecord && !showPlayPanel) {
+    if (loadedPlayRecord) {
       handleStartPlay()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2274,8 +2285,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   }, [playState?.is_human_turn, playState?.phase, showPlayPanel, playInitiated, aiThinking, playLoading, isPlayPaused, positionRoles])
 
   // 检测一墩完成，自动暂停；检测打牌完成，自动保存记录
+  // 仅真实打牌时运行；载入历史记录回放（loadedPlayRecord）时不触发，避免清空复盘游标
   useEffect(() => {
-    if (!showPlayPanel || !playState) return
+    if (!showPlayPanel || !playState || loadedPlayRecord) return
 
     const currentTricksCount = playState.tricks?.length || 0
     const prevTricksCount = prevTricksCountRef.current
@@ -2288,15 +2300,11 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       setSelectedPlayRecord(null)
     }
 
-    // 打牌完成，自动保存完整记录 + 自动进入复盘模式
+    // 打牌完成，自动保存完整记录；停留在完成状态，不自动进入复盘
     if (phase === 'complete' && prevTricksCount < 13) {
       console.log('[自动保存] 打牌完成 phase=complete, 准备保存完整记录');
       saveCompletePlayRecord()
-      // 新完成的打牌停在全部已出位置
-      const totalCards = (playState.tricks || []).reduce((s, t) => s + (t.cards?.length || 0), 0)
-        + (playState.current_trick?.cards?.length || 0)
-      // 停在最后一墩首张（有待出牌的位置），使 DD 提示直接可见
-      setReviewCursor(Math.max(0, totalCards - 1))
+      setReviewCursor(null)
     }
 
     prevTricksCountRef.current = currentTricksCount
@@ -2524,6 +2532,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
             return Math.min(totalCards, (c || 0) + 1)
           })}
           onRewindToTrick={handleRewindToTrick}
+          onReviewCompletedPlay={handleReviewCompletedPlay}
         />
       )}
 

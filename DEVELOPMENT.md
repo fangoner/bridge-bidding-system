@@ -500,6 +500,22 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.52
+- **出牌面板隐藏已出/他手的牌**
+  - 默认隐藏已出/他手的牌，仅显示当前可选牌，减少点击干扰
+  - 标题栏"显示全部"checkbox 恢复显示全部13张牌（灰色失效状态）
+  - checkbox 为面板级本地 state，切换位置/重开面板时保持
+- **打牌完成新增"复盘"按钮**
+  - 打牌完成时停留在完成状态，不再自动进入本地复盘
+  - "复盘"按钮从历史记录载入最新打牌完成记录，与"从历史记录载入"走同一路径
+  - 修复 MainTableArea→RightPanelSwitcher 漏传 onReviewCompletedPlay 导致按钮不显示
+  - 载入打牌记录后复盘游标停在全部已出位置，最后一张牌显示在牌桌上
+- **载入打牌记录一步直达打牌界面**
+  - loadRecordToTable 的 setShowPlayPanel 按 hasPlayState 判断
+  - 自动进入打牌界面的 useEffect 不再依赖 !showPlayPanel
+  - 仅叫牌完成未打牌的记录仍进入叫牌界面
+- 修改文件: App.jsx, CardTable.jsx, MainTableArea.jsx, PlayDetailPanel.jsx
+
 ### v1.51
 - **局况功能**
   - GameContext 新增 vulnerability/setVulnerability 状态

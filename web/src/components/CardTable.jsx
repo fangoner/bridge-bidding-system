@@ -132,6 +132,7 @@ function CardTable({
   const [handPickerPanelFor, setHandPickerPanelFor] = useState(null)
   const [playPanelPos, setPlayPanelPos] = useState(null)
   const [handPickerPos, setHandPickerPos] = useState(null)
+  const [showAllPlayCards, setShowAllPlayCards] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [dragTarget, setDragTarget] = useState(null)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
@@ -2289,8 +2290,19 @@ function CardTable({
                 {cp}家 出牌{ledSuit ? ` (跟${ledSuit})` : ' (首攻)'}
               </Typography>
               <Typography sx={{ fontSize: '1.21rem', color: isDark ? '#94a3b8' : '#888' }}>
-                拖拽移动 · 灰色=已出/他手
+                拖拽移动 · 已出/他手的牌已隐藏
               </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3, flexShrink: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={showAllPlayCards}
+                  onChange={(e) => setShowAllPlayCards(e.target.checked)}
+                  style={{ width: 18, height: 18, cursor: 'pointer' }}
+                />
+                <Typography sx={{ fontSize: '1.05rem', color: isDark ? '#94a3b8' : '#888', userSelect: 'none' }}>
+                  显示全部
+                </Typography>
+              </Box>
             </Box>
             {SUIT_ROWS.map(({ symbol, color }) => {
               const isLedSuit = ledSuit === symbol
@@ -2309,7 +2321,8 @@ function CardTable({
                   <Box sx={{ display: 'flex', gap: 0.36, flexWrap: 'nowrap' }}>
                     {RANKS.map((rank) => {
                       const cardKey = symbol + rank
-                      const isTaken = takenSet.has(cardKey)
+                      const isTaken = showAllPlayCards && takenSet.has(cardKey)
+                      if (!showAllPlayCards && takenSet.has(cardKey)) return null
                       return (
                         <Button
                           key={rank}

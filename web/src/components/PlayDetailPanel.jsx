@@ -29,6 +29,7 @@ function PlayDetailPanel({
   onReviewPrev,
   onReviewNext,
   onRewindToTrick,
+  onReviewCompletedPlay,
   onBackToBidding,
 }) {
   const [selectedRecord, setSelectedRecord] = useState(null)
@@ -695,6 +696,9 @@ function PlayDetailPanel({
           )}
           {((!isComplete && playStarted) || (isComplete && !isHistoryRecord)) && onUndoPlay && (
             <Button variant="outlined" color="secondary" onClick={onUndoPlay} disabled={aiLoading} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.2 }}>撤销</Button>
+          )}
+          {isComplete && !isHistoryRecord && onReviewCompletedPlay && (
+            <Button variant="contained" color="primary" onClick={onReviewCompletedPlay} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 48, py: 0.2 }}>复盘</Button>
           )}
           {onSave && (
             <Button variant="outlined" color="info" size="small" onClick={onSave} disabled={!canSave} sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.2 }}>保存</Button>

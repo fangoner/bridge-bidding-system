@@ -57,6 +57,7 @@ export default function MainTableArea({
   onReviewPrev,
   onReviewNext,
   onRewindToTrick,
+  onReviewCompletedPlay,
 }) {
   return (
     <Box sx={isMobile
@@ -113,6 +114,7 @@ export default function MainTableArea({
         onReviewPrev={onReviewPrev}
         onReviewNext={onReviewNext}
         onRewindToTrick={onRewindToTrick}
+        onReviewCompletedPlay={onReviewCompletedPlay}
       />
     </Box>
   )
@@ -143,6 +145,7 @@ function RightPanelSwitcher({
   onReviewPrev,
   onReviewNext,
   onRewindToTrick,
+  onReviewCompletedPlay,
 }) {
   const {
     hands,
@@ -211,6 +214,7 @@ function RightPanelSwitcher({
         onReviewNext={onReviewNext}
         onBackToBidding={onBackToBidding}
         onRewindToTrick={onRewindToTrick}
+        onReviewCompletedPlay={onReviewCompletedPlay}
       />
     )
   }
