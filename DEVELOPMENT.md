@@ -500,6 +500,17 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.54
+- **DD 提示异步计算（7/8：线程化 + 参数链路）**
+  - 将 DD 提示计算移出出牌请求关键路径：`_dd_hint_executor`（ThreadPoolExecutor，max_workers=1）后台线程计算，不再阻塞 play_card / ai_play 响应
+  - 出牌前 `copy.deepcopy(state_before)` 快照，后台线程从快照的 current_player 取可出牌计算提示，与复盘路径 `_compute_dd_hints_for_state_from_state` 语义一致
+  - 在请求线程内同步捕获目标 trick 引用（`_resolve_dd_target`），避免后台运行时状态前进导致提示错墩
+- **修复 DDS 并发安全（根因）**
+  - direct_dds 的 `_dll_lock` 原先只保护 DLL 加载，未保护实际求解调用
+  - 扩展 `_dll_lock` 到 `solve_all_boards_raw` / `solve_all_boards_bits` / `calc_dd_table` 的 `SolveAllBoardsBin` / `CalcDDtable`，串行化所有 DDS 求解
+  - 修复 7/8 线程化后后台线程与主线程并发调用 DDS 导致内部状态损坏（`Sum 3 is not four`）、进程崩溃进而丢失定约/定约方/首攻的问题
+- 修改文件: api/main.py, bridge/mcts/direct_dds.py
+
 ### v1.53
 - **人类出牌乐观更新**
   - 点击后立即将牌显示到当前墩并移出手牌，后端返回后用权威状态覆盖，失败时回退（reconcilePlayState）

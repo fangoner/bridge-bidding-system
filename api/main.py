@@ -11,7 +11,9 @@ import io
 import re
 import json
 import time
+import copy
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 import traceback
 import tempfile
 from pathlib import Path
@@ -1508,6 +1510,7 @@ async def play_card(request: PlayCardRequest):
 
         state_before = service.get_state()
         tricks_before = len(state_before.tricks) if state_before else 0
+        state_snapshot = copy.deepcopy(state_before) if state_before else None
 
         card = Card(suit=request.card["suit"], rank=request.card["rank"])
         _log = f"[PLAY_CARD] position={request.position} card={card} current_player={state_before.current_player if state_before else 'N/A'} hands[{request.position}]={state_before.hands.get(request.position) if state_before else 'N/A'}"
@@ -1530,8 +1533,8 @@ async def play_card(request: PlayCardRequest):
             trick_winner = state.current_player  # 新一墩的首攻者就是上一墩的赢家
             trick_complete = True
 
-        # 记录DD提示到trick
-        _record_dd_hint(service, state_before, state, tricks_before)
+        # 记录DD提示到trick（后台异步计算，不阻塞响应）
+        _submit_dd_hint(state_snapshot, state, tricks_before)
 
         result = None
         is_complete = service.is_complete()
@@ -1698,6 +1701,7 @@ async def ai_play(request: PlayAIRequest):
                 # 记录DD提示所需的出牌前状态
                 state_before = service.get_state()
                 tricks_before = len(state_before.tricks) if state_before else 0
+                state_snapshot = copy.deepcopy(state_before) if state_before else None
                 result = await service.get_ai_play(
                     use_reasoning=use_reasoning,
                     use_mcts=use_mcts,
@@ -1714,9 +1718,9 @@ async def ai_play(request: PlayAIRequest):
                     current_player = service.get_current_player()
                     reason = result.get("reasoning", "")
                     success, message = service.play_card(current_player, card, is_ai=True, reason=reason)
-                    # 记录DD提示
+                    # 记录DD提示到trick（后台异步计算，不阻塞响应）
                     state_after = service.get_state()
-                    _record_dd_hint(service, state_before, state_after, tricks_before)
+                    _submit_dd_hint(state_snapshot, state_after, tricks_before)
                     state_dict = service.get_state_dict()
 
                     return PlayAIResponse(
@@ -1916,20 +1920,48 @@ def _compute_dd_hints_for_state(service, state) -> dict:
     return _compute_dd_hints_from_state(state, playable)
 
 
-def _record_dd_hint(service, state_before, state_after, tricks_before):
-    """出牌后录入DD提示：计算出牌前状态的DD评估，追加到对应trick的dd_hints列表。"""
-    if not state_before or not state_after:
+# ── DD 提示异步计算（7/8）──
+_dd_hint_executor = ThreadPoolExecutor(max_workers=1)
+
+
+def _resolve_dd_target(state_after, tricks_before):
+    """确定本次出牌对应的目标 trick（在请求线程同步捕获，避免竞态）。"""
+    if not state_after:
+        return None
+    tricks_after = len(state_after.tricks)
+    trick_complete = tricks_after > tricks_before
+    if trick_complete and state_after.tricks:
+        return state_after.tricks[-1]
+    return state_after.current_trick
+
+
+def _submit_dd_hint(state_before_snapshot, state_after, tricks_before):
+    """异步提交DD提示计算。
+
+    在请求线程内同步捕获目标trick引用（避免后台运行时状态已前进导致定位错墩），
+    并传入出牌前状态深拷贝快照，供后台线程安全读取。
+    """
+    try:
+        if not state_before_snapshot or not state_after:
+            return
+        target_trick = _resolve_dd_target(state_after, tricks_before)
+        if target_trick is None:
+            return
+        _dd_hint_executor.submit(_record_dd_hint_async, state_before_snapshot, target_trick)
+    except Exception:
+        pass
+
+
+def _record_dd_hint_async(state_before_snapshot, target_trick):
+    """后台线程：基于出牌前状态快照计算DD提示，追加到目标trick。"""
+    if not state_before_snapshot or target_trick is None:
         return
     try:
-        hints = _compute_dd_hints_for_state(service, state_before)
+        perspective = state_before_snapshot.current_player
+        playable = state_before_snapshot.get_playable_cards(perspective)
+        hints = _compute_dd_hints_from_state(state_before_snapshot, playable)
         if not hints:
             return
-        tricks_after = len(state_after.tricks) if state_after else 0
-        trick_complete = tricks_after > tricks_before
-        if trick_complete and state_after.tricks:
-            target_trick = state_after.tricks[-1]
-        else:
-            target_trick = state_after.current_trick
         target_trick.dd_hints.append(hints)
     except Exception:
         pass

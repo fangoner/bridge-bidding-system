@@ -210,7 +210,9 @@ def solve_all_boards_raw(
     solvedp = _solvedBoards()
 
     # 调用 DDS（argtypes/restype 确保 64-bit 指针正确传递）
-    dll.SolveAllBoardsBin(ctypes.byref(bop), ctypes.byref(solvedp))
+    # DDS C 库有全局内部状态，非并发安全：跨线程的顶层求解必须串行化
+    with _dll_lock:
+        dll.SolveAllBoardsBin(ctypes.byref(bop), ctypes.byref(solvedp))
 
     results = []
     for i in range(n):
@@ -375,9 +377,10 @@ def solve_all_boards_bits(
             bop.mode[i] = mode
 
         solvedp = _solvedBoards()
-        dll.SolveAllBoardsBin.argtypes = [ctypes.POINTER(_boards), ctypes.POINTER(_solvedBoards)]
-        dll.SolveAllBoardsBin.restype = ctypes.c_int
-        ret = dll.SolveAllBoardsBin(ctypes.byref(bop), ctypes.byref(solvedp))
+        with _dll_lock:
+            dll.SolveAllBoardsBin.argtypes = [ctypes.POINTER(_boards), ctypes.POINTER(_solvedBoards)]
+            dll.SolveAllBoardsBin.restype = ctypes.c_int
+            ret = dll.SolveAllBoardsBin(ctypes.byref(bop), ctypes.byref(solvedp))
         if ret == 0:  # 0 = failure, non-zero = success
             all_results.extend([None] * bn)
             continue
@@ -442,7 +445,9 @@ def calc_dd_table(hands: Dict[str, List[Card]]) -> Optional[List[List[int]]]:
     except AttributeError:
         return None
 
-    ret = dll.CalcDDtable(tdeal, ctypes.byref(results))
+    ret = None
+    with _dll_lock:
+        ret = dll.CalcDDtable(tdeal, ctypes.byref(results))
     if ret == 0:
         return None
 

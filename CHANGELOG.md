@@ -1,5 +1,22 @@
 # 开发日志
 
+## 2026-08-08（DD hint 线程化 + DDS 并发安全）
+
+### DD 提示异步计算（7/8：线程化 + 参数链路）
+
+**背景**: 修复 7/8 功能（`_record_dd_hint` 线程化）导致的定约/定约方/首攻丢失和后端崩溃问题，根因是 DDS 库非线程安全、并发调用损坏内部状态
+
+**改进**:
+- DD 提示计算移出请求关键路径：`_dd_hint_executor`（ThreadPoolExecutor，max_workers=1）后台线程执行，不再阻塞 play_card / ai_play 响应
+- 出牌前 `copy.deepcopy(state_before)` 快照，后台线程从快照的 current_player 取可出牌计算提示，与复盘路径语义一致
+- 请求线程内同步捕获目标 trick 引用（`_resolve_dd_target`），避免后台运行时状态前进导致提示错墩
+- 修复 DDS 并发安全根因：direct_dds 的 `_dll_lock` 原先只保护 DLL 加载，扩展至 `solve_all_boards_raw` / `solve_all_boards_bits` / `calc_dd_table` 的 `SolveAllBoardsBin` / `CalcDDtable`，串行化所有 DDS 求解
+- 修复 `Sum 3 is not four` 崩溃及定约/定约方/首攻丢失问题
+
+**修改文件**: api/main.py, bridge/mcts/direct_dds.py
+
+**测试验证**: 并发 DDS 调用无崩溃；定约/定约方/首攻正常显示；DD 提示异步写入正确
+
 ## 2026-08-08
 
 ### 出牌延迟优化 + DD/αμ LLM审查提示词修正
