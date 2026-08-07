@@ -500,6 +500,21 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.53
+- **人类出牌乐观更新**
+  - 点击后立即将牌显示到当前墩并移出手牌，后端返回后用权威状态覆盖，失败时回退（reconcilePlayState）
+- **AI出牌两阶段（即时思考）**
+  - AI出牌拆为两个 useEffect：轮到时立即置 aiThinking=true（中心圆圈马上旋转），250ms 后再执行 handleAIPlay
+- **ai_play 直接返回 state**
+  - PlayAIResponse 新增 state 字段，前端不再额外调 getPlayState，减少一次往返延迟
+- **牌桌防闪隐**
+  - 当前墩为空时直接用 playState.tricks 最后一墩，避免刚出的牌短暂消失
+  - 已出牌模式优先用顶层完整手牌，避免复盘回放时与已出牌重复计数
+- **DD/αμ LLM 审查提示词 engine_name 通用化**
+  - _build_strategy_text 新增 engine_name 参数，替换硬编码"αμ"
+  - 移除 DD/αμ 路径两个 _validate_and_fallback 调用
+- 修改文件: api/main.py, App.jsx, CardTable.jsx, play_service.py
+
 ### v1.52
 - **出牌面板隐藏已出/他手的牌**
   - 默认隐藏已出/他手的牌，仅显示当前可选牌，减少点击干扰
