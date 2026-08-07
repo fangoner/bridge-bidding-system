@@ -458,7 +458,13 @@ function CardTable({
     const remainingCards = playState.hands?.[position] || []
 
     if (showPlayedCards) {
-      // 显示已出模式：合并剩余牌+已出牌 = 完整13张，统一排序保证和隐藏模式顺序一致
+      // 显示已出模式：优先用顶层完整手牌（始终为发牌时的完整13张），
+      // 避免 playState.hands 异常（复盘回放失败时仍为全量）与已出牌重复计数成26张
+      const fullHand = hands?.[position]
+      if (fullHand && (fullHand.spades || fullHand.hearts || fullHand.diamonds || fullHand.clubs)) {
+        return fullHand
+      }
+      // 顶层无手牌数据时，回退到 剩余牌+已出牌 重建
       const manualCards = getManualPlayedCards(position)
       const allCards = [...remainingCards, ...manualCards]
       if (allCards.length > 0) return sortCardsToHand(allCards)
@@ -836,12 +842,15 @@ function CardTable({
       }
     }
 
-    // 复盘模式：显示 reviewTrick；否则优先当前墩，再 lastCompletedTrick
+    // 复盘模式：显示 reviewTrick；否则优先当前墩，再最近完成墩
+    // 当前墩为空时直接用 playState.tricks 最后一墩（该墩刚完成即移入 tricks），
+    // 避免等待 lastCompletedTrick 的 useEffect 滞后更新造成刚出的牌短暂消失
+    const lastCompletedTrickFromState = playState?.tricks?.length ? playState.tricks[playState.tricks.length - 1] : null
     const displayTrick = isReview
       ? (reviewTrick || { cards: [] })  // 复盘模式：用 reviewTrick，墩边界时显示空墩（首攻）
       : (current_trick?.cards && current_trick.cards.length > 0)
         ? current_trick
-        : lastCompletedTrick ? lastCompletedTrick : current_trick
+        : (lastCompletedTrickFromState || lastCompletedTrick || current_trick)
 
     const getCardAtPosition = (position) => {
       if (!displayTrick?.cards) return null
@@ -858,8 +867,9 @@ function CardTable({
     }
     
     const getLastTrickWinner = () => {
-      if (lastCompletedTrick) {
-        return lastCompletedTrick?.winner
+      const completed = lastCompletedTrickFromState || lastCompletedTrick
+      if (completed) {
+        return completed?.winner
       }
       return null
     }

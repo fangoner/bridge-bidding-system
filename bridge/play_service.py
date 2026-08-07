@@ -921,7 +921,6 @@ class PlayService:
 
                 target = playable_strs.get(target_card_str)
                 if target:
-                    target, validation = self._validate_and_fallback(target, playable, state)
                     self._mark_step_completed(target_card_str, trick_number)
                     alpha_result["card"] = target.to_dict()
                     group_desc = ", ".join(c.get("card", "") for c in chosen_group["cards"])
@@ -1039,7 +1038,6 @@ class PlayService:
 
                 target = playable_strs.get(target_card_str)
                 if target:
-                    target, validation = self._validate_and_fallback(target, playable, state)
                     self._mark_step_completed(target_card_str, trick_number)
                     dd_result["card"] = target.to_dict()
                     group_desc = ", ".join(c.get("card", "") for c in chosen_group["cards"])
@@ -1640,7 +1638,7 @@ class PlayService:
 
         system_prompt = (
             f"你是桥牌做庄专家。{engine_name}引擎已默认选定第1组出牌。"
-            + ("αμ搜索已判断无成约机会，目标是**尽可能多拿墩、少宕**。" if desperation else
+            + (f"{engine_name}搜索已判断无成约机会，目标是**尽可能多拿墩、少宕**。" if desperation else
                "你的任务是依次检查第2组及以后的组，判断是否有组能实现某个关键战术"
                "（飞牌/将吃/进张管理/长套建立/终局打法），"
                "而第1组无法或不应实现这个战术。")
@@ -1655,7 +1653,7 @@ class PlayService:
             card_strs = [c.get("card", "") for c in g["cards"]]
             rate = f"{g['success_rate']:.0%}"
             dds_eq_label = "DDS等价" if len(card_strs) > 1 else ""
-            default_mark = " ← αμ默认选择" if g["group_id"] == 1 else ""
+            default_mark = f" ← {engine_name}默认选择" if g["group_id"] == 1 else ""
             group_lines.append(
                 f"组{g['group_id']}: {' '.join(card_strs)} "
                 f"(成功率{rate}) {dds_eq_label}{default_mark}".rstrip()
@@ -1706,7 +1704,7 @@ class PlayService:
      * 注意：边花输墩可通过将吃、飞牌、长套垫牌等方式消除。
    - 合计总输墩，计算为了完成定约还需要减少多少输墩。"""
 
-        strategy_text = self._build_strategy_text(desperation, is_nt, trump_cleared, loss_analysis)
+        strategy_text = self._build_strategy_text(desperation, is_nt, trump_cleared, loss_analysis, engine_name)
 
         user_prompt = f"""## 局面信息
 定约: {state.contract}
@@ -1744,10 +1742,10 @@ class PlayService:
 {played_cards_info}
 
 ## 可选出牌组
-同一组内的牌在αμ采样空间中DDS等价（出哪张结果相同），不同组之间DDS不等价。
+同一组内的牌在{engine_name}采样空间中DDS等价（出哪张结果相同），不同组之间DDS不等价。
 分组**不预设战术**——同一组牌既可能用于飞牌，也可能用于清将，也可能用于其他战术。
 战术由你根据局面自行判断，不要根据牌张大小臆测战术类别。
-**第1组是αμ引擎的默认选择，除非其他组有第1组做不到的战术价值，否则选组1。**
+**第1组是{engine_name}引擎的默认选择，除非其他组有第1组做不到的战术价值，否则选组1。**
 {groups_text}
 
 {plan_section}
@@ -1778,11 +1776,12 @@ class PlayService:
             return {"group": 0, "reason": f"审查异常: {e}", "llm_prompt": ""}
 
     def _build_strategy_text(self, desperation: bool, is_nt: bool,
-                              trump_cleared: bool, loss_analysis: str) -> str:
+                              trump_cleared: bool, loss_analysis: str,
+                              engine_name: str = "αμ") -> str:
         if desperation:
-            return f"""⚠️ αμ搜索已判定无成约机会（所有候选成功率≈0%）。目标是**尽可能多拿墩、少宕**。以下分析框架相应调整：
+            return f"""⚠️ {engine_name}搜索已判定无成约机会（所有候选成功率≈0%）。目标是**尽可能多拿墩、少宕**。以下分析框架相应调整：
 1. **数赢墩（力争多拿墩）**：逐花色数庄家方能赢的墩数。
-   第1组是αμ默认选择，检查第2组及以后是否有组能多拿墩。
+   第1组是{engine_name}默认选择，检查第2组及以后是否有组能多拿墩。
 2. **识别赢墩机会**：
    对照\u201c对方关键大牌\u201d列表，判断哪些花色可以通过飞牌多拿墩。
    - **如果某组所在花色对方有K/Q/J**：优先考虑飞牌来多拿墩。即使定约已无法完成，多拿一墩少宕一阶也能改善得分。
@@ -1810,7 +1809,7 @@ class PlayService:
         lines.append('   - 注意：弱二开叫、阻击叫的对手通常大牌集中在该花色，边花大牌可能在同伴手中。')
         lines.append('')
         lines.append('3. **审查任务：检查第2组及以后是否能实现第1组做不到的关键战术**：')
-        lines.append('   **第1组是αμ默认选择，除非非第1组有明确的战术优势，否则选组1。**')
+        lines.append('   **第1组是{0}默认选择，除非非第1组有明确的战术优势，否则选组1。**'.format(engine_name))
         lines.append('   依次检查各组（跳过第1组），判断：')
         lines.append('   - 该组是否能启动一个第1组无法启动的关键战术？')
         lines.append('     关键战术包括：飞牌（捕捉对方K/Q/J）、树立长套（垫输墩）、')

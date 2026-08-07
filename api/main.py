@@ -1644,6 +1644,7 @@ class PlayAIResponse(BaseModel):
     used_model: Optional[str] = None
     used_engine: Optional[str] = None
     elapsed_ms: Optional[int] = None
+    state: Optional[dict] = None
     error: Optional[str] = None
 
 
@@ -1716,7 +1717,8 @@ async def ai_play(request: PlayAIRequest):
                     # 记录DD提示
                     state_after = service.get_state()
                     _record_dd_hint(service, state_before, state_after, tricks_before)
-                    
+                    state_dict = service.get_state_dict()
+
                     return PlayAIResponse(
                         success=success,
                         card=result["card"],
@@ -1727,6 +1729,7 @@ async def ai_play(request: PlayAIRequest):
                         used_model=actual_model,
                         used_engine=engine,
                         elapsed_ms=elapsed_ms,
+                        state=state_dict,
                     )
                 else:
                     engine = request.play_engine or DEFAULT_PLAY_ENGINE

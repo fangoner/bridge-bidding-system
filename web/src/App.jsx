@@ -1823,13 +1823,38 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   }
 
   // 出牌
+  // 出牌失败时回退乐观更新，重新拉取后端真实状态
+  const reconcilePlayState = async () => {
+    try {
+      const s = await getPlayState()
+      if (s.success) setPlayState(s.state)
+    } catch (err) {
+      console.error('回退状态失败:', err)
+    }
+  }
+
   const handlePlayCard = async (position, card) => {
+    // 乐观更新：立即在桌面上显示点击的牌，避免等待后端DD计算造成延迟
+    setPlayState(prev => {
+      if (!prev || !prev.current_trick) return prev
+      return {
+        ...prev,
+        current_trick: {
+          ...prev.current_trick,
+          cards: [...(prev.current_trick.cards || []), [position, card]],
+        },
+        hands: {
+          ...prev.hands,
+          [position]: (prev.hands?.[position] || []).filter(c => !(c.suit === card.suit && c.rank === card.rank)),
+        },
+      }
+    })
     setPlayLoading(true)
     setError(null)
-    
+
     try {
       const result = await playCard(position, card)
-      
+
       if (result.success) {
         console.log('[DEBUG handlePlayCard] result.state.current_trick:', result.state.current_trick)
         setPlayState(result.state)
@@ -1842,10 +1867,14 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         }
       } else {
         setError(result.error || result.message || '出牌失败')
+        // 出牌失败，回退乐观更新，恢复后端真实状态
+        await reconcilePlayState()
       }
     } catch (err) {
       console.error('出牌失败:', err)
       setError('出牌失败: ' + (err.response?.data?.detail || err.message))
+      // 出牌失败，回退乐观更新，恢复后端真实状态
+      await reconcilePlayState()
     } finally {
       setPlayLoading(false)
     }
@@ -1934,10 +1963,14 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         }
         setAiPlayHistory(prev => [...prev, aiRecord])
         setPlayStarted(true)
-        
-        const stateResult = await getPlayState()
-        if (stateResult.success) {
-          setPlayState(stateResult.state)
+        // 直接用 aiPlay 返回的 state 更新桌面，避免额外的 getPlayState 往返造成延迟
+        if (result.state) {
+          setPlayState(result.state)
+        } else {
+          const stateResult = await getPlayState()
+          if (stateResult.success) {
+            setPlayState(stateResult.state)
+          }
         }
       } else {
         setError(result.error || 'AI出牌失败')
@@ -2235,28 +2268,37 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedPlayRecord])
 
-  // AI自动出牌
+  // AI自动出牌：轮到AI时立即进入思考状态（中心圆圈马上旋转）
   useEffect(() => {
     if (!showPlayPanel || !playState || aiThinking || playLoading || isPlayPaused || !playInitiated) return
 
     const { phase } = playState
     const isHuman = isCurrentPlayerHuman()
 
-
     // AI hand guard: wait for input when AI has no cards
     if (!isHuman) {
       const currentHand = playState.hands?.[playState.current_player]
       if (!currentHand || currentHand.length === 0) return
     }
-    // 如果不是人类回合且游戏未结束，自动AI出牌
+    // 如果不是人类回合且游戏未结束，立即进入思考状态
     if (!isHuman && phase !== 'complete') {
-      const timer = setTimeout(() => {
-        handleAIPlay()
-      }, 500) // 延迟500ms让用户看到状态变化
-
-      return () => clearTimeout(timer)
+      setAiThinking(true)
     }
   }, [playState?.is_human_turn, playState?.phase, showPlayPanel, aiThinking, playLoading, isPlayPaused, playInitiated, positionRoles])
+
+  // AI出牌执行：进入思考状态后延迟执行，让上一张牌动画完成
+  useEffect(() => {
+    if (!showPlayPanel || !playState || !aiThinking || isPlayPaused || !playInitiated) return
+    const { phase } = playState
+    const isHuman = isCurrentPlayerHuman()
+    if (isHuman || phase === 'complete') return
+    const currentHand = playState.hands?.[playState.current_player]
+    if (!currentHand || currentHand.length === 0) return
+    const timer = setTimeout(() => {
+      handleAIPlay()
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [showPlayPanel, playState?.is_human_turn, playState?.phase, aiThinking, isPlayPaused, playInitiated, positionRoles])
 
   // 最后一墩自动出牌（仅剩一张时无需选择）
   useEffect(() => {
