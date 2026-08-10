@@ -47,7 +47,7 @@ import HistoryDialog from './components/HistoryDialog'
 import useBridgeRecords from './hooks/useBridgeRecords'
 import useModelSettings from './hooks/useModelSettings'
 import useDealing from './hooks/useDealing'
-import { getPartnerPosition, BRIDGE_POSITIONS } from './utils/position'
+import { BRIDGE_POSITIONS } from './utils/position'
 import { validateHands, validateBidding } from './utils/validation'
 import { formatElapsedTime } from './utils/biddingUtils'
 import './App.css'
@@ -100,7 +100,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const draftSaveTimerRef = useRef(null) // debounce 叫牌草稿自动保存
   const lastBidTimeRef = useRef(null) // 上一条叫牌记录完成的时间戳，用于计算单次耗时
   const biddingStartTimeRef = useRef(null) // 同步存储叫牌开始时间，避免 React state 异步问题
-  const aiCallStartRef = useRef(null) // AI 调用开始时间，用于准确计算单次 AI 耗时
   // ── Game 域状态（迁入 GameContext）──
   const {
     hands, setHands,
@@ -126,7 +125,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     showDraftBanner, setShowDraftBanner,
     customDealOpen, setCustomDealOpen,
     imageDealOpen, setImageDealOpen,
-    customDealText, setCustomDealText,
     imagePath, setImagePath,
     imageFile, setImageFile,
     imageOpeningLead, setImageOpeningLead,
@@ -139,6 +137,16 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const [handsValidationWarning, setHandsValidationWarning] = useState([])
   const [biddingValidationError, setBiddingValidationError] = useState([])
   const [biddingValidationWarning, setBiddingValidationWarning] = useState([])
+  // 修正手牌对话框编辑文本（局部 state，避免每次按键触发全局 context 重渲染导致迟滞）
+  const [customDealText, setCustomDealText] = useState('')
+  // 编辑叫牌序列对话框编辑文本（局部 state，同理避免全局重渲染迟滞）
+  const [editBiddingText, setEditBiddingText] = useState('')
+  // 直接打牌对话框表单 & 重置首攻值（局部 state，避免输入时触发全局 context 重渲染迟滞）
+  const [contractDialogForm, setContractDialogForm] = useState({
+    contractStr: '', declarer: '南', openingLead: '',
+    isDouble: false, isRedouble: false,
+  })
+  const [resetOpeningLeadValue, setResetOpeningLeadValue] = useState('')
 
   // 将当前手牌转换为自定义牌局文本格式（带花色符号，便于阅读编辑）
   const handsToEditText = (handsObj) => {
@@ -183,7 +191,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     biddingHistory, setBiddingHistory,
     historyIndex, setHistoryIndex,
     showEditBiddingDialog, setShowEditBiddingDialog,
-    editBiddingText, setEditBiddingText,
     outputFormats, setOutputFormats,
     setOutputFormatsLoading,
     setAnalyzeLoading,
@@ -212,12 +219,12 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     setDDHints,
     setDDHintsLoading,
     contractDialogOpen, setContractDialogOpen,
-    contractDialogForm, setContractDialogForm,
     resetOpeningLeadDialogOpen, setResetOpeningLeadDialogOpen,
-    resetOpeningLeadValue, setResetOpeningLeadValue,
     directPlayContractInfo, setDirectPlayContractInfo,
     playEngine,
     handlePlayEngineChange,
+    useLlmReview,
+    handleLlmReviewChange,
   } = usePlay()
 
   // 页面加载时检测是否有未完成的叫牌草稿
@@ -235,7 +242,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     } catch {
       localStorage.removeItem(BIDDING_DRAFT_KEY)
     }
-  }, [])
+  }, [setShowDraftBanner])
 
   // 清除叫牌草稿
   const clearBiddingDraft = () => {
@@ -281,11 +288,10 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   
   // 牌局记录管理（叫牌+打牌统一存储）
   const {
-    records: bridgeRecords, setRecords: setBridgeRecords,
+    records: bridgeRecords,
     historyDialogOpen, setHistoryDialogOpen,
     loadRecords: loadBridgeRecords,
     saveRecord: saveBridgeRecord,
-    deleteRecord: deleteBridgeRecord,
     deleteRecords: deleteBridgeRecords,
     updateRecordNote,
     importRecords,
@@ -537,19 +543,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   }
 
   // 叫牌回退功能
-  const saveBiddingSnapshot = useCallback(() => {
-    const snapshot = {
-      biddingSequence: [...biddingSequence],
-      currentBidder,
-      aiBiddingHistory: [...aiBiddingHistory],
-    }
-    const newHistory = historyIndex >= 0 
-      ? biddingHistory.slice(0, historyIndex + 1) 
-      : biddingHistory
-    setBiddingHistory([...newHistory, snapshot])
-    setHistoryIndex(newHistory.length)
-  }, [biddingSequence, currentBidder, aiBiddingHistory, biddingHistory, historyIndex])
-
   const undoBidding = useCallback(() => {
     if (historyIndex > 0) {
       const snapshot = biddingHistory[historyIndex - 1]
@@ -562,7 +555,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       setHistoryIndex(historyIndex - 1)
       setBidSuggestion(null)
     }
-  }, [biddingHistory, historyIndex])
+  }, [biddingHistory, historyIndex, setAiBiddingHistory, setBidSuggestion, setBiddingSequence, setCurrentBidder, setHistoryIndex])
 
   // 只有停止叫牌后才能撤销，且AI不在加载中（包括AI叫牌和获取叫品含义）
   const showUndo = stopBidding && historyIndex > 0
@@ -662,10 +655,10 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   // ── 发牌流程 hook（发牌/自定义牌局/图片识别/截屏识别/清除手牌）──
   const {
     handleDeal,
-    handleCustomDeal,
     handleImageDeal,
     handleScreenshotDeal,
     handleSingleHandScreenshot,
+    handleSingleHandUpload,
     clearAllHands,
     parseBiddingSequenceStr,
     screenshotCancelledRef,
@@ -761,7 +754,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     
     setIsPlayPaused(false)
     setLoadedPlayRecord(null)
-  }, [gameMode, practiceDirection])
+  }, [gameMode, practiceDirection, setAiBiddingHistory, setAiPlayHistory, setBiddingSequence, setBiddingStarted, setCurrentBidder, setDealer, setIsPlayPaused, setLoadedPlayRecord, setPassedAIPositions, setPlayState, setPracticeDirection, setShowOpponentHands, setShowPartnerHand, setShowPlayPanel, setStopBidding])
 
   // 双人模式：练习方向改变时，同步发牌人（发牌人必须在练习方阵营内）
   useEffect(() => {
@@ -774,7 +767,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         setCurrentBidder(pairDealers[0])
       }
     }
-  }, [practiceDirection, gameMode, dealer, biddingStarted])
+  }, [practiceDirection, gameMode, dealer, biddingStarted, setCurrentBidder, setDealer])
 
   // 切换停止/继续叫牌
   const toggleStopBidding = () => {
@@ -1944,7 +1937,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     
     try {
       const pm = parseModelValue(playModel)
-      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, switchCards)
+      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, switchCards, useLlmReview)
       if (controller.signal.aborted) return
       console.log('[AI Play] engine:', result.used_engine, 'elapsed:', result.elapsed_ms + 'ms', 'model:', result.used_model)
 
@@ -2258,7 +2251,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       .catch(err => { if (!cancelled) console.error('DD hints fetch failed:', err) })
       .finally(() => { if (!cancelled) setDDHintsLoading(false) })
     return () => { cancelled = true }
-  }, [showDDHints, playState?.current_player, playState?.phase, showPlayPanel, reviewCursor, playState, hands])
+  }, [showDDHints, playState?.current_player, playState?.phase, showPlayPanel, reviewCursor, playState, hands, setDDHints, setDDHintsLoading])
 
   // 加载记录后自动进入打牌界面（记录含打牌数据时）
   useEffect(() => {
@@ -2466,11 +2459,10 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         darkMode={darkMode}
         onToggleDarkMode={onToggleDarkMode}
         aiThinking={aiThinking}
-        vulnerability={vulnerability}
-        setVulnerability={setVulnerability}
       />
       {/* 游戏设置 */}
       <SettingsPanel
+        isMobile={isMobile}
         showSettings={showSettings}
         gameMode={gameMode}
         setGameMode={setGameMode}
@@ -2480,6 +2472,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         handlePlayModelChange={handlePlayModelChange}
         playEngine={playEngine}
         handlePlayEngineChange={handlePlayEngineChange}
+        useLlmReview={useLlmReview}
+        handleLlmReviewChange={handleLlmReviewChange}
         ddSampleCount={ddSampleCount}
         handleDDSampleCountChange={handleDDSampleCountChange}
         ddParticles={ddParticles} ddParticlesRange={ddParticlesRange}
@@ -2541,6 +2535,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           onImageDeal={() => setImageDealOpen(true)}
           onScreenshotDeal={onScreenshotDeal}
           onSingleHandScreenshot={handleSingleHandScreenshot}
+          onSingleHandUpload={handleSingleHandUpload}
           onCustomDeal={() => setCustomDealOpen(true)}
           onDeal={handleDeal}
           onHandCardClick={handleHandCardClick}

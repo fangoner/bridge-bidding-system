@@ -58,6 +58,12 @@ def _load_dll():
             _dds_dll = ctypes.WinDLL(dll_path)
         else:
             _dds_dll = ctypes.CDLL(dll_path)
+        try:
+            _dds_dll.SetMaxThreads.argtypes = [ctypes.c_int]
+            _dds_dll.SetMaxThreads.restype = ctypes.c_int
+            _dds_dll.SetMaxThreads(max(1, os.cpu_count() or 1))
+        except Exception:
+            pass
     return _dds_dll
 
 

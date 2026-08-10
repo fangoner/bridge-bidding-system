@@ -84,7 +84,7 @@ function useBiddingRecords() {
       }
       return new Set(biddingRecords.map(r => r.id))
     })
-  }, [biddingRecords.length])
+  }, [biddingRecords])
 
   const toggleRecordSelection = useCallback((id) => {
     setSelectedRecordIds(prev => {

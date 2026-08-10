@@ -26,7 +26,7 @@ if sys.platform == 'win32':
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -1142,6 +1142,72 @@ async def trigger_screenshot():
         return {"success": False, "message": "触发截屏失败"}
 
 
+def _recognize_single_hand_image(image_path: str, position: str) -> dict:
+    """识别单张图片中的某一家手牌。剪贴板与上传两条路径共用。"""
+    import time
+    t_start = time.time()
+    result = vision_client.read_single_hand_from_image(image_path, position)
+    if "error" in result:
+        return {"success": False, "message": f"识别失败: {result['error']}"}
+
+    hand_str = result.get("手牌") or ""
+    if not hand_str:
+        return {"success": False, "message": "未识别到手牌"}
+
+    hand_str = convert_10_to_T(hand_str)
+    suit_map = {"♠": "spades", "♥": "hearts", "♦": "diamonds", "♣": "clubs"}
+    suits = {"spades": "", "hearts": "", "diamonds": "", "clubs": ""}
+    suit_positions = [(m.start(), m.group()) for m in re.finditer(r'[♠♥♦♣]', hand_str)]
+    for i, (pos, symbol) in enumerate(suit_positions):
+        start = pos + 1
+        end = suit_positions[i + 1][0] if i + 1 < len(suit_positions) else len(hand_str)
+        card_str = hand_str[start:end].strip()
+        card_str = re.sub(r'[-—–－―‐]', '-', card_str)
+        card_str = re.sub(r'[^AKQJT98765432]', '', card_str)
+        suits[suit_map[symbol]] = card_str
+
+    hand = Hand(spades=suits["spades"], hearts=suits["hearts"], diamonds=suits["diamonds"], clubs=suits["clubs"])
+    total_cards = len(hand.spades) + len(hand.hearts) + len(hand.diamonds) + len(hand.clubs)
+
+    warnings = []
+    if total_cards != 13:
+        warnings.append(f"识别到{total_cards}张牌（标准为13张）")
+
+    hand_dict = hand_to_dict(hand)
+    hand_dict["hcp"] = sum(4 if c == "A" else 3 if c == "K" else 2 if c == "Q" else 1 if c == "J" else 0
+                           for c in (hand.spades + hand.hearts + hand.diamonds + hand.clubs).upper())
+
+    print(f"[INFO] 单家识别 {position}家完成: {total_cards}张, 耗时: {time.time() - t_start:.1f}s")
+    return {
+        "success": True,
+        "message": "识别成功" if not warnings else "识别完成（" + "; ".join(warnings) + "）",
+        "position": position,
+        "hand": hand_dict,
+        "total_cards": total_cards
+    }
+
+
+@app.post("/api/single-hand-image")
+async def single_hand_image(position: str = Query(...), image: bytes = File(..., description="单家手牌图片")):
+    """上传单家手牌图片并识别（移动端/相册路径）。"""
+    try:
+        if position not in ["南", "西", "北", "东"]:
+            return {"success": False, "message": f"无效的位置: {position}"}
+        print(f"[INFO] 收到 {position}家手牌图片上传请求，大小: {len(image)} bytes")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+            tmp.write(image)
+            image_path = tmp.name
+        try:
+            return _recognize_single_hand_image(image_path, position)
+        finally:
+            if os.path.exists(image_path):
+                os.unlink(image_path)
+    except Exception as e:
+        print(f"[ERROR] 上传单家识别失败: {str(e)}")
+        traceback.print_exc()
+        return {"success": False, "message": f"上传单家识别失败: {str(e)}"}
+
+
 @app.post("/api/read-hand-clipboard")
 async def read_hand_clipboard(position: str = ""):
     """从剪贴板读取截图，识别单家手牌"""
@@ -1163,62 +1229,19 @@ async def read_hand_clipboard(position: str = ""):
 
         print(f"[INFO] 单家识别 {position}家，新剪贴板内容（哈希: {current_hash[:8]}...）")
 
-        import time
-        t_clipboard = time.time()
-
         with tempfile.NamedTemporaryFile(delete=False, suffix=f".{fmt}") as tmp:
             tmp.write(image_data)
             image_path = tmp.name
 
         print(f"[INFO] 单家截图已保存到: {image_path} ({fmt})")
 
-        result = vision_client.read_single_hand_from_image(image_path, position)
-
-        os.unlink(image_path)
-
-        if "error" in result:
-            return {
-                "success": False,
-                "message": f"识别失败: {result['error']}"
-            }
-
-        hand_str = result.get("手牌") or ""
-        if not hand_str:
-            return {"success": False, "message": "未识别到手牌"}
-
-        hand_str = convert_10_to_T(hand_str)
-        suit_map = {"♠": "spades", "♥": "hearts", "♦": "diamonds", "♣": "clubs"}
-        suits = {"spades": "", "hearts": "", "diamonds": "", "clubs": ""}
-        suit_positions = [(m.start(), m.group()) for m in re.finditer(r'[♠♥♦♣]', hand_str)]
-        for i, (pos, symbol) in enumerate(suit_positions):
-            start = pos + 1
-            end = suit_positions[i + 1][0] if i + 1 < len(suit_positions) else len(hand_str)
-            card_str = hand_str[start:end].strip()
-            card_str = re.sub(r'[-—–－―‐]', '-', card_str)
-            card_str = re.sub(r'[^AKQJT98765432]', '', card_str)
-            suits[suit_map[symbol]] = card_str
-
-        hand = Hand(spades=suits["spades"], hearts=suits["hearts"], diamonds=suits["diamonds"], clubs=suits["clubs"])
-        total_cards = len(hand.spades) + len(hand.hearts) + len(hand.diamonds) + len(hand.clubs)
+        try:
+            result = _recognize_single_hand_image(image_path, position)
+        finally:
+            os.unlink(image_path)
 
         _pre_single_hand_hash = current_hash
-
-        warnings = []
-        if total_cards != 13:
-            warnings.append(f"识别到{total_cards}张牌（标准为13张）")
-
-        hand_dict = hand_to_dict(hand)
-        hand_dict["hcp"] = sum(4 if c == "A" else 3 if c == "K" else 2 if c == "Q" else 1 if c == "J" else 0
-                              for c in (hand.spades + hand.hearts + hand.diamonds + hand.clubs).upper())
-
-        print(f"[INFO] 单家识别 {position}家完成: {total_cards}张, 耗时: {time.time() - t_clipboard:.1f}s")
-        return {
-            "success": True,
-            "message": "识别成功" if not warnings else "识别完成（" + "; ".join(warnings) + "）",
-            "position": position,
-            "hand": hand_dict,
-            "total_cards": total_cards
-        }
+        return result
 
     except Exception as e:
         print(f"[ERROR] 单家识别失败: {str(e)}")
@@ -1604,6 +1627,7 @@ class PlayAIRequest(BaseModel):
     play_engine: Optional[str] = None  # "llm" | "mcts" | "dd" | "perfect" | "alphamu" | "dd_alphamu_llm"
     dd_sample_count: Optional[int] = None  # DD 蒙地卡罗采样数
     dd_alphamu_switch_cards: Optional[int] = None  # DD-αμ-LLM 引擎中盘/残局切换分界
+    use_llm_review: bool = False  # DD-αμ-LLM 引擎是否启用 LLM 分组审查（默认关闭）
 
 
 class SetHandRequest(BaseModel):
@@ -1694,6 +1718,7 @@ async def ai_play(request: PlayAIRequest):
                 use_perfect = engine == "perfect"
                 use_alphamu = engine == "alphamu"
                 use_dd_alphamu_llm = engine == "dd_alphamu_llm"
+                enable_llm_review = request.use_llm_review
                 dd_samples = (request.dd_sample_count
                               if (use_dd or use_dd_alphamu_llm) else None)
                 dd_switch_cards = request.dd_alphamu_switch_cards if use_dd_alphamu_llm else None
@@ -1709,6 +1734,7 @@ async def ai_play(request: PlayAIRequest):
                     use_perfect=use_perfect,
                     use_alphamu=use_alphamu,
                     use_dd_alphamu_llm=use_dd_alphamu_llm,
+                    enable_llm_review=enable_llm_review,
                     dd_samples=dd_samples,
                     dd_alphamu_switch_cards=dd_switch_cards)
                 elapsed_ms = int((time.time() - t0) * 1000)
@@ -1842,6 +1868,42 @@ async def get_play_state():
         )
 
 
+def _hands_are_complete(state) -> bool:
+    """校验剩余手牌与已出牌是否构成完整一副牌（52张无重复）。
+
+    实战模拟时若人类位置未下发手牌（或编辑手牌后前后端未同步），
+    手牌不完整，此时不应计算DD提示，避免给出误导性结果。
+    """
+    try:
+        seen = set()
+        total = 0
+        for pos in ["北", "东", "南", "西"]:
+            for card in state.hands.get(pos) or []:
+                key = (card.suit, card.rank)
+                if key in seen:
+                    return False
+                seen.add(key)
+                total += 1
+        for trick in state.tricks:
+            for card in trick.cards:
+                key = (card.suit, card.rank)
+                if key in seen:
+                    return False
+                seen.add(key)
+                total += 1
+        cur = getattr(state, "current_trick", None)
+        if cur is not None:
+            for card in cur.cards:
+                key = (card.suit, card.rank)
+                if key in seen:
+                    return False
+                seen.add(key)
+                total += 1
+        return total == 52
+    except Exception:
+        return False
+
+
 def _compute_dd_hints_from_state(state, playable) -> dict:
     """共享 DD 提示计算：给定状态与可出牌列表，返回每张牌的 delta。
 
@@ -1860,6 +1922,10 @@ def _compute_dd_hints_from_state(state, playable) -> dict:
     try:
         from bridge.mcts.dd_search import solve_all_boards_raw, _dds_result_to_score_map
         from bridge.mcts.state_utils import get_current_trick_state
+
+        # 手牌不完整（实战模拟无可出牌者手牌等）则不计算提示
+        if not _hands_are_complete(state):
+            return {}
 
         declarer = state.contract.declarer
         dummy = state.dummy
@@ -1920,12 +1986,8 @@ def _compute_dd_hints_for_state(service, state) -> dict:
     return _compute_dd_hints_from_state(state, playable)
 
 
-# ── DD 提示异步计算（7/8）──
-_dd_hint_executor = ThreadPoolExecutor(max_workers=1)
-
-
 def _resolve_dd_target(state_after, tricks_before):
-    """确定本次出牌对应的目标 trick（在请求线程同步捕获，避免竞态）。"""
+    """确定本次出牌对应的目标 trick（请求线程同步捕获，避免竞态）。"""
     if not state_after:
         return None
     tricks_after = len(state_after.tricks)
@@ -1933,6 +1995,10 @@ def _resolve_dd_target(state_after, tricks_before):
     if trick_complete and state_after.tricks:
         return state_after.tricks[-1]
     return state_after.current_trick
+
+
+# ── DD 提示异步计算（7/8）──
+_dd_hint_executor = ThreadPoolExecutor(max_workers=1)
 
 
 def _submit_dd_hint(state_before_snapshot, state_after, tricks_before):

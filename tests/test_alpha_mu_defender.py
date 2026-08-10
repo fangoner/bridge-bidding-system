@@ -64,7 +64,7 @@ if __name__ == "__main__":
     print(f"  已赢墩: 庄家 {state.declarer_tricks}, 防守 {state.defender_tricks}")
     print(f"  东家手牌: {[str(c) for c in state.hands['东']]}")
 
-    search = AlphaMuSearch(num_worlds=8, max_depth=2, time_limit=10.0)
+    search = AlphaMuSearch(num_worlds=8, M=2, time_limit=10.0)
     result = search.search(state)
     print(f"  推荐: {result.get('card')}")
     print(f"  推理: {result.get('reasoning', '')[:200]}")
@@ -78,7 +78,7 @@ if __name__ == "__main__":
     print(f"  已赢墩: 庄家 {state2.declarer_tricks}, 防守 {state2.defender_tricks}")
     print(f"  南家手牌: {[str(c) for c in state2.hands['南']]}")
 
-    search2 = AlphaMuSearch(num_worlds=8, max_depth=2, time_limit=10.0)
+    search2 = AlphaMuSearch(num_worlds=8, M=2, time_limit=10.0)
     result2 = search2.search(state2)
     print(f"  推荐: {result2.get('card')}")
     print(f"  推理: {result2.get('reasoning', '')[:200]}")

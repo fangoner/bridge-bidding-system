@@ -143,15 +143,6 @@ function useBridgeRecords() {
     }
   }, [syncBackupToServer])
 
-  // 判断两条记录是否是同一副牌（基于手牌和叫牌序列）
-  const isSameBoard = (a, b) => {
-    const aHands = JSON.stringify(a.board?.hands || a.hands || {})
-    const bHands = JSON.stringify(b.board?.hands || b.hands || {})
-    const aBidding = JSON.stringify(a.board?.bidding_sequence || a.biddingSequence || [])
-    const bBidding = JSON.stringify(b.board?.bidding_sequence || b.biddingSequence || [])
-    return aHands === bHands && aBidding === bBidding
-  }
-
   const saveRecord = useCallback((record) => {
     console.log('[saveRecord] 开始保存, type:', record.type, 'sourceRecordId:', record.sourceRecordId, 'id:', record.id)
     setRecords(prev => {
@@ -282,7 +273,7 @@ function useBridgeRecords() {
       }
       return new Set(records.map(r => r.id))
     })
-  }, [records.length])
+  }, [records])
 
   const toggleRecordSelection = useCallback((id) => {
     setSelectedRecordIds(prev => {

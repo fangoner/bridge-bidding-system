@@ -12,8 +12,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import random
 from collections import Counter
-from bridge.mcts.constraints import BidConstraint, validate_sample, compute_sample_violation_score, HCP_MAP
-from bridge.mcts.sampler import DealSampler
+from bridge.mcts.constraints import BidConstraint, validate_sample, filter_hard_constraints, HCP_MAP
+from bridge.mcts.sampler import DealSampler, _sample_uniform
 from bridge.mcts.bid_constraint_library import (
     extract_constraints_from_bid_history,
     get_opening_bid_constraint,

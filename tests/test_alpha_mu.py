@@ -160,7 +160,7 @@ def test_alpha_mu_endgame():
 
     search = AlphaMuSearch(
         num_worlds=8,       # 测试用少量 worlds 加速
-        max_depth=2,        # 浅深度
+        M=2,                # 浅深度
         time_limit=15.0,
     )
 
@@ -208,7 +208,7 @@ def test_alpha_mu_vs_dd_consistency():
 
     # αμ 搜索
     alpha_search = AlphaMuSearch(
-        num_worlds=6, max_depth=2, time_limit=10.0,
+        num_worlds=6, M=2, time_limit=10.0,
     )
     alpha_result = alpha_search.search(state)
     alpha_card = alpha_result.get("card")

@@ -72,7 +72,7 @@ const getBidColor = (bid, theme) => {
 
 const BidButton = styled(Button, {
   shouldForwardProp: (prop) => !['bidColor', 'isActive'].includes(prop),
-})(({ theme, bidColor, isActive }) => ({
+})(({ bidColor, isActive }) => ({
   minWidth: '44px',
   width: '44px',
   height: '32px',
@@ -104,7 +104,7 @@ const BidButton = styled(Button, {
 
 const CompactBidButton = styled(Button, {
   shouldForwardProp: (prop) => !['bidColor'].includes(prop),
-})(({ theme, bidColor }) => ({
+})(({ bidColor }) => ({
   minWidth: '28px',
   width: '100%',
   height: '28px',
@@ -141,10 +141,10 @@ function BiddingControls({
   isVerticalLayout = false,
   hideJFPanel = false,
 }) {
-  if (!hands) return null;
-
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
+
+  if (!hands) return null;
 
   const bidLevels = [
     ['1C', '1D', '1H', '1S', '1NT'],

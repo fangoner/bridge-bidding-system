@@ -37,13 +37,13 @@ if ($KillOnly) {
 }
 
 Write-Host "=== Starting backend ===" -ForegroundColor Cyan
-$be = Start-Process -WindowStyle Hidden -FilePath "uvicorn" -ArgumentList "api.main:app --host 0.0.0.0 --port 8003 --reload" -WorkingDirectory "D:\Bridge Card\Bidding System" -PassThru -NoNewWindow
+$be = Start-Process -WindowStyle Hidden -FilePath "uvicorn" -ArgumentList "api.main:app --host 0.0.0.0 --port 8003" -WorkingDirectory "D:\Bridge Card\Bidding System" -PassThru
 Write-Host "Backend started (PID: $($be.Id))" -ForegroundColor Green
 
 Start-Sleep -Seconds 3
 
 Write-Host "=== Starting frontend ===" -ForegroundColor Cyan
-$fe = Start-Process -WindowStyle Hidden -FilePath "npm" -ArgumentList "run dev" -WorkingDirectory "D:\Bridge Card\Bidding System\web" -PassThru -NoNewWindow
+$fe = Start-Process -WindowStyle Hidden -FilePath "npm.cmd" -ArgumentList "run dev" -WorkingDirectory "D:\Bridge Card\Bidding System\web" -PassThru
 Write-Host "Frontend started (PID: $($fe.Id))" -ForegroundColor Green
 
 Write-Host ""

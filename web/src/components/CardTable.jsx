@@ -46,7 +46,6 @@ function CardTable({
   showOpponentHands,
   getPartnerPosition,
   renderBiddingTable,
-  checkBiddingComplete,
   outputFormats,
   outputFormatsLoading,
   handleAnalyzeContract,
@@ -55,7 +54,6 @@ function CardTable({
   showDoubleDummy,
   doubleDummyResult,
   doubleDummyLoading,
-  biddingTotalTime,
   positionRoles,
   onPositionRoleChange,
   onDealerChange,
@@ -63,7 +61,6 @@ function CardTable({
   setHands,
   biddingStarted,
   stopBidding,
-  declarer,
   finalContract,
   directPlayContractInfo,
   playState,
@@ -91,6 +88,7 @@ function CardTable({
   reviewCursor,
   reviewTrick,
   onSingleHandScreenshot,
+  onSingleHandUpload,
 }) {
   const { fallbackModel, playModel } = useGame()
   const { playEngine } = usePlay()
@@ -104,12 +102,6 @@ function CardTable({
     }
     return modelLabel(playModel)
   }, [fallbackModel, playModel, playEngine])
-  const [handInputs, setHandInputs] = useState({
-    '南': '',
-    '北': '',
-    '东': '',
-    '西': ''
-  })
   const [inputErrors, setInputErrors] = useState({
     '南': '',
     '北': '',
@@ -122,12 +114,6 @@ function CardTable({
     '东': {},
     '西': {}
   })
-  const [handPickerSuit, setHandPickerSuit] = useState({
-    '南': null,
-    '北': null,
-    '东': null,
-    '西': null
-  })
   const [handPickerPanelOpen, setHandPickerPanelOpen] = useState(false)
   const [handPickerPanelFor, setHandPickerPanelFor] = useState(null)
   const [playPanelPos, setPlayPanelPos] = useState(null)
@@ -138,10 +124,17 @@ function CardTable({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const tableRef = useRef(null)
   const dragPanelRef = useRef(null)
+  const singleHandFileRef = useRef(null)
+  const [singleHandPos, setSingleHandPos] = useState(null)
 
   const getTableRightPos = () => {
-    if (!tableRef.current) return { right: 16, top: 100 }
+    if (!tableRef.current) return isMobile
+      ? { left: Math.max(8, window.innerWidth / 2 - 140), top: window.innerHeight / 2 - 120 }
+      : { right: 16, top: 100 }
     const rect = tableRef.current.getBoundingClientRect()
+    if (isMobile) {
+      return { left: Math.max(8, window.innerWidth / 2 - 140), top: rect.top + rect.height / 2 - 120 }
+    }
     return { left: rect.right + 8, top: rect.top }
   }
   const [selectedBidLevel, setSelectedBidLevel] = useState(null)
@@ -214,12 +207,7 @@ function CardTable({
   // EW手牌容器（外层旋转90°后视觉为纵向）
   // 旋转前：横向布局，宽=totalFanLength, 高=cardHeight
   // 旋转后：视觉宽=cardHeight≈62px, 视觉高=totalFanLength≈460px
-  // ewColW: 容器宽（旋转前=高），需容纳牌高+padding ≈ 80px
-  // ewColH: 容器高度自适应，用 top/bottom 限制不溢出桌面
-  const ewColW = 80
-  const ewColH = 460
   const infoBarHeight = 24 // 信息条估计高度（旋转后视觉宽度）
-  const biddingTableWidth = isMobile ? 'calc((100vw - 12px) * 0.5)' : 160
   const centerBoxWidth = isMobile ? 152 : 220
   const centerBoxHeight = isMobile ? 240 : 220
   const centerBoxSize = 220 // 桌面版中心面板宽高（包含 HAND_GAP 布局）
@@ -232,7 +220,7 @@ function CardTable({
       if (center) {
         const rect = center.getBoundingClientRect()
         setBidBoxPos({
-          left: rect.left + rect.width / 2 - 100,
+          left: rect.left + rect.width / 2 - (isMobile ? 95 : 200),
           top: rect.top + rect.height / 2 + centerBoxHeight / 2 + 20,
           ready: true,
         })
@@ -246,12 +234,10 @@ function CardTable({
   // Grid间距：手牌区到中心区的统一间距
   const GRID_GAP = isMobile ? 6 : 4
 
-  if (!hands) return null;
-
-  const north = hands['北'];
-  const south = hands['南'];
-  const east = hands['东'];
-  const west = hands['西'];
+  const north = hands?.['北'];
+  const south = hands?.['南'];
+  const east = hands?.['东'];
+  const west = hands?.['西'];
 
   const defaultScheme = {
     table: {
@@ -372,7 +358,6 @@ function CardTable({
   }, [reviewCursor, playState])
 
   const reviewCurrentPlayer = reviewInfo?.currentPlayer
-  const reviewTrickGlobalStart = reviewInfo?.globalStart || 0
 
   // 计算当前可出的牌（跟花色规则）
   const playableCardSet = useMemo(() => {
@@ -453,7 +438,7 @@ function CardTable({
 
   // 打牌阶段的手牌：隐藏模式下用剩余手牌，显示模式下用原始手牌+已出标记
   const getPlayHand = (position) => {
-    if (!showPlayPanel || !playState) return hands[position]
+    if (!showPlayPanel || !playState) return hands?.[position]
 
     const remainingCards = playState.hands?.[position] || []
 
@@ -468,122 +453,23 @@ function CardTable({
       const manualCards = getManualPlayedCards(position)
       const allCards = [...remainingCards, ...manualCards]
       if (allCards.length > 0) return sortCardsToHand(allCards)
-      return hands[position]
+      return hands?.[position]
     }
 
     // 隐藏模式（默认）：只用剩余手牌，统一排序
     if (remainingCards.length > 0) return sortCardsToHand(remainingCards)
-    return hands[position]
+    return hands?.[position]
   }
 
   // 预计算四家显示手牌：稳定引用，让 React.memo(HandDisplay) 跳过未变化手的渲染
   const displayHands = useMemo(() => {
+    if (!hands) return {}
     const result = {}
     for (const pos of ['北', '南', '东', '西']) {
       result[pos] = getPlayHand(pos)
     }
     return result
   }, [hands, showPlayPanel, playState?.hands, showPlayedCards, playedCardCache?.playedByPosition])
-
-  const parseHandInput = (input) => {
-    const suits = input.trim().split(/\s+/)
-    if (suits.length !== 4) {
-      return { valid: false, error: '请输入4个花色，用空格分隔' }
-    }
-
-    const validCards = /^[AKQJTakqjt2-9-]+$/
-    for (const suit of suits) {
-      if (suit !== '-' && !validCards.test(suit)) {
-        return { valid: false, error: '包含无效字符' }
-      }
-    }
-
-    // 张数校验：每手牌必须是13张
-    const totalCards = suits.reduce((sum, s) => sum + (s === '-' ? 0 : s.length), 0)
-    if (totalCards !== 13) {
-      return { valid: false, error: `张数不对：${totalCards}张（需要13张）` }
-    }
-
-    const calculateHCP = (cards) => {
-      let hcp = 0
-      for (const card of cards.toUpperCase()) {
-        if (card === 'A') hcp += 4
-        else if (card === 'K') hcp += 3
-        else if (card === 'Q') hcp += 2
-        else if (card === 'J') hcp += 1
-      }
-      return hcp
-    }
-
-    const spades = suits[0] === '-' ? '' : suits[0].toUpperCase()
-    const hearts = suits[1] === '-' ? '' : suits[1].toUpperCase()
-    const diamonds = suits[2] === '-' ? '' : suits[2].toUpperCase()
-    const clubs = suits[3] === '-' ? '' : suits[3].toUpperCase()
-
-    // 重复牌校验：与已确认的其他位置手牌比对
-    const allHandCards = new Map() // '♠A' -> position
-    for (const [pos, hand] of Object.entries(hands || {})) {
-      if (!hand || typeof hand !== 'object') continue
-      for (const [suit, suitRanks] of Object.entries(hand)) {
-        if (!suitRanks || suitRanks === '-' || typeof suitRanks !== 'string') continue
-        const suitSymbol = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' }[suit] || suit
-        for (const rank of suitRanks) {
-          allHandCards.set(`${suitSymbol}${rank}`, pos)
-        }
-      }
-    }
-    const newCards = [
-      ...(spades ? spades.split('').map(r => `♠${r}`) : []),
-      ...(hearts ? hearts.split('').map(r => `♥${r}`) : []),
-      ...(diamonds ? diamonds.split('').map(r => `♦${r}`) : []),
-      ...(clubs ? clubs.split('').map(r => `♣${r}`) : []),
-    ]
-    for (const card of newCards) {
-      if (allHandCards.has(card)) {
-        return { valid: false, error: `${card} 已在${allHandCards.get(card)}家手牌中` }
-      }
-    }
-
-    return {
-      valid: true,
-      hand: {
-        spades,
-        hearts,
-        diamonds,
-        clubs,
-        hcp: calculateHCP(spades + hearts + diamonds + clubs)
-      }
-    }
-  }
-
-  const handleHandInputChange = (position, value) => {
-    setHandInputs(prev => ({ ...prev, [position]: value }))
-    setInputErrors(prev => ({ ...prev, [position]: '' }))
-  }
-
-  const handleHandInputSubmit = (position) => {
-    const result = parseHandInput(handInputs[position])
-    if (!result.valid) {
-      setInputErrors(prev => ({ ...prev, [position]: result.error }))
-      return
-    }
-    
-    setHands(prev => ({
-      ...prev,
-      [position]: result.hand
-    }))
-    setHandInputs(prev => ({ ...prev, [position]: '' }))
-  }
-
-  const handleAIHandSubmit = (position) => {
-    const result = parseHandInput(handInputs[position])
-    if (!result.valid) {
-      setInputErrors(prev => ({ ...prev, [position]: result.error }))
-      return
-    }
-    onSetPlayHand?.(position, result.hand)
-    setHandInputs(prev => ({ ...prev, [position]: '' }))
-  }
 
   const shouldShowHandContent = (position) => {
     if (showPlayPanel && playState) {
@@ -1035,9 +921,6 @@ function CardTable({
     const selectedCards = Object.keys(selections)
     const selectedCount = selectedCards.length
 
-    const pickSuit = handPickerSuit[position]
-    const setPickSuit = (s) => setHandPickerSuit(prev => ({ ...prev, [position]: s }))
-
     const takenSet = new Set()
     for (const [pos, hand] of Object.entries(hands || {})) {
       if (pos === position || !hand || typeof hand !== 'object') continue
@@ -1066,14 +949,12 @@ function CardTable({
 
     const clearAll = () => {
       setHandPickerSelections(prev => ({ ...prev, [position]: {} }))
-      setHandPickerSuit(prev => ({ ...prev, [position]: null }))
       setInputErrors(prev => ({ ...prev, [position]: '' }))
     }
 
     const closePanel = () => {
       setHandPickerPanelOpen(false)
       setHandPickerPanelFor(null)
-      setHandPickerSuit(prev => ({ ...prev, [position]: null }))
     }
 
     const handleConfirm = () => {
@@ -1125,7 +1006,6 @@ function CardTable({
       }
 
       setHandPickerSelections(prev => ({ ...prev, [position]: {} }))
-      setHandPickerSuit(prev => ({ ...prev, [position]: null }))
       setHandPickerPanelOpen(false)
       setHandPickerPanelFor(null)
     }
@@ -1166,11 +1046,12 @@ function CardTable({
       <Box sx={{
         position: 'fixed', zIndex: 9999, ...posStyle,
         bgcolor: isDark ? 'rgba(17,24,39,0.96)' : 'rgba(255,255,255,0.96)',
-        borderRadius: 2, p: 1.5,
+        borderRadius: 2, p: isMobile ? 0.75 : 1.5,
         border: '1px solid', borderColor: 'divider',
         boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
         display: 'flex', flexDirection: 'column', gap: 0.3,
         cursor: dragging && dragTarget === 'picker' ? 'grabbing' : 'auto',
+        maxWidth: isMobile ? '100vw' : 'none',
       }}>
         <Box
           sx={{
@@ -1187,7 +1068,8 @@ function CardTable({
             fontFamily: 'monospace', fontSize: '0.75rem',
             color: isDark ? '#e2e8f0' : '#333',
             textAlign: 'center', flex: 1,
-            visibility: selectedCount > 0 ? 'visible' : 'hidden',
+            visibility: isMobile ? 'hidden' : (selectedCount > 0 ? 'visible' : 'hidden'),
+            display: isMobile ? 'none' : 'block',
           }}>
             {suits.map(({ s, c }) => (
               <span key={s}>
@@ -1215,16 +1097,16 @@ function CardTable({
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.3, px: 0.5 }}>
           {suits.map(({ s, c }) => (
             <Box key={s} sx={{
-              display: 'flex', alignItems: 'center', gap: 0.3,
+              display: 'flex', alignItems: 'center', gap: isMobile ? 0.15 : 0.3,
               borderRadius: 0.5, px: 0.2, py: 0.11,
               border: '1px solid transparent',
             }}>
               <Typography sx={{
-                width: 20, minWidth: 20, textAlign: 'center', fontSize: '0.95rem',
+                width: isMobile ? 16 : 20, minWidth: isMobile ? 16 : 20, textAlign: 'center', fontSize: '0.95rem',
                 fontWeight: 700, color: c, lineHeight: 1,
                 userSelect: 'none',
               }}>{s}</Typography>
-              <Box sx={{ display: 'flex', gap: 0.2 }}>
+              <Box sx={{ display: 'flex', gap: isMobile ? 0.1 : 0.2 }}>
                 {allRanks.map((rank) => {
                   const cardKey = s + rank
                   const sel = !!selections[cardKey]
@@ -1234,8 +1116,8 @@ function CardTable({
                       disabled={taken}
                       onClick={() => toggleCard(s, rank)}
                       sx={{
-                        minWidth: 0, width: 26, height: 26, p: 0,
-                        fontSize: '0.7rem', fontWeight: 600, borderRadius: 0.5,
+                        minWidth: 0, width: isMobile ? 20 : 26, height: isMobile ? 20 : 26, p: 0,
+                        fontSize: isMobile ? '0.6rem' : '0.7rem', fontWeight: 600, borderRadius: 0.5,
                         border: '1px solid',
                         color: taken ? (isDark ? '#475569' : '#aaa')
                           : sel ? '#fff' : c,
@@ -1272,7 +1154,6 @@ function CardTable({
   const renderHandWithStatus = (hand, position, sxProps) => {
     const orientation = sxProps?.orientation || 'horizontal'
     const popDirection = sxProps?.popDirection || 'auto'
-    const isCurrentlyBidding = currentBiddingPosition === position;
     const currentTurnPos = showPlayPanel ? (reviewCursor != null ? reviewCurrentPlayer : playState?.current_player) : currentBiddingPosition;
     const isAI = isAIPosition(position)
     const hasHandData = hasHand(position)
@@ -1284,7 +1165,6 @@ function CardTable({
       && manualPlayedCount === 0
       && !(position === playState.dummy && playState.phase === 'lead')
       && (isAI || position === playState.dummy)
-    const handKnownInPlay = showPlayPanel && playState?.hands?.[position]?.length > 0
     const isDeclarer = showPlayPanel && playState?.contract?.declarer === position
     
     // 人类庄家手动出牌模式（庄家手牌未知）：明手在非明手回合时变灰，提示用户用选择面板出庄家的牌
@@ -1414,8 +1294,8 @@ function CardTable({
                 >
                   选牌
                 </Button>
-                {onSingleHandScreenshot && (
-                  <Tooltip title={`截屏识别 ${position} 家手牌`} arrow slotProps={{
+                {(onSingleHandScreenshot || onSingleHandUpload) && (
+                  <Tooltip title={`截牌识别 ${position} 家手牌`} arrow slotProps={{
                     tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
                     arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
                   }}>
@@ -1425,7 +1305,16 @@ function CardTable({
                       color="primary"
                       disabled={aiLoading}
                       sx={{ fontSize: '0.7rem', py: 0.3, px: 1, fontWeight: 'bold', minWidth: 0, gap: 0.3 }}
-                      onClick={() => onSingleHandScreenshot(position)}
+                      onClick={() => {
+                        const isTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches
+                        const isMobile = isTouch || /Android|iPhone|iPad|iPod|Mobile|Mobi/i.test(navigator.userAgent) || ('ontouchstart' in window)
+                        if (isMobile && onSingleHandUpload) {
+                          setSingleHandPos(position)
+                          singleHandFileRef.current?.click()
+                        } else {
+                          onSingleHandScreenshot?.(position)
+                        }
+                      }}
                     >
                       {aiLoading ? <CircularProgress size={14} sx={{ color: 'white' }} /> : <CameraAltIcon sx={{ fontSize: '0.9rem' }} />}
                       截牌
@@ -1470,6 +1359,8 @@ function CardTable({
         </Box>
     );
   };
+
+  if (!hands) return null;
 
   return (
     <Box ref={tableRef} className="card-table-container" sx={{
@@ -2041,7 +1932,7 @@ function CardTable({
             border: '1px solid', borderColor: 'divider',
             boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
             display: 'flex', flexDirection: 'column', gap: '4px',
-            width: isMobile ? 130 : 200,
+            width: isMobile ? 190 : 200,
             cursor: 'move',
             userSelect: 'none',
           }}
@@ -2077,7 +1968,7 @@ function CardTable({
                     const sel = selectedBidLevel === l
                     return (
                       <Button key={l} size="small"
-                        sx={{ ...btnSx(l + 'NT', 24, '0.7rem', !avail), flex: 1,
+                        sx={{ ...btnSx(l + 'NT', isMobile ? 32 : 24, isMobile ? '0.9rem' : '0.7rem', !avail), flex: 1,
                           ...(sel && avail ? { boxShadow: `0 0 0 2px ${getBidColor(l + 'NT', false).c}`, transform: 'scale(1.05)' } : {}),
                         }}
                         onClick={() => { if (avail) setSelectedBidLevel(sel ? null : l) }}
@@ -2091,7 +1982,7 @@ function CardTable({
                     const sel = selectedBidLevel === l
                     return (
                       <Button key={l} size="small"
-                        sx={{ ...btnSx(l + 'NT', 24, '0.7rem', !avail), flex: 1,
+                        sx={{ ...btnSx(l + 'NT', isMobile ? 32 : 24, isMobile ? '0.9rem' : '0.7rem', !avail), flex: 1,
                           ...(sel && avail ? { boxShadow: `0 0 0 2px ${getBidColor(l + 'NT', false).c}`, transform: 'scale(1.05)' } : {}),
                         }}
                         onClick={() => { if (avail) setSelectedBidLevel(sel ? null : l) }}
@@ -2108,7 +1999,7 @@ function CardTable({
                   const sel = selectedBidLevel === l
                   return (
                     <Button key={l} size="small"
-                      sx={{ ...btnSx(l + 'NT', 24, '0.7rem', !avail), flex: 1,
+                      sx={{ ...btnSx(l + 'NT', 48, '1.4rem', !avail), flex: 1,
                         ...(sel && avail ? { boxShadow: `0 0 0 2px ${getBidColor(l + 'NT', false).c}`, transform: 'scale(1.05)' } : {}),
                       }}
                       onClick={() => { if (avail) setSelectedBidLevel(sel ? null : l) }}
@@ -2124,10 +2015,10 @@ function CardTable({
                 const avail = selectedBidLevel !== null && suitAvailable(lvl, s)
                 const bid = lvl + s
                 return (
-                  <Button key={s} size="small" sx={btnSx(bid, 28, '0.7rem', !avail)}
+                  <Button key={s} size="small" sx={btnSx(bid, isMobile ? 36 : 56, isMobile ? '0.9rem' : '1.8rem', !avail)}
                     onClick={() => { if (avail) { addBid && addBid(bid); setSelectedBidLevel(null) } }}
                     disabled={!avail || !addBid}>
-                    {s === 'NT' ? 'NT' : s}
+                    {s === 'NT' ? 'NT' : { C: '♣', D: '♦', H: '♥', S: '♠' }[s] || s}
                   </Button>
                 )
               })}
@@ -2135,7 +2026,7 @@ function CardTable({
             {/* 行3: pass / X / XX */}
             <Box sx={{ display: 'flex', gap: '4px', minHeight: 28 }}>
               {['pass', 'X', 'XX'].map(bid => (
-                <Button key={bid} size="small" sx={{ ...btnSx(bid, 28, '0.7rem', false), flex: 1 }}
+                <Button key={bid} size="small" sx={{ ...btnSx(bid, isMobile ? 36 : 28, isMobile ? '0.9rem' : '0.7rem', false), flex: 1 }}
                   onClick={() => { addBid && addBid(bid); setSelectedBidLevel(null) }}
                   disabled={!addBid}>
                   {bid}
@@ -2221,6 +2112,7 @@ function CardTable({
       })()}
 
       {/* 人类无手牌时通过花色+牌点选择出牌（类似叫牌面板） */}
+      {/* eslint-disable-next-line react-hooks/refs -- dragPanelRef 仅在事件处理器内读写 */}
       {showPlayPanel && playState && (() => {
         const cp = playState.current_player
         if (!cp) return null
@@ -2265,7 +2157,9 @@ function CardTable({
 
         const posStyle = playPanelPos
           ? { left: playPanelPos.x, top: playPanelPos.y }
-          : getTableRightPos()
+          : isMobile
+            ? { left: Math.max(8, window.innerWidth / 2 - 140), top: window.innerHeight - 170 }
+            : getTableRightPos()
 
         const onMouseDown = (e) => {
           if (e.button !== 0) return
@@ -2282,11 +2176,12 @@ function CardTable({
           <Box sx={{
             position: 'fixed', zIndex: 9999, ...posStyle,
             bgcolor: isDark ? 'rgba(17,24,39,0.96)' : 'rgba(255,255,255,0.96)',
-            borderRadius: 3.56, p: 2.67,
+            borderRadius: 3.56, p: isMobile ? 1 : 2.67,
             border: '1px solid', borderColor: 'divider',
             boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
             display: 'flex', flexDirection: 'column', gap: 0.53,
             cursor: dragging && dragTarget === 'play' ? 'grabbing' : 'auto',
+            maxWidth: isMobile ? '100vw' : 'none',
           }}>
             <Box
               sx={{
@@ -2296,10 +2191,10 @@ function CardTable({
               }}
               onMouseDown={onMouseDown}
             >
-              <Typography sx={{ fontSize: '1.51rem', fontWeight: 700, color: isDark ? '#e2e8f0' : '#333', flexShrink: 0 }}>
+              <Typography sx={{ fontSize: isMobile ? '0.9rem' : '1.51rem', fontWeight: 700, color: isDark ? '#e2e8f0' : '#333', flexShrink: 0 }}>
                 {cp}家 出牌{ledSuit ? ` (跟${ledSuit})` : ' (首攻)'}
               </Typography>
-              <Typography sx={{ fontSize: '1.21rem', color: isDark ? '#94a3b8' : '#888' }}>
+              <Typography sx={{ fontSize: '1.21rem', color: isDark ? '#94a3b8' : '#888', display: isMobile ? 'none' : 'block' }}>
                 拖拽移动 · 已出/他手的牌已隐藏
               </Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3, flexShrink: 0 }}>
@@ -2307,9 +2202,9 @@ function CardTable({
                   type="checkbox"
                   checked={showAllPlayCards}
                   onChange={(e) => setShowAllPlayCards(e.target.checked)}
-                  style={{ width: 18, height: 18, cursor: 'pointer' }}
+                  style={{ width: isMobile ? 16 : 18, height: isMobile ? 16 : 18, cursor: 'pointer' }}
                 />
-                <Typography sx={{ fontSize: '1.05rem', color: isDark ? '#94a3b8' : '#888', userSelect: 'none' }}>
+                <Typography sx={{ fontSize: isMobile ? '0.75rem' : '1.05rem', color: isDark ? '#94a3b8' : '#888', userSelect: 'none' }}>
                   显示全部
                 </Typography>
               </Box>
@@ -2318,17 +2213,17 @@ function CardTable({
               const isLedSuit = ledSuit === symbol
               return (
                 <Box key={symbol} sx={{
-                  display: 'flex', alignItems: 'center', gap: 0.53,
+                  display: 'flex', alignItems: 'center', gap: isMobile ? 0.2 : 0.53,
                   bgcolor: isLedSuit ? (isDark ? 'rgba(99,102,241,0.15)' : 'rgba(99,102,241,0.08)') : 'transparent',
                   borderRadius: 0.89, px: 0.36, py: 0.2,
                   border: isLedSuit ? `1px solid ${isDark ? 'rgba(129,140,248,0.4)' : 'rgba(99,102,241,0.3)'}` : '1px solid transparent',
                 }}>
                   <Typography sx={{
-                    width: 36, minWidth: 36, textAlign: 'center',
-                    color, fontSize: '1.69rem', fontWeight: 700, lineHeight: 1,
+                    width: isMobile ? 20 : 36, minWidth: isMobile ? 20 : 36, textAlign: 'center',
+                    color, fontSize: isMobile ? '1.05rem' : '1.69rem', fontWeight: 700, lineHeight: 1,
                     userSelect: 'none',
                   }}>{symbol}</Typography>
-                  <Box sx={{ display: 'flex', gap: 0.36, flexWrap: 'nowrap' }}>
+                  <Box sx={{ display: 'flex', gap: isMobile ? 0.12 : 0.36, flexWrap: 'nowrap' }}>
                     {RANKS.map((rank) => {
                       const cardKey = symbol + rank
                       const isTaken = showAllPlayCards && takenSet.has(cardKey)
@@ -2340,8 +2235,8 @@ function CardTable({
                           disabled={isTaken}
                           onClick={() => handlePick(symbol, rank)}
                           sx={{
-                            minWidth: 0, width: 47, height: 47, p: 0,
-                            fontSize: '1.24rem', fontWeight: 600, borderRadius: 0.89,
+                            minWidth: 0, width: isMobile ? 21 : 47, height: isMobile ? 21 : 47, p: 0,
+                            fontSize: isMobile ? '0.78rem' : '1.24rem', fontWeight: 600, borderRadius: 0.89,
                             border: '1px solid',
                             color: isTaken ? (isDark ? '#475569' : '#aaa') : color,
                             bgcolor: isTaken
@@ -2370,7 +2265,23 @@ function CardTable({
         return ReactDOM.createPortal(panelContent, document.body)
       })()}
 
+      {/* eslint-disable-next-line react-hooks/refs -- dragPanelRef 仅在事件处理器内读写 */}
       {renderHandPickerPanel()}
+
+      {/* 移动端截牌：隐藏文件选择，触发相册/拍照上传识别 */}
+      <input
+        type="file"
+        accept="image/*"
+        ref={singleHandFileRef}
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file && onSingleHandUpload && singleHandPos) {
+            onSingleHandUpload(singleHandPos, file)
+          }
+          e.target.value = ''
+        }}
+      />
     </Box>
   );
 }

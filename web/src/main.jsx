@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- 入口文件含 ThemeWrapper 组件但无导出，Fast Refresh 规则不适用 */
 import React, { StrictMode, useState, useMemo, useCallback, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ThemeProvider } from '@mui/material/styles'

@@ -4,7 +4,7 @@ import os
 import random
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from bridge.mcts.constraints import BidConstraint, validate_sample, compute_sample_violation_score, HCP_MAP
+from bridge.mcts.constraints import BidConstraint, validate_sample, HCP_MAP
 from bridge.mcts.sampler import DealSampler
 from bridge.mcts.bid_constraint_library import (
     extract_constraints_from_bid_history,

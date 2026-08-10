@@ -66,7 +66,6 @@ export function GameProvider({ children }) {
   const [showDraftBanner, setShowDraftBanner] = useState(false)
   const [customDealOpen, setCustomDealOpen] = useState(false)
   const [imageDealOpen, setImageDealOpen] = useState(false)
-  const [customDealText, setCustomDealText] = useState('')
   const [imagePath, setImagePath] = useState('')
   const [imageFile, setImageFile] = useState(null)
   const [imageOpeningLead, setImageOpeningLead] = useState(null)
@@ -99,7 +98,6 @@ export function GameProvider({ children }) {
       showDraftBanner, setShowDraftBanner,
       customDealOpen, setCustomDealOpen,
       imageDealOpen, setImageDealOpen,
-      customDealText, setCustomDealText,
       imagePath, setImagePath,
       imageFile, setImageFile,
       imageOpeningLead, setImageOpeningLead,
@@ -113,7 +111,7 @@ export function GameProvider({ children }) {
       dealMode, showSettings, dealSystem,
       fallbackModel, playModel,
       apiStatus, currentRecordId, showDraftBanner,
-      customDealOpen, imageDealOpen, customDealText, imagePath, imageFile,
+      customDealOpen, imageDealOpen, imagePath, imageFile,
       imageOpeningLead, mode, readonlyMode,
     ],
   )

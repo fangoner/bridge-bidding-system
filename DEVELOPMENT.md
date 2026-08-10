@@ -291,12 +291,16 @@ BidConstraint:
 
 ### 手牌采样器
 
-`bridge/mcts/sampler.py` 的 `DealSampler` 实现 uniform sampling with level-based constraint validation。
+`bridge/mcts/sampler.py` 的 `DealSampler` 实现 uniform sampling with level-based constraint validation，辅以 Metropolis-Hastings（MH）引导式修复提速收敛。
 
-**采样流程**：
-1. `_sample_uniform()`：洗牌未知牌池，按剩余计数分配
-2. 约束验证：L1（硬约束）→ L2（放宽）→ L0（仅voids）回退链
-3. `compute_sample_violation_score()`：软约束违规评分（仅诊断用）
+**采样流程**（`_sample_one`）：
+1. `_extract_known_info()`：提取已知手牌、未知牌池、剩余计数、已知缺门（void）
+2. `_reduce_constraint_for_played()`：中局按已出牌扣减约束（例外：已知手牌位置不验证）
+3. `_check_feasible()`：可行性预检，识别"花色约束迫使 HCP 超标"等不可行场景，直接跳过 MH/L1 空转
+4. `_sample_uniform()`：逐张分配（Tier 1 优先「仍缺张+不 void 该花色+剩余需求最大」）+ 残留牌退回补齐（Tier 2），**保证世界永远完整**（绝不丢牌），违反 void 的世界由上层验证链剔除
+5. 分级验证回退链：L1（MH 修复，`_sample_mh_repair`）→ L2（放宽）→ L0（仅voids）→ 兜底（`_pick_least_violating`，选违反约束最少的候选）
+
+**MH 引导式提案**（`_propose_swap`）：按违约类型定向交换，补花色时移出最高 HCP 非目标牌避免 HCP 升高被接受率拒绝；`exact_suit` 缺长纳入花色缺长引导；补花色优先从"超过 `suit_min`"的花色移出牌，避免破坏其他花色约束；HCP 接近下限时保 HCP（移出最低非目标牌、补入最高目标牌）。多约束叠加场景（逆叫、技术性加倍）整体 MH 成功率 100%/88%。
 
 **中局约束扣减法**：按已出牌扣减 HCP/min_controls/suit_min/exact_suit/suit_max，物理意义：初始约束 = 已出部分 + 剩余部分。
 
@@ -499,6 +503,35 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 3. 启动前端：`cd web && npm run dev`
 
 ## 版本历史
+
+### v1.58
+- **MH 多约束收敛（补花色保护边缘花色）**
+  - `_propose_swap` 分支3 补花色时，移出的牌优先来自"超过其 `suit_min`"的花色（`protected`），避免补目标花色时把边缘花色压到约束之下（如补♦破坏♥≥5）形成振荡。验证：逆叫16+ 50% → 100%，技术性加倍 76% → 88%
+  - 通过 8 种真实约束模式的整体成功率基准确认默认 `beta=1.0` 最优
+- 修改文件: bridge/mcts/sampler.py, bench_mh.py
+
+### v1.57
+- **MH 死锁修复（补花色时保 HCP）**
+  - `_propose_swap` 分支 3 自适应保 HCP：当"移出最高非目标牌 + 补入最低目标牌"会跌破 `min_hcp`（`vhcp - max_non_wanted < vcon.min_hcp`）时，切换为保 HCP 路径——移出最低 HCP 非目标牌、补入最高 HCP 目标牌（不超出 `max_hcp`），避免补花色破坏 HCP 下限被 Metropolis 拒绝而死锁。验证：死锁场景 MH 成功率 19% → 100%
+- 修改文件: bridge/mcts/sampler.py, test_mh_fix.py
+
+### v1.56
+- **中局采样慢优化（世界完整性 + MH 收敛 + 可行性预检）**
+  - `_sample_uniform` 重写：逐张分配（Tier 1 优先「仍缺张+不 void 该花色+剩余需求最大」）+ 残留牌退回补齐（Tier 2），保证世界永远完整，杜绝 void 回填失败导致的缺牌/重复世界被 DDS 丢弃
+  - `_propose_swap` 补花色改移出最高 HCP 非目标牌，避免 HCP 升高被 Metropolis 接受率拒绝；`exact_suit` 缺长纳入花色缺长引导
+  - `_check_feasible` 可行性预检增强：`_position_hcp_feasible` 合并 `suit_min`/`exact_suit` 并排除 exact_suit 剩余牌，识别"花色约束迫使 HCP 超标"的不可行场景，跳过 MH 空转
+  - 采样回退链早收敛：MH 几乎全失败时直接走 Level 0/兜底
+- 修改文件: bridge/mcts/sampler.py, dbg_repro.py
+
+### v1.55
+- **DD-αμ-LLM 引擎 LLM 审查开关**
+  - `_dd_alphamu_llm_play` 新增 `enable_llm_review` 参数：关闭（默认）时中盘走 `_dd_play`、残局走 `_alpha_mu_play`（纯引擎）；开启时走原 `_dd_llm_play`/`_alphamu_llm_play`（LLM 审查）
+  - API `PlayAIRequest` 新增 `use_llm_review` 字段并透传 service
+  - 前端设置面板 DD-αμ-LLM 引擎下新增「纯引擎 / LLM审查」切换，PlayContext 持久化 localStorage
+- **选牌决策改为完全交予概率（取消小牌优先）**
+  - DD：`_compare_candidates` 取消平局小牌优先，完全按 val 方向决胜（庄家取高、防守取低）；删除 `_paired_diff_stats`、`_Z_SCORE` 死代码
+  - αμ：根节点选牌本就是 `if score > best_score` 纯概率；删除 `_rank_bonus` 死代码
+- 修改文件: bridge/play_service.py, api/main.py, bridge/mcts/dd_search.py, bridge/mcts/alpha_mu.py, config.py, web/src/context/PlayContext.jsx, web/src/services/api.js, web/src/App.jsx, web/src/components/SettingsPanel.jsx
 
 ### v1.54
 - **DD 提示异步计算（7/8：线程化 + 参数链路）**

@@ -1,5 +1,69 @@
 # 开发日志
 
+## 2026-08-10（MH 多约束收敛：补花色保护边缘花色）
+
+### 背景
+MH 收敛质量深挖：用完整牌池对 8 种真实约束模式做整体成功率基准，发现"多约束叠加"场景（同时要求 HCP + 多花色 + 牌型）仍有短板——逆叫16+（♥≥5 且 ♦≥4 且 HCP16-21 且非均型）仅 50%，技术性加倍 76%。诊断失败样本：HCP/牌型基本满足，只差一门花色（逆叫常差 ♦1-2 张）却卡住。
+
+### 根因
+`_propose_swap` 分支3（花色缺长）选"最高 HCP 非目标牌"移出时，常选中恰好等于其 `suit_min` 的边缘花色牌（如 ♥=5=suit_min），补 ♦ 时把 ♥ 压到 4 破坏 `♥≥5`，形成"补♦破♥"振荡。分支1（HCP 超标）已有 `protected` 逻辑避免动边缘花色，分支3 缺失。
+
+### 改进
+- **分支3 补花色保护边缘花色**：移出的牌优先来自"超过其 `suit_min`"的花色（`protected = {s for s,n in suit_min.items() if vdist[s] <= n}`），只有无多余花色时才退而移出会破坏约束的牌。验证：逆叫16+ 50% → 100%，技术性加倍 76% → 88%，beta=1.0 保持最优
+- 确认默认 `beta=1.0` 合理（调低 0.5/0.3/0.1 无明显收益甚至略降）
+
+**修改文件**: bridge/mcts/sampler.py, bench_mh.py（新增整体成功率基准）
+
+## 2026-08-10（MH 死锁修复：补花色时保 HCP）
+
+### 背景
+上一轮修复（移出最高 HCP 非目标牌压低 HCP）解决了"HCP 超标"场景，但引入新的死锁：当违约位置 HCP 恰好压在下限（`min_hcp`）且花色缺长时，补花色扔掉高 HCP 非目标牌会把 HCP 跌破下限，产生新的 `min_hcp` 违约被 Metropolis 拒绝，来回振荡不收敛，MH 成功率仅 ~19-43%。
+
+### 改进
+- **`_propose_swap` 分支 3 自适应保 HCP**：当"移出最高非目标牌 + 补入最低目标牌"会跌破 `min_hcp`（`vhcp - max_non_wanted < vcon.min_hcp`）时，切换为保 HCP 路径——移出**最低 HCP 非目标牌**、补入**最高 HCP 目标牌**（且不超出 `max_hcp`，避免越过上限振荡），使补花色不再破坏 HCP 下限。验证：死锁场景（西 ♠≥6 且 min_hcp=6）MH 成功率 19% → 100%；带 `max_hcp` 上下限场景 100%
+
+**修改文件**: bridge/mcts/sampler.py, test_mh_fix.py（新增回归测试）
+
+## 2026-08-10（中局采样慢优化：世界完整性 + MH 收敛 + 可行性预检）
+
+### 背景
+中局（trick=2）DD 分析总时长 53.8s，采样耗时占比过高（54.37s prepare，仅 2.4s 求解）。根因链条：采样生成的 world 因 void 回填失败而**不完整**（缺牌/重复）→ DDS 判定无效丢弃（16/924 成功）；高 HCP 花色约束下 MH 补花色逻辑导致 HCP 升高被接受率拒绝而收敛失败；不可行约束未预检导致采样空转。
+
+### 改进
+- **`_sample_uniform` 重写（世界完整性修复）**：旧逻辑"先跳过 void 花色牌→事后回填"在多家共享 void 或单家大量 void 时回填找不到接收位置而静默丢牌。改为逐张分配（Tier 1 优先放入「仍缺张+不 void 该花色+剩余需求最大」位置）+ 残留牌退回补齐（Tier 2），保证世界永远完整，违反 void 的世界由上层验证链剔除。验证：西 void♥♦、西&东 void♦ 场景不完整世界从 200/200 → 0/200，DDS 成功率 0/50 → 50/50
+- **`_propose_swap` 引导式提案优化**：补花色（分支 3）时改移出**最高 HCP 非目标花色牌**（原为最低 HCP），避免补花色导致 HCP 升高被 Metropolis 接受率拒绝；将 `exact_suit` 低于精确值纳入花色缺长引导。验证：高 HCP ♠ 场景 MH 成功率从 0% → 32%
+- **`_check_feasible` 可行性预检增强**：`_position_hcp_feasible` 合并 `suit_min` 与 `exact_suit` 为各花色必需张数，计算 HCP 可达区间时排除 `exact_suit` 花色的剩余牌，准确识别"花色约束迫使 HCP 超标"的不可行场景。验证：不可行场景 `_sample_one` 耗时从 2.8s → 23ms/样本
+- **采样回退链早收敛**：MH 修复几乎全失败时直接走 Level 0/兜底，而非每个样本跑满 300 次 MH
+
+**修改文件**: bridge/mcts/sampler.py, dbg_repro.py（新增诊断脚本）
+
+**测试验证**: dd_debug.log 采样世界完整率 100%，DDS 求解成功率恢复；不可行场景耗时降低 100 倍以上
+
+## 2026-08-09（DD-αμ-LLM 引擎 LLM 审查开关 + 选牌原则改为纯概率）
+
+### DD-αμ-LLM 引擎新增 LLM 审查开关
+
+**背景**: 为对比"纯引擎"与"LLM 审查"两种出牌质量，共用 DD-αμ-LLM 引擎，通过开关切换，避免新增独立引擎的重复维护
+
+**改进**:
+- `_dd_alphamu_llm_play` 新增 `enable_llm_review` 参数：关闭（默认）时中盘走 `_dd_play`、残局走 `_alpha_mu_play`（纯引擎）；开启时走原 `_dd_llm_play`/`_alphamu_llm_play`（LLM 审查）
+- API `PlayAIRequest` 新增 `use_llm_review` 字段并透传 service
+- 前端设置面板在 DD-αμ-LLM 引擎下新增「纯引擎 / LLM审查」ToggleButton 切换，PlayContext 持久化到 localStorage
+- PlayDetailPanel 通过 `hasLLM`（是否有 `llm_review`）自动区分：开审查显示 `DD·模型·思考/快答`，关审查显示纯 `DD`/`αμ`
+
+### 选牌决策改为完全交给概率（取消小牌优先保留大牌结构）
+
+**背景**: 纯 DD 引擎在赢墩等价时按"小牌优先保留大牌结构"选牌，导致 avg 略高的牌（如 ♣T 8.49 vs ♣8 8.41）反而未被选中，用户希望完全交给概率决定
+
+**改进**:
+- DD：`_compare_candidates` 取消"平局时小牌优先"，改为完全按 val 方向决胜（庄家取高、防守取低）；删除不再使用的 `_paired_diff_stats`、`_Z_SCORE` 死代码
+- αμ：确认根节点选牌本就是 `if score > best_score` 纯概率比较（无小牌优先），删除未使用的 `_rank_bonus` 死代码
+- LLM 审查开关保留：开启时由 LLM 在赢墩等价组内做战术判断
+
+**修改文件**: bridge/play_service.py, api/main.py, bridge/mcts/dd_search.py, bridge/mcts/alpha_mu.py, config.py, web/src/context/PlayContext.jsx, web/src/services/api.js, web/src/App.jsx, web/src/components/SettingsPanel.jsx
+
+**测试验证**: Python py_compile 通过；后端健康检查 200；前端 lint 无新增错误；前后端服务运行正常
+
 ## 2026-08-08（DD hint 线程化 + DDS 并发安全）
 
 ### DD 提示异步计算（7/8：线程化 + 参数链路）

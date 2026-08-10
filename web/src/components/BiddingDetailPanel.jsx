@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from 'react'
+import { useMemo, useState } from 'react'
 import { Box, Typography, Paper, FormControlLabel, Checkbox, Select, MenuItem, CircularProgress, Alert, Button, ToggleButton, ToggleButtonGroup, useTheme } from '@mui/material'
 import { PANEL_LAYOUT } from '../styles/constants'
 import { isHumanPosition } from '../utils/position'
@@ -35,7 +35,6 @@ function BiddingDetailPanel({
   stopBidding,
   outputFormats,
   isBiddingCompleteFn,
-  height = '640px',
   onStartPlay,
   playLoading,
   // 叫牌按钮相关
@@ -60,25 +59,23 @@ function BiddingDetailPanel({
   const bgPanel = isDark ? 'rgba(255,255,255,0.04)' : '#fafafa'
   const borderCode = isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid #e9ecef'
   const borderPanel = isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #e0e0e0'
-  const borderLine = isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd'
   const colorMuted = isDark ? '#94a3b8' : '#666'
   const [detailTab, setDetailTab] = useState('jf')
 
-  // 人类回合自动切换到 JF 标签
-  useEffect(() => {
-    if (isHumanPosition(positionRoles, currentBidder)) {
-      setDetailTab('jf')
-    }
-  }, [positionRoles, currentBidder])
+  // 人类回合自动切换到 JF 标签（渲染期间调整 state，避免 effect 内同步 setState）
+  const [prevHumanTurn, setPrevHumanTurn] = useState(false)
+  const isHumanTurn = isHumanPosition(positionRoles, currentBidder)
+  if (isHumanTurn !== prevHumanTurn) {
+    setPrevHumanTurn(isHumanTurn)
+    if (isHumanTurn) setDetailTab('jf')
+  }
 
-  // LLM返回新结果时自动切换到细节面板
-  const prevHistoryLen = useRef(aiBiddingHistory.length)
-  useEffect(() => {
-    if (aiBiddingHistory.length > prevHistoryLen.current) {
-      setDetailTab('details')
-    }
-    prevHistoryLen.current = aiBiddingHistory.length
-  }, [aiBiddingHistory.length])
+  // LLM返回新结果时自动切换到细节面板（渲染期间调整 state，避免 effect 内同步 setState）
+  const [prevHistoryLen, setPrevHistoryLen] = useState(aiBiddingHistory.length)
+  if (aiBiddingHistory.length > prevHistoryLen) {
+    setPrevHistoryLen(aiBiddingHistory.length)
+    setDetailTab('details')
+  }
 
   const historySelectOptions = useMemo(() => {
     if (aiBiddingHistory.length === 0) return []
@@ -358,9 +355,8 @@ function BiddingDetailPanel({
       flexDirection: 'column',
       width: isMobile ? '100%' : '640px',
       height: '640px',
-      minHeight: '640px',
+      minHeight: isMobile ? '400px' : '640px',
       flexShrink: 0,
-      minHeight: isMobile ? '400px' : undefined,
       overflow: isMobile ? undefined : 'hidden',
       boxSizing: 'border-box'
     }}>

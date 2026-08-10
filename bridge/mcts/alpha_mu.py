@@ -1356,17 +1356,6 @@ class AlphaMuSearch:
                 world_def.append(ns_info["def_tricks"])
         return updated_worlds, world_decl, world_def
 
-    @staticmethod
-    def _rank_bonus(card: Card) -> float:
-        """平局 tie-break，bonus 足够小不覆盖真实差异。
-        小牌 bonus 更大（保留大牌结构/进张），与 DD 引擎 _compare_candidates 一致。"""
-        rank_values = {
-            '2': 0.009, '3': 0.008, '4': 0.007, '5': 0.006, '6': 0.005,
-            '7': 0.004, '8': 0.003, '9': 0.002, 'T': 0.001,
-            'J': 0.0009, 'Q': 0.0008, 'K': 0.0007, 'A': 0.0006,
-        }
-        return rank_values.get(card.rank, 0.0)
-
     def _time_up(self) -> bool:
         if self._start_time <= 0:
             return False

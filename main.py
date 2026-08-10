@@ -1099,7 +1099,7 @@ def select_deal_system(game: BiddingGame):
     choice = input("请选择 (1/2): ").strip()
     system_map = {
         "1": "2D：多功能，2H/S：麦德伯格，2NT：双低花",
-        "2": "2D/2H/2S：自然阻击"
+        "2": "自然阻击"
     }
     if choice in system_map:
         game.set_deal_system(system_map[choice])

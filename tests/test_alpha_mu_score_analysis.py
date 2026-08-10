@@ -101,7 +101,7 @@ def run_scenario(name, state):
         print("  ⚠ endplay 未安装，跳过")
         return
 
-    search = AlphaMuSearch(num_worlds=8, max_depth=3, time_limit=15.0)
+    search = AlphaMuSearch(num_worlds=8, M=3, time_limit=15.0)
     result = search.search(state)
 
     print(f"\nαμ 推荐: {result.get('card')}")

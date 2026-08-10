@@ -15,8 +15,6 @@ function ControlButtons({
   darkMode,
   onToggleDarkMode,
   aiThinking,
-  vulnerability,
-  setVulnerability,
 }) {
   const isLarge = size === 'large'
   const buttonSize = isLarge ? 'large' : 'small'

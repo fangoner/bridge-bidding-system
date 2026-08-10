@@ -185,6 +185,19 @@ export const imageDeal = async (imageFile) => {
   }
 };
 
+// 上传单家手牌图片识别（移动端/相册路径）
+export const uploadSingleHandImage = async (position, imageFile) => {
+  try {
+    const formData = new FormData();
+    formData.append('image', imageFile);
+    const response = await axios.post(`${API_BASE_URL}/api/single-hand-image?position=${encodeURIComponent(position)}`, formData);
+    return response.data;
+  } catch (error) {
+    console.error('上传单家手牌识别失败:', error);
+    throw error;
+  }
+};
+
 // 触发系统截屏
 export const triggerScreenshot = async () => {
   try {
@@ -278,10 +291,11 @@ export const undoPlay = async () => {
 };
 
 // AI出牌
-export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null, ddAlphamuSwitchCards = null) => {
+export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null, ddAlphamuSwitchCards = null, useLlmReview = false) => {
   try {
     const requestData = {
       use_reasoning: useReasoning,
+      use_llm_review: useLlmReview,
     };
 
     if (playModel) {

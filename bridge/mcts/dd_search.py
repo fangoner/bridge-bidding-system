@@ -30,71 +30,17 @@ def _card_rank_val(card_str: str) -> int:
     return RANK_ORDER.get(card_str[-1], 0)
 
 
-# ── 显著性阈值 ──
-# 显著性 Z 值（1.0 = 1σ ≈ 68% 置信，平衡灵敏度与噪声）
-_Z_SCORE = 1.0
-
-
-def _paired_diff_stats(a_scores, b_scores):
-    """计算两个候选牌配对采样的差值统计。
-
-    返回 (mean_diff, threshold)：
-    - mean_diff = mean(a_scores - b_scores) = a_avg - b_avg
-    - threshold = Z × std_diff / √N （配对差值标准差，避免独立假设虚高）
-
-    配对采样下同 world 的 cov(a,b) > 0，配对 std 远小于独立假设的 √2·σ，
-    阈值更精确。N≤1 时 threshold=0（精确求解无需显著性检验）。
-    """
-    n = min(len(a_scores), len(b_scores))
-    if n == 0:
-        return 0.0, 0.0
-    total_diff = 0.0
-    for i in range(n):
-        total_diff += a_scores[i] - b_scores[i]
-    mean_diff = total_diff / n
-    if n <= 1:
-        return mean_diff, 0.0
-    sq_sum = 0.0
-    for i in range(n):
-        d = (a_scores[i] - b_scores[i]) - mean_diff
-        sq_sum += d * d
-    std_diff = math.sqrt(sq_sum / (n - 1))
-    threshold = _Z_SCORE * std_diff / math.sqrt(n)
-    return mean_diff, threshold
-
-
 def _compare_candidates(a_val, a_scores, a_rank_val, b_val, b_scores, b_rank_val, is_declarer_side):
-    """配对差值检验比较两个候选牌。
+    """比较两个候选牌，完全交给概率决定。
 
     a_val, b_val: 用于决策方向的值（如 blended 或 avg）
-    a_scores, b_scores: 配对采样的 per-world 得分列表，用于计算配对差值阈值
+    a_scores, b_scores: 保留用作扩展（当前不参与决定）
 
     返回: 1 if a 优于 b, -1 if b 优于 a, 0 if 等价。
-    分层决胜：
-    1. |a_val - b_val| > 配对阈值 → 显著差异，按 val 方向决胜
-       （庄家方取高，防守方取低）
-    2. rank 不同 → 小牌优先（保留大牌结构/进张）
-    3. rank 相同 → 回退到原始 val 方向（虽在阈值内属噪声，
-       但仍比迭代顺序任意决定更合理）
+    决胜规则（庄家方取高，防守方取低）：
+    - 完全按 val 方向决定，不做小牌优先保留大牌结构
     """
-    _, threshold = _paired_diff_stats(a_scores, b_scores)
     diff = a_val - b_val
-    if is_declarer_side:
-        if diff > threshold:
-            return 1   # a 显著更高（庄家方更优）
-        if diff < -threshold:
-            return -1  # b 显著更高
-    else:
-        if diff < -threshold:
-            return 1   # a 显著更低（防守方更优）
-        if diff > threshold:
-            return -1  # b 显著更低
-    # 平局：小牌优先（rank 值小 = 小牌）
-    if a_rank_val < b_rank_val:
-        return 1
-    if a_rank_val > b_rank_val:
-        return -1
-    # rank 也相同：回退到原始 val 方向（避免迭代顺序任意决定）
     if is_declarer_side:
         if diff > 0:
             return 1
@@ -352,7 +298,7 @@ class DDSearch:
 
     def __init__(self, sampler: DealSampler = None, num_samples: int = 100,
                  min_samples: int = 15, time_limit: float = 5.0,
-                 endgame_card_threshold: int = 10, max_enumerations: int = 5000,
+                 endgame_card_threshold: int = 4, max_enumerations: int = 5000,
                  use_maximin: bool = True):
         self.sampler = sampler or DealSampler()
         self.num_samples = num_samples

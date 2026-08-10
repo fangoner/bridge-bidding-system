@@ -1,6 +1,7 @@
 import os
 import random
 import copy
+import math
 from typing import Dict, List, Set, Optional, Tuple
 
 from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER
@@ -9,7 +10,7 @@ from bridge.mcts.constraints import (
     BidConstraint, validate_sample,
     HCP_MAP, CONTROL_MAP,
     validate_level1, validate_level2, validate_voids_only,
-    is_hard_source, filter_hard_constraints,
+    is_hard_source, filter_hard_constraints, _is_balanced, _check_constraint,
 )
 from bridge.mcts.belief import collect_voids
 
@@ -169,7 +170,11 @@ def _extract_known_info(state: "PlayState", perspective: str) -> dict:
 
 
 def _sample_uniform(known_info: dict) -> Dict[str, List[Card]]:
-    """均匀随机分配未知牌：打乱 pool → 按位置所需张数顺次分配，跳过 void 花色。
+    """均匀随机分配未知牌：打乱 pool → 把每张牌分配到所需位置，尽量跳过 void 花色。
+
+    保证世界永远完整（池中每张牌都被分配，绝不丢牌）：void 花色只在对应位置
+    仍有需求时避开；若某张牌因 void 在任何仍缺张的位置都放不下（信息矛盾），
+    则退回其他位置补齐张数，由上层验证链（Level0/兜底）剔除无效世界。
 
     这就是论文的 "random generation followed by verification of the constraints"。
     """
@@ -179,44 +184,260 @@ def _sample_uniform(known_info: dict) -> Dict[str, List[Card]]:
     remaining_counts = dict(known_info["remaining_counts"])
     known_voids = known_info["known_voids"]
 
-    idx = 0
-    # 初始化空位置
     for pos in POSITION_ORDER:
         if pos not in result:
             result[pos] = []
-    # 收集 void 跳过的牌，后面回填（避免丢牌）
-    skipped: Dict[str, List[Card]] = {pos: [] for pos in POSITION_ORDER}
-    for pos in POSITION_ORDER:
-        have = len(result.get(pos, []))
-        need = remaining_counts.get(pos, 0) - have
-        void_suits = known_voids.get(pos, set())
-        for _ in range(need):
-            while idx < len(pool) and pool[idx].suit in void_suits:
-                skipped[pos].append(pool[idx])
-                idx += 1
-            if idx < len(pool):
-                result[pos].append(pool[idx])
-                idx += 1
-    # 回填：void 跳过的牌分配给不 void 该花色的后续位置
-    for pos in POSITION_ORDER:
-        _retries = 0
-        while len(result.get(pos, [])) < remaining_counts.get(pos, 0) and _retries < 100:
-            _retries += 1
-            filled = False
-            for p2 in POSITION_ORDER:
-                if pos == p2 or not skipped.get(p2):
-                    continue
-                for i, card in enumerate(skipped[p2]):
-                    if card.suit not in known_voids.get(pos, set()):
-                        result.setdefault(pos, []).append(skipped[p2].pop(i))
-                        filled = True
-                        break
-                if filled:
-                    break
-            if not filled:
-                break  # 无可用牌，放弃回填
+    # 每个位置仍缺的张数（剩余需求）
+    needs = {
+        pos: remaining_counts.get(pos, 0) - len(result.get(pos, []))
+        for pos in POSITION_ORDER
+    }
+    void_suits = {pos: known_voids.get(pos, set()) for pos in POSITION_ORDER}
+
+    residue = []
+    # Tier 1：每张牌优先放进「仍缺张，且不 void 该花色，且剩余需求最大」的位置
+    for card in pool:
+        eligible = [
+            pos for pos in POSITION_ORDER
+            if needs[pos] > 0 and card.suit not in void_suits[pos]
+        ]
+        if eligible:
+            pos = max(eligible, key=lambda p: needs[p])
+            result[pos].append(card)
+            needs[pos] -= 1
+        else:
+            residue.append(card)
+    # Tier 2：残留牌（其花色在几乎所有仍缺张的位置都被 void）。
+    # 退回仍缺张的位置补齐张数，保证世界完整；可能违反 void，由验证链剔除。
+    for card in residue:
+        open_pos = [p for p in POSITION_ORDER if needs[p] > 0]
+        if not open_pos:
+            break
+        pos = max(open_pos, key=lambda p: needs[p])
+        result[pos].append(card)
+        needs[pos] -= 1
 
     return result
+
+
+def _propose_swap(
+    world: Dict[str, List[Card]],
+    active_constraints: Dict[str, "BidConstraint"],
+    swap_positions: List[str],
+) -> Optional[Tuple[str, str, int, int]]:
+    """引导式提案：返回一个针对违约位置定向修复的双卡交换 (vpos, dpos, i, j)。
+
+    只在未知位置间交换，不碰已知手牌。按违约类型选择方向与目标牌：
+      - HCP 超标：从违约位置挪出最高 HCP 牌，从最低分位置取最低 HCP 牌补入（降 HCP）；
+      - HCP 不足：挪出最低 HCP 牌，从最高分位置取最高 HCP 牌补入（升 HCP）；
+      - 花色缺长：挪出非该花色牌，从有该花色牌的位置取该花色牌补入；
+      - 花色过长：挪出多余花色牌，补入非该花色牌；
+      - 兜底：对称交换（保证遍历性）。
+    无违约位置时返回 None（调用方视为已满足并结束）。
+    """
+    violating = [
+        p for p in active_constraints
+        if p in swap_positions
+        and not _check_constraint(world.get(p, []), active_constraints[p])
+    ]
+    if not violating:
+        return None
+    vpos = violating[random.randrange(len(violating))]
+    vcon = active_constraints[vpos]
+    vhand = world.get(vpos, [])
+    donors = [p for p in swap_positions if p != vpos]
+    if not vhand or not donors:
+        return None
+
+    vhcp = sum(HCP_MAP.get(c.rank, 0) for c in vhand)
+    vdist: Dict[str, int] = {}
+    for c in vhand:
+        vdist[c.suit] = vdist.get(c.suit, 0) + 1
+    vcontrols = sum(CONTROL_MAP.get(c.rank, 0) for c in vhand)
+
+    def pos_hcp(p: str) -> int:
+        return sum(HCP_MAP.get(c.rank, 0) for c in world.get(p, []))
+
+    # 1) HCP 超标：需降 HCP
+    if vcon.max_hcp is not None and vhcp > vcon.max_hcp:
+        # 挪出的牌必须避开 suit_min 要求保留的花色，否则降 HCP 会破坏花色约束造成振荡
+        protected = {
+            s for s, n in vcon.suit_min.items()
+            if vdist.get(s, 0) <= n
+        }
+        movable = [k for k in range(len(vhand)) if vhand[k].suit not in protected]
+        if not movable:
+            movable = list(range(len(vhand)))
+        i = max(movable, key=lambda k: HCP_MAP.get(vhand[k].rank, 0))
+        dpos = min(donors, key=pos_hcp)
+        dhand = world.get(dpos, [])
+        if not dhand:
+            return None
+        j = min(range(len(dhand)), key=lambda k: HCP_MAP.get(dhand[k].rank, 0))
+        return vpos, dpos, i, j
+    # 2) HCP 不足：需升 HCP
+    if vcon.min_hcp is not None and vhcp < vcon.min_hcp:
+        i = min(range(len(vhand)), key=lambda k: HCP_MAP.get(vhand[k].rank, 0))
+        dpos = max(donors, key=pos_hcp)
+        dhand = world.get(dpos, [])
+        if not dhand:
+            return None
+        j = max(range(len(dhand)), key=lambda k: HCP_MAP.get(dhand[k].rank, 0))
+        return vpos, dpos, i, j
+    # 3) 花色缺长：需补该花色（suit_min 不足或 exact_suit 低于精确值）
+    suit_deficit = {
+        s: n for s, n in vcon.suit_min.items()
+        if n - vdist.get(s, 0) > 0
+    }
+    for s, n in vcon.exact_suit.items():
+        if n - vdist.get(s, 0) > 0:
+            suit_deficit[s] = n
+    if suit_deficit:
+        wanted = next(iter(suit_deficit))
+        # 优先从"超过其 suit_min"的花色移出牌，避免补 wanted 时把其他花色压到约束之下
+        # （否则补♦会动到♥=5=suit_min，导致 ♥≥5 被破坏，形成补♦破♥的振荡）
+        protected = {
+            s for s, n in vcon.suit_min.items()
+            if vdist.get(s, 0) <= n
+        }
+        candidates = [k for k in range(len(vhand))
+                      if vhand[k].suit != wanted and vhand[k].suit not in protected]
+        if not candidates:
+            candidates = [k for k in range(len(vhand)) if vhand[k].suit != wanted]
+        if not candidates:
+            candidates = list(range(len(vhand)))
+        with_wanted = [
+            p for p in donors
+            if any(c.suit == wanted for c in world.get(p, []))
+        ]
+        pool_d = with_wanted if with_wanted else donors
+        # 是否必须保 HCP：若"移出最高非目标牌 + 补入最低目标牌"会跌破 HCP 下限，
+        # 则改走保 HCP 路径，避免 new_score 升高被 Metropolis 拒绝而陷入死锁。
+        keep_hcp = False
+        if vcon.min_hcp is not None:
+            max_non_wanted = max(
+                (HCP_MAP.get(vhand[k].rank, 0) for k in candidates), default=0
+            )
+            if vhcp - max_non_wanted < vcon.min_hcp:
+                keep_hcp = True
+        if keep_hcp:
+            # 保 HCP：移出最低 HCP 非目标牌，补入最高 HCP 目标牌（不超出 max_hcp）
+            i = min(candidates, key=lambda k: HCP_MAP.get(vhand[k].rank, 0))
+            cur_hcp = vhcp - HCP_MAP.get(vhand[i].rank, 0)
+            cap = vcon.max_hcp if vcon.max_hcp is not None else float("inf")
+            best_d = None
+            best_j = -1
+            best_hcp = -1
+            for p in pool_d:
+                dh = world.get(p, [])
+                for k in range(len(dh)):
+                    if dh[k].suit != wanted or HCP_MAP.get(dh[k].rank, 0) <= best_hcp:
+                        continue
+                    if cur_hcp + HCP_MAP.get(dh[k].rank, 0) <= cap:
+                        best_hcp = HCP_MAP.get(dh[k].rank, 0)
+                        best_d = p
+                        best_j = k
+            if best_d is None:
+                # 目标牌都会超 max_hcp，退回最高目标牌（接受率会兜底，不制造新违约循环）
+                for p in pool_d:
+                    dh = world.get(p, [])
+                    for k in range(len(dh)):
+                        if dh[k].suit == wanted and HCP_MAP.get(dh[k].rank, 0) > best_hcp:
+                            best_hcp = HCP_MAP.get(dh[k].rank, 0)
+                            best_d = p
+                            best_j = k
+            if best_d is None:
+                return None
+            return vpos, best_d, i, best_j
+        # 默认：压低 HCP（移出最高非目标牌，补入最低目标牌）
+        i = max(candidates, key=lambda k: HCP_MAP.get(vhand[k].rank, 0))
+        dpos = min(pool_d, key=pos_hcp)
+        dhand = world.get(dpos, [])
+        wanted_idx = [k for k in range(len(dhand)) if dhand[k].suit == wanted]
+        if not wanted_idx:
+            return None
+        j = min(wanted_idx, key=lambda k: HCP_MAP.get(dhand[k].rank, 0))
+        return vpos, dpos, i, j
+    # 4) 花色过长（suit_max / exact_suit）：需移出多余花色
+    excess = set(vcon.suit_max.keys()) | set(vcon.exact_suit.keys())
+    over_suit = None
+    for s in excess:
+        limit = vcon.suit_max.get(s, vcon.exact_suit.get(s, 0))
+        if vdist.get(s, 0) > limit:
+            over_suit = s
+            break
+    if over_suit is not None:
+        over_idx = [k for k in range(len(vhand)) if vhand[k].suit == over_suit]
+        if over_idx:
+            i = max(over_idx, key=lambda k: HCP_MAP.get(vhand[k].rank, 0))
+            dpos = min(donors, key=pos_hcp)
+            dhand = world.get(dpos, [])
+            not_over = [k for k in range(len(dhand)) if dhand[k].suit != over_suit]
+            if not not_over:
+                return None
+            j = min(not_over, key=lambda k: HCP_MAP.get(dhand[k].rank, 0))
+            return vpos, dpos, i, j
+    # 5) 兜底：对称交换（保证遍历性）
+    i = random.randrange(len(vhand))
+    dpos = random.choice(donors)
+    dhand = world.get(dpos, [])
+    if not dhand:
+        return None
+    j = random.randrange(len(dhand))
+    return vpos, dpos, i, j
+
+
+def _sample_mh_repair(
+    known_info: dict,
+    active_constraints: Dict[str, "BidConstraint"],
+    max_swaps: int = 300,
+    beta: float = 1.0,
+) -> Tuple[Dict[str, List[Card]], bool]:
+    """MH 修复：从一次均匀发牌出发，用引导式提案 + Metropolis 接受率逼近满足 L1 的手牌。
+
+    提案优先定向移动高价值牌到违约位置（收敛快），按 Metropolis 接受率
+    min(1, exp(-beta * Δscore)) 接受/拒绝，在加速收敛的同时对分布做校正。
+    β 越小越接近均匀探索，β 越大越激进逼近硬约束。只交换未知位置，不碰已知手牌。
+    返回 (world, ok)。
+    """
+    world = _sample_uniform(known_info)
+    if not active_constraints:
+        return world, True
+    if validate_level1(world, active_constraints):
+        return world, True
+    known_positions = set(known_info.get("result", {}).keys())
+    swap_positions = [p for p in world if p not in known_positions]
+    if len(swap_positions) < 2:
+        return world, False
+
+    def total_score() -> int:
+        return sum(
+            _constraint_violation_score(world.get(p, []), con)
+            for p, con in active_constraints.items()
+        )
+
+    current_score = total_score()
+    for _ in range(max_swaps):
+        if current_score == 0 or validate_level1(world, active_constraints):
+            return world, True
+        proposal = _propose_swap(world, active_constraints, swap_positions)
+        if proposal is None:
+            return world, current_score == 0
+        vpos, dpos, i, j = proposal
+        hand_v = world.get(vpos, [])
+        hand_d = world.get(dpos, [])
+        if not hand_v or not hand_d:
+            return world, False
+        hand_v[i], hand_d[j] = hand_d[j], hand_v[i]
+        new_score = total_score()
+        accept_prob = min(1.0, math.exp(-beta * (new_score - current_score)))
+        if random.random() < accept_prob:
+            current_score = new_score
+            if validate_level1(world, active_constraints):
+                return world, True
+        else:
+            hand_v[i], hand_d[j] = hand_d[j], hand_v[i]
+    return world, current_score == 0
 
 
 def _constraint_trivially_satisfied(c: "BidConstraint", remaining_count: int) -> bool:
@@ -238,6 +459,191 @@ def _constraint_trivially_satisfied(c: "BidConstraint", remaining_count: int) ->
     if c.balanced is not None:
         return False
     return True
+
+
+def _position_hcp_feasible(
+    con: "BidConstraint",
+    pool_cards: List[Card],
+    L: int,
+) -> bool:
+    """单位置可满足性：在满足花色要求的前提下，该位置 HCP 可达区间是否与约束有交集。
+
+    若被迫拿满 suit_min 所需花色后 HCP 必然超标（或必然不足），则约束必不可行。
+    例如某位置 ♠≥6 且池中♠全高HCP，西拿满6张♠后 HCP 必 > max_hcp。
+    这是必要不充分检查，用于在 MH/L1/L2 空转前识别确定性冲突。
+    """
+    if L <= 0:
+        return True
+    suit_sorted = {
+        s: sorted([c for c in pool_cards if c.suit == s], key=lambda c: HCP_MAP.get(c.rank, 0))
+        for s in SUIT_DISPLAY_ORDER
+    }
+    # 合并 suit_min 与 exact_suit 为各花色必需张数（exact_suit 覆盖为精确值）
+    required: Dict[str, int] = {}
+    for s, n in con.suit_min.items():
+        required[s] = max(required.get(s, 0), n)
+    for s, n in con.exact_suit.items():
+        required[s] = n
+    fixed = 0
+    for s, n in required.items():
+        if len(suit_sorted[s]) < n:
+            return False
+        fixed += n
+    rem = L - fixed
+    if rem < 0:
+        return False
+    used = {s: required.get(s, 0) for s in SUIT_DISPLAY_ORDER if s in required}
+    # 最小可达 HCP：各必需花色取最低 n 张，其余取全池最低 rem 张
+    mn = 0
+    for s in SUIT_DISPLAY_ORDER:
+        n = used.get(s, 0)
+        mn += sum(HCP_MAP.get(c.rank, 0) for c in suit_sorted[s][:n])
+    rest_low = []
+    for s in SUIT_DISPLAY_ORDER:
+        n = used.get(s, 0)
+        seq = suit_sorted[s]
+        if s in con.exact_suit:
+            continue  # exact_suit 恰好取 n 张，剩余该花色不能进入该位置
+        rest_low.extend(seq[n:])
+    rest_low.sort(key=lambda c: HCP_MAP.get(c.rank, 0))
+    mn += sum(HCP_MAP.get(c.rank, 0) for c in rest_low[:rem])
+    # 最大可达 HCP：各必需花色取最高 n 张，其余取全池最高 rem 张
+    mx = 0
+    for s in SUIT_DISPLAY_ORDER:
+        n = used.get(s, 0)
+        seq = suit_sorted[s]
+        mx += sum(HCP_MAP.get(c.rank, 0) for c in seq[-n:] if n)
+    rest_high = []
+    for s in SUIT_DISPLAY_ORDER:
+        n = used.get(s, 0)
+        seq = suit_sorted[s]
+        if s in con.exact_suit:
+            continue
+        rest_high.extend(seq[:len(seq) - n])
+    rest_high.sort(key=lambda c: HCP_MAP.get(c.rank, 0), reverse=True)
+    mx += sum(HCP_MAP.get(c.rank, 0) for c in rest_high[:rem])
+    if con.max_hcp is not None and mn > con.max_hcp:
+        return False
+    if con.min_hcp is not None and mx < con.min_hcp:
+        return False
+    return True
+
+
+def _check_feasible(
+    active_constraints: Dict[str, "BidConstraint"],
+    known_info: dict,
+) -> bool:
+    """可满足性预检：约束在当前未知牌池下是否可能同时成立。
+
+    仅做必要条件检查（不充分）。任一不满足则约束必不可能满足，
+    调用方应跳过 L1/L2 重试直接降级，避免无效空转。
+    """
+    unknown_pool = known_info["unknown_pool"]
+    total_hcp = sum(HCP_MAP.get(c.rank, 0) for c in unknown_pool)
+    total_controls = sum(CONTROL_MAP.get(c.rank, 0) for c in unknown_pool)
+    suit_counts: Dict[str, int] = {s: 0 for s in SUIT_DISPLAY_ORDER}
+    pool_cards: Set[Tuple[str, str]] = set()
+    for c in unknown_pool:
+        suit_counts[c.suit] = suit_counts[c.suit] + 1
+        pool_cards.add((c.suit, c.rank))
+
+    sum_min_hcp = 0
+    sum_min_controls = 0
+    sum_suit_min: Dict[str, int] = {s: 0 for s in SUIT_DISPLAY_ORDER}
+    for con in active_constraints.values():
+        if con.min_hcp is not None and con.min_hcp > 0:
+            sum_min_hcp += con.min_hcp
+            if con.min_hcp > total_hcp:
+                return False
+        if con.min_controls is not None and con.min_controls > 0:
+            sum_min_controls += con.min_controls
+            if con.min_controls > total_controls:
+                return False
+        for s, n in con.suit_min.items():
+            sum_suit_min[s] += n
+            if n > suit_counts[s]:
+                return False
+        for suit, rank in con.specific_cards:
+            if (suit, rank) not in pool_cards:
+                return False
+    if sum_min_hcp > total_hcp:
+        return False
+    if sum_min_controls > total_controls:
+        return False
+    for s in SUIT_DISPLAY_ORDER:
+        if sum_suit_min[s] > suit_counts[s]:
+            return False
+    # 单位置：花色+HCP 冲突检测（如被迫拿满高HCP花色必然超标）
+    remaining_counts = known_info.get("remaining_counts", {})
+    for pos, con in active_constraints.items():
+        L = remaining_counts.get(pos, 0)
+        if L > 0 and not _position_hcp_feasible(con, unknown_pool, L):
+            return False
+    return True
+
+
+def _constraint_violation_score(cards: List[Card], con: "BidConstraint") -> int:
+    """单位置约束违反打分：分数越小越接近满足，0 表示完全满足。
+
+    用于兜底降级保护：在无法满足硬约束时挑选违反最少的候选世界。
+    """
+    hcp = 0
+    controls = 0
+    dist: Dict[str, int] = {s: 0 for s in SUIT_DISPLAY_ORDER}
+    for c in cards:
+        hcp += HCP_MAP.get(c.rank, 0)
+        controls += CONTROL_MAP.get(c.rank, 0)
+        dist[c.suit] = dist[c.suit] + 1
+    score = 0
+    if con.min_hcp is not None and hcp < con.min_hcp:
+        score += con.min_hcp - hcp
+    if con.max_hcp is not None and hcp > con.max_hcp:
+        score += hcp - con.max_hcp
+    if con.min_controls is not None and controls < con.min_controls:
+        score += con.min_controls - controls
+    for s, n in con.suit_min.items():
+        if dist.get(s, 0) < n:
+            score += n - dist.get(s, 0)
+    for s, n in con.suit_max.items():
+        if dist.get(s, 0) > n:
+            score += dist.get(s, 0) - n
+    for s, n in con.exact_suit.items():
+        if dist.get(s, 0) != n:
+            score += abs(dist.get(s, 0) - n)
+    if con.balanced is not None:
+        if con.balanced != _is_balanced(dist):
+            score += 1
+    for suit, rank in con.specific_cards:
+        if not any(c.suit == suit and c.rank == rank for c in cards):
+            score += 1
+    return score
+
+
+def _pick_least_violating(
+    active_constraints: Dict[str, "BidConstraint"],
+    known_info: dict,
+    k: int = 10,
+) -> Dict[str, List[Card]]:
+    """兜底降级保护：生成 k 个均匀候选，返回违反约束最少的一套。
+
+    约束无法满足时的兜底，从"纯随机"改为"选违反最少的候选"，
+    使 DD/αμ 评估起点尽量贴近叫牌信息。
+    """
+    best_world = None
+    best_score = None
+    for _ in range(k):
+        world = _sample_uniform(known_info)
+        total = 0
+        for pos, con in active_constraints.items():
+            cards = world.get(pos, [])
+            if cards:
+                total += _constraint_violation_score(cards, con)
+        if best_score is None or total < best_score:
+            best_score = total
+            best_world = world
+            if total == 0:
+                break
+    return best_world
 
 
 def _reduce_constraint_for_played(
@@ -348,26 +754,31 @@ class DealSampler:
             if reduced is None:
                 continue
             active_constraints[pos] = reduced
-        # Level 1: 硬约束
-        for _attempt in range(50):
-            world = _sample_uniform(known_info)
-            if not active_constraints:
-                return world
-            if validate_level1(world, active_constraints):
-                return world
+        # 可满足性预检：约束在当前牌池下必不可能满足时，跳过 MH/L1 空转
+        feasible = _check_feasible(active_constraints, known_info)
+        if feasible:
+            if active_constraints:
+                # Level 1: MH 修复（从一次均匀发牌出发对称交换，无偏提速）
+                world, ok = _sample_mh_repair(known_info, active_constraints)
+                if ok:
+                    return world
+                _warn_fallback("MH→2", known_info, self.constraints)
+            else:
+                return _sample_uniform(known_info)
+        else:
+            _warn_fallback("INFEASIBLE→0", known_info, self.constraints)
         # Level 2: 放宽约束
-        _warn_fallback("Level 1→2", known_info, self.constraints)
+        _warn_fallback("Level 2→0", known_info, self.constraints)
         for _attempt in range(50):
             world = _sample_uniform(known_info)
             if validate_level2(world, active_constraints):
                 return world
         # Level 0: 仅 void
-        _warn_fallback("Level 2→0", known_info, self.constraints)
         for _attempt in range(20):
             world = _sample_uniform(known_info)
             if validate_voids_only(world, known_info["known_voids"]):
                 return world
-        # 兜底
+        # 兜底：选违反约束最少的候选世界（兜底降级保护）
         _warn_fallback("FINAL_FALLBACK", known_info, self.constraints)
-        return _sample_uniform(known_info)
+        return _pick_least_violating(active_constraints, known_info)
 

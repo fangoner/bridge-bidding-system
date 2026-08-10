@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Box, Typography, Paper, Divider, Button, ToggleButtonGroup, ToggleButton, useTheme, Chip, Collapse, IconButton } from '@mui/material'
 import { KeyboardArrowDown, KeyboardArrowRight } from '@mui/icons-material'
 import { getSuitColor } from '../constants/suits'
@@ -12,7 +12,6 @@ function PlayDetailPanel({
   isPaused,
   onResume,
   onResetPlay,
-  height = '680px',
   externalSelectedRecord,
   onClearExternalRecord,
   playStarted,
@@ -24,7 +23,6 @@ function PlayDetailPanel({
   positionRoles,
   onSave,
   canSave,
-  imageOpeningLead,
   reviewCursor,
   onReviewPrev,
   onReviewNext,
@@ -310,8 +308,6 @@ function PlayDetailPanel({
                     })}
                     {isAlphaMu && Array.isArray(mctsData.timing_stats) && mctsData.timing_stats.length > 0 && (() => {
                       const ts = mctsData.timing_stats
-                      const maxTime = Math.max(...ts.map(t => t.time_sec || 0), 0.1)
-                      const maxDds = Math.max(...ts.map(t => t.dds_calls || 0), 1)
                       const totalEval = ts.reduce((s, t) => s + (t.evaluated || 0), 0)
                       const totalInh = ts.reduce((s, t) => s + (t.inherited || 0), 0)
                       return (
@@ -320,8 +316,6 @@ function PlayDetailPanel({
                             ⏱ 时间监控 · {ts.length}次迭代 · 累计评估{totalEval}候选 · 继承{totalInh}
                           </Typography>
                           {ts.map((t, i) => {
-                            const pct = (t.time_sec || 0) / maxTime * 100
-                            const ddsPct = (t.dds_calls || 0) / maxDds * 100
                             const cutInfo = (t.root_cut_at && t.root_cut_at > 0)
                               ? ` · RootCut@${t.root_cut_at}`
                               : ''
@@ -393,7 +387,7 @@ function PlayDetailPanel({
                     </Typography>
                   </Box>
                 )
-              } catch (e) { return null }
+              } catch { return null }
             })()}
           </>
         ) : (
@@ -539,7 +533,6 @@ function PlayDetailPanel({
           <Box sx={{ display: 'flex', gap: 0.25, flexWrap: 'wrap' }}>
             {trick.cards && trick.cards.map(([pos, card], cardIdx) => {
               const globalCardIdx = globalStartIdx + cardIdx
-              const isBeforeCursor = reviewCursor != null && globalCardIdx < reviewCursor
               const isAtCursor = reviewCursor != null && globalCardIdx === reviewCursor
               const isAfterCursor = reviewCursor != null && globalCardIdx > reviewCursor
               // 游标语义：reviewCursor=N 表示前 N 张已出，第 N 张（globalCardIdx===N）回到手牌（未出）

@@ -21,7 +21,7 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT = os.getenv("DOUBAO_SEED_2_1_TURBO_REAS
 
 JF_CONVENTION_FILE = BASE_DIR / "JF实战_标准自然 - Rev 3.2.docx"
 
-DEFAULT_DEAL_SYSTEM = "2D/2H/2S：自然阻击"
+DEFAULT_DEAL_SYSTEM = "自然阻击"
 
 DEEP_FINESSE_PATH = BASE_DIR / "Deep Finesse 2014 v2" / "Deep Finesse.exe"
 DEEP_FINESSE_CLI_PATH = BASE_DIR / "Deep Finesse 2014 v2" / "df char mode.exe"
@@ -109,13 +109,16 @@ DD_ENDGAME_MAX_ENUMERATIONS = 5000  # 枚举总数超过此值时回退采样
 # DD-αμ-LLM 主力引擎：中盘DD与残局αμ的切换分界（每手剩余牌数≤此值切到αμ）
 DD_ALPHAMU_SWITCH_CARDS = 8
 
+# LLM 审查触发门槛：αμ阶段 top-1 与 top-2 成功率差达到此值时视为"一边倒"，跳过审查
+ALPHAMU_LLM_GAP_CAP = 0.35
+
 # 引擎粒子数/采样数范围（供 API 配置端点校验用）
-DD_PARTICLES_MIN = 100
+DD_PARTICLES_MIN = 250
 DD_PARTICLES_MAX = 2000
 MCTS_PARTICLES_MIN = 300
 MCTS_PARTICLES_MAX = 1000
-ALPHA_MU_WORLDS_MIN = 30
-ALPHA_MU_WORLDS_MAX = 500
+ALPHA_MU_WORLDS_MIN = 10
+ALPHA_MU_WORLDS_MAX = 100
 
 # 防守信号参数
 SIGNAL_WEIGHT = 1.3      # 信号一致时权重乘数

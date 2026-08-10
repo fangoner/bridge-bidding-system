@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import re
 from typing import Optional, Dict, List, Any, Tuple
 
@@ -8,6 +9,7 @@ from bridge.play_engine import PlayEngine
 from llm.prompts import PLAY_COMMON_RULES, PLAY_COMMON_SITUATION, PLAY_DECLARER_PROMPT, PLAY_DEFENDER_PROMPT
 from bridge.mcts import MctsSearch, RandomizedRollout, DDSearch
 from bridge.mcts.constraints import BidConstraint, validate_sample
+from bridge.mcts.signals import format_partner_signals_for_prompt
 from bridge.mcts.bid_constraint_library import extract_constraints_from_bid_history, SYSTEM_JF
 from config import (
     MCTS_ITERATIONS, MCTS_TIME_LIMIT, MCTS_EXPLORATION_CONSTANT,
@@ -16,6 +18,7 @@ from config import (
     DD_MAXIMIN_ENABLE, DD_ALPHAMU_SWITCH_CARDS,
     ALPHA_MU_ENABLE, ALPHA_MU_ENDGAME_CARDS, ALPHA_MU_NUM_WORLDS,
     ALPHA_MU_MAX_DEPTH, ALPHA_MU_TIME_LIMIT, ALPHA_MU_M,
+    ALPHAMU_LLM_GAP_CAP,
 )
 
 
@@ -94,6 +97,17 @@ class PlayService:
                 line = f"  {i}. [{done}] {action}"
                 if pre:
                     line += f" (前提: {pre})"
+                extra = []
+                if s.get("play_card"):
+                    extra.append(f"出{s.get('play_card')}")
+                if s.get("tactic"):
+                    extra.append(s.get("tactic"))
+                if s.get("target_card"):
+                    extra.append(f"目标{s.get('target_card')}")
+                if s.get("entry_card"):
+                    extra.append(f"进手{s.get('entry_card')}")
+                if extra:
+                    line += f" [{'/'.join(extra)}]"
                 parts.append(line)
         return "\n".join(parts)
 
@@ -207,6 +221,7 @@ class PlayService:
                           use_perfect: bool = False,
                           use_alphamu: bool = False,
                           use_dd_alphamu_llm: bool = False,
+                          enable_llm_review: bool = False,
                           dd_samples: int = None,
                           dd_alphamu_switch_cards: int = None) -> Dict[str, Any]:
         state = self.engine.get_state()
@@ -243,7 +258,8 @@ class PlayService:
         # === DD-αμ-LLM 主力引擎（中盘DD+LLM审查 / 残局αμ+LLM审查） ===
         if use_dd_alphamu_llm:
             return await asyncio.to_thread(
-                self._dd_alphamu_llm_play, state, use_reasoning, dd_samples, dd_alphamu_switch_cards)
+                self._dd_alphamu_llm_play, state, use_reasoning, dd_samples,
+                dd_alphamu_switch_cards, enable_llm_review)
 
         # === MCTS 引擎分支 ===
         if use_mcts:
@@ -854,8 +870,16 @@ class PlayService:
         # Step 2: 按 best_vector 分组
         trump_suit = state.contract.suit if state.contract.suit != "NT" else ""
         groups = self._group_candidates_by_vector(candidates, trump_suit=trump_suit)
+
+        # 防守方走独立防守审查（赢墩硬约束下传信号）
+        declarer = state.contract.declarer
+        dummy = state.dummy
+        if state.current_player not in (declarer, dummy):
+            return self._run_defender_review(state, alpha_result, candidates, groups,
+                                             "αμ", use_reasoning)
+
         desperation_mode = False
-        if not self._should_trigger_llm(groups, candidates):
+        if not self._should_trigger_llm(groups, candidates, gap_threshold=None):
             all_zero = candidates and all(c.get("success_rate", 0) == 0 for c in candidates)
             if all_zero and len(candidates) >= 2:
                 groups = self._build_desperation_groups(candidates, trump_suit=trump_suit)
@@ -865,17 +889,10 @@ class PlayService:
                 desperation_mode = True
                 print(f"[αμ+LLM] 绝望模式：αμ认为无成约机会，LLM审查{len(groups)}组、力争多拿墩少宕")
             else:
-                full_output["llm_review_status"] = "跳过：αμ已明确偏好（成功率差≥15%）"
+                full_output["llm_review_status"] = "跳过：成功率差距一边倒，引擎已明确偏好"
                 return alpha_result
 
-        # 仅庄家方触发
-        declarer = state.contract.declarer
-        dummy = state.dummy
-        if state.current_player not in (declarer, dummy):
-            full_output["llm_review_status"] = "跳过：防守方出牌，审查仅限庄家/明手"
-            return alpha_result
-
-        # 检测plan是否失效，失效则清空（强制LLM重新制定）
+        # 庄家方：检测plan是否失效，失效则清空（强制LLM重新制定）
         if self._check_plan_invalidation(state):
             print(f"[αμ+LLM] 检测到plan失效，清空旧计划")
             self.declarer_plan = self._empty_plan()
@@ -907,34 +924,24 @@ class PlayService:
                 chosen_group = groups[idx]
 
         if chosen_group:
-            # 按规则从组内选牌
-            playable = self.engine.get_playable_cards()
-            playable_strs = {str(c): c for c in playable}
-            group_playable = [c for c in chosen_group["cards"] if c.get("card", "") in playable_strs]
-            if group_playable:
-                # 当前玩家是明手 → 选最小；否则选最大
-                is_dummy_turn = (state.current_player == dummy)
-                if is_dummy_turn:
-                    target_card_str = min(group_playable, key=lambda c: self._extract_rank(c.get("card", "")))["card"]
-                else:
-                    target_card_str = max(group_playable, key=lambda c: self._extract_rank(c.get("card", "")))["card"]
-
-                target = playable_strs.get(target_card_str)
-                if target:
-                    self._mark_step_completed(target_card_str, trick_number)
-                    alpha_result["card"] = target.to_dict()
-                    group_desc = ", ".join(c.get("card", "") for c in chosen_group["cards"])
-                    group_reason = review.get("reason", f"选择组{chosen_group_idx}（{group_desc}）")
-                    review_reasoning = f"[αμ+LLM] 选组{chosen_group_idx}出{target_card_str}（{group_reason}）"
-                    plan_desc = review.get("plan", "")
-                    if plan_desc:
-                        review_reasoning += f"（计划: {plan_desc[:60]}...）"
-                    alpha_result["reasoning"] = f"{review_reasoning}\n{alpha_result.get('reasoning', '')}"
-                    alpha_result["full_output"]["推荐出牌"] = target_card_str
-                    alpha_result["full_output"]["核心逻辑"] = review_reasoning
-                    review["card"] = target_card_str
-                    alpha_result["full_output"]["llm_review"] = review
-                    return alpha_result
+            # 组内选牌：优先 LLM 指定 card，否则机械 min/max
+            target_card_str, target = self._resolve_group_card(
+                state, chosen_group, review.get("card", ""), dummy)
+            if target:
+                self._mark_step_completed(target_card_str, trick_number)
+                alpha_result["card"] = target.to_dict()
+                group_desc = ", ".join(c.get("card", "") for c in chosen_group["cards"])
+                group_reason = review.get("reason", f"选择组{chosen_group_idx}（{group_desc}）")
+                review_reasoning = f"[αμ+LLM] 选组{chosen_group_idx}出{target_card_str}（{group_reason}）"
+                plan_desc = review.get("plan", "")
+                if plan_desc:
+                    review_reasoning += f"（计划: {plan_desc[:60]}...）"
+                alpha_result["reasoning"] = f"{review_reasoning}\n{alpha_result.get('reasoning', '')}"
+                alpha_result["full_output"]["推荐出牌"] = target_card_str
+                alpha_result["full_output"]["核心逻辑"] = review_reasoning
+                review["card"] = target_card_str
+                alpha_result["full_output"]["llm_review"] = review
+                return alpha_result
 
         # 回退：LLM选组失败，保留αμ
         print(f"[αμ+LLM] LLM选组失败(idx={chosen_group_idx})，保留αμ选择")
@@ -945,15 +952,21 @@ class PlayService:
 
     def _dd_alphamu_llm_play(self, state: PlayState, use_reasoning: bool = False,
                               dd_samples: int = None,
-                              switch_cards: int = None) -> Dict[str, Any]:
+                              switch_cards: int = None,
+                              enable_llm_review: bool = False) -> Dict[str, Any]:
         """DD-αμ-LLM 主力引擎：中盘DD+LLM审查，残局αμ+LLM审查。
 
         分界点参数化：每手剩余牌数 ≤ switch_cards（默认 DD_ALPHAMU_SWITCH_CARDS）
-        时切到 αμ 搜索。两个阶段都经过 LLM 分组审查。
+        时切到 αμ 搜索。enable_llm_review=False（默认）时跳过 LLM 分组审查，
+        直接走纯 DD/αμ 引擎，用于与 LLM 审查开关开启时做对比。
         """
         threshold = switch_cards if switch_cards is not None else DD_ALPHAMU_SWITCH_CARDS
         perspective = state.current_player
         cards = len(state.hands.get(perspective, []))
+        if not enable_llm_review:
+            if cards > threshold:
+                return self._dd_play(state, dd_samples)
+            return self._alpha_mu_play(state)
         if cards > threshold:
             return self._dd_llm_play(state, use_reasoning, dd_samples)
         return self._alphamu_llm_play(state, use_reasoning)
@@ -977,8 +990,17 @@ class PlayService:
         trump_suit = state.contract.suit if state.contract.suit != "NT" else ""
         groups = self._group_candidates_by_tricks_vec(
             candidates, state.contract.tricks_needed, trump_suit)
+
+        # 防守方走独立防守审查（赢墩硬约束下传信号）
+        declarer = state.contract.declarer
+        dummy = state.dummy
+        if state.current_player not in (declarer, dummy):
+            return self._run_defender_review(state, dd_result, candidates, groups,
+                                             "DD", use_reasoning)
+
         desperation_mode = False
-        if not self._should_trigger_llm(groups, candidates):
+        dd_iterations = full_output.get("mcts_stats", {}).get("iterations")
+        if not self._should_trigger_llm(groups, candidates, n_samples=dd_iterations):
             all_zero = candidates and all(c.get("success_rate", 0) == 0 for c in candidates)
             if all_zero and len(candidates) >= 2:
                 groups = self._build_desperation_groups(candidates, trump_suit=trump_suit)
@@ -988,14 +1010,8 @@ class PlayService:
                 desperation_mode = True
                 print(f"[DD-αμ-LLM] 绝望模式：DD认为无成约机会，LLM审查{len(groups)}组、力争多拿墩少宕")
             else:
-                full_output["llm_review_status"] = "跳过：DD已明确偏好（成功率差≥15%）"
+                full_output["llm_review_status"] = "跳过：成功率差显著，DD已明确偏好"
                 return dd_result
-
-        declarer = state.contract.declarer
-        dummy = state.dummy
-        if state.current_player not in (declarer, dummy):
-            full_output["llm_review_status"] = "跳过：防守方出牌，审查仅限庄家/明手"
-            return dd_result
 
         if self._check_plan_invalidation(state):
             print(f"[DD-αμ-LLM] 检测到plan失效，清空旧计划")
@@ -1026,32 +1042,24 @@ class PlayService:
                 chosen_group = groups[idx]
 
         if chosen_group:
-            playable = self.engine.get_playable_cards()
-            playable_strs = {str(c): c for c in playable}
-            group_playable = [c for c in chosen_group["cards"] if c.get("card", "") in playable_strs]
-            if group_playable:
-                is_dummy_turn = (state.current_player == dummy)
-                if is_dummy_turn:
-                    target_card_str = min(group_playable, key=lambda c: self._extract_rank(c.get("card", "")))["card"]
-                else:
-                    target_card_str = max(group_playable, key=lambda c: self._extract_rank(c.get("card", "")))["card"]
-
-                target = playable_strs.get(target_card_str)
-                if target:
-                    self._mark_step_completed(target_card_str, trick_number)
-                    dd_result["card"] = target.to_dict()
-                    group_desc = ", ".join(c.get("card", "") for c in chosen_group["cards"])
-                    group_reason = review.get("reason", f"选择组{chosen_group_idx}（{group_desc}）")
-                    review_reasoning = f"[DD-αμ-LLM] 选组{chosen_group_idx}出{target_card_str}（{group_reason}）"
-                    plan_desc = review.get("plan", "")
-                    if plan_desc:
-                        review_reasoning += f"（计划: {plan_desc[:60]}...）"
-                    dd_result["reasoning"] = f"{review_reasoning}\n{dd_result.get('reasoning', '')}"
-                    dd_result["full_output"]["推荐出牌"] = target_card_str
-                    dd_result["full_output"]["核心逻辑"] = review_reasoning
-                    review["card"] = target_card_str
-                    dd_result["full_output"]["llm_review"] = review
-                    return dd_result
+            # 组内选牌：优先 LLM 指定 card，否则机械 min/max
+            target_card_str, target = self._resolve_group_card(
+                state, chosen_group, review.get("card", ""), dummy)
+            if target:
+                self._mark_step_completed(target_card_str, trick_number)
+                dd_result["card"] = target.to_dict()
+                group_desc = ", ".join(c.get("card", "") for c in chosen_group["cards"])
+                group_reason = review.get("reason", f"选择组{chosen_group_idx}（{group_desc}）")
+                review_reasoning = f"[DD-αμ-LLM] 选组{chosen_group_idx}出{target_card_str}（{group_reason}）"
+                plan_desc = review.get("plan", "")
+                if plan_desc:
+                    review_reasoning += f"（计划: {plan_desc[:60]}...）"
+                dd_result["reasoning"] = f"{review_reasoning}\n{dd_result.get('reasoning', '')}"
+                dd_result["full_output"]["推荐出牌"] = target_card_str
+                dd_result["full_output"]["核心逻辑"] = review_reasoning
+                review["card"] = target_card_str
+                dd_result["full_output"]["llm_review"] = review
+                return dd_result
 
         print(f"[DD-αμ-LLM] LLM选组失败(idx={chosen_group_idx})，保留DD选择")
         if review.get("plan"):
@@ -1101,11 +1109,27 @@ class PlayService:
             g["group_id"] = i + 1
         return result
 
+    def _normalize_step(self, s) -> dict:
+        """把LLM输出的单步规范化为结构化战术实体，兜底缺失字段。"""
+        if not isinstance(s, dict):
+            s = {}
+        return {
+            "step": s.get("step", 1),
+            "action": s.get("action", ""),
+            "play_card": s.get("play_card", ""),
+            "precondition": s.get("precondition", ""),
+            "tactic": s.get("tactic", ""),
+            "target_card": s.get("target_card", ""),
+            "entry_card": s.get("entry_card", ""),
+            "ruff_suit": s.get("ruff_suit", ""),
+            "completed": bool(s.get("completed", False)),
+        }
+
     def _build_plan_from_review(self, review: dict, trick_number: int) -> dict:
         """从LLM审查结果构建结构化plan。
 
         LLM输出的plan可能是字符串或含steps的结构。
-        统一转为结构化dict存储。
+        统一转为结构化dict存储，每个step经 _normalize_step 兜底缺失字段。
         """
         plan = self._empty_plan()
         plan["created_at_trick"] = trick_number
@@ -1117,12 +1141,12 @@ class PlayService:
         if isinstance(raw, str) and raw:
             plan["raw_text"] = raw
         if isinstance(steps, list) and steps:
-            plan["steps"] = steps
+            plan["steps"] = [self._normalize_step(s) for s in steps]
         elif isinstance(raw, str) and raw:
             # 没有结构化steps，尝试简单解析（按句号/分号分割）
             sentences = [s.strip() for s in raw.replace("；", "。").split("。") if s.strip()]
             plan["steps"] = [
-                {"step": i + 1, "action": s, "precondition": "", "completed": False}
+                self._normalize_step({"step": i + 1, "action": s})
                 for i, s in enumerate(sentences[:6])  # 最多6步
             ]
         return plan
@@ -1132,9 +1156,10 @@ class PlayService:
 
         失效条件：
         0. 所有步骤都已完成 → 计划执行完毕，失效
-        1. plan中提到的大牌已出（如"飞♠K"但♠K已出）
+        1. 结构化字段精确校验：步骤涉及的 play_card/target_card/entry_card 已出
+           （如飞牌对象target_card被逼出、进手张entry_card被破坏）
         2. plan创建后已过太多墩（>4墩未更新）
-        3. 未完成步骤的前提条件不满足（如关键大牌已出）
+        3. 无结构化字段的旧步骤：回退大牌子串匹配（如"飞♠K"但♠K已出）
 
         返回True表示plan失效，需要重新制定。
         """
@@ -1166,17 +1191,28 @@ class PlayService:
             for pos, card in trick.cards:
                 played_cards.add(str(card))
 
+        key_cards = ["♠A", "♠K", "♠Q", "♠J", "♠T",
+                     "♥A", "♥K", "♥Q", "♥J", "♥T",
+                     "♦A", "♦K", "♦Q", "♦J", "♦T",
+                     "♣A", "♣K", "♣Q", "♣J", "♣T"]
+
         for s in steps:
             if s.get("completed"):
                 continue
+            # 结构化字段精确校验
+            structured = [c for c in (s.get("play_card", ""),
+                                      s.get("target_card", ""),
+                                      s.get("entry_card", "")) if c]
+            if structured:
+                for card in structured:
+                    if card in played_cards:
+                        print(f"[αμ+LLM] plan失效：步骤涉及的牌张{card}已出")
+                        return True
+                continue
+            # 兜底：无结构化字段时用大牌子串匹配
             action = s.get("action", "")
             precondition = s.get("precondition", "")
-
             check_text = action + " " + precondition
-            key_cards = ["♠A", "♠K", "♠Q", "♠J", "♠T",
-                         "♥A", "♥K", "♥Q", "♥J", "♥T",
-                         "♦A", "♦K", "♦Q", "♦J", "♦T",
-                         "♣A", "♣K", "♣Q", "♣J", "♣T"]
             for card in key_cards:
                 if card in check_text and card in played_cards:
                     return True
@@ -1186,8 +1222,8 @@ class PlayService:
     def _mark_step_completed(self, played_card: str, trick_number: int) -> bool:
         """出牌后标记plan中匹配的步骤为完成。
 
-        在第一个未完成的步骤的action中查找played_card，
-        如果匹配则标记completed=True。
+        优先用 play_card 精确匹配落桌牌张；无 play_card 时回退 action 子串匹配。
+        标记第一个未完成的匹配步骤为 completed=True。
         返回True表示有步骤被标记完成。
         """
         plan = self.declarer_plan
@@ -1199,30 +1235,46 @@ class PlayService:
         for s in steps:
             if s.get("completed"):
                 continue
+            play_card = s.get("play_card", "")
             action = s.get("action", "")
-            if played_card in action:
+            if play_card:
+                matched = (play_card == played_card)
+            else:
+                matched = (played_card in action)
+            if matched:
                 s["completed"] = True
                 plan["last_validated_trick"] = trick_number
                 print(f"[αμ+LLM] plan步骤{s.get('step', '?')}完成: {action[:40]}...")
                 return True
         return False
 
-    def _should_trigger_llm(self, groups: list, candidates: list = None) -> bool:
+    def _should_trigger_llm(self, groups: list, candidates: list = None,
+                            gap_threshold: float = 0.15, n_samples: int = None) -> bool:
         """判断是否需要触发LLM分组审查。
 
         条件：
         1. 至少2组（有选择空间）
-        2. top-1和top-2的成功率差距 < 15%
+        2. 组间成功率差距未达"一边倒"——差距越大越不值得LLM判断。
 
-        如果αμ已明显偏好某组（gap≥15%），则信任αμ、不触发LLM。
-        如果αμ分不清（gap<15%），则触发LLM帮忙判断。
+        gap_threshold=None（αμ阶段）：仅当 top-1 与 top-2 差距达 ALPHAMU_LLM_GAP_CAP
+        （默认0.35）才视为一边倒跳过，其余保留（对战术平等敏感，只拦明确一边倒）。
+        DD阶段：有 n_samples 时用统计显著阈值（1.645·SE，SE随采样量自适应），
+                无 n_samples 时回退固定 gap_threshold（默认0.15）。
         """
         if len(groups) < 2:
             return False
         rates = [g["success_rate"] for g in groups]
-        if rates[0] - rates[1] >= 0.15:
-            return False
-        return True
+        diff = rates[0] - rates[1]
+        if diff <= 0:
+            return True
+        if gap_threshold is None:
+            return diff < ALPHAMU_LLM_GAP_CAP
+        if n_samples and n_samples > 0:
+            se = math.sqrt(rates[0] * (1 - rates[0]) / n_samples)
+            if se <= 0:
+                return True
+            return diff < 1.645 * se
+        return diff < gap_threshold
 
     def _extract_rank(self, card_str: str) -> int:
         """从牌张代码中提取数字等级。♠2→2, ♥J→11, ♣Q→12, ♦K→13, ♠A→14"""
@@ -1230,6 +1282,211 @@ class PlayService:
         rank_map = {"2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7,
                     "8": 8, "9": 9, "T": 10, "10": 10, "J": 11, "Q": 12, "K": 13, "A": 14}
         return rank_map.get(rank_str, 0)
+
+    def _resolve_group_card(self, state: PlayState, chosen_group: dict,
+                            llm_card: str, dummy: str):
+        """在所选组内解析本墩出牌：优先 LLM 指定的 card，否则机械 min/max 回退。
+
+        校验：LLM 的 card 必须落在所选组内 AND 在当前可出牌内，否则丢弃，
+        回退机械选牌（明手最小/其他最大）。保证赢墩永不损失。
+        返回 (target_card_str, target) 或 (None, None)。
+        """
+        playable = self.engine.get_playable_cards()
+        playable_strs = {str(c): c for c in playable}
+        group_cards = {c.get("card", "") for c in chosen_group["cards"]}
+        group_playable = [c for c in chosen_group["cards"] if c.get("card", "") in playable_strs]
+        if not group_playable:
+            return None, None
+        target_card_str = None
+        if llm_card and llm_card in group_cards and llm_card in playable_strs:
+            target_card_str = llm_card
+        if target_card_str is None:
+            is_dummy_turn = (state.current_player == dummy)
+            if is_dummy_turn:
+                target_card_str = min(group_playable, key=lambda c: self._extract_rank(c.get("card", "")))["card"]
+            else:
+                target_card_str = max(group_playable, key=lambda c: self._extract_rank(c.get("card", "")))["card"]
+        return target_card_str, playable_strs.get(target_card_str)
+
+    def _is_key_defense_trick(self, state: PlayState, current_player: str) -> bool:
+        """判断当前防守墩是否值得触发 LLM 审查（触发克制）。
+
+        关键防守墩：跟同伴领出、垫牌、将吃抉择。这些是信号传递的最佳时机。
+        """
+        current = state.current_trick.cards
+        if not current:
+            return False
+        lead_pos, lead_card = current[0]
+        lead_suit = lead_card.suit
+        hand = state.hands.get(current_player, [])
+        has_suit = any(c.suit == lead_suit for c in hand)
+        if not has_suit:
+            return True
+        return lead_pos == PARTNERS.get(current_player)
+
+    def _defender_llm_review(self, state: PlayState, candidates: list,
+                             groups: list,
+                             defender_card: str = "",
+                             use_reasoning: bool = False,
+                             engine_name: str = "αμ") -> dict:
+        """防守方分组审查：在不损失赢墩的前提下选牌并传递信号。
+
+        返回dict:
+          - group: int, 选择的组号（1-based）
+          - card: str, 本墩实际出的牌张（必须在所选组内且可出）
+          - reason: str, 推荐理由（含防守分析与信号意图）
+          - llm_prompt: str, 完整提示词
+        """
+        hands_info = self._format_hands_info(state)
+        missing_info = self._format_missing_key_cards(state)
+        trump_analysis = self._format_trump_analysis(state)
+        completed_tricks = self._format_completed_tricks(state)
+        current_trick = self._format_current_trick(state)
+        played_cards_info = self._format_played_cards_info(state)
+        partner_signals = format_partner_signals_for_prompt(state, state.current_player)
+
+        declarer = state.contract.declarer
+        dummy = state.dummy
+        current_player = state.current_player
+        current_trick_count = len(state.current_trick.cards)
+        play_position = current_trick_count + 1
+        remaining_players = 4 - play_position
+        declarer_remaining = max(0, state.contract.tricks_needed - state.declarer_tricks)
+        defender_remaining = max(0, (14 - state.contract.tricks_needed) - state.defender_tricks)
+        bidding_seq = state.bidding_sequence or "未提供"
+
+        system_prompt = (
+            "你是桥牌防守专家。"
+            + f"{engine_name}引擎已默认选定第1组出牌（该组在防守视角下最优，最小化庄家赢墩）。"
+            + "你的任务是：在**不损失赢墩**的前提下选择最佳出牌，"
+            + "并利用赢墩等价组内牌张差异向同伴传递防守信号。"
+            + "赢墩是硬约束，信号是赢墩等价组内的软选择。"
+            + "除非非第1组有明显更好的防守价值（进张保留/防飞牌/信号意图），否则返回第1组。"
+            + "请以JSON格式输出分析结果。"
+        )
+
+        group_lines = []
+        for g in groups:
+            card_strs = [c.get("card", "") for c in g["cards"]]
+            rate = f"{g['success_rate']:.0%}"
+            dds_eq_label = "DDS等价" if len(card_strs) > 1 else ""
+            default_mark = f" ← {engine_name}默认选择" if g["group_id"] == 1 else ""
+            group_lines.append(
+                f"组{g['group_id']}: {' '.join(card_strs)} "
+                f"(庄家成约率{rate}) {dds_eq_label}{default_mark}".rstrip()
+            )
+        groups_text = "\n".join(group_lines)
+
+        user_prompt = f"""## 局面信息
+定约: {state.contract}
+庄家: {declarer}, 明手: {dummy}
+**当前出牌方: {current_player}（防守方）**
+**必须从{current_player}的手牌中出牌，不能出其他位置的牌。**
+本墩出牌位置: 第{play_position}家（当前墩已有{current_trick_count}张牌，之后还有{remaining_players}家未出）
+庄家方已得: {state.declarer_tricks}墩, 还需: {declarer_remaining}墩成约
+防守方已得: {state.defender_tricks}墩, 还需: {defender_remaining}墩击垮
+当前墩: {current_trick}
+
+## 叫牌过程
+{bidding_seq}
+（用于推断庄家/明手花色长度和大牌位置，辅助防守方向判断）
+
+## 基本规则提醒
+大牌永远大于小牌（A>K>Q>J>10>...>2）；必须跟出领出花色；将牌大于任何边花。
+
+## 手牌
+{hands_info}
+
+## 将牌统计（程序计算，请直接使用，不要自行数牌）
+{trump_analysis}
+
+## 庄家方关键大牌（未出现的关键大牌可能在庄家/明手或同伴手中）
+{missing_info}
+
+## 已完成墩
+{completed_tricks}
+
+## 已出牌
+{played_cards_info}
+
+## 可选出牌组
+同一组内的牌在{engine_name}采样空间中DDS等价（出哪张，庄家赢墩数相同），不同组之间DDS不等价。
+**第1组是{engine_name}引擎默认选择（防守视角最优），除非其他组有第1组做不到的防守价值，否则选组1。**
+{groups_text}
+
+## 防守信号（本墩出牌的软约束）
+选择组内具体牌张时，在**不损失赢墩**的前提下传递信号：
+1. **跟同伴领出**：高牌=欢迎续攻，低牌=不欢迎
+2. **垫牌**：花色偏好——高牌=偏好高级别花色（♠/♥），低牌=低级别（♦/♣）
+3. **张数**：同花色先大后小=偶数张，先小后大=奇数张
+**约束**：信号只在赢墩等价组内的牌张差异上体现，绝不能为传信号而换组（换组可能丢赢墩）。
+{partner_signals}
+
+## 输出JSON
+{{
+  "group": 1,（最终选择的组号，无更好选择时填1）
+  "card": "♠A",（本墩实际出的牌张，必须是所选组内、且当前出牌方手中可出的牌）
+  "reason": "选择理由（含防守分析与信号意图）"
+}}"""
+
+        try:
+            full_prompt = f"{system_prompt}\n\n{user_prompt}"
+            result = self.llm_client.chat_json(
+                system_prompt, user_prompt,
+                temperature=0.3, thinking=use_reasoning)
+            result["llm_prompt"] = full_prompt
+            return result
+        except Exception as e:
+            print(f"[{engine_name}+LLM] 防守审查失败: {e}")
+            return {"group": 0, "reason": f"审查异常: {e}", "llm_prompt": ""}
+
+    def _run_defender_review(self, state: PlayState, engine_result: Dict[str, Any],
+                             candidates: list, groups: list,
+                             engine_name: str, use_reasoning: bool = False) -> Dict[str, Any]:
+        """防守方分组审查主流程：赢墩硬约束下选牌传信号。
+
+        仅在关键防守墩触发；LLM 出牌必须落在赢墩等价组内，否则回退引擎选择。
+        返回引擎可选用的 result（成功时覆盖 card/reasoning/full_output）。
+        """
+        full_output = engine_result.get("full_output", {})
+        current_player = state.current_player
+        if not self._is_key_defense_trick(state, current_player):
+            full_output["llm_review_status"] = "跳过：非关键防守墩"
+            return engine_result
+
+        review = self._defender_llm_review(
+            state, candidates, groups,
+            defender_card=full_output.get("推荐出牌", ""),
+            engine_name=engine_name, use_reasoning=use_reasoning)
+
+        chosen_group_idx = review.get("group")
+        chosen_group = None
+        if isinstance(chosen_group_idx, (int, float)) and not isinstance(chosen_group_idx, bool):
+            idx = int(chosen_group_idx) - 1
+            if 0 <= idx < len(groups):
+                chosen_group = groups[idx]
+        if not chosen_group:
+            full_output["llm_review_status"] = "跳过：防守LLM选组失败"
+            return engine_result
+
+        dummy = state.dummy
+        target_card_str, target = self._resolve_group_card(
+            state, chosen_group, review.get("card", ""), dummy)
+        if not target:
+            full_output["llm_review_status"] = "跳过：防守LLM出牌不合法"
+            return engine_result
+
+        group_desc = ", ".join(c.get("card", "") for c in chosen_group["cards"])
+        group_reason = review.get("reason", f"选择组{chosen_group_idx}（{group_desc}）")
+        review_reasoning = f"[{engine_name}+LLM] 防守选组{chosen_group_idx}出{target_card_str}（{group_reason}）"
+        engine_result["card"] = target.to_dict()
+        engine_result["reasoning"] = f"{review_reasoning}\n{engine_result.get('reasoning', '')}"
+        full_output["推荐出牌"] = target_card_str
+        full_output["核心逻辑"] = review_reasoning
+        full_output["llm_review_status"] = "防守方审查已激活"
+        review["card"] = target_card_str
+        full_output["llm_review"] = review
+        return engine_result
 
     def _group_candidates_by_vector(self, candidates: list,
                                      trump_suit: str = "") -> list:
@@ -1748,6 +2005,14 @@ class PlayService:
 **第1组是{engine_name}引擎的默认选择，除非其他组有第1组做不到的战术价值，否则选组1。**
 {groups_text}
 
+## 组内选牌（本墩具体出牌）
+选定组后，还需在组内决定本墩实际出的那一张。组内牌张赢墩等价（出哪张双明手结果相同），
+但出哪张在**过程**上价值不同：
+1. **进手管理**：这墩由庄家还是明手赢？保留哪一边的关键进手张？
+2. **信息隐藏**：出哪张对防守方泄露最少（避免暴露大牌位置或花色分布）？
+3. **终局保留**：哪张留到残局更有用（保留终局遮挡/紧逼张）？
+在 JSON 的 `card` 字段给出本墩实际出的牌张（必须是所选组内、且当前出牌方手中可出的牌）。
+
 {plan_section}
 ## 战略分析
 {strategy_text}
@@ -1755,10 +2020,11 @@ class PlayService:
 ## 输出JSON
 {{
   "group": 1,（最终选择的组号，无更好选择时填1）
+  "card": "♠A",（本墩实际出的牌张，必须是所选组内、且当前出牌方手中可出的牌）
   "plan": "打牌计划简述（一句话概括）",
   "steps": [
-    {{"step": 1, "action": "具体动作", "precondition": "前提条件（如某大牌位置、花色分布）"}},
-    {{"step": 2, "action": "...", "precondition": "..."}}
+    {{"step": 1, "action": "具体动作", "play_card": "本步执行时要出的关键牌张（如♠A，无则空）", "precondition": "前提条件（如某大牌位置、花色分布）", "tactic": "战术类型（飞牌/将吃/清将/建立长套/进张管理/终局）", "target_card": "战术目标牌（如飞牌对象，无则空）", "entry_card": "本步需要保留的进手张（无则空）", "ruff_suit": "将吃花色（无将吃则空）"}},
+    {{"step": 2, "action": "...", "play_card": "", "precondition": "", "tactic": "", "target_card": "", "entry_card": "", "ruff_suit": ""}}
   ],
   "plan_valid": true/false,
   "reason": "选择理由（含战术分析）"
@@ -1869,6 +2135,7 @@ class PlayService:
                 card = self._select_best_card(playable, state)
             full_output = result.get("full_output", {})
             full_output["叫牌约束"] = self._format_constraints_for_display(constraints)
+            full_output["engine_phase"] = "midgame_dd"
             return {
                 "card": card.to_dict() if card else None,
                 "reasoning": result.get("reasoning", ""),

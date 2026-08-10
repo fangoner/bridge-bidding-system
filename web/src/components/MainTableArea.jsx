@@ -28,6 +28,7 @@ export default function MainTableArea({
   onImageDeal,
   onScreenshotDeal,
   onSingleHandScreenshot,
+  onSingleHandUpload,
   onCustomDeal,
   onDeal,
   onHandCardClick,
@@ -81,6 +82,7 @@ export default function MainTableArea({
         onImageDeal={onImageDeal}
         onScreenshotDeal={onScreenshotDeal}
         onSingleHandScreenshot={onSingleHandScreenshot}
+        onSingleHandUpload={onSingleHandUpload}
         onCustomDeal={onCustomDeal}
         onDeal={onDeal}
         onHandCardClick={onHandCardClick}

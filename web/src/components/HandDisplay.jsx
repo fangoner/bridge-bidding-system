@@ -75,9 +75,6 @@ const FIXED_OVERLAP = 0.65  // 固定重叠比例
 /** 单张扑克牌面 */
 function PlayingCard({
   suit, rank, color, size, isSelected, isPlayable, isPlayed, onClick, hint, style,
-  orientation = 'horizontal',
-  popDirection = 'auto',
-  disableHover = false,
 }) {
   // 统一比例：牌宽=size，牌高=size*1.42（正常竖向扑克牌）
   const cardW = size
@@ -86,9 +83,6 @@ function PlayingCard({
   const isSmall = cardW < 50
   const fontSize = Math.max(5, cardW * (isSmall ? 0.15 : 0.20))
   const smallFont = Math.max(5, cardW * (isSmall ? 0.28 : 0.22))
-
-  const isVertical = orientation === 'vertical'
-  const hoverTransform = 'translateY(-15px)'
 
   return (
     <Box
@@ -170,10 +164,7 @@ function PlayingCard({
 function HandDisplay({
   hand,
   position,
-  isActive = false,
-  isHuman = false,
   isDealer = false,
-  isPartner = false,
   showContent = true,
   titleExtra = null,
   hideTitle = false,
@@ -267,9 +258,6 @@ function HandDisplay({
 
             const canHover = enableHover && isPlayable
             const showHint = enableHover && hint && isPlayable
-            // 旋转后牌视觉宽度 = cardHeight，外层宽度 = cardWidth
-            // hint距视觉牌边缘的偏移 = (cardHeight - cardWidth) / 2 + 间距
-            const hintOffset = cardWidth * (CARD_ASPECT - 1) / 2 + 6
             return (
               <Box
                 key={card.cardKey}

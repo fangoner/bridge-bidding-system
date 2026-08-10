@@ -13,6 +13,7 @@ export function usePlay() {
 }
 
 const PLAY_ENGINE_KEY = 'bridge_play_engine'
+const LLM_REVIEW_KEY = 'bridge_use_llm_review'
 
 export function PlayProvider({ children }) {
   // ── 打牌核心状态 ──
@@ -39,12 +40,7 @@ export function PlayProvider({ children }) {
 
   // ── 直接打牌对话框 ──
   const [contractDialogOpen, setContractDialogOpen] = useState(false)
-  const [contractDialogForm, setContractDialogForm] = useState({
-    contractStr: '', declarer: '南', openingLead: '',
-    isDouble: false, isRedouble: false,
-  })
   const [resetOpeningLeadDialogOpen, setResetOpeningLeadDialogOpen] = useState(false)
-  const [resetOpeningLeadValue, setResetOpeningLeadValue] = useState('')
   const [directPlayContractInfo, setDirectPlayContractInfo] = useState(null)
 
   // ── 打牌引擎 ──
@@ -54,6 +50,11 @@ export function PlayProvider({ children }) {
     } catch {
       return 'dd_alphamu_llm'
     }
+  })
+
+  // ── LLM 分组审查开关（DD-αμ-LLM 引擎内，默认关闭以与纯引擎对比）──
+  const [useLlmReview, setUseLlmReview] = useState(() => {
+    try { return localStorage.getItem(LLM_REVIEW_KEY) === 'true' } catch { return false }
   })
 
   // ── helper 闭包（保持引用稳定即可，暂不需要 useCallback）──
@@ -67,6 +68,10 @@ export function PlayProvider({ children }) {
   const handlePlayEngineChange = (value) => {
     setPlayEngineState(value)
     try { localStorage.setItem(PLAY_ENGINE_KEY, value) } catch {/* empty */}
+  }
+  const handleLlmReviewChange = (value) => {
+    setUseLlmReview(value)
+    try { localStorage.setItem(LLM_REVIEW_KEY, String(value)) } catch {/* empty */}
   }
 
   const value = useMemo(
@@ -89,21 +94,21 @@ export function PlayProvider({ children }) {
       ddHintsLoading, setDDHintsLoading,
       toggleDDHints,
       contractDialogOpen, setContractDialogOpen,
-      contractDialogForm, setContractDialogForm,
       resetOpeningLeadDialogOpen, setResetOpeningLeadDialogOpen,
-      resetOpeningLeadValue, setResetOpeningLeadValue,
       directPlayContractInfo, setDirectPlayContractInfo,
       playEngine, setPlayEngineState,
       handlePlayEngineChange,
+      useLlmReview, setUseLlmReview,
+      handleLlmReviewChange,
     }),
     [
       playState, playLoading, showPlayPanel, showPlayedCards, playCenterView,
       isPlayPaused, lastCompletedTrick, aiPlayHistory, selectedPlayRecord,
       playStarted, playInitiated, loadedPlayRecord, reviewCursor,
       showDDHints, ddHints, ddHintsLoading,
-      contractDialogOpen, contractDialogForm,
-      resetOpeningLeadDialogOpen, resetOpeningLeadValue, directPlayContractInfo,
-      playEngine,
+      contractDialogOpen,
+      resetOpeningLeadDialogOpen, directPlayContractInfo,
+      playEngine, useLlmReview,
     ],
   )
 

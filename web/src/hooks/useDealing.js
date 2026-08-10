@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react'
-import { dealCards, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, readSingleHandClipboard } from '../services/api'
+import { dealCards, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, readSingleHandClipboard, uploadSingleHandImage } from '../services/api'
 import { setPlayHand as apiSetPlayHand } from '../services/api'
 import { BRIDGE_POSITIONS } from '../utils/position'
 import { useGame } from '../context/GameContext'
@@ -352,7 +352,45 @@ export function useDealing({ clearBiddingDraft }) {
     } finally {
       setLoading(false)
     }
-  }, [loading, setLoading, setError, setWarning, setHands])
+  }, [loading, setLoading, setError, setWarning, setHands, setPlayState])
+
+  // 4c. 单家手牌图片上传识别（移动端/相册路径）
+  const handleSingleHandUpload = useCallback(async (position, imageFile) => {
+    if (loading) return
+    if (!position || !['南','西','北','东'].includes(position)) return
+    setLoading(true)
+    screenshotCancelledRef.current = false
+    setError(`正在识别 ${position} 家手牌图片...`)
+    setWarning(null)
+    try {
+      const data = await uploadSingleHandImage(position, imageFile)
+      if (!data.success) {
+        setError(data.message || '识别失败')
+        setLoading(false)
+        return
+      }
+      // 合并更新：只更新目标位置，保留其他三家
+      setHands(prev => {
+        const prevHand = prev?.[position] || { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 }
+        return { ...(prev || {}), [position]: { ...prevHand, ...data.hand } }
+      })
+      // 同步更新打牌状态（如在打牌阶段），确保 showPlayHandInput 和 AI 自动出牌能正确识别
+      try {
+        const playResult = await apiSetPlayHand(position, data.hand)
+        if (playResult.success && playResult.state) {
+          setPlayState(playResult.state)
+        }
+      } catch {
+        // 不在打牌阶段时 API 调用可能失败，忽略即可
+      }
+      if (data.message && data.message !== '识别成功') setWarning(`${position}家: ${data.message}`)
+      setError(null)
+    } catch {
+      setError(`${position} 家手牌识别失败，请检查API服务是否正常运行`)
+    } finally {
+      setLoading(false)
+    }
+  }, [loading, setLoading, setError, setWarning, setHands, setPlayState])
 
   // 5. 清除所有手牌
   const clearAllHands = useCallback(() => {
@@ -404,6 +442,7 @@ export function useDealing({ clearBiddingDraft }) {
     handleImageDeal,
     handleScreenshotDeal,
     handleSingleHandScreenshot,
+    handleSingleHandUpload,
     clearAllHands,
     cancelScreenshot,
     parseBiddingSequenceStr,

@@ -127,7 +127,6 @@ export function validateBidding(bids, dealer = null) {
   // 3. 叫品合法性与阶数递增
   const suitRank = { C: 1, D: 2, H: 3, S: 4, N: 5 }
   let lastSubstantiveBid = null
-  let lastSubstantivePos = null
   let lastBidType = null // 'bid', 'X', 'XX', 'pass'
   let lastSubstantiveSide = null // 'NS' or 'EW'
 
@@ -158,7 +157,6 @@ export function validateBidding(bids, dealer = null) {
         }
       }
       lastSubstantiveBid = bid
-      lastSubstantivePos = position
       lastSubstantiveSide = ['南', '北'].includes(position) ? 'NS' : 'EW'
     } else if (bidType === 'X') {
       // 加倍：上一实质性叫品必须来自右手对手（即对方阵营），且上一条叫品不是X/XX

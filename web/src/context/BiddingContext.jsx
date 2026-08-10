@@ -23,7 +23,6 @@ export function BiddingProvider({ children }) {
 
   // ── 叫牌编辑/对话框 ──
   const [showEditBiddingDialog, setShowEditBiddingDialog] = useState(false)
-  const [editBiddingText, setEditBiddingText] = useState('')
 
   // ── 输出格式 / 定约分析 ──
   const [showMoreFormats, setShowMoreFormats] = useState(false)
@@ -43,7 +42,6 @@ export function BiddingProvider({ children }) {
       biddingHistory, setBiddingHistory,
       historyIndex, setHistoryIndex,
       showEditBiddingDialog, setShowEditBiddingDialog,
-      editBiddingText, setEditBiddingText,
       showMoreFormats, setShowMoreFormats,
       outputFormats, setOutputFormats,
       outputFormatsLoading, setOutputFormatsLoading,
@@ -55,7 +53,7 @@ export function BiddingProvider({ children }) {
     }),
     [
       biddingState, biddingHistory, historyIndex,
-      showEditBiddingDialog, editBiddingText,
+      showEditBiddingDialog,
       showMoreFormats, outputFormats, outputFormatsLoading,
       analyzeLoading, analyzeResult,
       showDoubleDummy, doubleDummyResult, doubleDummyLoading,

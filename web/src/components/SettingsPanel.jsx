@@ -1,3 +1,4 @@
+import { memo, useState } from 'react'
 import {
   Box, Typography, Paper, FormControl, InputLabel, Select, MenuItem,
   Divider, TextField, useTheme, ToggleButton, ToggleButtonGroup
@@ -14,7 +15,7 @@ const BASE_MODELS = [
 function ModelSelector({ label, parsed, onModelChange, onReasoningChange, disabled, models }) {
   return (
     <Box sx={{ display: 'flex', alignItems: 'stretch', gap: 0 }}>
-      <FormControl sx={{ minWidth: 140 }} size="small" disabled={disabled}>
+      <FormControl sx={{ minWidth: 100 }} size="small" disabled={disabled}>
         <InputLabel>{label}</InputLabel>
         <Select
           value={models.some(m => m.value === parsed.model) ? parsed.model : models[0]?.value || ''}
@@ -48,15 +49,49 @@ function ModelSelector({ label, parsed, onModelChange, onReasoningChange, disabl
           },
         }}
       >
-        <ToggleButton value="chat">快答</ToggleButton>
-        <ToggleButton value="reasoning">思考</ToggleButton>
+        <ToggleButton value="chat">快</ToggleButton>
+        <ToggleButton value="reasoning">思</ToggleButton>
       </ToggleButtonGroup>
     </Box>
   )
 }
 
+// 可拖滑块：本地草稿值实时更新显示，拖动仅重渲染本组件，松手才提交给父级
+const RangeSlider = memo(function RangeSlider({
+  label, value, onCommit, min, max, step, width,
+}) {
+  const [draft, setDraft] = useState(value)
+  const [dragging, setDragging] = useState(false)
+  const [prevValue, setPrevValue] = useState(value)
+
+  // 外部提交后的 value 变化回同步草稿；拖动期间不覆盖本地草稿
+  if (value !== prevValue) {
+    setPrevValue(value)
+    if (!dragging.current) setDraft(value)
+  }
+
+  const commit = () => {
+    setDragging(false)
+    onCommit(draft)
+  }
+
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+      <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>{label}</Typography>
+      <input
+        type="range" min={min} max={max} step={step} value={draft}
+        onChange={(e) => { setDragging(true); setDraft(Number(e.target.value)) }}
+        onMouseUp={commit} onTouchEnd={commit} onKeyUp={commit}
+        style={{ width, height: 16 }}
+      />
+      <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 600, minWidth: 24 }}>{draft}</Typography>
+    </Box>
+  )
+})
+
 function SettingsPanel({
   showSettings,
+  isMobile = false,
   gameMode,
   setGameMode,
   fallbackModel,
@@ -65,9 +100,11 @@ function SettingsPanel({
   handlePlayModelChange,
   playEngine,
   handlePlayEngineChange,
+  useLlmReview,
+  handleLlmReviewChange,
   ddSampleCount,
   handleDDSampleCountChange,
-  ddParticles, ddParticlesRange,
+  ddParticlesRange,
   mctsParticles, mctsParticlesRange,
   alphaMuParticles, alphaMuParticlesRange,
   handleParticleChange,
@@ -134,12 +171,12 @@ function SettingsPanel({
 
   return (
     <Paper elevation={2} sx={{ p: { xs: 2, md: 3 }, mb: 3, width: '100%' }}>
-      <Box sx={{ display: 'flex', flexWrap: 'nowrap', gap: 1.5, alignItems: 'flex-start' }}>
+      <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', flexWrap: 'nowrap', gap: isMobile ? 1.5 : 1.5, alignItems: 'flex-start' }}>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, flexShrink: 0 }}>
           <Typography variant="h6" sx={{ fontSize: '0.85rem' }}>
             叫牌设置
           </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'nowrap', gap: 1, alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', flexWrap: isMobile ? 'wrap' : 'nowrap', gap: 1, alignItems: 'center' }}>
             <FormControl sx={{ minWidth: 80 }} size="small">
               <InputLabel>模式</InputLabel>
               <Select value={gameMode} label="模式" onChange={(e) => setGameMode(e.target.value)}>
@@ -159,7 +196,7 @@ function SettingsPanel({
             <FormControl sx={{ minWidth: 140 }} size="small">
               <InputLabel>阻击叫牌体系</InputLabel>
               <Select value={dealSystem} label="阻击叫牌体系" onChange={(e) => setDealSystem(e.target.value)}>
-                <MenuItem value="2D/2H/2S：自然阻击">2D/2H/2S：自然阻击</MenuItem>
+                <MenuItem value="自然阻击">自然阻击</MenuItem>
                 <MenuItem value="2D：多功能，2H/S：麦德伯格，2NT：双低花">多功能/麦德伯格</MenuItem>
               </Select>
             </FormControl>
@@ -176,13 +213,13 @@ function SettingsPanel({
           </Box>
         </Box>
 
-        <Divider orientation="vertical" flexItem sx={{ borderColor: theme.palette.divider, flexShrink: 0 }} />
+        <Divider orientation={isMobile ? 'horizontal' : 'vertical'} flexItem sx={{ borderColor: theme.palette.divider, flexShrink: 0, width: isMobile ? '100%' : undefined }} />
 
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, flexShrink: 0 }}>
           <Typography variant="h6" sx={{ fontSize: '0.85rem' }}>
             打牌设置
           </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'nowrap', gap: 1, alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', flexWrap: isMobile ? 'wrap' : 'nowrap', gap: 1, alignItems: 'center' }}>
             <ModelSelector
               label="模型"
               parsed={playParsed}
@@ -192,69 +229,65 @@ function SettingsPanel({
               models={visibleModels}
             />
 
-            <FormControl size="small" sx={{ minWidth: 110 }}>
+            <FormControl size="small" sx={{ minWidth: 90 }}>
               <InputLabel>打牌引擎</InputLabel>
               <Select
                 value={playEngine}
                 onChange={(e) => handlePlayEngineChange(e.target.value)}
                 label="打牌引擎"
               >
-                <MenuItem value="dd_alphamu_llm">DD-αμ-LLM (主力)</MenuItem>
-                <MenuItem value="llm">LLM 大模型</MenuItem>
-                <MenuItem value="mcts">MCTS 搜索</MenuItem>
-                <MenuItem value="dd">DD 蒙地卡罗</MenuItem>
-                <MenuItem value="perfect" disabled={mode !== 'practice' && !allHandsComplete} title={mode !== 'practice' && !allHandsComplete ? '完美DD需要四家完整手牌，暂不可用' : ''}>完美DD (全知)</MenuItem>
-                <MenuItem value="alphamu">αμ 搜索</MenuItem>
+                <MenuItem value="dd_alphamu_llm">DD-αμ-LLM</MenuItem>
+                <MenuItem value="llm">LLM</MenuItem>
+                <MenuItem value="mcts">MCTS</MenuItem>
+                <MenuItem value="dd">DD</MenuItem>
+                <MenuItem value="perfect" disabled={mode !== 'practice' && !allHandsComplete} title={mode !== 'practice' && !allHandsComplete ? '完美DD需要四家完整手牌，暂不可用' : ''}>完美DD</MenuItem>
+                <MenuItem value="alphamu">αμ</MenuItem>
               </Select>
             </FormControl>
             {playEngine === 'dd' && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>粒子</Typography>
-                <input type="range" min={ddParticlesRange.min} max={ddParticlesRange.max} step={10}
-                  value={ddParticles} onChange={(e) => handleParticleChange('dd', Number(e.target.value))}
-                  style={{ width: 72, height: 16 }} />
-                <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 600, minWidth: 24 }}>{ddParticles}</Typography>
-              </Box>
+              <RangeSlider label="样本数" value={ddSampleCount}
+                min={ddParticlesRange.min} max={ddParticlesRange.max} step={250} width={72}
+                onCommit={handleDDSampleCountChange} />
             )}
             {playEngine === 'dd_alphamu_llm' && (
               <>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>分界</Typography>
-                  <input type="range" min={switchCardsRange.min} max={switchCardsRange.max} step={1}
-                    value={switchCards} onChange={(e) => handleSwitchCardsChange(Number(e.target.value))}
-                    style={{ width: 60, height: 16 }} />
-                  <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 600, minWidth: 16 }}>{switchCards}</Typography>
-                </Box>
+                <RangeSlider label="分界" value={switchCards}
+                  min={switchCardsRange.min} max={switchCardsRange.max} step={1} width={60}
+                  onCommit={handleSwitchCardsChange} />
+                <ToggleButtonGroup
+                  value={useLlmReview ? 'on' : 'off'}
+                  exclusive
+                  onChange={(_, v) => v && handleLlmReviewChange(v === 'on')}
+                  size="small"
+                  sx={{
+                    '& .MuiToggleButton-root': { px: 1, py: 0.2, fontSize: '0.65rem', textTransform: 'none', minWidth: 40 },
+                  }}
+                >
+                  <ToggleButton value="off">纯引擎</ToggleButton>
+                  <ToggleButton value="on">LLM审查</ToggleButton>
+                </ToggleButtonGroup>
               </>
             )}
             {playEngine === 'alphamu' && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>粒子</Typography>
-                <input type="range" min={alphaMuParticlesRange.min} max={alphaMuParticlesRange.max} step={10}
-                  value={alphaMuParticles} onChange={(e) => handleParticleChange('alphaMu', Number(e.target.value))}
-                  style={{ width: 72, height: 16 }} />
-                <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 600, minWidth: 24 }}>{alphaMuParticles}</Typography>
-              </Box>
+              <RangeSlider label="世界数" value={alphaMuParticles}
+                min={alphaMuParticlesRange.min} max={alphaMuParticlesRange.max} step={5} width={72}
+                onCommit={(v) => handleParticleChange('alphaMu', v)} />
             )}
             {playEngine === 'mcts' && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>粒子</Typography>
-                <input type="range" min={mctsParticlesRange.min} max={mctsParticlesRange.max} step={10}
-                  value={mctsParticles} onChange={(e) => handleParticleChange('mcts', Number(e.target.value))}
-                  style={{ width: 72, height: 16 }} />
-                <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 600, minWidth: 24 }}>{mctsParticles}</Typography>
-              </Box>
+              <RangeSlider label="样本数" value={mctsParticles}
+                min={mctsParticlesRange.min} max={mctsParticlesRange.max} step={10} width={72}
+                onCommit={(v) => handleParticleChange('mcts', v)} />
             )}
           </Box>
         </Box>
 
-        <Divider orientation="vertical" flexItem sx={{ borderColor: theme.palette.divider, flexShrink: 0 }} />
+        <Divider orientation={isMobile ? 'horizontal' : 'vertical'} flexItem sx={{ borderColor: theme.palette.divider, flexShrink: 0, width: isMobile ? '100%' : undefined }} />
 
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, flexShrink: 0 }}>
           <Typography variant="h6" sx={{ fontSize: '0.85rem' }}>
             发牌设置
           </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'nowrap', gap: 1, alignItems: 'center' }}>
+          <Box sx={{ display: 'flex', flexWrap: isMobile ? 'wrap' : 'nowrap', gap: 1, alignItems: 'center' }}>
             <FormControl sx={{ minWidth: 80 }} size="small">
               <InputLabel>发牌</InputLabel>
               <Select value={dealMode} label="发牌" onChange={(e) => setDealMode(e.target.value)}>

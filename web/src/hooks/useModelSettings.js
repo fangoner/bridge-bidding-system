@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { setFallbackModel, getFallbackModel, healthCheck, reloadJF, getParticleSettings, setParticleSettings } from '../services/api'
 import { useGame } from '../context/GameContext'
 
@@ -26,7 +26,7 @@ export function useModelSettings() {
 
   const [ddSampleCount, setDDSampleCount] = useState(() => {
     try {
-      return parseInt(localStorage.getItem(DD_SAMPLE_COUNT_KEY)) || 200
+      return parseInt(localStorage.getItem(DD_SAMPLE_COUNT_KEY)) || 250
     } catch {
       return 200
     }
@@ -70,11 +70,22 @@ export function useModelSettings() {
     try { localStorage.setItem(PLAY_MODEL_KEY, newModel) } catch {/* empty */}
   }, [setPlayModelState])
 
+  // 滑块拖动会连续触发 onChange，后端持久化做 debounce，避免拖动卡顿
+  const particleSyncTimer = useRef(null)
+  const scheduleParticleSync = useCallback((payload) => {
+    if (particleSyncTimer.current) clearTimeout(particleSyncTimer.current)
+    particleSyncTimer.current = setTimeout(() => {
+      setParticleSettings(payload).catch(() => {})
+    }, 300)
+  }, [])
+
   const handleDDSampleCountChange = useCallback((value) => {
-    const num = parseInt(value) || 200
+    const num = parseInt(value) || 250
     setDDSampleCount(num)
     try { localStorage.setItem(DD_SAMPLE_COUNT_KEY, num) } catch {/* empty */}
-  }, [])
+    // 全局DD样本数同步到后端，持久作用于所有采样引擎（dd / dd_alphamu_llm）
+    scheduleParticleSync({ dd_particles: num })
+  }, [scheduleParticleSync])
 
   // 粒子数状态（按引擎分别配置，localStorage 持久化）
   const [ddParticles, setDDParticles] = useState(() => {
@@ -84,12 +95,12 @@ export function useModelSettings() {
   const [mctsParticles, setMCTSParticles] = useState(() => {
     try { return parseInt(localStorage.getItem(MCTS_PARTICLES_KEY)) || 500 } catch { return 500 }
   })
-  const [mctsParticlesRange] = useState({ min: 300, max: 1000 })
+  const [mctsParticlesRange, setMCTSParticlesRange] = useState({ min: 300, max: 1000 })
   const [alphaMuParticles, setAlphaMuParticles] = useState(() => {
     try { return parseInt(localStorage.getItem(ALPHA_MU_PARTICLES_KEY)) || 100 } catch { return 100 }
   }, [])
 
-  const [alphaMuParticlesRange] = useState({ min: 30, max: 500 })
+  const [alphaMuParticlesRange, setAlphaMuParticlesRange] = useState({ min: 10, max: 100 })
 
   // DD-αμ-LLM 引擎：中盘DD/残局αμ切换分界（每手剩余牌数≤此值切αμ，0=全程DD，13=全程αμ）
   const [switchCards, setSwitchCards] = useState(() => {
@@ -118,13 +129,13 @@ export function useModelSettings() {
       setter(value)
       try { localStorage.setItem(key, value) } catch {/* empty */}
     }
-    // 同步到后端
+    // 同步到后端（debounce）
     const payload = {}
     if (engine === 'dd') payload.dd_particles = value
     if (engine === 'mcts') payload.mcts_particles = value
     if (engine === 'alphaMu') payload.alpha_mu_particles = value
-    setParticleSettings(payload).catch(() => {})
-  }, [])
+    scheduleParticleSync(payload)
+  }, [scheduleParticleSync])
 
   // 启动时同步粒子数范围和当前值到后端
   useEffect(() => {
@@ -137,7 +148,7 @@ export function useModelSettings() {
     }).catch(() => {})
     // 同步 localStorage 保存的值到后端
     setParticleSettings({
-      dd_particles: parseInt(localStorage.getItem(DD_PARTICLES_KEY)) || undefined,
+      dd_particles: parseInt(localStorage.getItem(DD_SAMPLE_COUNT_KEY)) || undefined,
       mcts_particles: parseInt(localStorage.getItem(MCTS_PARTICLES_KEY)) || undefined,
       alpha_mu_particles: parseInt(localStorage.getItem(ALPHA_MU_PARTICLES_KEY)) || undefined,
     }).catch(() => {})
@@ -169,6 +180,7 @@ export function useModelSettings() {
   // 初始同步备用模型 & 拉取可用模型列表
   useEffect(() => {
     syncFallbackModel()
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetchAvailableModels 为 async，setState 在 await 后异步触发
     fetchAvailableModels()
   }, [syncFallbackModel, fetchAvailableModels])
 

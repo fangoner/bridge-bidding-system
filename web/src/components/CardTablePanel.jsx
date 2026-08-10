@@ -30,6 +30,7 @@ function CardTablePanel({
   onImageDeal,
   onScreenshotDeal,
   onSingleHandScreenshot,
+  onSingleHandUpload,
   onCustomDeal,
   onDeal,
   onHandCardClick,
@@ -75,22 +76,6 @@ function CardTablePanel({
     ddHints,
     reviewCursor,
   } = usePlay()
-
-  // 构建全局牌序列（每张牌一个对象，含 globalIdx / trick / cardInTrick）
-  const allPlayedCards = useMemo(() => {
-    if (!playState) return []
-    const cards = []
-    let idx = 0
-    for (const t of (playState.tricks || [])) {
-      for (let ci = 0; ci < (t.cards || []).length; ci++) {
-        cards.push({ globalIdx: idx++, trick: t, cardInTrick: ci })
-      }
-    }
-    for (let ci = 0; ci < (playState.current_trick?.cards || []).length; ci++) {
-      cards.push({ globalIdx: idx++, trick: null, cardInTrick: ci })
-    }
-    return cards
-  }, [playState?.tricks, playState?.current_trick?.cards])
 
   // 复盘游标对应的墩（按牌序号查找所属trick）
   // 游标语义：reviewCursor = N 表示前 N 张牌已出，第 N 张（allPlayed[N]）回到手牌
@@ -424,6 +409,7 @@ function CardTablePanel({
           reviewCursor={reviewCursor}
           reviewTrick={reviewTrick}
           onSingleHandScreenshot={onSingleHandScreenshot}
+          onSingleHandUpload={onSingleHandUpload}
         />
       </Box>
     </Paper>

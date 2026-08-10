@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import {
   Box,
   Paper,
@@ -30,14 +30,12 @@ function PlayPanel({
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
   const [selectedCard, setSelectedCard] = useState(null)
-  const prevPlayerRef = useRef(playState?.current_player)
-  
-  useEffect(() => {
-    if (playState?.current_player !== prevPlayerRef.current) {
-      prevPlayerRef.current = playState?.current_player
-      setSelectedCard(null)
-    }
-  }, [playState?.current_player])
+  // 切换出牌者时清空选中（渲染期间调整 state，避免 effect 内同步 setState）
+  const [prevPlayer, setPrevPlayer] = useState(playState?.current_player)
+  if (playState && playState.current_player !== prevPlayer) {
+    setPrevPlayer(playState.current_player)
+    setSelectedCard(null)
+  }
   
   if (!playState) {
     return (

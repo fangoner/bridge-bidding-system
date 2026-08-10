@@ -187,7 +187,7 @@ def test_validator_illegal_card():
     result = validate_llm_play(card, playable, state)
     print(f"  校验结果: {result}")
     assert result.valid is False
-    assert result.severity == "error"
+    assert result.severity == "critical"
     assert "不在可出牌列表中" in result.violation
     print("  ✓ 非法牌被正确检测")
 
@@ -223,7 +223,7 @@ def test_validator_fourth_hand_winning():
     result = validate_llm_play(card, playable, state)
     print(f"  校验结果: {result}")
     assert result.valid is False
-    assert "第四家" in result.violation or "应赢墩" in result.violation
+    assert "第四家" in result.violation or "应赢墩" in result.violation or "必须赢墩" in result.violation
     print("  ✓ 第四家能赢却出小牌被检测")
 
 

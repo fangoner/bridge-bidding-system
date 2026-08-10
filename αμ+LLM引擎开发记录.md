@@ -88,6 +88,13 @@
 
 **最终**（`_should_trigger_llm`）：组数 ≥ 2 即触发，不设成功率阈值。
 
+**复调优**（用户提出，DD中局与αμ残局差异化）：
+> "dd中局阶段保留15%截断，αμ取消，保留全部。"
+
+实现：`_should_trigger_llm` 新增 `gap_threshold` 参数。
+- DD中局（`_dd_llm_play`）：传默认 `gap_threshold=0.15`，保留顶差15%截断。
+- αμ残局（`_alphamu_llm_play`）：传 `gap_threshold=None`，仅看组数（≥2即触发），保留全部候选。
+
 ### 2.4 阶段四：绝望模式
 
 **需求**（用户提出）：
@@ -298,7 +305,7 @@ prompt中新增的飞牌优先提示：
 | `_group_candidates_by_vector` | L1469 | 三层分组 |
 | `_split_by_rank_tier` | L1567 | 花色+rank区间拆分 |
 | `_build_desperation_groups` | L1519 | 绝望模式分组（按avg_tricks） |
-| `_should_trigger_llm` | L1450 | 触发条件（≥2组） |
+| `_should_trigger_llm` | L1450 | 触发条件（≥2组，DD带15%截断/αμ全保留） |
 | `_check_plan_invalidation` | L1370 | plan失效检测（4条件） |
 | `_mark_step_completed` | L1426 | 标记plan步骤完成 |
 | `_llm_group_review` | L1837 | LLM审查（主prompt + 调用） |
@@ -339,7 +346,7 @@ prompt中新增的飞牌优先提示：
 ### 5.1 关键决策
 
 1. **用best_vector分组**（用户提出）：充分利用αμ搜索结果
-2. **不设成功率阈值**（用户提出）：所有有机会的情况都让LLM审查
+2. **不设成功率阈值**（用户提出，αμ）：所有有机会的情况都让LLM审查；DD中局仍保留15%截断
 3. **程序计算将牌统计**（我提出）：LLM数牌不可靠
 4. **分组不预设战术**（用户提出）：同组大牌小牌都可能用于多种战术
 5. **绝望模式**（用户提出）：αμ认为无机会时也要审查，目标切换为多拿墩少宕

@@ -23,7 +23,9 @@ export default defineConfig([
       },
     },
     rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]', ignoreRestSiblings: true }],
+      // 项目未启用 React Compiler，该规则不适用（会误报现有的正确 memo 写法学）
+      'react-hooks/preserve-manual-memoization': 'off',
     },
   },
 ])
