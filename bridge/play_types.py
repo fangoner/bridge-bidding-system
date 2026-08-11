@@ -238,6 +238,7 @@ class PlayState:
     defender_tricks: int = 0
     phase: PlayPhase = PlayPhase.LEAD
     bidding_sequence: str = "未提供"
+    vulnerability: str = "NV"
     
     def copy_hands(self) -> Dict[str, List[Card]]:
         """返回手牌的深拷贝"""
@@ -407,6 +408,7 @@ class PlayState:
             "hands": {pos: [c.to_dict() for c in cards] for pos, cards in self.hands.items()},
             "dummy": self.dummy,
             "bidding_sequence": self.bidding_sequence,
+            "vulnerability": self.vulnerability,
             "player_roles": self.player_roles,
             "tricks": [t.to_dict() for t in self.tricks],
             "current_trick": self.current_trick.to_dict(),

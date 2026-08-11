@@ -1,9 +1,9 @@
 """叫牌约束：从叫牌含义中提取的点力/牌型限制，用于采样过滤。
 
-约束分级体系（Phase 0a）：
-  Level 1 (硬约束) — 叫牌明确承诺，采样时必须满足：
+约束来源分类（描述性，不编号；采样尝试链的 Level 编号见 sampler.py）：
+  硬约束 — 叫牌明确承诺，采样时必须满足：
     hard_coded* / meaning_parsed / convention_* / cue_bid / overcall_* / unusual_nt
-  Level 3 (忽略) — 推理猜测，不参与采样：
+  忽略 — 推理猜测，不参与采样：
     negative_inference / hcp_conservation
 """
 from dataclasses import dataclass, field, copy as dc_copy
@@ -31,7 +31,7 @@ _IGNORED_SOURCES = {
 
 
 def is_hard_source(src: str) -> bool:
-    """约束来源是否是 Level 1（硬约束/叫牌明确承诺）。"""
+    """约束来源是否是硬约束（叫牌明确承诺）。"""
     if not src:
         return False
     if src in _IGNORED_SOURCES:
@@ -40,14 +40,14 @@ def is_hard_source(src: str) -> bool:
 
 
 def is_ignored_source(src: str) -> bool:
-    """约束来源是否应在采样中忽略（Level 3）。"""
+    """约束来源是否应在采样中忽略。"""
     return src in _IGNORED_SOURCES
 
 
 def filter_hard_constraints(
     constraints: Dict[str, "BidConstraint"],
 ) -> Dict[str, "BidConstraint"]:
-    """从约束字典中筛选仅 Level 1 硬约束（用于均匀采样验证）。"""
+    """从约束字典中筛选仅硬约束（用于均匀采样验证）。"""
     return {
         pos: c for pos, c in constraints.items()
         if is_hard_source(c.inference_source)
@@ -55,7 +55,7 @@ def filter_hard_constraints(
 
 
 def relax_constraint(c: "BidConstraint") -> "BidConstraint":
-    """生成 Level 2 放宽版约束：HCP ±2，suit_min 减半。"""
+    """生成放宽版约束：HCP ±2，suit_min 减半。"""
     relaxed = BidConstraint(position=c.position, inference_source="relaxed")
     if c.min_hcp is not None:
         relaxed.min_hcp = max(0, c.min_hcp - 2)
@@ -72,9 +72,9 @@ def relax_constraint(c: "BidConstraint") -> "BidConstraint":
 class BidConstraint:
     """一个牌手在叫牌中暴露的约束。
 
-    inference_source 标记约束来源，由约束分级体系使用：
-    - Level 1 硬约束（采样验证）：hard_coded*, meaning_parsed, convention_*, cue_bid, overcall_*, unusual_nt
-    - Level 3 忽略（不参与采样）：negative_inference, hcp_conservation
+    inference_source 标记约束来源，由约束来源分类使用：
+    - 硬约束（采样验证）：hard_coded*, meaning_parsed, convention_*, cue_bid, overcall_*, unusual_nt
+    - 忽略（不参与采样）：negative_inference, hcp_conservation
     """
     position: str
     min_hcp: Optional[int] = None
@@ -89,11 +89,11 @@ class BidConstraint:
     inference_source: str = "hard_coded"
 
 
-def validate_level1(
+def validate_hard(
     hands: Dict[str, List[Card]],
     constraints: Dict[str, "BidConstraint"],
 ) -> bool:
-    """Level 1 硬约束验证：仅检查叫牌明确承诺（hard_coded / convention / meaning_parsed）。
+    """硬约束验证：仅检查叫牌明确承诺（hard_coded / convention / meaning_parsed）。
 
     忽略 negative_inference 和 hcp_conservation 来源的约束。
     """
@@ -108,11 +108,11 @@ def validate_level1(
     return True
 
 
-def validate_level2(
+def validate_relaxed(
     hands: Dict[str, List[Card]],
     constraints: Dict[str, "BidConstraint"],
 ) -> bool:
-    """Level 2 放宽约束验证：HCP ±2, suit_min 减半。"""
+    """放宽约束验证：HCP ±2, suit_min 减半。"""
     for pos, constraint in constraints.items():
         if not is_hard_source(constraint.inference_source):
             continue
@@ -129,7 +129,7 @@ def validate_voids_only(
     hands: Dict[str, List[Card]],
     known_voids: Dict[str, Set[str]],
 ) -> bool:
-    """Level 0 验证：仅检查已知缺门（看到垫牌推得的花色张数 = 0）。"""
+    """仅 void 验证：只检查已知缺门（看到垫牌推得的花色张数 = 0）。"""
     for pos, void_suits in known_voids.items():
         cards = hands.get(pos, [])
         for c in cards:
@@ -175,12 +175,12 @@ def validate_sample(
     hands: Dict[str, List[Card]],
     constraints: Dict[str, "BidConstraint"],
 ) -> bool:
-    """检查采样出的手牌是否满足所有 Level 1 硬约束。
+    """检查采样出的手牌是否满足所有硬约束。
 
     自动忽略 negative_inference / hcp_conservation 来源的约束。
-    等同于 validate_level1()，保留用于向后兼容。
+    等同于 validate_hard()，保留用于向后兼容。
     """
-    return validate_level1(hands, constraints)
+    return validate_hard(hands, constraints)
 
 
 

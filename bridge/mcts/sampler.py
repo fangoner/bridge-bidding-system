@@ -9,7 +9,7 @@ from bridge.mcts.state_utils import SUIT_DISPLAY_ORDER, RANK_DESC
 from bridge.mcts.constraints import (
     BidConstraint, validate_sample,
     HCP_MAP, CONTROL_MAP,
-    validate_level1, validate_level2, validate_voids_only,
+    validate_hard, validate_relaxed, validate_voids_only,
     is_hard_source, filter_hard_constraints, _is_balanced, _check_constraint,
 )
 from bridge.mcts.belief import collect_voids
@@ -403,7 +403,7 @@ def _sample_mh_repair(
     world = _sample_uniform(known_info)
     if not active_constraints:
         return world, True
-    if validate_level1(world, active_constraints):
+    if validate_hard(world, active_constraints):
         return world, True
     known_positions = set(known_info.get("result", {}).keys())
     swap_positions = [p for p in world if p not in known_positions]
@@ -418,7 +418,7 @@ def _sample_mh_repair(
 
     current_score = total_score()
     for _ in range(max_swaps):
-        if current_score == 0 or validate_level1(world, active_constraints):
+        if current_score == 0 or validate_hard(world, active_constraints):
             return world, True
         proposal = _propose_swap(world, active_constraints, swap_positions)
         if proposal is None:
@@ -433,11 +433,57 @@ def _sample_mh_repair(
         accept_prob = min(1.0, math.exp(-beta * (new_score - current_score)))
         if random.random() < accept_prob:
             current_score = new_score
-            if validate_level1(world, active_constraints):
+            if validate_hard(world, active_constraints):
                 return world, True
         else:
             hand_v[i], hand_d[j] = hand_d[j], hand_v[i]
     return world, current_score == 0
+
+
+def _master_priority(con: "BidConstraint") -> int:
+    score = 0
+    if con.min_hcp is not None:
+        score += con.min_hcp
+    if con.min_controls is not None:
+        score += con.min_controls * 2
+    for _s, n in con.suit_min.items():
+        score += n * 2
+    if con.balanced is not None:
+        score += 1
+    return score
+
+
+def _sample_master_soft(
+    known_info: dict,
+    active_constraints: Dict[str, "BidConstraint"],
+    max_masters: int = 3,
+) -> Optional[Dict[str, List[Card]]]:
+    """主从软约束采样：只保证「约束最紧」的一方硬满足，其余未知位置吃剩余牌。
+
+    背景：两家主动叫牌（如南逆叫16+、西1NT均型）同时硬满足在均匀空间里极稀疏
+    （双约束占比可低至 0.004%），MH 对称修复两个违约位置会互相拉扯而难以收敛。
+    这里选中约束最紧的一方作为 master 单独做 MH 修复，slave 位置自动吃剩余牌，
+    其约束退化为软约束（不否决世界），符合「主分配一家 + 另一家暂不严格」的直觉。
+    返回 None 表示无法满足任一 master（调用方继续降级到 Level 2）。
+    """
+    positions = [
+        p for p in active_constraints.keys()
+        if p not in known_info.get("result", {})
+    ]
+    if len(positions) < 2:
+        return None
+    ordered = sorted(
+        positions,
+        key=lambda p: _master_priority(active_constraints[p]),
+        reverse=True,
+    )
+    for master in ordered[:max_masters]:
+        world, ok = _sample_mh_repair(
+            known_info, {master: active_constraints[master]}
+        )
+        if ok:
+            return world
+    return None
 
 
 def _constraint_trivially_satisfied(c: "BidConstraint", remaining_count: int) -> bool:
@@ -754,31 +800,40 @@ class DealSampler:
             if reduced is None:
                 continue
             active_constraints[pos] = reduced
-        # 可满足性预检：约束在当前牌池下必不可能满足时，跳过 MH/L1 空转
+        # 可满足性预检：约束在当前牌池下必不可能满足时，跳过 MH/L0 空转
         feasible = _check_feasible(active_constraints, known_info)
         if feasible:
             if active_constraints:
-                # Level 1: MH 修复（从一次均匀发牌出发对称交换，无偏提速）
+                # Level 0: MH 修复（从一次均匀发牌出发对称交换，无偏提速）
                 world, ok = _sample_mh_repair(known_info, active_constraints)
                 if ok:
                     return world
-                _warn_fallback("MH→2", known_info, self.constraints)
+                _warn_fallback("L0→L1", known_info, self.constraints)
+                ms_world = _sample_master_soft(known_info, active_constraints)
+                if ms_world is not None:
+                    _warn_fallback("L1_master_soft", known_info, self.constraints)
+                    return ms_world
             else:
                 return _sample_uniform(known_info)
         else:
-            _warn_fallback("INFEASIBLE→0", known_info, self.constraints)
+            _warn_fallback("INFEASIBLE", known_info, self.constraints)
+            ms_world = _sample_master_soft(known_info, active_constraints)
+            if ms_world is not None:
+                _warn_fallback("L1_master_soft", known_info, self.constraints)
+                return ms_world
         # Level 2: 放宽约束
-        _warn_fallback("Level 2→0", known_info, self.constraints)
+        _warn_fallback("L2_relaxed", known_info, self.constraints)
         for _attempt in range(50):
             world = _sample_uniform(known_info)
-            if validate_level2(world, active_constraints):
+            if validate_relaxed(world, active_constraints):
                 return world
-        # Level 0: 仅 void
+        # Level 3: 仅 void
+        _warn_fallback("L3_voids", known_info, self.constraints)
         for _attempt in range(20):
             world = _sample_uniform(known_info)
             if validate_voids_only(world, known_info["known_voids"]):
                 return world
         # 兜底：选违反约束最少的候选世界（兜底降级保护）
-        _warn_fallback("FINAL_FALLBACK", known_info, self.constraints)
+        _warn_fallback("L4_FINAL", known_info, self.constraints)
         return _pick_least_violating(active_constraints, known_info)
 

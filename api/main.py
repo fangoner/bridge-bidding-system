@@ -1461,6 +1461,7 @@ class PlayInitRequest(BaseModel):
     bidding_sequence: Optional[str] = None
     bid_history: Optional[str] = None  # 叫牌序列，用于MCTS约束采样
     bid_meanings: Optional[str] = None  # 叫牌含义文本，复用LLM已分析信息
+    vulnerability: Optional[str] = None  # 局况: "NV"/"NS"/"EW"/"All"
 
 
 class PlayInitResponse(BaseModel):
@@ -1488,6 +1489,7 @@ async def play_init(request: PlayInitRequest):
             bidding_sequence=request.bidding_sequence or "未提供",
             bid_history=request.bid_history or "",
             bid_meanings=request.bid_meanings or "",
+            vulnerability=_normalize_vulnerability(request.vulnerability) or "NV",
         )
 
         return PlayInitResponse(
@@ -1627,6 +1629,7 @@ class PlayAIRequest(BaseModel):
     play_engine: Optional[str] = None  # "llm" | "mcts" | "dd" | "perfect" | "alphamu" | "dd_alphamu_llm"
     dd_sample_count: Optional[int] = None  # DD 蒙地卡罗采样数
     dd_alphamu_switch_cards: Optional[int] = None  # DD-αμ-LLM 引擎中盘/残局切换分界
+    dd_scoring_mode: Optional[str] = None  # DD 决策计分制: "imp" | "make_rate" | "avg_tricks"
     use_llm_review: bool = False  # DD-αμ-LLM 引擎是否启用 LLM 分组审查（默认关闭）
 
 
@@ -1722,6 +1725,7 @@ async def ai_play(request: PlayAIRequest):
                 dd_samples = (request.dd_sample_count
                               if (use_dd or use_dd_alphamu_llm) else None)
                 dd_switch_cards = request.dd_alphamu_switch_cards if use_dd_alphamu_llm else None
+                dd_scoring_mode = request.dd_scoring_mode if (use_dd or use_dd_alphamu_llm) else None
                 t0 = time.time()
                 # 记录DD提示所需的出牌前状态
                 state_before = service.get_state()
@@ -1736,7 +1740,8 @@ async def ai_play(request: PlayAIRequest):
                     use_dd_alphamu_llm=use_dd_alphamu_llm,
                     enable_llm_review=enable_llm_review,
                     dd_samples=dd_samples,
-                    dd_alphamu_switch_cards=dd_switch_cards)
+                    dd_alphamu_switch_cards=dd_switch_cards,
+                    dd_scoring_mode=dd_scoring_mode)
                 elapsed_ms = int((time.time() - t0) * 1000)
 
                 if result.get("card"):
@@ -1885,7 +1890,7 @@ def _hands_are_complete(state) -> bool:
                 seen.add(key)
                 total += 1
         for trick in state.tricks:
-            for card in trick.cards:
+            for pos, card in trick.cards:
                 key = (card.suit, card.rank)
                 if key in seen:
                     return False
@@ -1893,7 +1898,7 @@ def _hands_are_complete(state) -> bool:
                 total += 1
         cur = getattr(state, "current_trick", None)
         if cur is not None:
-            for card in cur.cards:
+            for pos, card in cur.cards:
                 key = (card.suit, card.rank)
                 if key in seen:
                     return False

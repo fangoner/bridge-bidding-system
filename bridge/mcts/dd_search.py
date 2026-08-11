@@ -54,6 +54,99 @@ def _compare_candidates(a_val, a_scores, a_rank_val, b_val, b_scores, b_rank_val
     return 0
 
 
+# ── 计分制决策辅助：把各 world 的庄家方总赢墩换算为决策值 ──
+# 约定：所有决策值均从"庄家方越优数值越高"的视角计算，_compare_candidates 按 is_declarer_side 取方向。
+_IMP_TABLE = [0, 20, 50, 80, 130, 200, 300, 500, 750, 1000, 1300, 1600, 2000, 2400,
+              3000, 3600, 4200, 4900, 5900, 7000, 8000, 9000, 10000, 11000, 12000]
+
+
+def _raw_to_imp(raw):
+    sign = 1 if raw >= 0 else -1
+    a = abs(raw)
+    k = 0
+    for kk in range(len(_IMP_TABLE) - 1, -1, -1):
+        if a >= _IMP_TABLE[kk]:
+            k = kk
+            break
+    return sign * k
+
+
+def _doubled_down_total(down, vul_decl):
+    total = 0
+    for i in range(1, down + 1):
+        total += (100 + 200 * (i - 1)) if not vul_decl else (200 + 300 * (i - 1))
+    return total
+
+
+def _declarer_side_vulnerable(declarer, vul):
+    if not vul or vul == "NV":
+        return False
+    if vul == "All":
+        return True
+    if vul == "NS":
+        return declarer in ("北", "南")
+    if vul == "EW":
+        return declarer in ("东", "西")
+    return False
+
+
+def _contract_score(decl_total, contract, vul_decl):
+    """庄家方取得 decl_total 墩的原始分（正=庄家得分，负=庄家宕分）。"""
+    needed = contract.tricks_needed
+    suit = contract.suit
+    if suit == "NT":
+        base = 40 + 30 * (contract.level - 1)
+        trick_val = 30
+    elif suit in ("♠", "♥"):
+        base = 30 * contract.level
+        trick_val = 30
+    else:
+        base = 20 * contract.level
+        trick_val = 20
+    if decl_total >= needed:
+        overtricks = decl_total - needed
+        score = base
+        if contract.redoubled:
+            score += overtricks * (400 if vul_decl else 200)
+        elif contract.doubled:
+            score += overtricks * (200 if vul_decl else 100)
+        else:
+            score += overtricks * trick_val
+        if base >= 100:
+            score += 500 if vul_decl else 300
+        else:
+            score += 50
+        if contract.level == 6:
+            score += 750 if vul_decl else 500
+        elif contract.level == 7:
+            score += 1500 if vul_decl else 1000
+        if contract.redoubled:
+            score += 100
+        elif contract.doubled:
+            score += 50
+    else:
+        down = needed - decl_total
+        if contract.redoubled:
+            score = -2 * _doubled_down_total(down, vul_decl)
+        elif contract.doubled:
+            score = -_doubled_down_total(down, vul_decl)
+        else:
+            score = -(50 + 50 * vul_decl) * down
+    return score
+
+
+def _expected_imp_value(scores, contract, vul_decl):
+    if not scores:
+        return 0.0
+    return sum(_raw_to_imp(_contract_score(t, contract, vul_decl)) for t in scores) / len(scores)
+
+
+def _make_rate_value(scores, tricks_needed):
+    if not scores:
+        return 0.0
+    return sum(1 for t in scores if t >= tricks_needed) / len(scores)
+
+
 def _has_duplicates(hands: Dict[str, List[Card]]) -> bool:
     """检测采样手牌中是否存在同一张牌出现在多个位置的情况。"""
     seen = set()
@@ -299,7 +392,7 @@ class DDSearch:
     def __init__(self, sampler: DealSampler = None, num_samples: int = 100,
                  min_samples: int = 15, time_limit: float = 5.0,
                  endgame_card_threshold: int = 4, max_enumerations: int = 5000,
-                 use_maximin: bool = True):
+                 use_maximin: bool = True, scoring_mode: Optional[str] = None):
         self.sampler = sampler or DealSampler()
         self.num_samples = num_samples
         self.min_samples = min_samples
@@ -307,6 +400,22 @@ class DDSearch:
         self.endgame_card_threshold = endgame_card_threshold
         self.max_enumerations = max_enumerations
         self.use_maximin = use_maximin
+        if scoring_mode is None:
+            from config import DD_SCORING_MODE
+            scoring_mode = DD_SCORING_MODE
+        self.scoring_mode = scoring_mode
+
+    def _decision_value(self, scores: List[int], state: PlayState):
+        """按计分制返回决策值（从庄家方越优数值越高的视角）。
+        imp/make_rate 覆盖默认 avg_tricks 逻辑；返回 None 表示走既有 avg/regret 逻辑。"""
+        mode = self.scoring_mode
+        if mode == "imp":
+            vul_decl = _declarer_side_vulnerable(state.contract.declarer,
+                                                 getattr(state, "vulnerability", "NV"))
+            return _expected_imp_value(scores, state.contract, vul_decl)
+        if mode == "make_rate":
+            return _make_rate_value(scores, state.contract.tricks_needed)
+        return None
 
     def search(self, state: PlayState) -> dict:
         perspective = state.current_player
@@ -479,7 +588,10 @@ class DDSearch:
 
             rank_val = RANK_ORDER.get(card.rank, 0)
 
-            if use_maximin:
+            scoring_val = self._decision_value(scores, state)
+            if scoring_val is not None:
+                blended = scoring_val
+            elif use_maximin:
                 from config import DD_REGRET_BASE
                 declarer_tricks = state.declarer_tricks
                 defender_tricks = state.defender_tricks
@@ -626,7 +738,10 @@ class DDSearch:
         remaining_tricks = 13 - total_played_tricks
 
         card_scores = {str(c): [] for c in playable}
-        constraints = self.sampler.constraints
+        # 残局枚举直接对真实剩余牌池穷举所有分布，无需用叫牌约束过滤。
+        # 叫牌约束（如整手16HCP）针对发牌时13张手牌，残局剩余1-2张必然不满足，
+        # 若在此验证会导致所有分布被过滤、枚举返回None，进而回退到同样错误的采样。
+        constraints = None
 
         n_pool = len(pool)
         indices = list(range(n_pool))
@@ -748,8 +863,11 @@ class DDSearch:
                 "scores": scores,
             })
             rank_val = RANK_ORDER.get(card.rank, 0)
-            # 残局枚举同样适用 maximin（精确分布下 min 更可靠）
-            if getattr(self, 'use_maximin', True):
+            # 残局枚举同样支持计分制决策；否则回退 maximin/avg
+            scoring_val = self._decision_value(scores, state)
+            if scoring_val is not None:
+                blended = scoring_val
+            elif getattr(self, 'use_maximin', True):
                 from config import DD_REGRET_BASE
                 declarer_tricks = state.declarer_tricks
                 defender_tricks = state.defender_tricks

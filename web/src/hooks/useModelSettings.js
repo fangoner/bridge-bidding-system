@@ -9,6 +9,7 @@ const DD_PARTICLES_KEY = 'bridge_dd_particles'
 const MCTS_PARTICLES_KEY = 'bridge_mcts_particles'
 const ALPHA_MU_PARTICLES_KEY = 'bridge_alpha_mu_particles'
 const SWITCH_CARDS_KEY = 'bridge_dd_alphamu_switch_cards'
+const DD_SCORING_MODE_KEY = 'bridge_dd_scoring_mode'
 
 // 解析组合模型值 "model::reasoning" → { model, reasoning }
 export function parseModelValue(value) {
@@ -118,6 +119,16 @@ export function useModelSettings() {
     try { localStorage.setItem(SWITCH_CARDS_KEY, num) } catch {/* empty */}
   }, [])
 
+  // DD 决策计分制（localStorage 持久化），随 aiPlay 请求下发到后端 DD 引擎
+  const [ddScoringMode, setDdScoringMode] = useState(() => {
+    try { return localStorage.getItem(DD_SCORING_MODE_KEY) || 'imp' } catch { return 'imp' }
+  })
+  const handleDdScoringModeChange = useCallback((value) => {
+    const v = ['imp', 'make_rate', 'avg_tricks'].includes(value) ? value : 'imp'
+    setDdScoringMode(v)
+    try { localStorage.setItem(DD_SCORING_MODE_KEY, v) } catch {/* empty */}
+  }, [])
+
   const handleParticleChange = useCallback((engine, value) => {
     const setters = {
       dd: [setDDParticles, DD_PARTICLES_KEY],
@@ -203,6 +214,9 @@ export function useModelSettings() {
     // DD-αμ-LLM 分界
     switchCards, switchCardsRange,
     handleSwitchCardsChange,
+    // DD 决策计分制
+    ddScoringMode,
+    handleDdScoringModeChange,
   }
 }
 

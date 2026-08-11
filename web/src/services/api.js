@@ -245,7 +245,7 @@ export const doubleDummyAnalysis = async (hands) => {
 // ==================== 打牌相关API ====================
 
 // 初始化打牌
-export const playInit = async (hands, contract, declarer, playerRoles = null, doubled = false, redoubled = false, biddingSequence = null, bidHistory = '', bidMeanings = '') => {
+export const playInit = async (hands, contract, declarer, playerRoles = null, doubled = false, redoubled = false, biddingSequence = null, bidHistory = '', bidMeanings = '', vulnerability = null) => {
   try {
     const response = await api.post('/api/play/init', {
       hands,
@@ -257,6 +257,7 @@ export const playInit = async (hands, contract, declarer, playerRoles = null, do
       bidding_sequence: biddingSequence,
       bid_history: bidHistory,
       bid_meanings: bidMeanings,
+      vulnerability,
     });
     return response.data;
   } catch (error) {
@@ -291,7 +292,7 @@ export const undoPlay = async () => {
 };
 
 // AI出牌
-export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null, ddAlphamuSwitchCards = null, useLlmReview = false) => {
+export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null, ddAlphamuSwitchCards = null, useLlmReview = false, ddScoringMode = null) => {
   try {
     const requestData = {
       use_reasoning: useReasoning,
@@ -309,6 +310,9 @@ export const aiPlay = async (playModel = null, useReasoning = false, playEngine 
     }
     if (ddAlphamuSwitchCards != null) {
       requestData.dd_alphamu_switch_cards = ddAlphamuSwitchCards;
+    }
+    if (ddScoringMode) {
+      requestData.dd_scoring_mode = ddScoringMode;
     }
     
     const timeout = useReasoning ? 300000 : 120000;

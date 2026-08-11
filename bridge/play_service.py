@@ -132,6 +132,7 @@ class PlayService:
         bidding_sequence: str = "未提供",
         bid_history: str = "",
         bid_meanings: str = "",
+        vulnerability: str = "NV",
     ) -> PlayState:
         from bridge.play_types import Contract
 
@@ -148,7 +149,7 @@ class PlayService:
         self.bid_constraints = None  # 延迟提取
         # Phase 0a: BeliefTracker 已移除，粒子缓存不再需要清理
 
-        return self.engine.initialize(hands, contract, player_roles, bidding_sequence)
+        return self.engine.initialize(hands, contract, player_roles, bidding_sequence, vulnerability)
     
     def get_state(self) -> Optional[PlayState]:
         return self.engine.get_state()
@@ -223,7 +224,8 @@ class PlayService:
                           use_dd_alphamu_llm: bool = False,
                           enable_llm_review: bool = False,
                           dd_samples: int = None,
-                          dd_alphamu_switch_cards: int = None) -> Dict[str, Any]:
+                          dd_alphamu_switch_cards: int = None,
+                          dd_scoring_mode: str = None) -> Dict[str, Any]:
         state = self.engine.get_state()
         if not state:
             return {"error": "游戏未初始化"}
@@ -249,7 +251,7 @@ class PlayService:
 
         # === DD 引擎分支 ===
         if use_dd:
-            return await asyncio.to_thread(self._dd_play, state, dd_samples)
+            return await asyncio.to_thread(self._dd_play, state, dd_samples, dd_scoring_mode)
 
         # === αμ 纯引擎分支（从开局到残局全覆盖） ===
         if use_alphamu:
@@ -259,7 +261,7 @@ class PlayService:
         if use_dd_alphamu_llm:
             return await asyncio.to_thread(
                 self._dd_alphamu_llm_play, state, use_reasoning, dd_samples,
-                dd_alphamu_switch_cards, enable_llm_review)
+                dd_alphamu_switch_cards, enable_llm_review, dd_scoring_mode)
 
         # === MCTS 引擎分支 ===
         if use_mcts:
@@ -793,6 +795,33 @@ class PlayService:
         perspective = state.current_player
         cards = len(state.hands.get(perspective, []))
 
+        # 残局枚举：优先尝试精确枚举所有未知分布。
+        # 门槛不再用"当前玩家手牌数"（如东5张会被挡下，但此时东/明手手牌
+        # 已知、未知仅两家各4张，C(8,4)=70 完全可枚举）。_enumerate_endgame
+        # 内部有 est > max 判定会自行回退采样，故放开硬门槛交由它判断。
+        # αμ 采样在约束不可满足时会陷入回退链（MH→Level2→Level0），枚举可避免。
+        enum_result = self.dd_search._enumerate_endgame(
+            state,
+            perspective,
+            state.current_player,
+            state.get_playable_cards(state.current_player),
+            state.contract.declarer,
+            state.dummy,
+            state.contract.suit,
+            perspective in (state.contract.declarer, state.dummy),
+        )
+        if enum_result is not None and enum_result.get("card") is not None:
+            enum_card = enum_result["card"]
+            enum_full = enum_result.get("full_output", {})
+            enum_full["引擎阶段"] = "endgame_enum"
+            return {
+                "card": enum_card.to_dict() if hasattr(enum_card, "to_dict") else None,
+                "reasoning": enum_result.get("reasoning", ""),
+                "full_output": enum_full,
+                "prompt": "[αμ] no prompt",
+            }
+        print("[αμ] 残局枚举不可行，回退 αμ 采样搜索")
+
         base_worlds = ALPHA_MU_NUM_WORLDS
         # 世界数随牌数减少而增加（残局越小，采样越精确）
         if cards <= 4:
@@ -953,7 +982,8 @@ class PlayService:
     def _dd_alphamu_llm_play(self, state: PlayState, use_reasoning: bool = False,
                               dd_samples: int = None,
                               switch_cards: int = None,
-                              enable_llm_review: bool = False) -> Dict[str, Any]:
+                              enable_llm_review: bool = False,
+                              dd_scoring_mode: str = None) -> Dict[str, Any]:
         """DD-αμ-LLM 主力引擎：中盘DD+LLM审查，残局αμ+LLM审查。
 
         分界点参数化：每手剩余牌数 ≤ switch_cards（默认 DD_ALPHAMU_SWITCH_CARDS）
@@ -965,21 +995,21 @@ class PlayService:
         cards = len(state.hands.get(perspective, []))
         if not enable_llm_review:
             if cards > threshold:
-                return self._dd_play(state, dd_samples)
+                return self._dd_play(state, dd_samples, dd_scoring_mode)
             return self._alpha_mu_play(state)
         if cards > threshold:
-            return self._dd_llm_play(state, use_reasoning, dd_samples)
+            return self._dd_llm_play(state, use_reasoning, dd_samples, dd_scoring_mode)
         return self._alphamu_llm_play(state, use_reasoning)
 
     def _dd_llm_play(self, state: PlayState, use_reasoning: bool = False,
-                     dd_samples: int = None) -> Dict[str, Any]:
+                     dd_samples: int = None, dd_scoring_mode: str = None) -> Dict[str, Any]:
         """中盘 DD 搜索 + LLM 分组审查。
 
         DD 候选没有 αμ 的 best_vector，改用各 world 赢墩数向量等价分组：
         scores 完全相同 → 各世界表现等价 → 一组；组内按花色+rank区间拆分。
         success_rate = scores 中 ≥ 定约所需墩数的占比（成约率，与 αμ 同义）。
         """
-        dd_result = self._dd_play(state, dd_samples)
+        dd_result = self._dd_play(state, dd_samples, dd_scoring_mode)
         full_output = dd_result.get("full_output", {})
         full_output["engine_phase"] = "midgame_dd"
         candidates = full_output.get("mcts_stats", {}).get("candidates", [])
@@ -2112,7 +2142,7 @@ class PlayService:
         lines.append('不要因为非第1组的成功率略高就选非第1组\u2014\u2014关键是战术差异，不是成功率。')
         return '\n'.join(lines)
 
-    def _dd_play(self, state: PlayState, dd_samples: int = None) -> Dict[str, Any]:
+    def _dd_play(self, state: PlayState, dd_samples: int = None, dd_scoring_mode: str = None) -> Dict[str, Any]:
         """DD搜索打牌（纯蒙特卡洛 + 双明手评估，由asyncio.to_thread调用）"""
         constraints = self._get_bid_constraints()
         if constraints:
@@ -2126,6 +2156,10 @@ class PlayService:
         _saved_num_samples = self.dd_search.num_samples
         if dd_samples is not None:
             self.dd_search.num_samples = dd_samples
+        # 请求级 dd_scoring_mode 允许临时覆盖计分制（用完恢复）
+        _saved_scoring_mode = self.dd_search.scoring_mode
+        if dd_scoring_mode is not None:
+            self.dd_search.scoring_mode = dd_scoring_mode
 
         try:
             result = self.dd_search.search(state)
@@ -2154,6 +2188,8 @@ class PlayService:
         finally:
             if dd_samples is not None:
                 self.dd_search.num_samples = _saved_num_samples
+            if dd_scoring_mode is not None:
+                self.dd_search.scoring_mode = _saved_scoring_mode
 
     def _perfect_play(self, state: PlayState) -> Dict[str, Any]:
         """完美DD打牌（全知双明手，无采样，一次 solve_board 得所有候选精确分）"""

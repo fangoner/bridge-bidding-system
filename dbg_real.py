@@ -78,7 +78,7 @@ for sc in ["随机♠","高HCP♠"]:
     run(f"  MH", ki, ac)
     if hi:
         # 对比 beta 对 MH 收敛的影响
-        from bridge.mcts.constraints import validate_level1
+        from bridge.mcts.constraints import validate_hard
         for b in (1.0, 0.0):
             okc=0
             for _ in range(200):

@@ -34,11 +34,11 @@ print("池♠HCP=",sp_hcp," 非♠0HCP张数=",non_sp_0hcp," feasible=",_check_f
       " pos_feasible=",_position_hcp_feasible(red, chosen, 12))
 # 单样本跟踪
 w= _sample_uniform(ki)
-from bridge.mcts.constraints import validate_level1
-print("初始西♠=",dist(w["西"])["♠"],"西HCP=",hcp(w["西"]),"L1=",validate_level1(w,ac))
+from bridge.mcts.constraints import validate_hard
+print("初始西♠=",dist(w["西"])["♠"],"西HCP=",hcp(w["西"]),"hard=",validate_hard(w,ac))
 # 手动跑300步，打印每10步
 for step in range(300):
-    if validate_level1(w,ac):
+    if validate_hard(w,ac):
         print(f"step{step}: 满足! 西♠={dist(w['西'])['♠']} HCP={hcp(w['西'])}"); break
     prop=_propose_swap(w,ac,["西","东"])
     if prop is None:

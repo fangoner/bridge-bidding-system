@@ -3,7 +3,7 @@
 Phase 0a 重写：BeliefTracker 已移除（均匀采样不需要粒子加权）。
 保留 void 收集和信号证据收集两个工具函数。
 
-void 收集 → 用于均匀采样的 Level 0 验证（void 是硬事实）
+void 收集 → 用于均匀采样的仅 void 验证（void 是硬事实）
 信号收集 → 用于 LLM prompt 注入（不影响采样）
 """
 

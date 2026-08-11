@@ -317,6 +317,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     handleParticleChange,
     switchCards, switchCardsRange,
     handleSwitchCardsChange,
+    ddScoringMode, handleDdScoringModeChange,
     handleFallbackModelChange,
     handlePlayModelChange,
     checkApiStatus,
@@ -1447,7 +1448,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       contract.redoubled || contract.isRedouble || false,
       biddingStr,
       seqStr,
-      meaningLines
+      meaningLines,
+      vulnerability
     )
     if (!initResult.success) return { error: initResult.error }
 
@@ -1649,7 +1651,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         contract.doubled || contract.isDouble || false,
         contract.redoubled || contract.isRedouble || false,
         biddingStr,
-        seqStr
+        seqStr,
+        meaningLines,
+        vulnerability
       )
       if (!initResult.success) {
         console.error('重打初始化失败:', initResult.error)
@@ -1771,7 +1775,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         contract.isRedouble || false,
         biddingStr,
         seqStr,
-        meaningLines
+        meaningLines,
+        vulnerability
       )
 
       if (result.success) {
@@ -1937,7 +1942,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     
     try {
       const pm = parseModelValue(playModel)
-      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, switchCards, useLlmReview)
+      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, switchCards, useLlmReview, ddScoringMode)
       if (controller.signal.aborted) return
       console.log('[AI Play] engine:', result.used_engine, 'elapsed:', result.elapsed_ms + 'ms', 'model:', result.used_model)
 
@@ -2482,6 +2487,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         handleParticleChange={handleParticleChange}
         switchCards={switchCards} switchCardsRange={switchCardsRange}
         handleSwitchCardsChange={handleSwitchCardsChange}
+        ddScoringMode={ddScoringMode} handleDdScoringModeChange={handleDdScoringModeChange}
         dealSystem={dealSystem}
         setDealSystem={setDealSystem}
         dealMode={dealMode}

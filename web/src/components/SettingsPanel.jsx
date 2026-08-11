@@ -1,7 +1,7 @@
 import { memo, useState } from 'react'
 import {
-  Box, Typography, Paper, FormControl, InputLabel, Select, MenuItem,
-  Divider, TextField, useTheme, ToggleButton, ToggleButtonGroup
+  Box, Paper, FormControl, InputLabel, Select, MenuItem,
+  ToggleButton, ToggleButtonGroup, Tabs, Tab, Typography
 } from '@mui/material'
 import { parseModelValue } from '../hooks/useModelSettings'
 
@@ -91,7 +91,6 @@ const RangeSlider = memo(function RangeSlider({
 
 function SettingsPanel({
   showSettings,
-  isMobile = false,
   gameMode,
   setGameMode,
   fallbackModel,
@@ -110,6 +109,8 @@ function SettingsPanel({
   handleParticleChange,
   switchCards, switchCardsRange,
   handleSwitchCardsChange,
+  ddScoringMode,
+  handleDdScoringModeChange,
   dealSystem,
   setDealSystem,
   dealMode,
@@ -120,7 +121,7 @@ function SettingsPanel({
   vulnerability,
   setVulnerability,
 }) {
-  const theme = useTheme()
+  const [tab, setTab] = useState('bidding')
 
   // 完美DD：发牌练习模式直接可用，其他模式有四家完整手牌也可用
   const allHandsComplete = hands && ['南','北','东','西'].every(p => {
@@ -169,137 +170,150 @@ function SettingsPanel({
 
   if (!showSettings) return null
 
+  // 计分制仅对用到 DD 决策的引擎生效（纯 DD 与 DD-αμ-LLM 中盘）
+  const ddScoringVisible = playEngine === 'dd' || playEngine === 'dd_alphamu_llm'
+
   return (
-    <Paper elevation={2} sx={{ p: { xs: 2, md: 3 }, mb: 3, width: '100%' }}>
-      <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', flexWrap: 'nowrap', gap: isMobile ? 1.5 : 1.5, alignItems: 'flex-start' }}>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, flexShrink: 0 }}>
-          <Typography variant="h6" sx={{ fontSize: '0.85rem' }}>
-            叫牌设置
-          </Typography>
-          <Box sx={{ display: 'flex', flexWrap: isMobile ? 'wrap' : 'nowrap', gap: 1, alignItems: 'center' }}>
-            <FormControl sx={{ minWidth: 80 }} size="small">
-              <InputLabel>模式</InputLabel>
-              <Select value={gameMode} label="模式" onChange={(e) => setGameMode(e.target.value)}>
-                <MenuItem value="four">四人</MenuItem>
-                <MenuItem value="pair">双人</MenuItem>
-              </Select>
-            </FormControl>
+    <Paper elevation={2} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, width: '100%' }}>
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" allowScrollButtonsMobile
+        sx={{ minHeight: 34, mb: 1.5, '& .MuiTab-root': { minHeight: 34, fontSize: '0.8rem', py: 0 } }}>
+        <Tab value="bidding" label="叫牌设置" />
+        <Tab value="playing" label="打牌设置" />
+        <Tab value="dealing" label="发牌设置" />
+      </Tabs>
 
-            <ModelSelector
-              label="模型"
-              parsed={biddingParsed}
-              onModelChange={onBiddingModelChange}
-              onReasoningChange={onBiddingReasoningChange}
-              models={visibleModels}
-            />
+      {/* ── 叫牌设置 ── */}
+      {tab === 'bidding' && (
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+          <FormControl sx={{ minWidth: 80 }} size="small">
+            <InputLabel>模式</InputLabel>
+            <Select value={gameMode} label="模式" onChange={(e) => setGameMode(e.target.value)}>
+              <MenuItem value="four">四人</MenuItem>
+              <MenuItem value="pair">双人</MenuItem>
+            </Select>
+          </FormControl>
 
-            <FormControl sx={{ minWidth: 140 }} size="small">
-              <InputLabel>阻击叫牌体系</InputLabel>
-              <Select value={dealSystem} label="阻击叫牌体系" onChange={(e) => setDealSystem(e.target.value)}>
-                <MenuItem value="自然阻击">自然阻击</MenuItem>
-                <MenuItem value="2D：多功能，2H/S：麦德伯格，2NT：双低花">多功能/麦德伯格</MenuItem>
-              </Select>
-            </FormControl>
+          <ModelSelector
+            label="模型"
+            parsed={biddingParsed}
+            onModelChange={onBiddingModelChange}
+            onReasoningChange={onBiddingReasoningChange}
+            models={visibleModels}
+          />
 
-            <FormControl sx={{ minWidth: 100 }} size="small">
-              <InputLabel>局况</InputLabel>
-              <Select value={vulnerability} label="局况" onChange={(e) => setVulnerability(e.target.value)}>
-                <MenuItem value="NV">双无局</MenuItem>
-                <MenuItem value="NS">南北有局</MenuItem>
-                <MenuItem value="EW">东西有局</MenuItem>
-                <MenuItem value="All">双有局</MenuItem>
-              </Select>
-            </FormControl>
-          </Box>
+          <FormControl sx={{ minWidth: 140 }} size="small">
+            <InputLabel>阻击叫牌体系</InputLabel>
+            <Select value={dealSystem} label="阻击叫牌体系" onChange={(e) => setDealSystem(e.target.value)}>
+              <MenuItem value="自然阻击">自然阻击</MenuItem>
+              <MenuItem value="2D：多功能，2H/S：麦德伯格，2NT：双低花">多功能/麦德伯格</MenuItem>
+            </Select>
+          </FormControl>
+
+          <FormControl sx={{ minWidth: 100 }} size="small">
+            <InputLabel>局况</InputLabel>
+            <Select value={vulnerability} label="局况" onChange={(e) => setVulnerability(e.target.value)}>
+              <MenuItem value="NV">双无局</MenuItem>
+              <MenuItem value="NS">南北有局</MenuItem>
+              <MenuItem value="EW">东西有局</MenuItem>
+              <MenuItem value="All">双有局</MenuItem>
+            </Select>
+          </FormControl>
         </Box>
+      )}
 
-        <Divider orientation={isMobile ? 'horizontal' : 'vertical'} flexItem sx={{ borderColor: theme.palette.divider, flexShrink: 0, width: isMobile ? '100%' : undefined }} />
+      {/* ── 打牌设置 ── */}
+      {tab === 'playing' && (
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+          <ModelSelector
+            label="模型"
+            parsed={playParsed}
+            onModelChange={onPlayModelChange}
+            onReasoningChange={onPlayReasoningChange}
+            disabled={playEngine !== 'llm' && playEngine !== 'dd_alphamu_llm'}
+            models={visibleModels}
+          />
 
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, flexShrink: 0 }}>
-          <Typography variant="h6" sx={{ fontSize: '0.85rem' }}>
-            打牌设置
-          </Typography>
-          <Box sx={{ display: 'flex', flexWrap: isMobile ? 'wrap' : 'nowrap', gap: 1, alignItems: 'center' }}>
-            <ModelSelector
-              label="模型"
-              parsed={playParsed}
-              onModelChange={onPlayModelChange}
-              onReasoningChange={onPlayReasoningChange}
-              disabled={playEngine !== 'llm' && playEngine !== 'dd_alphamu_llm'}
-              models={visibleModels}
-            />
+          <FormControl size="small" sx={{ minWidth: 90 }}>
+            <InputLabel>打牌引擎</InputLabel>
+            <Select
+              value={playEngine}
+              onChange={(e) => handlePlayEngineChange(e.target.value)}
+              label="打牌引擎"
+            >
+              <MenuItem value="dd_alphamu_llm">DD-αμ-LLM</MenuItem>
+              <MenuItem value="llm">LLM</MenuItem>
+              <MenuItem value="mcts">MCTS</MenuItem>
+              <MenuItem value="dd">DD</MenuItem>
+              <MenuItem value="perfect" disabled={mode !== 'practice' && !allHandsComplete} title={mode !== 'practice' && !allHandsComplete ? '完美DD需要四家完整手牌，暂不可用' : ''}>完美DD</MenuItem>
+              <MenuItem value="alphamu">αμ</MenuItem>
+            </Select>
+          </FormControl>
 
-            <FormControl size="small" sx={{ minWidth: 90 }}>
-              <InputLabel>打牌引擎</InputLabel>
+          {ddScoringVisible && (
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>计分制</InputLabel>
               <Select
-                value={playEngine}
-                onChange={(e) => handlePlayEngineChange(e.target.value)}
-                label="打牌引擎"
+                value={ddScoringMode}
+                label="计分制"
+                onChange={(e) => handleDdScoringModeChange(e.target.value)}
               >
-                <MenuItem value="dd_alphamu_llm">DD-αμ-LLM</MenuItem>
-                <MenuItem value="llm">LLM</MenuItem>
-                <MenuItem value="mcts">MCTS</MenuItem>
-                <MenuItem value="dd">DD</MenuItem>
-                <MenuItem value="perfect" disabled={mode !== 'practice' && !allHandsComplete} title={mode !== 'practice' && !allHandsComplete ? '完美DD需要四家完整手牌，暂不可用' : ''}>完美DD</MenuItem>
-                <MenuItem value="alphamu">αμ</MenuItem>
+                <MenuItem value="imp">IMP（期望分）</MenuItem>
+                <MenuItem value="make_rate">做成率</MenuItem>
+                <MenuItem value="avg_tricks">平均赢墩</MenuItem>
               </Select>
             </FormControl>
-            {playEngine === 'dd' && (
-              <RangeSlider label="样本数" value={ddSampleCount}
-                min={ddParticlesRange.min} max={ddParticlesRange.max} step={250} width={72}
-                onCommit={handleDDSampleCountChange} />
-            )}
-            {playEngine === 'dd_alphamu_llm' && (
-              <>
-                <RangeSlider label="分界" value={switchCards}
-                  min={switchCardsRange.min} max={switchCardsRange.max} step={1} width={60}
-                  onCommit={handleSwitchCardsChange} />
-                <ToggleButtonGroup
-                  value={useLlmReview ? 'on' : 'off'}
-                  exclusive
-                  onChange={(_, v) => v && handleLlmReviewChange(v === 'on')}
-                  size="small"
-                  sx={{
-                    '& .MuiToggleButton-root': { px: 1, py: 0.2, fontSize: '0.65rem', textTransform: 'none', minWidth: 40 },
-                  }}
-                >
-                  <ToggleButton value="off">纯引擎</ToggleButton>
-                  <ToggleButton value="on">LLM审查</ToggleButton>
-                </ToggleButtonGroup>
-              </>
-            )}
-            {playEngine === 'alphamu' && (
-              <RangeSlider label="世界数" value={alphaMuParticles}
-                min={alphaMuParticlesRange.min} max={alphaMuParticlesRange.max} step={5} width={72}
-                onCommit={(v) => handleParticleChange('alphaMu', v)} />
-            )}
-            {playEngine === 'mcts' && (
-              <RangeSlider label="样本数" value={mctsParticles}
-                min={mctsParticlesRange.min} max={mctsParticlesRange.max} step={10} width={72}
-                onCommit={(v) => handleParticleChange('mcts', v)} />
-            )}
-          </Box>
+          )}
+
+          {playEngine === 'dd' && (
+            <RangeSlider label="样本数" value={ddSampleCount}
+              min={ddParticlesRange.min} max={ddParticlesRange.max} step={250} width={72}
+              onCommit={handleDDSampleCountChange} />
+          )}
+          {playEngine === 'dd_alphamu_llm' && (
+            <>
+              <RangeSlider label="分界" value={switchCards}
+                min={switchCardsRange.min} max={switchCardsRange.max} step={1} width={60}
+                onCommit={handleSwitchCardsChange} />
+              <ToggleButtonGroup
+                value={useLlmReview ? 'on' : 'off'}
+                exclusive
+                onChange={(_, v) => v && handleLlmReviewChange(v === 'on')}
+                size="small"
+                sx={{
+                  '& .MuiToggleButton-root': { px: 1, py: 0.2, fontSize: '0.65rem', textTransform: 'none', minWidth: 40 },
+                }}
+              >
+                <ToggleButton value="off">纯引擎</ToggleButton>
+                <ToggleButton value="on">LLM审查</ToggleButton>
+              </ToggleButtonGroup>
+            </>
+          )}
+          {playEngine === 'alphamu' && (
+            <RangeSlider label="世界数" value={alphaMuParticles}
+              min={alphaMuParticlesRange.min} max={alphaMuParticlesRange.max} step={5} width={72}
+              onCommit={(v) => handleParticleChange('alphaMu', v)} />
+          )}
+          {playEngine === 'mcts' && (
+            <RangeSlider label="样本数" value={mctsParticles}
+              min={mctsParticlesRange.min} max={mctsParticlesRange.max} step={10} width={72}
+              onCommit={(v) => handleParticleChange('mcts', v)} />
+          )}
         </Box>
+      )}
 
-        <Divider orientation={isMobile ? 'horizontal' : 'vertical'} flexItem sx={{ borderColor: theme.palette.divider, flexShrink: 0, width: isMobile ? '100%' : undefined }} />
-
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, flexShrink: 0 }}>
-          <Typography variant="h6" sx={{ fontSize: '0.85rem' }}>
-            发牌设置
-          </Typography>
-          <Box sx={{ display: 'flex', flexWrap: isMobile ? 'wrap' : 'nowrap', gap: 1, alignItems: 'center' }}>
-            <FormControl sx={{ minWidth: 80 }} size="small">
-              <InputLabel>发牌</InputLabel>
-              <Select value={dealMode} label="发牌" onChange={(e) => setDealMode(e.target.value)}>
-                <MenuItem value="free">自由</MenuItem>
-                <MenuItem value="game">进局</MenuItem>
-                <MenuItem value="slam">满贯</MenuItem>
-              </Select>
-            </FormControl>
-
-          </Box>
+      {/* ── 发牌设置 ── */}
+      {tab === 'dealing' && (
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+          <FormControl sx={{ minWidth: 80 }} size="small">
+            <InputLabel>发牌</InputLabel>
+            <Select value={dealMode} label="发牌" onChange={(e) => setDealMode(e.target.value)}>
+              <MenuItem value="free">自由</MenuItem>
+              <MenuItem value="game">进局</MenuItem>
+              <MenuItem value="slam">满贯</MenuItem>
+            </Select>
+          </FormControl>
         </Box>
-      </Box>
+      )}
     </Paper>
   )
 }
