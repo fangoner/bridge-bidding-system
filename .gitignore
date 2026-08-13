@@ -54,6 +54,9 @@ Deep Finesse 2014 v2/
 bidding_history.json
 ~$*.docx
 
+# 临时归档目录（未跟踪杂物暂存，一个月后未使用则清理）
+_tmp_archive_20260813/
+
 # DDS debug dumps and backups
 dump.txt
 api/dump.txt
