@@ -115,11 +115,11 @@ function SettingsPanel({
   setDealSystem,
   dealMode,
   setDealMode,
+  humanBidInterpret,
+  setHumanBidInterpret,
   mode,
   hands,
   availableModels,
-  vulnerability,
-  setVulnerability,
 }) {
   const [tab, setTab] = useState('bidding')
 
@@ -209,15 +209,18 @@ function SettingsPanel({
             </Select>
           </FormControl>
 
-          <FormControl sx={{ minWidth: 100 }} size="small">
-            <InputLabel>局况</InputLabel>
-            <Select value={vulnerability} label="局况" onChange={(e) => setVulnerability(e.target.value)}>
-              <MenuItem value="NV">双无局</MenuItem>
-              <MenuItem value="NS">南北有局</MenuItem>
-              <MenuItem value="EW">东西有局</MenuItem>
-              <MenuItem value="All">双有局</MenuItem>
-            </Select>
-          </FormControl>
+          <ToggleButtonGroup
+            value={humanBidInterpret ? 'on' : 'off'}
+            exclusive
+            onChange={(_, v) => v && setHumanBidInterpret(v === 'on')}
+            size="small"
+            sx={{
+              '& .MuiToggleButton-root': { px: 1, py: 0.2, fontSize: '0.65rem', textTransform: 'none', minWidth: 44 },
+            }}
+          >
+            <ToggleButton value="off">关AI解释</ToggleButton>
+            <ToggleButton value="on">AI解释</ToggleButton>
+          </ToggleButtonGroup>
         </Box>
       )}
 

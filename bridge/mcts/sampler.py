@@ -41,29 +41,12 @@ def _extract_known_info(state: "PlayState", perspective: str) -> dict:
     dummy = state.dummy
     is_declarer_side = perspective in (declarer, dummy)
 
-    # 1. 收集已知牌张
-    known_cards: Set[Card] = set()
-    own_hand = state.hands.get(perspective, [])
-    known_cards.update(own_hand)
-
-    if is_declarer_side and dummy:
-        known_cards.update(state.hands.get(declarer, []))
-        known_cards.update(state.hands.get(dummy, []))
-    elif dummy and perspective != dummy:
-        if state.phase != PlayPhase.LEAD:
-            known_cards.update(state.hands.get(dummy, []))
-
-    # 已出牌张
-    for trick in state.tricks:
-        for _, card in trick.cards:
-            known_cards.add(card)
-    for _, card in state.current_trick.cards:
-        known_cards.add(card)
-
-    # 1.5 检测并修复重复牌（与旧版一致）
+    # 1. 收集已知牌张（在局部副本上去重，不写回调用方的 state.hands，
+    #    避免此处去重使 DD 引擎先前算好的 playable 失效，导致返回"非法牌"）
+    cleaned_hands = {pos: list(hand) for pos, hand in state.hands.items()}
     all_hand_cards = {}
     for pos in POSITION_ORDER:
-        hand = state.hands.get(pos, [])
+        hand = cleaned_hands.get(pos, [])
         seen_in_this_pos = set()
         cleaned = []
         for c in hand:
@@ -79,8 +62,25 @@ def _extract_known_info(state: "PlayState", perspective: str) -> dict:
                 seen_in_this_pos.add(key)
                 all_hand_cards[key] = pos
                 cleaned.append(c)
-        if len(cleaned) != len(hand):
-            state.hands[pos] = cleaned
+        cleaned_hands[pos] = cleaned
+
+    known_cards: Set[Card] = set()
+    own_hand = cleaned_hands.get(perspective, [])
+    known_cards.update(own_hand)
+
+    if is_declarer_side and dummy:
+        known_cards.update(cleaned_hands.get(declarer, []))
+        known_cards.update(cleaned_hands.get(dummy, []))
+    elif dummy and perspective != dummy:
+        if state.phase != PlayPhase.LEAD:
+            known_cards.update(cleaned_hands.get(dummy, []))
+
+    # 已出牌张
+    for trick in state.tricks:
+        for _, card in trick.cards:
+            known_cards.add(card)
+    for _, card in state.current_trick.cards:
+        known_cards.add(card)
 
     # 2. 计算每家剩余张数
     total_completed = state.declarer_tricks + state.defender_tricks
@@ -98,14 +98,14 @@ def _extract_known_info(state: "PlayState", perspective: str) -> dict:
     result = {}
     if is_declarer_side and dummy:
         for pos in (declarer, dummy):
-            hand = state.hands.get(pos, [])
+            hand = cleaned_hands.get(pos, [])
             if hand:
                 result[pos] = [Card(suit=c.suit, rank=c.rank) for c in hand]
     else:
         if own_hand:
             result[perspective] = [Card(suit=c.suit, rank=c.rank) for c in own_hand]
         if dummy and state.phase != PlayPhase.LEAD:
-            hand = state.hands.get(dummy, [])
+            hand = cleaned_hands.get(dummy, [])
             if hand:
                 result[dummy] = [Card(suit=c.suit, rank=c.rank) for c in hand]
 
@@ -163,7 +163,7 @@ def _extract_known_info(state: "PlayState", perspective: str) -> dict:
         "remaining_counts": remaining_counts,
         "known_voids": known_voids,
         "own_hand": own_hand,
-        "dummy_hand": state.hands.get(dummy, []) if dummy else [],
+        "dummy_hand": cleaned_hands.get(dummy, []) if dummy else [],
         "result": result,
         "played": played_stats,
     }

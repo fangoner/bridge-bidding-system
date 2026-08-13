@@ -1,11 +1,12 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 
 // Game 域：牌局/手牌/发牌/设置相关状态
 export const GameContext = createContext(null)
 
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
 const PLAY_MODEL_KEY = 'bridge_play_model'
+const HUMAN_BID_INTERPRET_KEY = 'bridge_human_bid_interpret'
 
 export function useGame() {
   const ctx = useContext(GameContext)
@@ -43,6 +44,15 @@ export function GameProvider({ children }) {
   const [dealMode, setDealMode] = useState('free') // free/game/slam
   const [showSettings, setShowSettings] = useState(false)
   const [dealSystem, setDealSystem] = useState('2D/2H/2S：自然阻击')
+  // 人类叫牌时是否调用AI解释该叫品含义（关闭可显著加快叫牌速度）
+  const [humanBidInterpret, setHumanBidInterpret] = useState(() => {
+    try {
+      const v = localStorage.getItem(HUMAN_BID_INTERPRET_KEY)
+      return v === null ? true : v === 'true'
+    } catch {
+      return true
+    }
+  })
 
   // ── 模型配置（localStorage 持久化）──
   const [fallbackModel, setFallbackModelState] = useState(() => {
@@ -72,6 +82,11 @@ export function GameProvider({ children }) {
   const [mode, setMode] = useState('practice') // 'practice' | 'simulated'
   const [readonlyMode, setReadonlyMode] = useState(false)
 
+  // 人类叫牌AI解释开关持久化
+  useEffect(() => {
+    try { localStorage.setItem(HUMAN_BID_INTERPRET_KEY, String(humanBidInterpret)) } catch {/* empty */}
+  }, [humanBidInterpret])
+
   const value = useMemo(
     () => ({
       hands, setHands,
@@ -91,6 +106,7 @@ export function GameProvider({ children }) {
       dealMode, setDealMode,
       showSettings, setShowSettings,
       dealSystem, setDealSystem,
+      humanBidInterpret, setHumanBidInterpret,
       fallbackModel, setFallbackModelState,
       playModel, setPlayModelState,
       apiStatus, setApiStatus,
@@ -109,6 +125,7 @@ export function GameProvider({ children }) {
       gameMode, dealer, vulnerability, practiceDirection, positionRoles,
       showPartnerHand, showOpponentHands, showAIBiddingOutput, useFallback,
       dealMode, showSettings, dealSystem,
+      humanBidInterpret,
       fallbackModel, playModel,
       apiStatus, currentRecordId, showDraftBanner,
       customDealOpen, imageDealOpen, imagePath, imageFile,

@@ -12,6 +12,8 @@ import re
 import json
 import time
 import copy
+import threading
+import asyncio
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
 import traceback
@@ -1439,16 +1441,53 @@ async def double_dummy_analysis(request: DoubleDummyRequest):
 from bridge.play_types import Card, Contract, PlayPhase
 from bridge.play_service import PlayService
 
-# 全局打牌服务实例
-play_service = None
+# ── 打牌服务会话隔离（方案A）──
+# PlayService 每会话独立实例，避免多用户/多局并发互相覆盖共享 state.hands（窜牌根因）。
+# LLM client 复用全局 get_llm_client()，不随会话新建，性能开销可忽略。
+_play_services_lock = threading.Lock()
+_play_services = {}  # session_id -> (PlayService, last_access_ts)
+_PLAY_SESSION_TTL = 3600  # 会话空闲 1 小时自动回收
+_session_cleanup_task = None
 
 
-def get_play_service():
-    global play_service
-    if play_service is None:
-        current_llm_client = get_llm_client()
-        play_service = PlayService(current_llm_client)
-    return play_service
+def get_play_service(session_id: str = "default"):
+    """按会话获取 PlayService，不存在则新建；LLM client 复用全局 get_llm_client()。"""
+    now = time.time()
+    with _play_services_lock:
+        entry = _play_services.get(session_id)
+        if entry is None:
+            service = PlayService(get_llm_client())
+        else:
+            service, _ = entry
+        _play_services[session_id] = (service, now)
+        return service
+
+
+def _sweep_expired_sessions():
+    now = time.time()
+    expired = [sid for sid, (_, ts) in _play_services.items() if now - ts > _PLAY_SESSION_TTL]
+    for sid in expired:
+        _play_services.pop(sid, None)
+
+
+async def _session_cleanup_loop():
+    while True:
+        await asyncio.sleep(300)
+        with _play_services_lock:
+            _sweep_expired_sessions()
+
+
+@app.on_event("startup")
+async def _start_session_cleanup():
+    global _session_cleanup_task
+    _session_cleanup_task = asyncio.create_task(_session_cleanup_loop())
+
+
+@app.on_event("shutdown")
+async def _stop_session_cleanup():
+    global _session_cleanup_task
+    if _session_cleanup_task:
+        _session_cleanup_task.cancel()
 
 
 class PlayInitRequest(BaseModel):
@@ -1462,6 +1501,7 @@ class PlayInitRequest(BaseModel):
     bid_history: Optional[str] = None  # 叫牌序列，用于MCTS约束采样
     bid_meanings: Optional[str] = None  # 叫牌含义文本，复用LLM已分析信息
     vulnerability: Optional[str] = None  # 局况: "NV"/"NS"/"EW"/"All"
+    session_id: str = "default"  # 打牌会话隔离标识
 
 
 class PlayInitResponse(BaseModel):
@@ -1478,7 +1518,7 @@ class PlayInitResponse(BaseModel):
 async def play_init(request: PlayInitRequest):
     """初始化打牌"""
     try:
-        service = get_play_service()
+        service = get_play_service(request.session_id)
         state = service.initialize(
             hands=request.hands,
             contract_str=request.contract,
@@ -1512,6 +1552,7 @@ async def play_init(request: PlayInitRequest):
 class PlayCardRequest(BaseModel):
     position: str
     card: dict  # {"suit": "♠", "rank": "A"}
+    session_id: str = "default"
 
 
 class PlayCardResponse(BaseModel):
@@ -1531,7 +1572,7 @@ class PlayCardResponse(BaseModel):
 async def play_card(request: PlayCardRequest):
     """出牌"""
     try:
-        service = get_play_service()
+        service = get_play_service(request.session_id)
 
         state_before = service.get_state()
         tricks_before = len(state_before.tricks) if state_before else 0
@@ -1598,10 +1639,10 @@ class PlayUndoResponse(BaseModel):
 
 
 @app.post("/api/play/undo", response_model=PlayUndoResponse)
-async def undo_play():
+async def undo_play(session_id: str = Query("default")):
     """撤销最近一次出牌"""
     try:
-        service = get_play_service()
+        service = get_play_service(session_id)
         success, message = service.undo_last_card()
         
         state = service.get_state()
@@ -1631,11 +1672,13 @@ class PlayAIRequest(BaseModel):
     dd_alphamu_switch_cards: Optional[int] = None  # DD-αμ-LLM 引擎中盘/残局切换分界
     dd_scoring_mode: Optional[str] = None  # DD 决策计分制: "imp" | "make_rate" | "avg_tricks"
     use_llm_review: bool = False  # DD-αμ-LLM 引擎是否启用 LLM 分组审查（默认关闭）
+    session_id: str = "default"
 
 
 class SetHandRequest(BaseModel):
     position: str
     hand: dict
+    session_id: str = "default"
 
 
 class SetHandResponse(BaseModel):
@@ -1649,7 +1692,7 @@ class SetHandResponse(BaseModel):
 async def set_play_hand(request: SetHandRequest):
     """设置一家的手牌（如首攻后输入明手整手牌）"""
     try:
-        service = get_play_service()
+        service = get_play_service(request.session_id)
         success, message = service.set_hand(request.position, request.hand)
         return SetHandResponse(
             success=success,
@@ -1682,7 +1725,7 @@ class PlayAIResponse(BaseModel):
 async def ai_play(request: PlayAIRequest):
     """AI出牌"""
     try:
-        service = get_play_service()
+        service = get_play_service(request.session_id)
 
         # 临时切换打牌模型（不影响叫牌模型）
         pm_raw = request.play_model or ""
@@ -1798,6 +1841,7 @@ async def ai_play(request: PlayAIRequest):
 
 class UpdatePlayerRolesRequest(BaseModel):
     player_roles: Dict[str, str]
+    session_id: str = "default"
 
 
 class UpdatePlayerRolesResponse(BaseModel):
@@ -1811,7 +1855,7 @@ class UpdatePlayerRolesResponse(BaseModel):
 async def update_player_roles(request: UpdatePlayerRolesRequest):
     """更新打牌阶段的玩家角色"""
     try:
-        service = get_play_service()
+        service = get_play_service(request.session_id)
         success = service.update_player_roles(request.player_roles)
         
         if not success:
@@ -1843,10 +1887,10 @@ class PlayStateResponse(BaseModel):
 
 
 @app.get("/api/play/state", response_model=PlayStateResponse)
-async def get_play_state():
+async def get_play_state(session_id: str = Query("default")):
     """获取当前打牌状态"""
     try:
-        service = get_play_service()
+        service = get_play_service(session_id)
         state = service.get_state()
         
         if not state:
@@ -2039,10 +2083,10 @@ def _record_dd_hint_async(state_before_snapshot, target_trick):
 
 
 @app.get("/api/play/dd-hints")
-async def get_dd_hints():
+async def get_dd_hints(session_id: str = Query("default")):
     """获取当前人类玩家可选牌的完美DD结果提示（基于剩余手牌）"""
     try:
-        service = get_play_service()
+        service = get_play_service(session_id)
         state = service.get_state()
         if not state:
             return {"success": False, "error": "打牌未初始化"}
@@ -2207,12 +2251,13 @@ class ParticleSettingsRequest(BaseModel):
     dd_particles: Optional[int] = None       # DD 样本数
     mcts_particles: Optional[int] = None     # MCTS 迭代数
     alpha_mu_particles: Optional[int] = None # αμ world数
+    session_id: str = "default"
 
 
 @app.get("/api/play/particle-settings")
-async def get_particle_settings():
+async def get_particle_settings(session_id: str = Query("default")):
     """获取当前采样/W数设置"""
-    service = get_play_service()
+    service = get_play_service(session_id)
     dd_val = service.dd_search.num_samples
     mcts_val = service.mcts.iterations
     amu_val = service.alpha_mu_search.num_worlds if service.alpha_mu_search else ALPHA_MU_NUM_WORLDS
@@ -2232,7 +2277,7 @@ async def get_particle_settings():
 @app.post("/api/play/particle-settings")
 async def set_particle_settings(request: ParticleSettingsRequest):
     """设置 DD样本数 / αμ world数（实时生效）"""
-    service = get_play_service()
+    service = get_play_service(request.session_id)
     updates = {}
     if request.dd_particles is not None:
         val = max(DD_PARTICLES_MIN, min(DD_PARTICLES_MAX, request.dd_particles))

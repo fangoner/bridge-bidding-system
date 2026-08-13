@@ -118,6 +118,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     dealMode, setDealMode,
     showSettings, setShowSettings,
     dealSystem, setDealSystem,
+    humanBidInterpret, setHumanBidInterpret,
     fallbackModel,
     playModel,
     apiStatus,
@@ -801,6 +802,15 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           timestamp: makeBidTimestamp()
         }])
         setCustomBidMeaning('') // 清空输入框
+      } else if (!humanBidInterpret) {
+        // 关闭AI解释：直接以叫品本身作为含义，不调用API（加快叫牌速度）
+        setAiBiddingHistory(prev => [...prev, {
+          position: currentBidder,
+          hand: hands[currentBidder],
+          biddingSequence: biddingStr,
+          result: { bid: bid, meaning: bid },
+          timestamp: makeBidTimestamp()
+        }])
       } else {
         // 没有自定义含义，调用API获取（传递数组，后端处理格式）
         setCurrentBiddingPosition(currentBidder)
@@ -2492,8 +2502,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         setDealSystem={setDealSystem}
         dealMode={dealMode}
         setDealMode={setDealMode}
-        vulnerability={vulnerability}
-        setVulnerability={setVulnerability}
+        humanBidInterpret={humanBidInterpret}
+        setHumanBidInterpret={setHumanBidInterpret}
         loading={loading}
         mode={mode}
         hands={hands}

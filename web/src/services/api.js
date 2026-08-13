@@ -244,6 +244,10 @@ export const doubleDummyAnalysis = async (hands) => {
 
 // ==================== 打牌相关API ====================
 
+// 打牌会话标识：每个浏览器标签页/用户独立一个后端 PlayService 会话，
+// 避免多用户/多局并发互相覆盖共享状态（窜牌根因）。
+const PLAY_SESSION_ID = `play_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
 // 初始化打牌
 export const playInit = async (hands, contract, declarer, playerRoles = null, doubled = false, redoubled = false, biddingSequence = null, bidHistory = '', bidMeanings = '', vulnerability = null) => {
   try {
@@ -258,6 +262,7 @@ export const playInit = async (hands, contract, declarer, playerRoles = null, do
       bid_history: bidHistory,
       bid_meanings: bidMeanings,
       vulnerability,
+      session_id: PLAY_SESSION_ID,
     });
     return response.data;
   } catch (error) {
@@ -272,6 +277,7 @@ export const playCard = async (position, card) => {
     const response = await api.post('/api/play/card', {
       position,
       card,
+      session_id: PLAY_SESSION_ID,
     });
     return response.data;
   } catch (error) {
@@ -283,7 +289,7 @@ export const playCard = async (position, card) => {
 // 撤销出牌
 export const undoPlay = async () => {
   try {
-    const response = await api.post('/api/play/undo');
+    const response = await api.post('/api/play/undo', null, { params: { session_id: PLAY_SESSION_ID } });
     return response.data;
   } catch (error) {
     console.error('撤销出牌失败:', error);
@@ -297,6 +303,7 @@ export const aiPlay = async (playModel = null, useReasoning = false, playEngine 
     const requestData = {
       use_reasoning: useReasoning,
       use_llm_review: useLlmReview,
+      session_id: PLAY_SESSION_ID,
     };
 
     if (playModel) {
@@ -334,6 +341,7 @@ export const updatePlayPlayerRoles = async (playerRoles) => {
   try {
     const response = await api.post('/api/play/update-roles', {
       player_roles: playerRoles,
+      session_id: PLAY_SESSION_ID,
     });
     return response.data;
   } catch (error) {
@@ -345,7 +353,7 @@ export const updatePlayPlayerRoles = async (playerRoles) => {
 // 获取打牌状态
 export const getPlayState = async () => {
   try {
-    const response = await api.get('/api/play/state');
+    const response = await api.get('/api/play/state', { params: { session_id: PLAY_SESSION_ID } });
     return response.data;
   } catch (error) {
     console.error('获取打牌状态失败:', error);
@@ -359,6 +367,7 @@ export const setPlayHand = async (position, hand) => {
     const response = await api.post('/api/play/set-hand', {
       position,
       hand,
+      session_id: PLAY_SESSION_ID,
     });
     return response.data;
   } catch (error) {
@@ -370,7 +379,7 @@ export const setPlayHand = async (position, hand) => {
 // 获取DD出牌提示（完美双明手分析）
 export const getDDHints = async () => {
   try {
-    const response = await api.get('/api/play/dd-hints');
+    const response = await api.get('/api/play/dd-hints', { params: { session_id: PLAY_SESSION_ID } });
     return response.data;
   } catch (error) {
     console.error('获取DD提示失败:', error);
@@ -395,7 +404,7 @@ export const getDDHintsReview = async (playState, cursor) => {
 // 获取粒子数设置
 export const getParticleSettings = async () => {
   try {
-    const response = await api.get('/api/play/particle-settings');
+    const response = await api.get('/api/play/particle-settings', { params: { session_id: PLAY_SESSION_ID } });
     return response.data;
   } catch (error) {
     console.error('获取粒子设置失败:', error);
@@ -406,7 +415,7 @@ export const getParticleSettings = async () => {
 // 设置粒子数
 export const setParticleSettings = async (settings) => {
   try {
-    const response = await api.post('/api/play/particle-settings', settings);
+    const response = await api.post('/api/play/particle-settings', { ...settings, session_id: PLAY_SESSION_ID });
     return response.data;
   } catch (error) {
     console.error('设置粒子数失败:', error);
