@@ -6,6 +6,42 @@ import { useGame } from '../context/GameContext'
 import { useBidding } from '../context/BiddingContext'
 import { usePlay } from '../context/PlayContext'
 
+// ── 浏览器直读剪贴板图片（v1.62）──
+// 用户截图后剪贴板有图，前端（运行在用户桌面会话里的浏览器）直接读取，
+// 绕开"后端读剪贴板"——后端若由沙箱托管，读不到用户桌面的剪贴板（window station 隔离）。
+// 返回 File 或 null；剪贴板权限被拒时抛 PERMISSION_DENIED。
+const readClipboardImageFromBrowser = async () => {
+  try {
+    if (!navigator.clipboard?.read) return null
+    const items = await navigator.clipboard.read()
+    for (const item of items) {
+      const imgType = (item.types || []).find(t => t.startsWith('image/'))
+      if (!imgType) continue
+      const blob = await item.getType(imgType)
+      return new File([blob], `clipboard_${Date.now()}.png`, { type: imgType })
+    }
+    return null
+  } catch (err) {
+    if (err?.name === 'NotAllowedError' || err?.name === 'SecurityError') {
+      throw new Error('PERMISSION_DENIED')
+    }
+    return null
+  }
+}
+
+// 图片内容指纹：用于区分"触发截屏前已存在的旧图"与"用户刚截的新图"
+const contentKey = async (file) => {
+  try {
+    const buf = await file.arrayBuffer()
+    const arr = new Uint8Array(buf)
+    let hash = 0
+    for (let i = 0; i < arr.length; i++) hash = (hash * 31 + arr[i]) >>> 0
+    return `${hash}:${arr.length}`
+  } catch {
+    return `${file.size}:${file.name}`
+  }
+}
+
 // 解析后端返回的叫牌序列字符串为 biddingSequence 数组
 // 格式: "(北)pass-(东)pass-(南)1NT-(西)pass-..."
 export function parseBiddingSequenceStr(biddingStr) {
@@ -244,33 +280,56 @@ export function useDealing({ clearBiddingDraft }) {
     if (setShowSettings) setShowSettings(false)
     setLoading(true)
     screenshotCancelledRef.current = false
-    setError('截屏已触发，请在截屏工具中选择区域后等待识别...')
+    setError('请截图：按 Win+Shift+S 选择区域（或等系统截图工具弹出）。首次使用浏览器会询问"允许读取剪贴板"，请允许')
     setWarning(null)
     try {
-      const result = await triggerScreenshot()
-      if (!result.success) {
-        setError(result.message || '触发截屏失败')
-        setLoading(false)
-        return
+      // 尝试触发系统截图工具（后端跑在用户桌面时有效；沙箱托管时弹不出，用户手动 Win+Shift+S 即可）
+      triggerScreenshot().catch(() => {})
+      // 手势内首次读取：触发浏览器剪贴板权限请求，并记录触发前已有的旧图（避免误识别旧内容）
+      let prevKey = null
+      try {
+        const warmFile = await readClipboardImageFromBrowser()
+        if (warmFile) prevKey = await contentKey(warmFile)
+      } catch {
+        // 权限被拒：提示并继续（后端兜底或用户允许后重试）
       }
-      // 轮询读取剪贴板，每2秒一次，最多10次
+      // 轮询读取剪贴板：优先浏览器直读（绕开沙箱后端剪贴板隔离），后端接口兜底
       let data = null
+      let permissionDenied = false
       for (let i = 0; i < 10; i++) {
         await new Promise(resolve => setTimeout(resolve, 2000))
         if (screenshotCancelledRef.current) {
           setLoading(false)
           return
         }
+        // 1) 浏览器直读剪贴板 → 上传识别（image-deal 接口不依赖后端剪贴板）
         try {
-          const resp = await readClipboardDeal()
-          if (resp.success) { data = resp; break }
-        } catch {
-          // 剪贴板还没有图片，继续等待
+          const file = await readClipboardImageFromBrowser()
+          if (file) {
+            const key = await contentKey(file)
+            if (key !== prevKey) {
+              const resp = await imageDeal(file)
+              if (resp.success) { data = resp; break }
+            }
+          }
+        } catch (err) {
+          if (err?.message === 'PERMISSION_DENIED') permissionDenied = true
+        }
+        // 2) 后端读剪贴板兜底（后端跑在用户桌面时有效）
+        if (!data) {
+          try {
+            const resp = await readClipboardDeal()
+            if (resp.success) { data = resp; break }
+          } catch {
+            // 剪贴板还没有图片，继续等待
+          }
         }
         setError(`等待截屏中... (${i + 1}/10)`)
       }
       if (!data) {
-        setError('截屏识别超时，请确保已完成截图并重试')
+        setError(permissionDenied
+          ? '浏览器未允许读取剪贴板：请在地址栏右侧点击剪贴板权限并选择"允许"，然后重新截图重试'
+          : '截屏识别超时，请确保已完成截图（Win+Shift+S）并重试')
         setLoading(false)
         return
       }
@@ -302,16 +361,22 @@ export function useDealing({ clearBiddingDraft }) {
     if (setShowSettings) setShowSettings(false)
     setLoading(true)
     screenshotCancelledRef.current = false
-    setError(`截屏识别 ${position} 家手牌中，请在截屏工具中选择该家手牌区域...`)
+    setError(`请截图 ${position} 家手牌：按 Win+Shift+S 选择区域（首次使用浏览器会询问剪贴板权限，请允许）`)
     setWarning(null)
     try {
-      const result = await triggerScreenshot()
-      if (!result.success) {
-        setError(result.message || '触发截屏失败')
-        setLoading(false)
-        return
+      // 尝试触发系统截图工具（后端跑在用户桌面时有效；沙箱托管时弹不出，用户手动截图即可）
+      triggerScreenshot().catch(() => {})
+      // 手势内首次读取：触发权限请求并记录触发前旧图
+      let prevKey = null
+      try {
+        const warmFile = await readClipboardImageFromBrowser()
+        if (warmFile) prevKey = await contentKey(warmFile)
+      } catch {
+        // 权限被拒：继续（后端兜底或用户允许后重试）
       }
+      // 轮询：优先浏览器直读 → 上传单家识别；后端接口兜底
       let data = null
+      let permissionDenied = false
       for (let i = 0; i < 10; i++) {
         await new Promise(resolve => setTimeout(resolve, 2000))
         if (screenshotCancelledRef.current) {
@@ -319,15 +384,31 @@ export function useDealing({ clearBiddingDraft }) {
           return
         }
         try {
-          const resp = await readSingleHandClipboard(position)
-          if (resp.success) { data = resp; break }
-        } catch {
-          // 剪贴板还没有图片，继续等待
+          const file = await readClipboardImageFromBrowser()
+          if (file) {
+            const key = await contentKey(file)
+            if (key !== prevKey) {
+              const resp = await uploadSingleHandImage(position, file)
+              if (resp.success) { data = resp; break }
+            }
+          }
+        } catch (err) {
+          if (err?.message === 'PERMISSION_DENIED') permissionDenied = true
+        }
+        if (!data) {
+          try {
+            const resp = await readSingleHandClipboard(position)
+            if (resp.success) { data = resp; break }
+          } catch {
+            // 剪贴板还没有图片，继续等待
+          }
         }
         setError(`等待 ${position} 家截屏中... (${i + 1}/10)`)
       }
       if (!data) {
-        setError(`${position} 家截屏识别超时，请确保已完成截图并重试`)
+        setError(permissionDenied
+          ? `浏览器未允许读取剪贴板：请在地址栏右侧点击剪贴板权限并选择"允许"，然后重新截图 ${position} 家重试`
+          : `${position} 家截屏识别超时，请确保已完成截图并重试`)
         setLoading(false)
         return
       }
