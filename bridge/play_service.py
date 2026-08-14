@@ -861,16 +861,23 @@ class PlayService:
         finally:
             self.dd_search.time_limit = _saved_dd_time_limit
 
-        base_worlds = ALPHA_MU_NUM_WORLDS
+        # P2-17 修复：世界数优先读取设置面板配置的值（滑块仅在纯 αμ 引擎下修改，
+        # 但值在 session 内持久，对 DD-αμ-LLM 残局阶段同样全局生效，与 DD 样本数滑块行为一致）
+        base_worlds = (self.alpha_mu_search.num_worlds
+                       if self.alpha_mu_search and getattr(self.alpha_mu_search, 'num_worlds', None)
+                       else ALPHA_MU_NUM_WORLDS)
         # 世界数随牌数减少而增加（残局越小，采样越精确）
+        # 上限随 base_worlds 成比例缩放：默认 20 时与原绝对上限（100/60/30/20）完全一致，
+        # 滑块调高时上限同步放大使全区间有效；代价是高世界数时 αμ 单步决策更慢（用户主动选择）
+        _world_cap_m = base_worlds / ALPHA_MU_NUM_WORLDS if ALPHA_MU_NUM_WORLDS else 1.0
         if cards <= 4:
-            n_worlds = min(100, base_worlds * 5)
+            n_worlds = min(int(100 * _world_cap_m), base_worlds * 5)
         elif cards <= 6:
-            n_worlds = min(60, base_worlds * 3)
+            n_worlds = min(int(60 * _world_cap_m), base_worlds * 3)
         elif cards <= 8:
-            n_worlds = min(30, base_worlds * 2)
+            n_worlds = min(int(30 * _world_cap_m), base_worlds * 2)
         else:
-            n_worlds = min(20, base_worlds)
+            n_worlds = min(int(20 * _world_cap_m), base_worlds)
         M_value = ALPHA_MU_M
 
         if cards <= 4:
