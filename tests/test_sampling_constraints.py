@@ -59,13 +59,15 @@ def test_opening_constraints():
     print("=== 测试开叫约束 ===")
     test_cases = [
         # (bid, exp_min_hcp, exp_max_hcp, exp_balanced, exp_suit_min, exp_suit_max, exp_exact_suit)
-        ("1NT", 15, 17, True, {}, {"♥": 4, "♠": 4}, {}),
+        # 1NT/2NT 采用当前库定义（见 bid_constraint_library.py 注释）：
+        # 允许 5 张高花/6 张低花，balanced=None（不再要求严格均型、高花≤4）
+        ("1NT", 15, 17, None, {"♠": 2, "♥": 2, "♦": 2, "♣": 2}, {"♠": 5, "♥": 5, "♦": 6, "♣": 6}, {}),
         ("1♠", 12, 21, None, {"♠": 5}, {}, {}),
         ("1♥", 12, 21, None, {"♥": 5}, {}, {}),
         ("1♣", 12, 21, None, {"♣": 3}, {}, {}),
         ("2♥", 6, 10, None, {}, {}, {"♥": 6}),
         ("2♠", 6, 10, None, {}, {}, {"♠": 6}),
-        ("2NT", 20, 21, True, {}, {}, {}),
+        ("2NT", 20, 21, None, {"♠": 2, "♥": 2, "♦": 2, "♣": 2}, {"♠": 5, "♥": 5, "♦": 6, "♣": 6}, {}),
         ("2♣", 22, None, None, {}, {}, {}),
     ]
     
@@ -197,50 +199,69 @@ def test_extract_from_history():
     return True
 
 
-def test_sampler_1NT_constraint():
-    """测试采样器满足1NT开叫约束：15-17HCP，均型，高花≤4张"""
-    print("=== 测试1NT开叫约束采样 ===")
-    
+def _make_state_west_fixed():
+    """构建采样状态：西家固定 13 张小牌（每门花色 3 张均分 + 1 张），南/北/东待采样。
+
+    当前采样器 API：sample(state, perspective) 保持 perspective 手牌不变，
+    重分配其余未知位置手牌并满足 set_constraints 的约束（v1.50 起替代旧 _constrained_select）。
+    注意：西家不能按 HCP 稳定排序取前 13 张（会把一门花色的低张全拿走，
+    导致该花色在未知牌池不足，触发可行性预检 INFEASIBLE）。
+    """
     from bridge.mcts.state_utils import SUIT_DISPLAY_ORDER, RANK_DESC
     ALL_CARDS = [Card(suit=s, rank=r) for s in SUIT_DISPLAY_ORDER for r in RANK_DESC]
+    west = []
+    for s in SUIT_DISPLAY_ORDER:
+        suit_cards = [c for c in ALL_CARDS if c.suit == s]
+        west.extend(sorted(suit_cards, key=lambda c: HCP_MAP.get(c.rank, 0))[:3])
+    rest_low = [c for c in ALL_CARDS if c not in west]
+    west.append(sorted(rest_low, key=lambda c: HCP_MAP.get(c.rank, 0))[0])
+    west_keys = {(c.suit, c.rank) for c in west}
+    remaining = [c for c in ALL_CARDS if (c.suit, c.rank) not in west_keys]
+    hands = {
+        "西": [Card(suit=c.suit, rank=c.rank) for c in west],
+        "南": [Card(suit=c.suit, rank=c.rank) for c in remaining[:13]],
+        "北": [Card(suit=c.suit, rank=c.rank) for c in remaining[13:26]],
+        "东": [Card(suit=c.suit, rank=c.rank) for c in remaining[26:39]],
+    }
+    state = PlayState(contract=Contract.from_str("1NT", "南"), hands=hands, bidding_sequence="(南)1NT-")
+    return state
+
+
+def test_sampler_1NT_constraint():
+    """测试采样器满足1NT开叫约束（使用库当前定义：15-17HCP，每门≥2，高花≤5/低花≤6）"""
+    print("=== 测试1NT开叫约束采样 ===")
     
-    sampler = DealSampler()
+    # 使用库的真实定义（与引擎一致），而非旧版"严格均型高花≤4"（该定义已演进，见库注释）
+    lib_constraint = get_opening_bid_constraint("1NT")
+    if lib_constraint is None:
+        print("  ✗ 库未定义 1NT 约束\n")
+        return False
     constraint = BidConstraint(
         position="南",
-        min_hcp=15,
-        max_hcp=17,
-        balanced=True,
-        suit_max={"♥": 4, "♠": 4},
-        min_hcp_target=16,
+        min_hcp=lib_constraint.min_hcp,
+        max_hcp=lib_constraint.max_hcp,
+        balanced=lib_constraint.balanced,
+        suit_min=lib_constraint.suit_min,
+        suit_max=lib_constraint.suit_max,
     )
     
-    # 西家固定13张小牌，保证牌池中有足够HCP满足南家1NT
-    random.shuffle(ALL_CARDS)
-    # 选HCP总和低的13张给西家，让牌池中有足够大牌
-    all_sorted = sorted(ALL_CARDS, key=lambda c: HCP_MAP.get(c.rank, 0))
-    west_hand = all_sorted[:13]
-    west_set = set((c.suit, c.rank) for c in west_hand)
-    pool = [c for c in ALL_CARDS if (c.suit, c.rank) not in west_set]
+    sampler = DealSampler()
+    state = _make_state_west_fixed()
+    sampler.set_constraints({"南": constraint})
     
-    print(f"测试约束: 1NT开叫，15-17HCP，均型，高花≤4张")
-    print(f"西家HCP: {sum(HCP_MAP.get(c.rank, 0) for c in west_hand)}")
-    print(f"牌池大小: {len(pool)}，需要选13张")
+    print(f"测试约束: 1NT开叫，{constraint.min_hcp}-{constraint.max_hcp}HCP，suit_max={constraint.suit_max}")
+    print(f"西家HCP: {sum(HCP_MAP.get(c.rank, 0) for c in state.hands['西'])}")
     
     hcp_samples = []
     valid_count = 0
     n_trials = 200
     
     for _ in range(n_trials):
-        selected = sampler._constrained_select(list(pool), 13, constraint)
-        hcp = sum(HCP_MAP.get(c.rank, 0) for c in selected)
-        dist = {"♠": 0, "♥": 0, "♦": 0, "♣": 0}
-        for c in selected:
-            dist[c.suit] += 1
-        
-        valid = sampler._check_all_constraints(selected, constraint, 13)
-        
-        if valid:
+        world = sampler.sample(state, "西")
+        south = world["南"]
+        if validate_sample({"南": south, "西": [], "北": [], "东": []}, {"南": constraint}):
             valid_count += 1
+            hcp = sum(HCP_MAP.get(c.rank, 0) for c in south)
             hcp_samples.append(hcp)
     
     valid_rate = valid_count / n_trials * 100
@@ -260,7 +281,6 @@ def test_sampler_weak_two():
     print("=== 测试弱二开叫(2♥)约束采样 ===")
     
     sampler = DealSampler()
-    
     constraint = BidConstraint(
         position="南",
         min_hcp=6,
@@ -269,35 +289,22 @@ def test_sampler_weak_two():
         min_hcp_target=8,
     )
     
-    from bridge.mcts.state_utils import SUIT_DISPLAY_ORDER, RANK_DESC
-    ALL_CARDS = [Card(suit=s, rank=r) for s in SUIT_DISPLAY_ORDER for r in RANK_DESC]
-    
-    # 保证牌池中至少有8张♥，西家最多拿5张♥
-    random.shuffle(ALL_CARDS)
-    hearts = [c for c in ALL_CARDS if c.suit == "♥"]
-    others = [c for c in ALL_CARDS if c.suit != "♥"]
-    # 西家拿5张♥ + 8张其他花色
-    random.shuffle(hearts)
-    random.shuffle(others)
-    west_hand = hearts[:5] + others[:8]
-    west_set = set((c.suit, c.rank) for c in west_hand)
-    pool = [c for c in ALL_CARDS if (c.suit, c.rank) not in west_set]
+    state = _make_state_west_fixed()
+    sampler.set_constraints({"南": constraint})
     
     print(f"测试约束: 2♥弱二，6-10HCP，♥=6张")
-    print(f"西家♥张数: {sum(1 for c in west_hand if c.suit == '♥')}")
-    print(f"牌池♥张数: {sum(1 for c in pool if c.suit == '♥')}")
-    print(f"牌池大小: {len(pool)}")
+    print(f"西家♥张数: {sum(1 for c in state.hands['西'] if c.suit == '♥')}")
     
     hcp_samples = []
     valid_count = 0
     n_trials = 200
     
     for _ in range(n_trials):
-        selected = sampler._constrained_select(list(pool), 13, constraint)
-        valid = sampler._check_all_constraints(selected, constraint, 13)
-        if valid:
+        world = sampler.sample(state, "西")
+        south = world["南"]
+        if validate_sample({"南": south, "西": [], "北": [], "东": []}, {"南": constraint}):
             valid_count += 1
-            hcp = sum(HCP_MAP.get(c.rank, 0) for c in selected)
+            hcp = sum(HCP_MAP.get(c.rank, 0) for c in south)
             hcp_samples.append(hcp)
     
     valid_rate = valid_count / n_trials * 100
@@ -319,7 +326,6 @@ def test_hcp_distribution_no_bias():
     print("=== 测试HCP分布无偏高偏差 ===")
     
     sampler = DealSampler()
-    
     # 简单约束：12-21HCP，♠≥5张（模拟1♠开叫）
     constraint = BidConstraint(
         position="南",
@@ -329,22 +335,19 @@ def test_hcp_distribution_no_bias():
         min_hcp_target=14,
     )
     
-    from bridge.mcts.state_utils import SUIT_DISPLAY_ORDER, RANK_DESC
-    ALL_CARDS = [Card(suit=s, rank=r) for s in SUIT_DISPLAY_ORDER for r in RANK_DESC]
+    state = _make_state_west_fixed()
+    sampler.set_constraints({"南": constraint})
     
     n_trials = 300
     hcp_samples = []
     valid_count = 0
     
     for _ in range(n_trials):
-        shuffled = list(ALL_CARDS)
-        random.shuffle(shuffled)
-        pool = shuffled[13:]
-        selected = sampler._constrained_select(pool, 13, constraint)
-        valid = sampler._check_all_constraints(selected, constraint, 13)
-        if valid:
+        world = sampler.sample(state, "西")
+        south = world["南"]
+        if validate_sample({"南": south, "西": [], "北": [], "东": []}, {"南": constraint}):
             valid_count += 1
-            hcp = sum(HCP_MAP.get(c.rank, 0) for c in selected)
+            hcp = sum(HCP_MAP.get(c.rank, 0) for c in south)
             hcp_samples.append(hcp)
     
     valid_rate = valid_count / n_trials * 100

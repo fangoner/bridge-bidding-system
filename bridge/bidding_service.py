@@ -325,6 +325,10 @@ class BiddingService:
 
             try:
                 result = self.llm_client.chat_bidding(prompt, temperature=MAIN_PROMPT_TEMPERATURE, thinking=self._use_reasoning)
+                # P0-5 修复：chat_json 失败返回 error dict（不再静默回落 chat()），
+                # 此处转为异常走统一错误路径（前端 502 提示重试，而非把空结果当正常叫品）
+                if result.get("error"):
+                    raise RuntimeError(result["error"])
                 result["JF约定"] = jf_keyword
                 result["阻击叫体系"] = deal_system
 
@@ -471,6 +475,10 @@ class BiddingService:
 
             try:
                 result = self.llm_client.chat_bidding_fallback(prompt, temperature=FALLBACK_PROMPT_TEMPERATURE, thinking=self._use_reasoning)
+                # P0-5 修复：chat_json 失败返回 error dict，直接传播错误（前端 502 提示重试），
+                # 不再把失败当正常结果继续处理
+                if result.get("error"):
+                    raise RuntimeError(result["error"])
                 # LLM 偶尔返回 dict/list 类型的字段（schema 声明是 string 但未强制），
                 # 这里统一规范化为 str，避免后续字符串拼接抛 TypeError
                 for _k in ("叫品筛选过程", "叫品含义", "选定叫品", "叫牌位置", "手牌分析", "叫牌历史"):
@@ -501,7 +509,8 @@ class BiddingService:
                     print(f"[fallback] 第 {attempt+1} 次叫品非法: {violation}")
             except Exception as e:
                 self.bid_meanings = original_bid_meanings
-                return {"选定叫品": "pass", "叫品含义": f"[备用提示词异常] {e}，强制选择pass", "叫品筛选过程": f"[备用提示词异常] {e}", "JF约定": actual_jf_keyword, "阻击叫体系": deal_system}
+                # P0-4 修复：异常不再静默强制 pass，返回 error 由 /api/bid 转 502（前端提示重试）
+                return {"error": f"[备用提示词异常] {e}", "选定叫品": "pass", "叫品含义": f"[备用提示词异常] {e}", "叫品筛选过程": f"[备用提示词异常] {e}", "JF约定": actual_jf_keyword, "阻击叫体系": deal_system}
 
         # fallback 重试耗尽，报错并暂停叫牌
         self.bid_meanings = original_bid_meanings
@@ -591,6 +600,11 @@ class BiddingService:
 
         try:
             result = self.llm_client.chat_human_bid(prompt, temperature=0, thinking=use_reasoning)
+            if result.get("error"):
+                # P0-5 修复：chat_json 失败返回 error dict，人类叫牌不中断（叫品已由用户输入），
+                # 仅提示含义获取失败
+                full_sequence = f"{bidding_sequence}({player_name}){bid}-"
+                return {"选定叫品": bid, "叫品含义": f"获取叫品含义失败: {result['error']}", "JF约定": actual_jf_keyword, "完整叫牌序列": full_sequence}
             result["JF约定"] = actual_jf_keyword
             if "完整叫牌序列" not in result:
                 result["完整叫牌序列"] = f"{bidding_sequence}({player_name}){bid}-"

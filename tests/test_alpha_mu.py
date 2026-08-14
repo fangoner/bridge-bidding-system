@@ -263,7 +263,7 @@ def test_alpha_mu_single_card():
     )
     state.current_player = "南"
 
-    search = AlphaMuSearch(num_worlds=4, max_depth=1, time_limit=5.0)
+    search = AlphaMuSearch(num_worlds=4, M=1, time_limit=5.0)
     result = search.search(state)
     card = result.get("card")
     assert card == Card("♠", "A"), f"应返回唯一牌 ♠A, 实际 {card}"

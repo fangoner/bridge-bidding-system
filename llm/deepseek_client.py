@@ -159,7 +159,15 @@ class DeepSeekClient:
         err_str = str(e).lower()
         return any(kw in err_str for kw in ["timeout", "timed out", "read timed out", "deadline"])
 
-    def chat_json(self, system_prompt: str, user_prompt: str = "", temperature: float = 0.7, schema: Dict = None, model: str = None, max_tokens: int = None, thinking: bool = False) -> Dict[str, Any]:
+    def _is_retryable_error(self, e: Exception) -> bool:
+        """是否值得重试：仅超时/连接/限流等瞬时错误；业务错误（400/鉴权/上下文超长）重试无效。"""
+        err_str = str(e).lower()
+        return any(kw in err_str for kw in [
+            "timeout", "timed out", "read timed out", "deadline",
+            "rate limit", "too many requests", "connection", "http 429", "http 500", "http 502", "http 503",
+        ])
+
+    def chat_json(self, system_prompt: str, user_prompt: str = "", temperature: float = 0.7, schema: Dict = None, model: str = None, max_tokens: int = None, thinking: bool = False, max_attempts: int = 2) -> Dict[str, Any]:
         if not self.client:
             raise ValueError("DeepSeek API Key未配置，请设置环境变量 DEEPSEEK_API_KEY")
         
@@ -180,11 +188,14 @@ class DeepSeekClient:
         timeout = self._get_timeout(thinking)
         start = time_module.time()
         actual_model = model or self.model
-        log_msg = f"[DeepSeek] chat_json model={actual_model} thinking={thinking} max_tokens={max_tokens} timeout={timeout}s prompt_chars={len(system_prompt)}"
+        log_msg = f"[DeepSeek] chat_json model={actual_model} thinking={thinking} max_tokens={max_tokens} timeout={timeout}s max_attempts={max_attempts} prompt_chars={len(system_prompt)}"
         print(log_msg)
         _logger.info(log_msg)
-        
-        for attempt in range(2):
+
+        content = ""
+        # P0-5 修复：去掉 chat() 回落链（不再 JSON 失败后再补一发非 JSON 调用）；
+        # 超时/限流指数退避重试，业务错误不重试；失败直接返回 error dict（由上层决定报错或兜底）
+        for attempt in range(max_attempts):
             try:
                 response = self.client.chat.completions.create(
                     model=actual_model,
@@ -205,38 +216,32 @@ class DeepSeekClient:
                 print(ok_msg)
                 _logger.info(ok_msg)
                 return json.loads(content)
-            except (json.JSONDecodeError, KeyError):
-                break
+            except json.JSONDecodeError:
+                # LLM 输出不合规 JSON：重试大概率同样失败，直接返回错误（含原文便于诊断）
+                fail_msg = f"[DeepSeek] JSON 解析失败 response_chars={len(content)}"
+                print(fail_msg)
+                _logger.error(fail_msg)
+                return {"raw_response": content, "error": "JSON解析失败"}
+            except KeyError:
+                fail_msg = "[DeepSeek] 响应结构异常（缺 choices/message/content）"
+                print(fail_msg)
+                _logger.error(fail_msg)
+                return {"raw_response": "", "error": "响应结构异常"}
             except Exception as e:
-                if attempt == 0:
-                    wait = 1
-                    retry_msg = f"[DeepSeek] JSON mode retry after {wait}s: {e}"
-                    print(retry_msg)
-                    _logger.warning(retry_msg)
-                    time_module.sleep(wait)
-                else:
-                    fail_msg = f"[DeepSeek] JSON mode failed after 1 retry: {e}"
+                is_last = (attempt == max_attempts - 1)
+                if is_last or not self._is_retryable_error(e):
+                    fail_msg = f"[DeepSeek] JSON mode failed: {e}"
                     print(fail_msg)
                     _logger.error(fail_msg)
-        
-        try:
-            response_text = self.chat(system_prompt, user_prompt, temperature, model, thinking=thinking)
-        except Exception as e:
-            error_msg = f"各模式均失败: {e}"
-            print(f"[DeepSeek] {error_msg}")
-            _logger.error(f"[DeepSeek] {error_msg}")
-            return {"raw_response": "", "error": error_msg}
-        
-        try:
-            json_match = response_text
-            if "```json" in response_text:
-                json_match = response_text.split("```json")[1].split("```")[0]
-            elif "```" in response_text:
-                json_match = response_text.split("```")[1].split("```")[0]
-            
-            return json.loads(json_match.strip())
-        except json.JSONDecodeError:
-            return {"raw_response": response_text, "error": "JSON解析失败"}
+                    return {"raw_response": "", "error": f"JSON mode failed: {e}"}
+                # 瞬时错误：指数退避（1s, 2s, 4s...）后重试
+                wait = 2 ** attempt
+                retry_msg = f"[DeepSeek] JSON mode retry after {wait}s (attempt {attempt + 1}/{max_attempts}): {e}"
+                print(retry_msg)
+                _logger.warning(retry_msg)
+                time_module.sleep(wait)
+
+        return {"raw_response": "", "error": "JSON mode failed"}
     
     def chat_bidding(self, system_prompt: str, temperature: float = 0.7, model: str = None, thinking: bool = False) -> Dict[str, Any]:
         return self.chat_json(system_prompt, "", temperature, BIDDING_SCHEMA, model, thinking=thinking)
@@ -249,4 +254,6 @@ class DeepSeekClient:
     
     def chat_play(self, system_prompt: str, temperature: float = 0.7, model: str = None, thinking: bool = False) -> Dict[str, Any]:
         max_tokens = 8192 if thinking else 1024
-        return self.chat_json(system_prompt, "", temperature, PLAY_SCHEMA, model, max_tokens=max_tokens, thinking=thinking)
+        # P1-1 修复：打牌决策单次尝试（不重试），失败由 play_service 快速回落规则选牌，
+        # 避免超时后重试再等一个完整 timeout（chat 30s → 最坏 60s+）
+        return self.chat_json(system_prompt, "", temperature, PLAY_SCHEMA, model, max_tokens=max_tokens, thinking=thinking, max_attempts=1)
