@@ -1633,15 +1633,13 @@ async def play_card(request: PlayCardRequest):
         state_snapshot = copy.deepcopy(state_before) if state_before else None
 
         card = Card(suit=request.card["suit"], rank=request.card["rank"])
+        # P2-15 修复：调试日志从出牌请求路径移除（原每张牌开文件追加写 dd_debug.log，
+        # 52 次/局文件 IO + 文件无限增长），保留控制台输出供排障
         _log = f"[PLAY_CARD] position={request.position} card={card} current_player={state_before.current_player if state_before else 'N/A'} hands[{request.position}]={state_before.hands.get(request.position) if state_before else 'N/A'}"
         print(_log)
-        with open("dd_debug.log", "a", encoding="utf-8") as _f:
-            _f.write(_log + "\n")
         success, message = service.play_card(request.position, card)
         _log2 = f"[PLAY_CARD] result: success={success} message={message}"
         print(_log2)
-        with open("dd_debug.log", "a", encoding="utf-8") as _f:
-            _f.write(_log2 + "\n")
 
         state = service.get_state()
         trick_winner = None

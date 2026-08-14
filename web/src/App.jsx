@@ -306,6 +306,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const aiPlayHistoryRef = useRef(aiPlayHistory)
   const abortControllerRef = useRef(null)
   const bidAbortRef = useRef(null) // 在途 AI 叫牌请求（支持暂停中止，P1 修复）
+  const humanBidInFlightRef = useRef(false) // P2-4：人类叫牌处理中（含含义获取）防重复点击
+  const playCardInFlightRef = useRef(false) // P2-5：出牌请求在途时防连点
   useEffect(() => { playStateRef.current = playState }, [playState])
   useEffect(() => { aiPlayHistoryRef.current = aiPlayHistory }, [aiPlayHistory])
 
@@ -820,6 +822,11 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     
     // 人类叫牌时，保存叫牌记录
     if (isCurrentHuman) {
+      // P2-4 修复：一次人类叫牌处理中（含含义获取/自定义含义等）忽略重复点击，
+      // 避免快速双击连发两个叫品；用 ref 同步防重（state 异步更新会有 stale closure）
+      if (humanBidInFlightRef.current) return
+      humanBidInFlightRef.current = true
+      try {
       // 用于显示的字符串
       const biddingStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-') + (biddingSequence.length > 0 ? '-' : '')
       
@@ -882,6 +889,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         } finally {
           setCurrentBiddingPosition(null)
         }
+      }
+      } finally {
+        humanBidInFlightRef.current = false
       }
     }
     
@@ -1892,6 +1902,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   }
 
   const handlePlayCard = async (position, card) => {
+    // P2-5 修复：出牌请求在途时忽略重复点击（连点两张 → 第二张被后端拒绝 → 桌面闪跳）
+    if (playCardInFlightRef.current) return
+    playCardInFlightRef.current = true
     // 乐观更新：立即在桌面上显示点击的牌，避免等待后端DD计算造成延迟
     setPlayState(prev => {
       if (!prev || !prev.current_trick) return prev
@@ -1934,6 +1947,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       // 出牌失败，回退乐观更新，恢复后端真实状态
       await reconcilePlayState()
     } finally {
+      playCardInFlightRef.current = false
       setPlayLoading(false)
     }
   }
@@ -2360,9 +2374,14 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     const isHuman = isCurrentPlayerHuman()
 
     // AI hand guard: wait for input when AI has no cards
+    // P2-8 修复：AI 缺手牌不再静默卡住——提示错误并暂停自动流程，用户输入手牌后可继续
     if (!isHuman) {
       const currentHand = playState.hands?.[playState.current_player]
-      if (!currentHand || currentHand.length === 0) return
+      if (!currentHand || currentHand.length === 0) {
+        setError(`AI出牌受阻：${playState.current_player}家手牌缺失，请先在牌桌输入该家手牌后点击"继续"`)
+        setIsPlayPaused(true)
+        return
+      }
     }
     // 如果不是人类回合且游戏未结束，立即进入思考状态
     if (!isHuman && phase !== 'complete') {
@@ -2377,7 +2396,11 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     const isHuman = isCurrentPlayerHuman()
     if (isHuman || phase === 'complete') return
     const currentHand = playState.hands?.[playState.current_player]
-    if (!currentHand || currentHand.length === 0) return
+    if (!currentHand || currentHand.length === 0) {
+      // P2-8 修复：兜底——缺手牌时暂停（首个 effect 已提示并暂停，这里防自激）
+      setIsPlayPaused(true)
+      return
+    }
     const legalPlays = getLegalPlaysForPlayer(playState.current_player)
     const timer = setTimeout(() => {
       if (legalPlays.length === 1) {
