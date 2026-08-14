@@ -346,6 +346,9 @@ class AlphaMuSearch:
 
         # ── 1. 生成 possible worlds（均匀采样 + 分级约束验证）──
         # Phase 0a: 直接调用 sampler.sample_n()，等权均匀 world 集合
+        # P1-4 修复：时间限制从 worlds 生成开始计时（原在生成后，约束难满足时
+        # worlds 生成耗时不受 time_limit 约束）
+        self._start_time = time.time()
         worlds: List[Dict[str, List[Card]]] = []
         try:
             worlds = self.sampler.sample_n(self.num_worlds, state, perspective)
@@ -353,9 +356,6 @@ class AlphaMuSearch:
             worlds = []
         if not worlds:
             raise RuntimeError("αμ: 无法生成 possible worlds")
-
-        # 开始计时（粒子/worlds准备完成后才开始算搜索时间）
-        self._start_time = time.time()
 
         # 诊断
         has_constraints = bool(getattr(self.sampler, 'constraints', None))

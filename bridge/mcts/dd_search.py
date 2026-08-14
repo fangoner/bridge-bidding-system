@@ -468,6 +468,8 @@ class DDSearch:
         all_played.extend(trick_cards)
 
         # Phase 0a: 均匀采样生成样本（替代旧 BeliefTracker）
+        # P1-4 修复：时间预算从采样开始计时（原在采样后，约束难满足时采样耗时不受 30s 预算约束）
+        start_time = time.time()
         samples = None  # List[Dict[str, List[Card]]]
         _prepare_t = 0.0
         _prep_t0 = time.time()
@@ -485,7 +487,6 @@ class DDSearch:
                      f"constraints={_has_constraints}({ _constraint_count }) "
                      f"remaining_tricks={remaining_tricks}\n")
 
-        start_time = time.time()
         samples_done = 0
         _solve_total = 0.0
         _solve_max = 0.0
