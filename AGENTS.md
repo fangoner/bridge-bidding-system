@@ -110,3 +110,4 @@ The threshold is `Z × std_diff / √N` where `std_diff` is the sample standard 
 - `bidding-cases/` — tracked in git; test/example bidding case records
 - `DEVELOPMENT.md` — current development documentation
 - `DEVELOPMENT_HISTORY.md` — archived historical development documentation
+- `docs/` — **开发研究/分析/方案讨论类 Markdown 报告的固定存放目录**（如 `打牌窜牌诊断报告.md`、`改进打牌引擎讨论.md`、`流程流畅性审查报告.md`）。所有开发研究类、审查分析类、方案讨论类的报告一律放这里，不要放项目根目录；写作新报告前先检索 docs/ 现有内容，避免重复讨论已知问题

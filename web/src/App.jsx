@@ -2205,6 +2205,17 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     }
   }
 
+  // 前端计算当前玩家的合法出牌（与 PlayPanel.getPlayableCards 一致）
+  const getLegalPlaysForPlayer = (position) => {
+    const hand = playState?.hands?.[position] || []
+    if (hand.length === 0) return []
+    const trickCards = playState?.current_trick?.cards || []
+    if (trickCards.length === 0) return hand
+    const leadSuit = trickCards[0][1].suit
+    const sameSuit = hand.filter(c => c.suit === leadSuit)
+    return sameSuit.length > 0 ? sameSuit : hand
+  }
+
   // 根据前端 positionRoles 计算当前回合是否为人类
   const isCurrentPlayerHuman = () => {
     if (!playState) return false
@@ -2302,37 +2313,43 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     if (isHuman || phase === 'complete') return
     const currentHand = playState.hands?.[playState.current_player]
     if (!currentHand || currentHand.length === 0) return
+    const legalPlays = getLegalPlaysForPlayer(playState.current_player)
     const timer = setTimeout(() => {
-      handleAIPlay()
+      if (legalPlays.length === 1) {
+        handlePlayCard(playState.current_player, legalPlays[0])
+      } else {
+        handleAIPlay()
+      }
     }, 250)
     return () => clearTimeout(timer)
   }, [showPlayPanel, playState?.is_human_turn, playState?.phase, aiThinking, isPlayPaused, playInitiated, positionRoles])
 
-  // 最后一墩自动出牌（仅剩一张时无需选择）
+  // 仅剩一张合法出牌时自动打出（无需用户选择）
   useEffect(() => {
-    if (!showPlayPanel || !playState || aiThinking || playLoading || isPlayPaused || !playInitiated) return
+    if (!showPlayPanel || !playState || aiThinking || playLoading || !playInitiated) return
     if (playState.phase === 'complete') return
     const cp = playState.current_player
     if (!cp) return
     const isHuman = positionRoles[cp] === 'human' || (cp === playState.dummy && positionRoles[playState.contract?.declarer] === 'human')
     if (!isHuman) return
-    const handLen = playState.hands?.[cp]?.length || 0
-    if (handLen === 1) {
-      const card = playState.hands[cp][0]
+    const legalPlays = getLegalPlaysForPlayer(cp)
+    if (legalPlays.length === 1) {
+      const card = legalPlays[0]
       const timer = setTimeout(() => handlePlayCard(cp, card), 400)
       return () => clearTimeout(timer)
     }
-  }, [playState?.current_player, playState?.hands?.[playState?.current_player]?.length, showPlayPanel, playInitiated, aiThinking, playLoading, isPlayPaused])
+  }, [playState?.current_player, playState?.current_trick, playState?.hands, showPlayPanel, playInitiated, aiThinking, playLoading])
 
   // 轮到人类出牌时自动暂停（每墩首张除外，由继续按钮控制）
   useEffect(() => {
     if (!showPlayPanel || !playState || aiThinking || playLoading || !playInitiated) return
     const isHuman = isCurrentPlayerHuman()
     const isStartOfTrick = (playState.current_trick?.cards?.length || 0) === 0
-    if (isHuman && playState.phase !== 'complete' && !isPlayPaused && !isStartOfTrick) {
+    const onlyOneLegal = isHuman && getLegalPlaysForPlayer(playState.current_player).length === 1
+    if (isHuman && playState.phase !== 'complete' && !isPlayPaused && !isStartOfTrick && !onlyOneLegal) {
       setIsPlayPaused(true)
     }
-  }, [playState?.is_human_turn, playState?.phase, showPlayPanel, playInitiated, aiThinking, playLoading, isPlayPaused, positionRoles])
+  }, [playState?.is_human_turn, playState?.phase, showPlayPanel, playInitiated, aiThinking, playLoading, isPlayPaused, positionRoles, playState?.current_trick, playState?.hands])
 
   // 检测一墩完成，自动暂停；检测打牌完成，自动保存记录
   // 仅真实打牌时运行；载入历史记录回放（loadedPlayRecord）时不触发，避免清空复盘游标
