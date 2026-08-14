@@ -91,8 +91,6 @@ const RangeSlider = memo(function RangeSlider({
 
 function SettingsPanel({
   showSettings,
-  gameMode,
-  setGameMode,
   fallbackModel,
   handleFallbackModelChange,
   playModel,
@@ -185,14 +183,6 @@ function SettingsPanel({
       {/* ── 叫牌设置 ── */}
       {tab === 'bidding' && (
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
-          <FormControl sx={{ minWidth: 80 }} size="small">
-            <InputLabel>模式</InputLabel>
-            <Select value={gameMode} label="模式" onChange={(e) => setGameMode(e.target.value)}>
-              <MenuItem value="four">四人</MenuItem>
-              <MenuItem value="pair">双人</MenuItem>
-            </Select>
-          </FormControl>
-
           <ModelSelector
             label="模型"
             parsed={biddingParsed}

@@ -77,16 +77,25 @@ function BiddingDetailPanel({
     setDetailTab('details')
   }
 
+  // 双人模式对方自动pass 记录（auto 标记或含义匹配）：无意义的不参与方跳过信息，
+  // 详情面板统一过滤，保持与四人叫牌一致的展示逻辑
+  const isAutoPassRecord = (record) =>
+    record?.auto === true || record?.result?.meaning === '双人模式对方自动pass'
+  const displayHistory = useMemo(
+    () => aiBiddingHistory.filter(r => !isAutoPassRecord(r)),
+    [aiBiddingHistory]
+  )
+
   const historySelectOptions = useMemo(() => {
-    if (aiBiddingHistory.length === 0) return []
-    return aiBiddingHistory.slice().reverse().slice(1).map((record, idx) => ({
-      value: aiBiddingHistory.length - 2 - idx,
+    if (displayHistory.length === 0) return []
+    return displayHistory.slice().reverse().slice(1).map((record, idx) => ({
+      value: displayHistory.length - 2 - idx,
       label: `${record.position}家 ${record.result.bid}`,
     }))
-  }, [aiBiddingHistory])
+  }, [displayHistory])
 
   const renderBiddingDetails = () => {
-    if (aiBiddingHistory.length === 0) {
+    if (displayHistory.length === 0) {
       return (
         <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 4 }}>
           等待AI叫牌...
@@ -95,7 +104,7 @@ function BiddingDetailPanel({
     }
 
     if (simpleDisplayMode) {
-      return aiBiddingHistory.map((record, index) => (
+      return displayHistory.map((record, index) => (
         <Box key={index} sx={{ mb: 1, p: 1.5, background: isDark ? 'rgba(30, 41, 59, 0.7)' : 'white', borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>
           <Typography variant="body2">
             <strong>{record.position}家</strong> → <span style={{ color: '#d32f2f', fontWeight: 'bold' }}>{record.result.bid}</span>
@@ -105,9 +114,13 @@ function BiddingDetailPanel({
       ))
     }
 
-    const record = selectedBiddingIndex === -1 
-      ? aiBiddingHistory[aiBiddingHistory.length - 1] 
-      : aiBiddingHistory[selectedBiddingIndex]
+    // 索引守卫：过滤后 displayHistory 变短，旧选中索引（context 持久）可能越界 → 回退到最新
+    const selIdx = (typeof selectedBiddingIndex === 'number' && selectedBiddingIndex >= 0 && selectedBiddingIndex < displayHistory.length)
+      ? selectedBiddingIndex
+      : -1
+    const record = selIdx === -1
+      ? displayHistory[displayHistory.length - 1]
+      : displayHistory[selIdx]
     
     if (!record) return null
     const fullOutput = record.result.full_output || {}
@@ -395,7 +408,7 @@ function BiddingDetailPanel({
               size="small"
               value={selectedBiddingIndex}
               onChange={(e) => setSelectedBiddingIndex(e.target.value)}
-              disabled={simpleDisplayMode || aiBiddingHistory.length === 0}
+              disabled={simpleDisplayMode || displayHistory.length === 0}
               sx={{ fontSize: '0.75rem', height: 24, minWidth: 80, '& .MuiSelect-select': { py: 0 } }}
             >
               <MenuItem value={-1}>最新</MenuItem>

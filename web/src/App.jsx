@@ -308,8 +308,20 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const bidAbortRef = useRef(null) // 在途 AI 叫牌请求（支持暂停中止，P1 修复）
   const humanBidInFlightRef = useRef(false) // P2-4：人类叫牌处理中（含含义获取）防重复点击
   const playCardInFlightRef = useRef(false) // P2-5：出牌请求在途时防连点
+  const aiBiddingHistoryRef = useRef(aiBiddingHistory) // 叫牌历史 ref：同步追踪最新值
   useEffect(() => { playStateRef.current = playState }, [playState])
   useEffect(() => { aiPlayHistoryRef.current = aiPlayHistory }, [aiPlayHistory])
+  useEffect(() => { aiBiddingHistoryRef.current = aiBiddingHistory }, [aiBiddingHistory])
+
+  // 追加叫牌历史：同步更新 ref + 设置 state，返回新数组。
+  // 修复根因：原代码人类/AI 用函数式更新、双人自动pass 用闭包直接值，
+  // React 直接值会替换函数式更新 → 真实叫牌记录被自动pass覆盖丢失（历史只剩跳过信息）
+  const appendBidHistory = useCallback((record) => {
+    const next = [...aiBiddingHistoryRef.current, record]
+    aiBiddingHistoryRef.current = next
+    setAiBiddingHistory(next)
+    return next
+  }, [])
 
   // ── 模型配置 hook（备用模型/打牌模型/DD采样/API状态/JF重载）──
   const {
@@ -832,28 +844,28 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       
       // 如果用户输入了自定义叫牌含义，直接使用，不调用API
       if (customBidMeaning.trim()) {
-        setAiBiddingHistory(prev => [...prev, {
+        appendBidHistory({
           position: currentBidder,
           hand: hands[currentBidder],
           biddingSequence: biddingStr,
           result: { bid: bid, meaning: customBidMeaning.trim() },
           timestamp: makeBidTimestamp()
-        }])
+        })
         setCustomBidMeaning('') // 清空输入框
       } else if (!humanBidInterpret) {
         // 关闭AI解释：直接以叫品本身作为含义，不调用API（加快叫牌速度）
-        setAiBiddingHistory(prev => [...prev, {
+        appendBidHistory({
           position: currentBidder,
           hand: hands[currentBidder],
           biddingSequence: biddingStr,
           result: { bid: bid, meaning: bid },
           timestamp: makeBidTimestamp()
-        }])
+        })
       } else {
         // 没有自定义含义，调用API获取（传递数组，后端处理格式）
         setCurrentBiddingPosition(currentBidder)
         try {
-          const bidHistory = aiBiddingHistory.map(record => {
+          const bidHistory = aiBiddingHistoryRef.current.map(record => {
             const bidPrefix = `${record.result.bid}：`
             const meaning = record.result.meaning?.startsWith(bidPrefix)
               ? record.result.meaning.slice(bidPrefix.length)
@@ -862,7 +874,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           }).join('\n')
           const result = await humanBid(biddingSequence, currentBidder, bid, dealSystem, bidHistory)
           
-          setAiBiddingHistory(prev => [...prev, {
+          appendBidHistory({
             position: currentBidder,
             hand: hands[currentBidder],
             biddingSequence: biddingStr,
@@ -872,10 +884,10 @@ function AppShell({ darkMode, onToggleDarkMode }) {
               full_output: result.full_output
             },
             timestamp: makeBidTimestamp()
-          }])
+          })
         } catch (err) {
           console.error('获取叫品含义失败:', err)
-          setAiBiddingHistory(prev => [...prev, {
+          appendBidHistory({
             position: currentBidder,
             hand: hands[currentBidder],
             biddingSequence: biddingStr,
@@ -885,7 +897,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
               full_output: {}
             },
             timestamp: makeBidTimestamp()
-          }])
+          })
         } finally {
           setCurrentBiddingPosition(null)
         }
@@ -925,11 +937,15 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           position: nextBidder,
           hand: hands[nextBidder],
           biddingSequence: passBiddingStr,
+          // 标记：双人模式对方自动pass（右侧详情面板过滤，保持与四人叫牌一致）
+          auto: true,
           result: { bid: 'pass', meaning: '双人模式对方自动pass' },
           timestamp: makeBidTimestamp()
         }
-        const updatedHistory = [...aiBiddingHistory, autoPassRecord]
-        setAiBiddingHistory(updatedHistory)
+        // 用 appendBidHistory（ref 同步累积）而非闭包直接赋值：
+        // 原代码闭包 aiBiddingHistory 不含本次刚追加的真实叫牌记录，
+        // 直接赋值会覆盖掉它（历史只剩自动pass）——双人面板"只显示跳过信息"的根因
+        const updatedHistory = appendBidHistory(autoPassRecord)
 
         // 继续计算下一个
         const nextNextIndex = (nextIndex + 1) % 4
@@ -957,11 +973,11 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     setBiddingSequence(newSequence)
     setCurrentBidder(nextBidder)
     
-    // 保存叫牌快照
+    // 保存叫牌快照（aiBiddingHistory 用 ref 取最新，避免漏掉刚追加的本次叫牌）
     const snapshot = {
       biddingSequence: newSequence,
       currentBidder: nextBidder,
-      aiBiddingHistory: [...aiBiddingHistory],
+      aiBiddingHistory: [...aiBiddingHistoryRef.current],
     }
     const newHistory = historyIndex >= 0 
       ? biddingHistory.slice(0, historyIndex + 1) 
@@ -1056,13 +1072,13 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     // 检查AI位置是否需要自动pass
     if (gameMode === 'four' && shouldAIAutoPass(currentBidder)) {
       console.log(`${currentBidder}家因搭档相继pass，自动pass`)
-      setAiBiddingHistory(prev => [...prev, {
+      appendBidHistory({
         position: currentBidder,
         hand: hands[currentBidder],
         biddingSequence: biddingSequence.map(b => `(${b.position})${b.bid}`).join('-'),
         result: { bid: 'pass', meaning: '搭档已相继pass，不再参与叫牌' },
         timestamp: makeBidTimestamp()
-      }])
+      })
       addBid('pass')
       return
     }
@@ -1112,25 +1128,25 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       // 合规性检查失败：后端返回 暂停叫牌 标记时，停止自动叫牌等待用户处理
       if (result.full_output?.暂停叫牌) {
         setStopBidding(true)
-        setAiBiddingHistory(prev => [...prev, {
+        appendBidHistory({
           position: currentBidder,
           hand: currentHand,
           biddingSequence: biddingStr,
           result: { ...result, bid: 'pass', meaning: result.meaning || '[合规性错误] 已暂停叫牌等待处理' },
           timestamp: makeBidTimestamp(aiCallElapsed)
-        }])
+        })
         addBid('pass')
         return
       }
 
       // 保存AI叫牌历史记录
-      setAiBiddingHistory(prev => [...prev, {
+      appendBidHistory({
         position: currentBidder,
         hand: currentHand,
         biddingSequence: biddingStr,
         result: result,
         timestamp: makeBidTimestamp(aiCallElapsed)
-      }])
+      })
 
       // 添加AI叫牌
       addBid(result.bid)
@@ -2584,8 +2600,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       <SettingsPanel
         isMobile={isMobile}
         showSettings={showSettings}
-        gameMode={gameMode}
-        setGameMode={setGameMode}
         fallbackModel={fallbackModel}
         handleFallbackModelChange={handleFallbackModelChange}
         playModel={playModel}

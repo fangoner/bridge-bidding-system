@@ -4,7 +4,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import CardTable from './CardTable'
 import BiddingTable from './BiddingTable'
-import { hasAnyHuman, getHumanPositions, getPartnerPosition } from '../utils/position'
+import { hasAnyHuman, getPartnerPosition } from '../utils/position'
 import { PANEL_LAYOUT } from '../styles/constants'
 import { useGame } from '../context/GameContext'
 import { useBidding } from '../context/BiddingContext'
@@ -45,7 +45,8 @@ function CardTablePanel({
   const {
     hands, setHands,
     loading, aiThinking,
-    gameMode, dealer, vulnerability, setVulnerability,
+    gameMode, setGameMode,
+    dealer, vulnerability, setVulnerability,
     showPartnerHand, setShowPartnerHand,
     showOpponentHands, setShowOpponentHands,
     positionRoles,
@@ -246,11 +247,19 @@ function CardTablePanel({
 
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: isMobile ? 'center' : 'center', flex: isMobile ? 'none' : 1, flexWrap: 'wrap', minHeight: isMobile ? 0 : undefined }}>
-          {!showPlayPanel && hasAnyHuman(positionRoles) && getHumanPositions(positionRoles).length < 3 && (
+          {/* 叫牌阶段：模式切换（双人/四人）+ 队友/对方手牌 checkbox（强制显示） */}
+          {!showPlayPanel && (
             <>
-              <Typography variant="body2" sx={{ fontSize: '0.75rem', fontWeight: 700, mr: 0 }}>
-                {gameMode === 'pair' ? '双人练习' : '四人练习'}
-              </Typography>
+              <ToggleButtonGroup
+                value={gameMode}
+                exclusive
+                onChange={(_, v) => v && setGameMode(v)}
+                size="small"
+                sx={{ '& .MuiToggleButton-root': { px: 1, py: 0.1, fontSize: '0.7rem', textTransform: 'none', minWidth: 44, height: 24 } }}
+              >
+                <ToggleButton value="four">四人</ToggleButton>
+                <ToggleButton value="pair">双人</ToggleButton>
+              </ToggleButtonGroup>
               <FormControlLabel
                 control={
                   <Checkbox
@@ -259,7 +268,7 @@ function CardTablePanel({
                     size="small"
                   />
                 }
-                label="队友手牌"
+                label="队友"
                 sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
               />
               <FormControlLabel
@@ -270,7 +279,7 @@ function CardTablePanel({
                     size="small"
                   />
                 }
-                label="对方手牌"
+                label="对方"
                 sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
               />
             </>
@@ -284,19 +293,19 @@ function CardTablePanel({
                 <>
                   <FormControlLabel
                     control={<Checkbox checked={showPartnerHand} onChange={(e) => setShowPartnerHand(e.target.checked)} size="small" />}
-                    label="队友手牌"
+                    label="队友"
                     sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
                   />
                   <FormControlLabel
                     control={<Checkbox checked={showOpponentHands} onChange={(e) => setShowOpponentHands(e.target.checked)} size="small" />}
-                    label="对方手牌"
+                    label="对方"
                     sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
                   />
                 </>
               ) : (
                 <FormControlLabel
                   control={<Checkbox checked={showOpponentHands} onChange={(e) => setShowOpponentHands(e.target.checked)} size="small" />}
-                  label="对方手牌"
+                  label="对方"
                   sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.75rem' }, mr: 0, height: 24 }}
                 />
               )}
