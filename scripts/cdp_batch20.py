@@ -136,10 +136,13 @@ class CDP:
             pass
 
 
-# ── 通用 DOM 操作：在页面 JS 内执行，返回 JSON 字符串结果 ──
+# ── 通用 DOM 操作：在页面 JS 内执行，返回字符串结果 ──
+# 注意：不能包 JSON.stringify —— CDP returnByValue 会把字符串正确序列化为 JS string，
+# 包了反而让返回值带上引号（'"CLICKED"'），导致 click_when 的 startswith 判断永远失败，
+# 点击实际成功但被误判为未找到（修复于 2026-08-14）。
 
 def _js_click_by_text(text, contains, nth, selector):
-    return ("JSON.stringify((function(){"
+    return ("(function(){"
             "var els=Array.from(document.querySelectorAll('" + selector + "'));"
             "var exact=els.filter(function(e){return (e.textContent||'').trim()===" + json.dumps(text) + ";});"
             "var hit=exact.length?exact:(els.filter(function(e){return (e.textContent||'').trim().includes(" + json.dumps(text) + ");}));"
@@ -148,7 +151,7 @@ def _js_click_by_text(text, contains, nth, selector):
             "hit[" + str(nth) + "].dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0}));"
             "hit[" + str(nth) + "].dispatchEvent(new MouseEvent('click',{bubbles:true,button:0}));"
             "return 'CLICKED';"
-            "})())")
+            "})()")
 
 
 def click_when(cdp, text, timeout, contains=True, nth=0, selector="button"):
@@ -169,7 +172,7 @@ def click_combobox(cdp, display_text, timeout=15):
     start = time.time()
     last = "TIMEOUT"
     while time.time() - start < timeout:
-        js = ("JSON.stringify((function(){"
+        js = ("(function(){"
               "var els=Array.from(document.querySelectorAll('[role=combobox]'));"
               "var hit=els.filter(function(e){return (e.textContent||'').trim()===" + json.dumps(display_text) + ";});"
               "if(!hit.length){return 'NOT_FOUND&n='+els.length;}"
@@ -178,7 +181,7 @@ def click_combobox(cdp, display_text, timeout=15):
               "el.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0}));"
               "el.dispatchEvent(new MouseEvent('click',{bubbles:true,button:0}));"
               "el.focus();return 'CLICKED';"
-              "})())")
+              "})()")
         last = cdp.eval(js)
         if isinstance(last, str) and last.startswith("CLICKED"):
             return last
@@ -191,7 +194,7 @@ def click_option(cdp, text, timeout=10):
     start = time.time()
     last = "TIMEOUT"
     while time.time() - start < timeout:
-        js = ("JSON.stringify((function(){"
+        js = ("(function(){"
               "var els=Array.from(document.querySelectorAll('[role=option]'));"
               "var exact=els.filter(function(e){return (e.textContent||'').trim()===" + json.dumps(text) + ";});"
               "var hit=exact.length?exact:els.filter(function(e){return (e.textContent||'').trim().includes(" + json.dumps(text) + ");});"
@@ -201,7 +204,7 @@ def click_option(cdp, text, timeout=10):
               "el.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0}));"
               "el.dispatchEvent(new MouseEvent('click',{bubbles:true,button:0}));"
               "return 'CLICKED';"
-              "})())")
+              "})()")
         last = cdp.eval(js)
         if isinstance(last, str) and last.startswith("CLICKED"):
             return last
@@ -280,7 +283,8 @@ def extract_bidding_seq(t):
 
 
 def extract_result(t):
-    m = re.search(r'(完成|宕\d+|\+[0-9]|-[0-9]|Result|定约[^\n]*)', t)
+    # 优先匹配结果区"超 N/宕 N"（含空格），其次 完成/Result，最后完整分数（如 +150，避免误取 +1）
+    m = re.search(r'(超\s*\d+|宕\s*\d+|完成|Result|[+-]\d+)', t)
     if m:
         return m.group(0).strip()
     return None
@@ -349,8 +353,10 @@ def main():
             rec["contract"] = extract_contract(t)
             rec["bidding_seq"] = extract_bidding_seq(t)
             print("  contract:", rec["contract"])
-            # 流程：叫牌结束后点"切换到打牌"激活"确认定约与首攻"对话框，
-            # 对话框出现后再点"开始打牌"才真正进入打牌阶段。
+            # 流程：叫牌结束后点"切换到打牌"激活"确认定约与首攻"对话框；
+            # 对话框"开始打牌"→ doPlayInit（初始化面板，playInitiated=false）；
+            # 随后面板顶部还会出现"开始打牌"按钮 → handleBeginPlay（真正开始出牌）。
+            # 两步必须分别点击，否则打牌停留在初始化状态（等待 13/13 将超时）。
             print("  切换到打牌:", click_when(cdp, "切换到打牌", timeout=15, selector="button"))
             time.sleep(2)
             dlg_ok, t1 = wait_for_body(cdp, "确认定约与首攻", timeout=15, interval=1)
@@ -364,7 +370,10 @@ def main():
                 click_when(cdp, "取消", timeout=15, selector="button")
                 time.sleep(2)
                 continue
-            print("  开始打牌:", click_when(cdp, "开始打牌", timeout=15, selector="button"))
+            print("  确认定约(对话框):", click_when(cdp, "开始打牌", timeout=15, selector="button"))
+            time.sleep(2)
+            # 第二步：等打牌面板出现后点顶部"开始打牌"（此时对话框已关闭，不会误点）
+            print("  开始出牌(面板):", click_when(cdp, "开始打牌", timeout=15, selector="button"))
             time.sleep(2)
             p_ok, t2 = wait_for_body(cdp, "13/13", timeout=1200)
             if not p_ok:
