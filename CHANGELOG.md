@@ -1,5 +1,30 @@
 # 开发日志
 
+## 2026-08-14（自动出牌状态机重构 + 总耗时显示 + 批测工具链 + 截屏修复）
+
+### 自动出牌状态机重构（v1.61）
+- 由"aiThinking 翻转驱动链条"重构为"回合状态显式调度"：单一调度 effect 以 `current_player` / `tricks.length` / `phase` / `hands` 为触发源（均为后端确认后才变的字段），aiThinking 降级为纯旋转指示器
+- `aiPlayInFlightRef` 覆盖"调度→后端确认"全程（含乐观更新窗口），杜绝同一回合重复调度；暂停/继续/撤销/重打自然衔接，无需手动翻转 aiThinking
+- 附带修正：单张直出路径 aiThinking 残留导致人类回合旋转圈不清、人类回合自动暂停失效
+
+### 总耗时显示（v1.61）
+- 叫牌结束后右侧面板显示"叫牌总耗时"（`biddingTotalTime` 此前已计算但从未展示）
+- 打牌结束后显示"打牌总耗时"（新增 `playStartTimeRef` + `playTotalTime`）；复盘载入的完成记录不显示
+- 共用格式化 `web/src/utils/format.js`（`formatTotalTime`）
+
+### CDP 全流程批测工具链（v1.62）
+- `_tmp_archive_20260813/_cdp_batch20.py` 移入 `scripts/cdp_batch20.py`：CDP 驱动 headless Chrome，发牌→叫牌→打牌完成全流程 N 副连跑，结果落盘 JSON
+- 修复三处：① 点击函数去 `JSON.stringify` 包裹（返回值带引号导致 startswith 误判，点击实际成功却报 NOT_FOUND）；② 进打牌补齐两步点击（对话框"开始打牌"=doPlayInit 初始化 + 面板"开始打牌"=handleBeginPlay 真正开始，缺第二步会停在初始化）；③ `extract_result` 支持"超 N/宕 N"，不再从分数 +450 误提取 +4
+- 新增 `scripts/analyze_batch_results.py`：成功率/定约分布/结果分布/耗时统计
+- 实测 1 副全流程 164s 通过（4H 超 0），并验证重构后状态机在真实全流程无卡死
+
+### 截屏发牌修复（v1.62）
+- 根因：后端若由沙箱托管，读不到用户桌面剪贴板（window station 隔离，权限升级无效）
+- 改为**浏览器直读剪贴板**（`navigator.clipboard.read()`，浏览器运行在用户桌面会话）→ 走图片上传识别接口（不依赖后端剪贴板）；后端 read-clipboard 保留兜底（后端跑在用户桌面时依然工作）
+- 手势内首次读取触发剪贴板权限请求 + 内容指纹跳过触发前旧图；权限被拒/超时有明确提示（地址栏允许权限 / Win+Shift+S）
+
+**修改文件**: web/src/App.jsx, web/src/hooks/useDealing.js, web/src/components/{MainTableArea,BiddingDetailPanel,PlayDetailPanel}.jsx, web/src/utils/format.js（新增）, scripts/cdp_batch20.py（新增）, scripts/analyze_batch_results.py（新增）
+
 ## 2026-08-14（全流程流畅性审查 + 三阶段修复）
 
 ### 背景

@@ -556,6 +556,16 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.62
+- **CDP 全流程批测工具链**：`scripts/cdp_batch20.py`（headless Chrome 发牌→叫牌→打牌完成，N 副连跑）+ `scripts/analyze_batch_results.py`（统计）。修复：点击判定（JSON.stringify 包裹致 startswith 误判）、两步进打牌（对话框确认 doPlayInit + 面板开始 handleBeginPlay）、结果提取（超N/宕N）。实测 1 副 164s（4H 超 0）
+- **截屏发牌绕过沙箱剪贴板隔离**：后端沙箱托管时读不到用户桌面剪贴板（window station 隔离）→ 改浏览器直读剪贴板（`navigator.clipboard.read()`）→ 图片上传识别接口；后端 read-clipboard 兜底。首次使用需允许浏览器剪贴板权限
+- 修改文件: web/src/hooks/useDealing.js, scripts/cdp_batch20.py（新增）, scripts/analyze_batch_results.py（新增）
+
+### v1.61
+- **自动出牌状态机重构**：aiThinking 从"链条驱动"降级为纯旋转指示；单一调度 effect 按回合状态（`current_player`/`tricks.length`/`phase`/`hands`）显式驱动，`aiPlayInFlightRef` 覆盖调度→后端确认全程防重复调度；人类回合/暂停/完成统一清思考态
+- **总耗时显示**：叫牌结束/打牌结束分别显示"叫牌总耗时""打牌总耗时"（`formatTotalTime` 共用，`web/src/utils/format.js`）
+- 修改文件: web/src/App.jsx, web/src/components/{MainTableArea,BiddingDetailPanel,PlayDetailPanel}.jsx, web/src/utils/format.js（新增）
+
 ### v1.60
 - **全流程流畅性审查 + 三阶段修复（P0×6 / P1×11 / P2×25，报告见 `docs/流程流畅性审查报告.md`）**
   - **并发治理**：9 个阻塞 async 端点改 `asyncio.to_thread`；/api/bid、/api/play/ai-play 请求级 `copy.copy` 客户端消除全局 `llm_client.model` 串用
