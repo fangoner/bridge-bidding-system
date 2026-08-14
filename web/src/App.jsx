@@ -394,13 +394,18 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     const bidding = record.bidding || record
     // 有打牌记录 → 从 tricks 重建完整四家手牌，完成后不区分来源
     let resolvedHands = board.hands || record.hands || {}
-    // 从打牌记录 tricks 重建完整四家手牌
+    // 从打牌记录 tricks 重建完整四家手牌（仅当顶层手牌不完整时，兼容旧记录/仅存打牌数据的导入）
     const playTricks = record.play?.tricks
-    const hasPlayState = !!(playTricks && playTricks.length > 0)
-    if (hasPlayState) {
+    const savedPlayState = record.play?.state
+    const hasPlayState = !!(playTricks && playTricks.length > 0) || !!savedPlayState
+    const hasFullHands = !!resolvedHands && ['南', '北', '东', '西'].every(p => {
+      const h = resolvedHands[p]
+      return h && (h.spades?.length || 0) + (h.hearts?.length || 0) + (h.diamonds?.length || 0) + (h.clubs?.length || 0) === 13
+    })
+    if (hasPlayState && !hasFullHands) {
       const ALL_POS = ['北', '东', '南', '西']
       const playedByPos = Object.fromEntries(ALL_POS.map(p => [p, []]))
-      for (const t of playTricks) {
+      for (const t of playTricks || []) {
         for (const [p, c] of (t.cards || [])) playedByPos[p].push(c)
       }
       const sm = { '♠': 'spades', '♥': 'hearts', '♦': 'diamonds', '♣': 'clubs' }
@@ -453,7 +458,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     setReviewCursor(null)
     setSelectedPlayRecord(null)
     // 预加载打牌数据
-    if (record.play && record.play.tricks && record.play.tricks.length > 0) {
+    if (record.play && (playTricks?.length > 0 || savedPlayState)) {
       // 完整记录含 tricks 数组
       const contractFromRecord = board.contract
       const suitMap = { S: '♠', H: '♥', D: '♦', C: '♣', NT: 'NT' }
@@ -468,19 +473,33 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         tricks_needed: (contractFromRecord.level || 0) + 6,
       } : null
 
-      const restoredPlayState = {
-        contract,
-        hands: { '北': [], '南': [], '东': [], '西': [] },
-        dummy: contract ? partnerMap[contract.declarer] : null,
-        player_roles: board.player_roles || {},
-        tricks: record.play.tricks,
-        current_trick: { cards: [], leader: null, trump: contract?.suit || null },
-        current_player: null,
-        lead_player: null,
-        declarer_tricks: record.play.declarer_tricks || 0,
-        defender_tricks: record.play.defender_tricks || 0,
-        phase: 'complete',
-        is_human_turn: false,
+      let restoredPlayState
+      if (savedPlayState && savedPlayState.phase && savedPlayState.phase !== 'complete') {
+        // P2 修复：进行中记录（play_in_progress）直接恢复保存的状态（含真实 phase/current_trick），
+        // 支持断点续打；stripPlayState 已剥离 contract/player_roles/dummy，需重新挂接
+        restoredPlayState = {
+          ...savedPlayState,
+          contract,
+          player_roles: savedPlayState.player_roles || board.player_roles || board.position_roles || {},
+          dummy: contract ? partnerMap[contract.declarer] : null,
+          is_human_turn: false,
+        }
+      } else {
+        // 完整记录（play_complete，无 state）：从 tricks 重建完成态
+        restoredPlayState = {
+          contract,
+          hands: { '北': [], '南': [], '东': [], '西': [] },
+          dummy: contract ? partnerMap[contract.declarer] : null,
+          player_roles: board.player_roles || {},
+          tricks: playTricks || [],
+          current_trick: { cards: [], leader: null, trump: contract?.suit || null },
+          current_player: null,
+          lead_player: null,
+          declarer_tricks: record.play.declarer_tricks || 0,
+          defender_tricks: record.play.defender_tricks || 0,
+          phase: 'complete',
+          is_human_turn: false,
+        }
       }
 
       setLoadedPlayRecord({
@@ -723,6 +742,13 @@ function AppShell({ darkMode, onToggleDarkMode }) {
 
   const handleModeChange = (newMode) => {
     if (newMode !== mode) {
+      // P2 修复：切换模式会清空当前牌局（clearAllHands），有牌局时先确认，避免误触丢失进度
+      const hasActiveGame = hands && Object.values(hands).some(h => h && (
+        (h.spades?.length || 0) + (h.hearts?.length || 0) + (h.diamonds?.length || 0) + (h.clubs?.length || 0) > 0
+      ))
+      if (hasActiveGame && !window.confirm('切换模式将清空当前牌局（手牌与叫牌/打牌进度），确定继续吗？')) {
+        return
+      }
       setMode(newMode)
       clearAllHands()
       // 切到发牌练习：全部AI；切到模拟实战：默认3人+1AI
@@ -1491,8 +1517,12 @@ function AppShell({ darkMode, onToggleDarkMode }) {
 
     // 构建截断后的 playState
     const keptTricks = (savedState.tricks || []).slice(0, completedTricksToKeep)
+    // P2 修复：部分墩可能位于 current_trick（进行中记录），tricks 取完时从 current_trick 取
+    const partialSource = completedTricksToKeep < (savedState.tricks || []).length
+      ? (savedState.tricks?.[completedTricksToKeep]?.cards || [])
+      : (savedState.current_trick?.cards || [])
     const partialCards = cardsInPartialTrick > 0
-      ? (savedState.tricks?.[completedTricksToKeep]?.cards || []).slice(0, cardsInPartialTrick)
+      ? partialSource.slice(0, cardsInPartialTrick)
       : []
     const isLead = actualKeep === 0
     const allReplayed = actualKeep >= allPlayed.length
@@ -1714,8 +1744,12 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       }
       // 构建截断后的 playState（使用后端回放后的真实状态，保证 hands/current_trick 等正确）
       const keptCompletedTricks = (savedState.tricks || []).slice(0, completedTricksToKeep)
+      // P2 修复：部分墩可能位于 current_trick（进行中记录），tricks 取完时从 current_trick 取
+      const partialTrickSource = completedTricksToKeep < (savedState.tricks || []).length
+        ? (savedState.tricks?.[completedTricksToKeep]?.cards || [])
+        : (savedState.current_trick?.cards || [])
       const partialTrickCards = cardsInPartialTrick > 0
-        ? (savedState.tricks?.[completedTricksToKeep]?.cards || []).slice(0, cardsInPartialTrick)
+        ? partialTrickSource.slice(0, cardsInPartialTrick)
         : []
       const truncatedState = lastReplayState
         ? {

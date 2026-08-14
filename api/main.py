@@ -1540,6 +1540,32 @@ class PlayInitResponse(BaseModel):
 async def play_init(request: PlayInitRequest):
     """初始化打牌"""
     try:
+        # P2 修复：定约合法性预校验——Pass Out/非法定约返回友好中文错误，
+        # 而不是 Contract.from_str 的英文 ValueError（play_types.py:142 int()）
+        from bridge.play_types import Contract as _Contract
+        if not request.declarer or request.declarer not in ("南", "西", "北", "东"):
+            return PlayInitResponse(
+                success=False,
+                error=f"庄家位置非法: {request.declarer or '空'}（应为南/西/北/东）"
+            )
+        try:
+            _c = _Contract.from_str(request.contract or "", request.declarer)
+            if not (1 <= _c.level <= 7):
+                return PlayInitResponse(
+                    success=False,
+                    error=f"定约阶数非法: {_c.level}（应为 1-7）"
+                )
+            if _c.suit not in ("♠", "♥", "♦", "♣", "NT"):
+                return PlayInitResponse(
+                    success=False,
+                    error=f"定约花色非法: {_c.suit}"
+                )
+        except Exception:
+            return PlayInitResponse(
+                success=False,
+                error="无法解析定约：叫牌未产生有效定约（Pass Out）或定约格式错误，请先完成叫牌或手动确认定约"
+            )
+
         service = get_play_service(request.session_id)
         state = service.initialize(
             hands=request.hands,
@@ -1553,6 +1579,12 @@ async def play_init(request: PlayInitRequest):
             bid_meanings=request.bid_meanings or "",
             vulnerability=_normalize_vulnerability(request.vulnerability) or "NV",
         )
+
+        if state is None:
+            return PlayInitResponse(
+                success=False,
+                error="打牌初始化失败：手牌数据不完整，请检查四家手牌"
+            )
 
         return PlayInitResponse(
             success=True,
@@ -1781,6 +1813,14 @@ async def ai_play(request: PlayAIRequest):
         try:
             if not service.is_human_turn():
                 engine = request.play_engine or DEFAULT_PLAY_ENGINE
+                # P2 修复：未识别引擎显式报错，避免静默落到 LLM 引擎（tiered/alphamu_llm 旧名已下线）
+                KNOWN_PLAY_ENGINES = {"llm", "mcts", "dd", "perfect", "alphamu", "dd_alphamu_llm"}
+                if request.play_engine and engine not in KNOWN_PLAY_ENGINES:
+                    return PlayAIResponse(
+                        success=False,
+                        used_engine=engine,
+                        error=f"未知引擎: {engine}（可选: {', '.join(sorted(KNOWN_PLAY_ENGINES))}）"
+                    )
                 use_mcts = engine == "mcts"
                 use_dd = engine == "dd"
                 use_perfect = engine == "perfect"

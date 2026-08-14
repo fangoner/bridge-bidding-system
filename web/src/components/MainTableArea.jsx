@@ -93,6 +93,7 @@ export default function MainTableArea({
 
       <RightPanelSwitcher
         isMobile={isMobile}
+        directPlayContractInfo={directPlayContractInfo}
         // 叫牌回调
         onStartPlay={onStartPlay}
         onResetBidding={onResetBidding}
@@ -125,6 +126,7 @@ export default function MainTableArea({
 // 右侧/下方面板切换：showPlayPanel 决定显示打牌面板还是叫牌面板
 function RightPanelSwitcher({
   isMobile,
+  directPlayContractInfo,
   // 叫牌回调
   onStartPlay,
   onResetBidding,
@@ -153,7 +155,6 @@ function RightPanelSwitcher({
     hands,
     positionRoles,
     showAIBiddingOutput,
-    gameMode,
     readonlyMode,
     aiThinking,
     imageOpeningLead,
@@ -233,7 +234,6 @@ function RightPanelSwitcher({
         selectedBiddingIndex={selectedBiddingIndex}
         setSelectedBiddingIndex={setSelectedBiddingIndex}
         hands={hands}
-        gameMode={gameMode}
         bidSuggestion={bidSuggestion}
         suggestionLoading={suggestionLoading}
         stopBidding={stopBidding}
@@ -241,6 +241,7 @@ function RightPanelSwitcher({
         isBiddingCompleteFn={isBiddingComplete}
         onStartPlay={onStartPlay}
         playLoading={playLoading}
+        directPlayContractInfo={directPlayContractInfo}
         biddingStarted={biddingStarted}
         onStartBidding={onStartBidding}
         onResetBidding={onResetBidding}

@@ -29,7 +29,6 @@ function BiddingDetailPanel({
   selectedBiddingIndex,
   setSelectedBiddingIndex,
   hands,
-  gameMode,
   bidSuggestion,
   suggestionLoading,
   stopBidding,
@@ -37,6 +36,7 @@ function BiddingDetailPanel({
   isBiddingCompleteFn,
   onStartPlay,
   playLoading,
+  directPlayContractInfo,
   // 叫牌按钮相关
   biddingStarted,
   onStartBidding,
@@ -425,8 +425,15 @@ function BiddingDetailPanel({
           <Button variant="outlined" color="info" size="small" onClick={onSave} disabled={!canSave || readonlyMode} sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, px: 0.5, py: 0, minWidth: 36 }}>
             保存
           </Button>
-          {gameMode !== 'pair' && onStartPlay && (
-            <Button variant="contained" color="primary" size="small" onClick={onStartPlay} disabled={playLoading} sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, px: 0.5, py: 0, minWidth: 36 }}>
+          {onStartPlay && (
+            <Button
+              variant="contained" color="primary" size="small"
+              onClick={onStartPlay}
+              // P2 修复：双人模式同样提供打牌入口；叫牌未结束且无直接打牌信息时禁用
+              disabled={playLoading || aiThinking || (!isBiddingCompleteFn() && !directPlayContractInfo)}
+              title={!isBiddingCompleteFn() && !directPlayContractInfo ? '叫牌尚未结束，请先完成叫牌（或通过图片识别直接进入打牌）' : ''}
+              sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, px: 0.5, py: 0, minWidth: 36 }}
+            >
               {playLoading ? <CircularProgress size={16} /> : '切换到打牌'}
             </Button>
           )}

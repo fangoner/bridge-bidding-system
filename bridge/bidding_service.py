@@ -28,9 +28,14 @@ class BiddingService:
         self._last_prompt = None
 
     def _get_slam_result(self, bidding_sequence, partner_name):
+        # P2-26 修复：按 (bidding_sequence, partner_name) 键控缓存，
+        # 避免 CLI 长生命周期 BiddingService 跨牌局/跨轮次串用旧检索结果
+        key = (bidding_sequence, partner_name)
         if self._slam_cache is None:
-            self._slam_cache = self.jf_retriever.retrieve_with_preprocess("成局与满贯", bidding_sequence, partner_name)
-        return self._slam_cache
+            self._slam_cache = {}
+        if key not in self._slam_cache:
+            self._slam_cache[key] = self.jf_retriever.retrieve_with_preprocess("成局与满贯", bidding_sequence, partner_name)
+        return self._slam_cache[key]
     
     def set_bid_meanings(self, bid_meanings: str):
         self.bid_meanings = bid_meanings

@@ -518,7 +518,7 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
 | `DEFAULT_DEAL_SYSTEM` | `2D/2H/2S：自然阻击` | 阻击叫体系，影响关键字提取 |
-| `DEFAULT_PLAY_ENGINE` | `llm` | 默认打牌引擎 |
+| `DEFAULT_PLAY_ENGINE` | `dd_alphamu_llm` | 默认打牌引擎（可选 llm/mcts/dd/perfect/alphamu/dd_alphamu_llm） |
 | `DEFAULT_MAIN_PROMPT_MODEL` | `deepseek-v4-flash` | 主提示词模型 |
 | `DEFAULT_FALLBACK_MODEL` | `deepseek-v4-flash` | 备用提示词模型 |
 | `MAIN_PROMPT_TEMPERATURE` | 0.2 | 主提示词温度 |

@@ -51,7 +51,7 @@ Start backend with `uvicorn api.main:app --host 0.0.0.0 --port 8003` (no `--relo
 `config.py` is the single source of truth. All MCTS, DD, model, temperature, and path settings are there. Do not create separate config files.
 
 Key non-obvious settings:
-- `DEFAULT_PLAY_ENGINE = "llm"` — options: `"llm"`, `"mcts"`, `"dd"`, `"tiered"`, `"perfect"`, `"alphamu"`, `"alphamu_llm"`
+- `DEFAULT_PLAY_ENGINE = "dd_alphamu_llm"` — options: `"llm"`, `"mcts"`, `"dd"`, `"perfect"`, `"alphamu"`, `"dd_alphamu_llm"`
 - `MCTS_SEARCH_MODE = "mcts"` — options: `"mcts"` (tree+rollout) or `"dd"` (pure Monte Carlo + double-dummy)
 - `DEFAULT_DEAL_SYSTEM = "2D/2H/2S：自然阻击"` — affects keyword extraction for opening bids
 - `SHOW_FULL_LLM_OUTPUT = True`

@@ -223,7 +223,7 @@ DOUBAO_SEED_ENDPOINT=your_seed_endpoint_id
 - Config keys in `config.py`: `DEFAULT_MAIN_PROMPT_MODEL`, `DEFAULT_FALLBACK_MODEL`, `DEFAULT_AI_PROVIDER`, `SHOW_FULL_LLM_OUTPUT`.
 
 ### Play Engine Configuration
-- `DEFAULT_PLAY_ENGINE`: "llm" (default), "mcts", "dd", "perfect", "tiered", "alphamu", "alphamu_llm".
+- `DEFAULT_PLAY_ENGINE`: "dd_alphamu_llm" (default; options: "llm", "mcts", "dd", "perfect", "alphamu", "dd_alphamu_llm").
 - `MCTS_ITERATIONS`: Max iterations per play decision (default 5000).
 - `MCTS_TIME_LIMIT`: Hard time cap per decision in seconds (default 10.0).
 - `MCTS_EXPLORATION_CONSTANT`: UCT exploration weight (default 1.414).
