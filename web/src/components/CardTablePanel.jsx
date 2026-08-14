@@ -73,7 +73,7 @@ function CardTablePanel({
     showPlayedCards, setShowPlayedCards,
     playCenterView, setPlayCenterView,
     showDDHints, toggleDDHints,
-    ddHints,
+    ddHints, ddHintsLoading,
     reviewCursor,
   } = usePlay()
 
@@ -217,11 +217,18 @@ function CardTablePanel({
             </ToggleButtonGroup>
           )}
           {showPlayPanel && toggleDDHints && allHandsComplete && (
-            <Tooltip title={showDDHints ? '隐藏DD提示' : '显示DD提示'} arrow>
-              <IconButton size="small" onClick={toggleDDHints} sx={{ p: 0.3 }}>
-                {showDDHints ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-              </IconButton>
-            </Tooltip>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              {showDDHints && ddHintsLoading && (
+                <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary' }}>
+                  DD 分析中…
+                </Typography>
+              )}
+              <Tooltip title={showDDHints ? '隐藏DD提示' : '显示DD提示'} arrow>
+                <IconButton size="small" onClick={toggleDDHints} sx={{ p: 0.3 }}>
+                  {showDDHints ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+                </IconButton>
+              </Tooltip>
+            </Box>
           )}
           {!showPlayPanel && isMobile && mode !== 'simulated' && (
           <Box sx={{ display: 'flex', gap: 0.5, ml: 'auto', borderLeft: '1px solid', borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)', pl: 1 }}>

@@ -127,6 +127,18 @@ function CardTable({
   const singleHandFileRef = useRef(null)
   const [singleHandPos, setSingleHandPos] = useState(null)
 
+  // P1 修复：AI 思考中显示"已等待 N 秒"（叫牌与打牌共用 aiLoading；setState 仅发生在 interval 回调内）
+  const aiThinkingStartRef = useRef(0)
+  const [aiThinkingSeconds, setAiThinkingSeconds] = useState(0)
+  useEffect(() => {
+    if (!aiLoading) return
+    aiThinkingStartRef.current = Date.now()
+    const timer = setInterval(() => {
+      setAiThinkingSeconds(Math.floor((Date.now() - aiThinkingStartRef.current) / 1000))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [aiLoading])
+
   const getTableRightPos = () => {
     if (!tableRef.current) return isMobile
       ? { left: Math.max(8, window.innerWidth / 2 - 140), top: window.innerHeight / 2 - 120 }
@@ -834,7 +846,14 @@ function CardTable({
           {renderCard('西')}
           <Box sx={{ width: 56, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', borderRadius: '50%', bgcolor: 'rgba(0,0,0,0.2)' }}>
             {aiLoading ? (
-              <CircularProgress size={22} sx={{ color: 'rgba(255,255,255,0.8)' }} />
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px' }}>
+                <CircularProgress size={20} sx={{ color: 'rgba(255,255,255,0.8)' }} />
+                {aiThinkingSeconds > 0 && (
+                  <Typography sx={{ fontSize: '0.5rem', fontWeight: 600, color: 'rgba(255,255,255,0.7)', lineHeight: 1 }}>
+                    {aiThinkingSeconds}s
+                  </Typography>
+                )}
+              </Box>
             ) : isReview ? (
               displayTrickIdx < 0 ? (
                 // 首攻（游标在第1墩开头）：显示首攻位置

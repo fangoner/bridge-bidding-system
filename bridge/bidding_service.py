@@ -88,6 +88,11 @@ class BiddingService:
         result["当前叫牌序列"] = bidding_sequence if bidding_sequence else "空（开叫位置）"
         result["自己pass次数"] = str(bidding_sequence.lower().count("pass"))
         bid = result.get("选定叫品", "pass")
+        # P2-28 修复：与 fallback 路径一致，dict/list 型叫品先规范化为 str，
+        # 避免 _normalize_bid 内 bid.strip() 抛 AttributeError（主路径直接报错不重试的问题）
+        if not isinstance(bid, str):
+            bid = json.dumps(bid, ensure_ascii=False) if bid is not None else "pass"
+            result["选定叫品"] = bid
         bid_normalized = self._normalize_bid(bid)
         if bid_normalized != bid:
             result["选定叫品"] = bid_normalized

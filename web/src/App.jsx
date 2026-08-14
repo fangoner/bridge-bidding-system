@@ -305,6 +305,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const playStateRef = useRef(playState)
   const aiPlayHistoryRef = useRef(aiPlayHistory)
   const abortControllerRef = useRef(null)
+  const bidAbortRef = useRef(null) // 在途 AI 叫牌请求（支持暂停中止，P1 修复）
   useEffect(() => { playStateRef.current = playState }, [playState])
   useEffect(() => { aiPlayHistoryRef.current = aiPlayHistory }, [aiPlayHistory])
 
@@ -773,6 +774,10 @@ function AppShell({ darkMode, onToggleDarkMode }) {
 
   // 切换停止/继续叫牌
   const toggleStopBidding = () => {
+    // P1 修复：暂停叫牌时中止在途 AI 请求，避免结果继续落盘（用户以为已停，叫品却进来了）
+    if (!stopBidding && bidAbortRef.current) {
+      bidAbortRef.current.abort()
+    }
     toggleStopBiddingState()
   }
 
@@ -1028,6 +1033,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     
     setCurrentBiddingPosition(currentBidder)
     setAiThinking(true)
+    // P1 修复：支持"暂停"中止在途请求（toggleStopBidding 会 abort）
+    const controller = new AbortController()
+    bidAbortRef.current = controller
     try {
       // 用于显示的字符串
       const biddingStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-') + (biddingSequence.length > 0 ? '-' : '')
@@ -1050,7 +1058,12 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       // 传递数组，后端处理格式
       const bm = parseModelValue(fallbackModel)
       const aiCallStart = Date.now()
-      const result = await aiBid(currentHand, biddingSequence, currentBidder, dealSystem, bidHistory, useFallback, bm.model, 'deepseek', bm.reasoning)
+      const result = await aiBid(currentHand, biddingSequence, currentBidder, dealSystem, bidHistory, useFallback, bm.model, 'deepseek', bm.reasoning, controller.signal)
+      if (controller.signal.aborted) {
+        // 用户已暂停，丢弃本次结果
+        console.log('[AI叫牌] 用户已暂停，丢弃本次结果')
+        return
+      }
       const aiCallElapsed = Date.now() - aiCallStart
       
       // 更新useFallback状态
@@ -1086,6 +1099,11 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       // 添加AI叫牌
       addBid(result.bid)
     } catch (err) {
+      if (err.name === 'CanceledError' || err.name === 'AbortError' || controller.signal.aborted) {
+        // 用户主动暂停：不报错、不落 pass（stopBidding 已由暂停按钮置位）
+        console.log('[AI叫牌] 请求已被用户中止')
+        return
+      }
       console.error('AI叫牌失败:', err)
       // P0-4 修复：不再静默自动 pass——提示错误并停止自动叫牌，
       // 用户可点击"继续叫牌"重试（toggleStopBidding 会重新触发 AI 叫牌）
@@ -1093,6 +1111,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       setError(`AI叫牌失败: ${errMsg}（已停止自动叫牌，可点击"继续叫牌"重试）`)
       setStopBidding(true)
     } finally {
+      if (bidAbortRef.current === controller) {
+        bidAbortRef.current = null
+      }
       setAiThinking(false)
       setCurrentBiddingPosition(null)
     }
@@ -2227,7 +2248,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     return positionRoles[cp] === 'human'
   }
 
-  // 牌桌DD提示获取
+  // 牌桌DD提示获取（P1 修复：300ms 防抖 + AbortController 取消在途请求，
+  // 避免每次出牌/撤销都连发 DDS 求解请求在服务端堆积）
   useEffect(() => {
     if (!showPlayPanel || !playState) return
     if (!showDDHints) { setDDHints(null); return }
@@ -2252,31 +2274,40 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     }
     if (!allKnown) { setDDHints(null); return }
 
-    // 复盘：通过游标重建牌局快照
-    if (reviewCursor != null) {
-      const totalCards = (playState.tricks || []).reduce((s, t) => s + (t.cards?.length || 0), 0)
-        + (playState.current_trick?.cards?.length || 0)
-      if (reviewCursor >= totalCards) { setDDHints(null); return }
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      // 复盘：通过游标重建牌局快照
+      if (reviewCursor != null) {
+        const totalCards = (playState.tricks || []).reduce((s, t) => s + (t.cards?.length || 0), 0)
+          + (playState.current_trick?.cards?.length || 0)
+        if (reviewCursor >= totalCards) { setDDHints(null); return }
+        setDDHints(null)
+        setDDHintsLoading(true)
+        getDDHintsReview({ ...playState, hands: fullHands }, reviewCursor, controller.signal)
+          .then(data => { if (!controller.signal.aborted && data?.success) setDDHints(data.hints) })
+          .catch(err => {
+            if (!controller.signal.aborted && err.name !== 'CanceledError' && err.name !== 'AbortError') {
+              console.error('DD hints review fetch failed:', err)
+            }
+          })
+          .finally(() => { if (!controller.signal.aborted) setDDHintsLoading(false) })
+        return
+      }
+
+      // 实战：直接用后端当前状态
+      if (playState.phase === 'complete') return
       setDDHints(null)
       setDDHintsLoading(true)
-      let cancelled = false
-      getDDHintsReview({ ...playState, hands: fullHands }, reviewCursor)
-        .then(data => { if (!cancelled && data?.success) setDDHints(data.hints) })
-        .catch(err => { if (!cancelled) console.error('DD hints review fetch failed:', err) })
-        .finally(() => { if (!cancelled) setDDHintsLoading(false) })
-      return () => { cancelled = true }
-    }
-
-    // 实战：直接用后端当前状态
-    if (playState.phase === 'complete') return
-    setDDHints(null)
-    setDDHintsLoading(true)
-    let cancelled = false
-    getDDHints()
-      .then(data => { if (!cancelled && data?.success) setDDHints(data.hints) })
-      .catch(err => { if (!cancelled) console.error('DD hints fetch failed:', err) })
-      .finally(() => { if (!cancelled) setDDHintsLoading(false) })
-    return () => { cancelled = true }
+      getDDHints(controller.signal)
+        .then(data => { if (!controller.signal.aborted && data?.success) setDDHints(data.hints) })
+        .catch(err => {
+          if (!controller.signal.aborted && err.name !== 'CanceledError' && err.name !== 'AbortError') {
+            console.error('DD hints fetch failed:', err)
+          }
+        })
+        .finally(() => { if (!controller.signal.aborted) setDDHintsLoading(false) })
+    }, 300)
+    return () => { clearTimeout(timer); controller.abort() }
   }, [showDDHints, playState?.current_player, playState?.phase, showPlayPanel, reviewCursor, playState, hands, setDDHints, setDDHintsLoading])
 
   // 加载记录后自动进入打牌界面（记录含打牌数据时）

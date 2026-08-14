@@ -2,6 +2,7 @@ import asyncio
 import json
 import math
 import re
+import time
 from typing import Optional, Dict, List, Any, Tuple
 
 from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER, PARTNERS
@@ -802,8 +803,10 @@ class PlayService:
                 import traceback
                 print(f"[MCTS] LLM约束补充提取失败: {e}，使用纯硬编码约束")
                 traceback.print_exc()
-            self.bid_constraints = hard_constraints
-            return hard_constraints
+            # P1-3 修复：返回合并后的约束（含 LLM 提取结果），原代码返回 hard_constraints
+            # 导致 Step 3 的 LLM 补充结果被丢弃（白烧一次 LLM 调用且功能无效）
+            self.bid_constraints = constraints
+            return constraints
 
         # 一二层已产出约束，缓存并返回
         self.bid_constraints = constraints
@@ -825,6 +828,11 @@ class PlayService:
         # 已知、未知仅两家各4张，C(8,4)=70 完全可枚举）。_enumerate_endgame
         # 内部有 est > max 判定会自行回退采样，故放开硬门槛交由它判断。
         # αμ 采样在约束不可满足时会陷入回退链（MH→Level2→Level0），枚举可避免。
+        # P1-2 修复：枚举与 αμ 搜索共享总预算——枚举预算从 DD 的 30s 压缩到 10s，
+        # 且 αμ 搜索预算会扣除枚举已用时间，避免"枚举30s+搜索32s"双预算叠加到 ~62s
+        _t_alpha_start = time.time()
+        _saved_dd_time_limit = self.dd_search.time_limit
+        self.dd_search.time_limit = min(10.0, _saved_dd_time_limit)
         try:
             enum_result = self.dd_search._enumerate_endgame(
                 state,
@@ -850,6 +858,8 @@ class PlayService:
         except Exception as e:
             # P0-3 修复：残局枚举异常不中断，回退 αμ 采样搜索
             print(f"[αμ] 残局枚举异常（回退 αμ 采样搜索）: {e}")
+        finally:
+            self.dd_search.time_limit = _saved_dd_time_limit
 
         base_worlds = ALPHA_MU_NUM_WORLDS
         # 世界数随牌数减少而增加（残局越小，采样越精确）
@@ -873,6 +883,9 @@ class PlayService:
             time_lim, dds_budget = 50.0, 15000
         else:
             time_lim, dds_budget = 60.0, 20000
+
+        # P1-2 修复：αμ 搜索预算扣除残局枚举已用时间（共享总 deadline，下限 3s）
+        time_lim = max(3.0, time_lim - (time.time() - _t_alpha_start))
 
         # 创建临时搜索器（复用 dd_search 的 sampler + 约束）
         constraints = self._get_bid_constraints()

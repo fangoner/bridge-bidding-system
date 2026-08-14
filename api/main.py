@@ -2067,7 +2067,11 @@ def _resolve_dd_target(state_after, tricks_before):
 
 
 # ── DD 提示异步计算（7/8）──
+# P1 修复：有界队列——单工作线程 + 待办只保留最新 1 个未开始的。
+# 连续快速出牌时丢弃过期的提示计算，避免无界堆积（每个任务持整局深拷贝快照，堆积即内存膨胀）
 _dd_hint_executor = ThreadPoolExecutor(max_workers=1)
+_dd_hint_pending = []  # [(snapshot, target_trick), ...]，锁内操作，最多 1 项
+_dd_hint_lock = threading.Lock()
 
 
 def _submit_dd_hint(state_before_snapshot, state_after, tricks_before):
@@ -2082,9 +2086,24 @@ def _submit_dd_hint(state_before_snapshot, state_after, tricks_before):
         target_trick = _resolve_dd_target(state_after, tricks_before)
         if target_trick is None:
             return
-        _dd_hint_executor.submit(_record_dd_hint_async, state_before_snapshot, target_trick)
+        with _dd_hint_lock:
+            _dd_hint_pending.append((state_before_snapshot, target_trick))
+            # 只保留最新一个未开始的待办，丢弃旧的
+            if len(_dd_hint_pending) > 1:
+                _dd_hint_pending[:] = _dd_hint_pending[-1:]
+        _dd_hint_executor.submit(_dd_hint_worker)
     except Exception:
         pass
+
+
+def _dd_hint_worker():
+    """后台工作线程：取最新待办计算 DD 提示。"""
+    while True:
+        with _dd_hint_lock:
+            if not _dd_hint_pending:
+                return
+            snapshot, target = _dd_hint_pending.pop(0)
+        _record_dd_hint_async(snapshot, target)
 
 
 def _record_dd_hint_async(state_before_snapshot, target_trick):
@@ -2094,10 +2113,15 @@ def _record_dd_hint_async(state_before_snapshot, target_trick):
     try:
         perspective = state_before_snapshot.current_player
         playable = state_before_snapshot.get_playable_cards(perspective)
-        hints = _compute_dd_hints_from_state(state_before_snapshot, playable)
+        # P1 修复：DD 提示计算加硬超时（10s），避免坏局面挂起占用唯一工作线程
+        with ThreadPoolExecutor(max_workers=1) as _compute_exec:
+            _fut = _compute_exec.submit(_compute_dd_hints_from_state, state_before_snapshot, playable)
+            hints = _fut.result(timeout=10.0)
         if not hints:
             return
         target_trick.dd_hints.append(hints)
+    except TimeoutError:
+        print("[DD提示] 计算超时（>10s），丢弃本次提示")
     except Exception:
         pass
 

@@ -83,7 +83,7 @@ export const setFallbackModel = async (fallbackModel) => {
 };
 
 // AI叫牌
-export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H/2S：自然阻击', bidHistory = '', useFallback = false, fallbackModel = null, aiProvider = null, useReasoning = false) => {
+export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H/2S：自然阻击', bidHistory = '', useFallback = false, fallbackModel = null, aiProvider = null, useReasoning = false, signal = null) => {
   try {
     const requestData = {
       hand,
@@ -103,9 +103,13 @@ export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H
       requestData.ai_provider = aiProvider;
     }
     
-    const response = await api.post('/api/bid', requestData);
+    const config = signal ? { signal } : {};
+    const response = await api.post('/api/bid', requestData, config);
     return response.data;
   } catch (error) {
+    if (error.name === 'CanceledError' || error.name === 'AbortError') {
+      throw error; // 用户主动取消，交由调用方处理
+    }
     console.error('AI叫牌失败:', error);
     throw error;
   }
@@ -377,9 +381,11 @@ export const setPlayHand = async (position, hand) => {
 };
 
 // 获取DD出牌提示（完美双明手分析）
-export const getDDHints = async () => {
+export const getDDHints = async (signal = null) => {
   try {
-    const response = await api.get('/api/play/dd-hints', { params: { session_id: PLAY_SESSION_ID } });
+    const config = { params: { session_id: PLAY_SESSION_ID } };
+    if (signal) config.signal = signal;
+    const response = await api.get('/api/play/dd-hints', config);
     return response.data;
   } catch (error) {
     console.error('获取DD提示失败:', error);
@@ -388,12 +394,13 @@ export const getDDHints = async () => {
 };
 
 // 复盘模式：根据游标位置获取DD提示
-export const getDDHintsReview = async (playState, cursor) => {
+export const getDDHintsReview = async (playState, cursor, signal = null) => {
   try {
+    const config = signal ? { signal } : {};
     const response = await api.post('/api/play/dd-hints-review', {
       play_state: playState,
       cursor: cursor,
-    });
+    }, config);
     return response.data;
   } catch (error) {
     console.error('获取复盘DD提示失败:', error);

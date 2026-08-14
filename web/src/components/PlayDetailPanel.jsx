@@ -35,6 +35,18 @@ function PlayDetailPanel({
   const [collapsed, setCollapsed] = useState(false)
   const prevIsPausedRef = useRef(isPaused)
 
+  // P1 修复：AI 出牌等待中显示"已等待 N 秒"（setState 仅发生在 interval 回调内）
+  const aiWaitStartRef = useRef(0)
+  const [aiWaitSeconds, setAiWaitSeconds] = useState(0)
+  useEffect(() => {
+    if (!aiLoading) return
+    aiWaitStartRef.current = Date.now()
+    const timer = setInterval(() => {
+      setAiWaitSeconds(Math.floor((Date.now() - aiWaitStartRef.current) / 1000))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [aiLoading])
+
   // 恢复继续时清除选中记录
   useEffect(() => {
     if (prevIsPausedRef.current && !isPaused) {
@@ -82,7 +94,7 @@ function PlayDetailPanel({
     if (!record) {
       return (
         <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 2 }}>
-          等待AI出牌...
+          等待AI出牌{aiWaitSeconds > 0 ? `...（已等待 ${aiWaitSeconds}s）` : '...'}
         </Typography>
       )
     }
