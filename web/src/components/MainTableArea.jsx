@@ -59,6 +59,7 @@ export default function MainTableArea({
   onReviewNext,
   onRewindToTrick,
   onReviewCompletedPlay,
+  playTotalTime, // v1.61：打牌总耗时（秒，完成后计算）
 }) {
   return (
     <Box sx={isMobile
@@ -118,6 +119,7 @@ export default function MainTableArea({
         onReviewNext={onReviewNext}
         onRewindToTrick={onRewindToTrick}
         onReviewCompletedPlay={onReviewCompletedPlay}
+        playTotalTime={playTotalTime}
       />
     </Box>
   )
@@ -150,6 +152,7 @@ function RightPanelSwitcher({
   onReviewNext,
   onRewindToTrick,
   onReviewCompletedPlay,
+  playTotalTime, // v1.61：打牌总耗时（秒，完成后计算）
 }) {
   const {
     hands,
@@ -172,6 +175,7 @@ function RightPanelSwitcher({
     outputFormats,
     isBiddingComplete,
     biddingStarted,
+    biddingTotalTime, // v1.61：叫牌总耗时（秒，叫牌完成时计算）
   } = useBidding()
 
   const {
@@ -218,6 +222,7 @@ function RightPanelSwitcher({
         onBackToBidding={onBackToBidding}
         onRewindToTrick={onRewindToTrick}
         onReviewCompletedPlay={onReviewCompletedPlay}
+        playTotalTime={playTotalTime}
       />
     )
   }
@@ -254,6 +259,7 @@ function RightPanelSwitcher({
         aiThinking={aiThinking}
         readonlyMode={readonlyMode}
         fallbackModel={fallbackModel}
+        biddingTotalTime={biddingTotalTime}
       />
     )
   }

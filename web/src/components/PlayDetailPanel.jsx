@@ -3,6 +3,7 @@ import { Box, Typography, Paper, Divider, Button, ToggleButtonGroup, ToggleButto
 import { KeyboardArrowDown, KeyboardArrowRight } from '@mui/icons-material'
 import { getSuitColor } from '../constants/suits'
 import { PANEL_LAYOUT } from '../styles/constants'
+import { formatTotalTime } from '../utils/format'
 
 function PlayDetailPanel({
   isMobile,
@@ -29,6 +30,7 @@ function PlayDetailPanel({
   onRewindToTrick,
   onReviewCompletedPlay,
   onBackToBidding,
+  playTotalTime, // v1.61：打牌总耗时（秒，打牌完成时计算）
 }) {
   const [selectedRecord, setSelectedRecord] = useState(null)
   const [viewMode, setViewMode] = useState('output')
@@ -716,6 +718,13 @@ function PlayDetailPanel({
           )}
         </Box>
       </Box>
+
+      {/* v1.61：打牌结束后显示打牌总耗时 */}
+      {isComplete && playTotalTime != null && (
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5, flexShrink: 0 }}>
+          <Chip size="small" color="success" variant="outlined" label={`⏱ 打牌总耗时：${formatTotalTime(playTotalTime)}`} sx={{ fontSize: '0.7rem', height: 22 }} />
+        </Box>
+      )}
 
       <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: isDark ? 'rgba(255,255,255,0.04)' : '#fafafa', borderRadius: 2, border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd', minHeight: 0, p: 1 }}>
 

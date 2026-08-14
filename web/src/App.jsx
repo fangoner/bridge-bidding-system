@@ -228,6 +228,10 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     handleLlmReviewChange,
   } = usePlay()
 
+  // ── 打牌总耗时（v1.61）：进入打牌时记录开始时间，完成后计算总时长并显示 ──
+  const playStartTimeRef = useRef(null)
+  const [playTotalTime, setPlayTotalTime] = useState(null)
+
   // 页面加载时检测是否有未完成的叫牌草稿
   useEffect(() => {
     try {
@@ -308,6 +312,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const bidAbortRef = useRef(null) // 在途 AI 叫牌请求（支持暂停中止，P1 修复）
   const humanBidInFlightRef = useRef(false) // P2-4：人类叫牌处理中（含含义获取）防重复点击
   const playCardInFlightRef = useRef(false) // P2-5：出牌请求在途时防连点
+  const aiPlayInFlightRef = useRef(false) // v1.61：AI 出牌请求在途（含乐观更新窗口），防同一回合重复调度
   const aiBiddingHistoryRef = useRef(aiBiddingHistory) // 叫牌历史 ref：同步追踪最新值
   useEffect(() => { playStateRef.current = playState }, [playState])
   useEffect(() => { aiPlayHistoryRef.current = aiPlayHistory }, [aiPlayHistory])
@@ -1605,6 +1610,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     const savedState = loadedPlayRecord?.playState
     if (!savedState?.contract) return
 
+    setAiThinking(false) // 复盘/回放前清除残留思考态（完成态旋转不停问题）
     setPlayLoading(true)
     setError(null)
     try {
@@ -1819,6 +1825,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const doPlayInit = async (contract, biddingSeq, aiHistory) => {
     setPlayLoading(true)
     setError(null)
+    setAiThinking(false) // 重新打牌/初始化时清除残留思考态（完成或中途单张直出后可能残留 true）
     setIsPlayPaused(false)
     setPlayStarted(false)
     setPlayInitiated(false)
@@ -1921,6 +1928,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     // P2-5 修复：出牌请求在途时忽略重复点击（连点两张 → 第二张被后端拒绝 → 桌面闪跳）
     if (playCardInFlightRef.current) return
     playCardInFlightRef.current = true
+    aiPlayInFlightRef.current = true // v1.61：标记在途，直到后端确认（乐观更新窗口内挡住重复调度）
     // 乐观更新：立即在桌面上显示点击的牌，避免等待后端DD计算造成延迟
     setPlayState(prev => {
       if (!prev || !prev.current_trick) return prev
@@ -1964,6 +1972,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       await reconcilePlayState()
     } finally {
       playCardInFlightRef.current = false
+      aiPlayInFlightRef.current = false
       setPlayLoading(false)
     }
   }
@@ -2026,6 +2035,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     }
     const controller = new AbortController()
     abortControllerRef.current = controller
+    aiPlayInFlightRef.current = true // v1.61：标记在途，直到后端确认（防 AI 回合重复调度）
 
     setAiThinking(true)
     setError(null)
@@ -2079,6 +2089,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null
       }
+      aiPlayInFlightRef.current = false
       setAiThinking(false)
     }
   }
@@ -2158,6 +2169,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   // 暂停打牌（立即中止AI请求）
   const handlePausePlay = () => {
     setIsPlayPaused(true)
+    // 修复：暂停同时清除思考态，立即停止旋转（否则 aiThinking 卡 true，暂停无效）
+    setAiThinking(false)
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
       abortControllerRef.current = null
@@ -2228,6 +2241,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     if (!window.confirm('确定要返回叫牌界面吗？\n\n当前的打牌过程和数据将被丢弃，但叫牌序列和手牌会保留。')) {
       return
     }
+    setAiThinking(false) // 返回叫牌时清除残留思考态（停止旋转/计时）
     setPlayState(null)
     setAiPlayHistory([])
     setShowPlayPanel(false)
@@ -2382,51 +2396,45 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedPlayRecord])
 
-  // AI自动出牌：轮到AI时立即进入思考状态（中心圆圈马上旋转）
+  // AI 自动出牌（v1.61 重构）：由回合状态显式驱动，不再依赖 aiThinking 翻转链条。
+  // - aiThinking 仅作"AI 思考中"旋转指示（指示器清除由下方独立 effect 负责）
+  // - 调度触发源：current_player（墩内轮转）/ tricks.length（第四家赢墩后继续领出，
+  //   current_player 不变，只有墩数变化）/ hands / current_trick（手动补手牌后恢复）
+  // - 防重复调度：aiPlayInFlightRef 覆盖"调度→后端确认"全程；乐观更新期间
+  //   current_player/tricks.length 不变，在途标记挡住同回合二次调度；后端确认推进后
+  //   重新评估并调度下一家。暂停/继续/撤销/重打均自然衔接，无需手动翻转 aiThinking。
   useEffect(() => {
-    if (!showPlayPanel || !playState || aiThinking || playLoading || isPlayPaused || !playInitiated) return
-
+    if (!showPlayPanel || !playState || !playInitiated) return
+    if (isPlayPaused || playLoading) return
     const { phase } = playState
+    if (phase === 'complete') return
     const isHuman = isCurrentPlayerHuman()
-
-    // AI hand guard: wait for input when AI has no cards
-    // P2-8 修复：AI 缺手牌不再静默卡住——提示错误并暂停自动流程，用户输入手牌后可继续
-    if (!isHuman) {
-      const currentHand = playState.hands?.[playState.current_player]
-      if (!currentHand || currentHand.length === 0) {
-        setError(`AI出牌受阻：${playState.current_player}家手牌缺失，请先在牌桌输入该家手牌后点击"继续"`)
-        setIsPlayPaused(true)
-        return
-      }
-    }
-    // 如果不是人类回合且游戏未结束，立即进入思考状态
-    if (!isHuman && phase !== 'complete') {
-      setAiThinking(true)
-    }
-  }, [playState?.is_human_turn, playState?.phase, showPlayPanel, aiThinking, playLoading, isPlayPaused, playInitiated, positionRoles])
-
-  // AI出牌执行：进入思考状态后延迟执行，让上一张牌动画完成
-  useEffect(() => {
-    if (!showPlayPanel || !playState || !aiThinking || isPlayPaused || !playInitiated) return
-    const { phase } = playState
-    const isHuman = isCurrentPlayerHuman()
-    if (isHuman || phase === 'complete') return
-    const currentHand = playState.hands?.[playState.current_player]
+    if (isHuman) return
+    const cp = playState.current_player
+    if (!cp) return
+    // P2-8：AI 缺手牌不再静默卡住——提示错误并暂停，用户输入手牌后可继续
+    // 注意：phase === 'complete' 已在上方拦截，打完 13 墩后四家空手牌不会误报
+    const currentHand = playState.hands?.[cp]
     if (!currentHand || currentHand.length === 0) {
-      // P2-8 修复：兜底——缺手牌时暂停（首个 effect 已提示并暂停，这里防自激）
+      setError(`AI出牌受阻：${cp}家手牌缺失，请先在牌桌输入该家手牌后点击"继续"`)
       setIsPlayPaused(true)
       return
     }
-    const legalPlays = getLegalPlaysForPlayer(playState.current_player)
+    if (aiPlayInFlightRef.current) return // 出牌请求在途，等后端确认后本 effect 重新评估
+
+    const legalPlays = getLegalPlaysForPlayer(cp)
+    if (legalPlays.length === 0) return
+
+    setAiThinking(true)
     const timer = setTimeout(() => {
       if (legalPlays.length === 1) {
-        handlePlayCard(playState.current_player, legalPlays[0])
+        handlePlayCard(cp, legalPlays[0])
       } else {
         handleAIPlay()
       }
     }, 250)
     return () => clearTimeout(timer)
-  }, [showPlayPanel, playState?.is_human_turn, playState?.phase, aiThinking, isPlayPaused, playInitiated, positionRoles])
+  }, [showPlayPanel, playState?.current_player, playState?.tricks?.length, playState?.current_trick?.cards?.length, playState?.hands, playState?.phase, playInitiated, isPlayPaused, playLoading])
 
   // 仅剩一张合法出牌时自动打出（无需用户选择）
   useEffect(() => {
@@ -2455,6 +2463,15 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     }
   }, [playState?.is_human_turn, playState?.phase, showPlayPanel, playInitiated, aiThinking, playLoading, isPlayPaused, positionRoles, playState?.current_trick, playState?.hands])
 
+  // 打牌计时开始（v1.61）：playInitiated 变 true（开始打牌/重打/复盘重打）时记录开始时间；
+  // 暂停/继续不重置，总耗时=从进入打牌到完成的墙钟时间
+  useEffect(() => {
+    if (playInitiated && showPlayPanel) {
+      playStartTimeRef.current = Date.now()
+      setPlayTotalTime(null)
+    }
+  }, [playInitiated, showPlayPanel])
+
   // 检测一墩完成，自动暂停；检测打牌完成，自动保存记录
   // 仅真实打牌时运行；载入历史记录回放（loadedPlayRecord）时不触发，避免清空复盘游标
   useEffect(() => {
@@ -2474,12 +2491,25 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     // 打牌完成，自动保存完整记录；停留在完成状态，不自动进入复盘
     if (phase === 'complete' && prevTricksCount < 13) {
       console.log('[自动保存] 打牌完成 phase=complete, 准备保存完整记录');
+      // v1.61：计算打牌总耗时（打牌开始时间在 playInitiated 变 true 时记录）
+      if (playStartTimeRef.current) {
+        setPlayTotalTime(Math.max(0, Math.round((Date.now() - playStartTimeRef.current) / 1000)))
+      }
       saveCompletePlayRecord()
       setReviewCursor(null)
     }
 
     prevTricksCountRef.current = currentTricksCount
   }, [playState?.tricks?.length, playState?.phase, showPlayPanel])
+
+  // AI 思考指示清除（v1.61）：aiThinking 仅作旋转指示，只在 AI 回合出牌过程中为 true；
+  // 人类回合 / 暂停 / 完成 / 离开打牌（返回叫牌、复盘载入完成态）时立即清除，
+  // 避免旋转不停、计时不增（复盘载入完成态同样覆盖）
+  useEffect(() => {
+    if (!showPlayPanel || playState?.phase === 'complete' || isPlayPaused || isCurrentPlayerHuman()) {
+      setAiThinking(false)
+    }
+  }, [showPlayPanel, playState?.phase, playState?.is_human_turn, playState?.current_player, isPlayPaused, positionRoles])
 
   // 保存打牌完成的完整记录
   const saveCompletePlayRecord = useCallback(() => {
@@ -2705,6 +2735,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           })}
           onRewindToTrick={handleRewindToTrick}
           onReviewCompletedPlay={handleReviewCompletedPlay}
+          playTotalTime={playTotalTime}
         />
       )}
 

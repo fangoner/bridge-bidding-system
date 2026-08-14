@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
-import { Box, Typography, Paper, FormControlLabel, Checkbox, Select, MenuItem, CircularProgress, Alert, Button, ToggleButton, ToggleButtonGroup, useTheme } from '@mui/material'
+import { Box, Typography, Paper, FormControlLabel, Checkbox, Select, MenuItem, CircularProgress, Alert, Button, ToggleButton, ToggleButtonGroup, Chip, useTheme } from '@mui/material'
 import { PANEL_LAYOUT } from '../styles/constants'
 import { isHumanPosition } from '../utils/position'
+import { formatTotalTime } from '../utils/format'
 
 /** hand对象 → 展示字符串 "♠AKQ ♥J32 ♦KT9 ♣6542 15点"；空手牌返回 "未知" */
 const formatHandDisplay = (hand) => {
@@ -50,6 +51,7 @@ function BiddingDetailPanel({
   aiThinking,
   readonlyMode = false,
   fallbackModel,
+  biddingTotalTime, // v1.61：叫牌总耗时（秒，叫牌完成时计算）
 }) {
   const theme = useTheme()
   const [viewMode, setViewMode] = useState('output') // 'input' | 'output'
@@ -452,6 +454,13 @@ function BiddingDetailPanel({
           )}
         </Box>
       </Box>
+
+      {/* v1.61：叫牌结束后显示叫牌总耗时 */}
+      {isBiddingCompleteFn() && biddingTotalTime != null && (
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5, flexShrink: 0, px: 0.5 }}>
+          <Chip size="small" color="success" variant="outlined" label={`⏱ 叫牌总耗时：${formatTotalTime(biddingTotalTime)}`} sx={{ fontSize: '0.7rem', height: 22 }} />
+        </Box>
+      )}
 
       <Box sx={{ flex: 1, overflow: 'hidden', p: 1, background: bgPanel, borderRadius: 2, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {detailTab === 'jf' ? (
