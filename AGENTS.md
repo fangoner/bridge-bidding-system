@@ -92,6 +92,15 @@ When the dummy leads a trick, `perspective` (rewritten declarer) differs from th
 ### DD card selection: significance threshold uses paired difference
 The threshold is `Z × std_diff / √N` where `std_diff` is the sample standard deviation of **paired differences** (same world, different candidate cards), NOT independent samples. The old formula assumed independent samples (`σ_diff = √2 × σ`), which inflated the threshold 2-4x and incorrectly classified real differences as ties.
 
+### αμ 世界数滑块全局有效（v1.60）
+`_alpha_mu_play` 优先读取 `self.alpha_mu_search.num_worlds`（设置面板配置值，仅在纯 αμ 引擎下修改，但对 DD-αμ-LLM 残局阶段同样全局生效），世界数上限随 base 成比例缩放（默认 20 时与原绝对上限 100/60/30/20 一致）。修改该函数时不要退回硬编码 `ALPHA_MU_NUM_WORLDS` 常量。
+
+### DD 提示异步追加竞态防护（v1.60）
+`api/main.py` 的 `_record_dd_hint_async` 在 `target_trick.dd_hints.append(hints)` 前检查 `len(dd_hints) >= len(cards)`，撤销后迟到 hint 会被丢弃，保持 hints 与牌张 1:1（前端按序号取 `dd_hints[cardIdx]`）。修改异步提示管线时保留该不变量。
+
+### /api/bid 错误语义（v1.60）
+LLM 超时/网络/配置错误返回 **502 + detail**（前端提示并停止自动叫牌），不再伪装成 200+pass；合规性重试耗尽的"暂停叫牌"标记保持 200（前端有专门处理路径）。不要改回静默 pass。
+
 ## Code conventions
 
 - Chinese for user-facing strings and comments; English for technical identifiers, class names, functions

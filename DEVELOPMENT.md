@@ -556,6 +556,17 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.60
+- **全流程流畅性审查 + 三阶段修复（P0×6 / P1×11 / P2×25，报告见 `docs/流程流畅性审查报告.md`）**
+  - **并发治理**：9 个阻塞 async 端点改 `asyncio.to_thread`；/api/bid、/api/play/ai-play 请求级 `copy.copy` 客户端消除全局 `llm_client.model` 串用
+  - **错误语义化**：/api/bid 失败 502+detail（不再伪装 200+pass）；前端 AI 叫牌失败不再静默 pass（提示+停止+可重试）；AI 出牌失败暂停打破无限重试循环
+  - **引擎健壮性**：αμ try/except 兜底回退规则选牌；DDS 可用性真实探测（`is_dds_available`）+ 引擎降级；LLM 调用链瘦身（去 chat() 回落链、指数退避、`max_attempts`，打牌单次尝试）
+  - **体验**：叫牌等待计时/AbortController 取消/暂停真正中止；DD 提示前端防抖+取消+loading、后端有界队列+10s 硬超时；αμ 双预算合并（枚举 10s + 搜索扣除）
+  - **流程完整性**：双人模式打牌入口；叫牌中禁用进入打牌；模式切换确认；历史进行中记录可续打；/api/play/init 定约校验；未识别引擎报错；`_slam_cache` 键控
+  - **配置/测试**：αμ 世界数滑块生效（P2-17，上限随滑块缩放）；DD 提示异步竞态防护（P2-24 更正）；采样时间计入预算（P1-4）；修复 test_alpha_mu/test_sampling_constraints，归档 34 个 API 漂移测试至 `tests/_stale/`（tests/ 根目录 13 个全绿）
+  - **P2-27 判定**：树解析"被拍平"经设计对齐+活体验证为误诊，无需修复
+- 修改文件: 核心为 api/main.py、bridge/play_service.py、web/src/App.jsx 等 20+ 文件，详见报告 §8 提交清单（11 个提交，57bc96e~b98c8df）
+
 ### v1.59
 - **αμ 引擎残局枚举修复验证 + 全流程计时**
   - `_alpha_mu_play` 无条件尝试 `_enumerate_endgame`（原以"当前玩家手牌数≤4"为门槛，东5张会被挡下，但东/明手已知、未知仅两家各4张 C(8,4)=70 本可枚举），由内部 `est > max_enumerations` 判定回退采样

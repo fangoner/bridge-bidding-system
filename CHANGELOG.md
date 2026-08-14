@@ -1,5 +1,43 @@
 # 开发日志
 
+## 2026-08-14（全流程流畅性审查 + 三阶段修复）
+
+### 背景
+对"发牌→叫牌→打牌→完成"全链路做流畅性审查（报告：`docs/流程流畅性审查报告.md`），定位 P0×6 / P1×11 / P2×25 卡关问题；按"止血 → 体验 → 流程完整性 → 补充"四批实施完毕（11 个提交，`57bc96e`~`b98c8df`）。
+
+### 第一阶段：止血（P0）
+- **并发治理**：9 个阻塞 async 端点（bid/human-bid/image-deal/single-hand-image/read-hand-clipboard/read-clipboard/double-dummy/dd-hints/dd-hints-review）改 `asyncio.to_thread`，不再阻塞事件循环（对照 play_service.get_ai_play 既有范例）
+- **共享状态竞态**：/api/bid、/api/play/ai-play 改用请求级 `copy.copy` 客户端，消除并发修改全局 `llm_client.model` 串用
+- **错误语义化**：/api/bid 失败返回 502 + detail（含豆包未配置分支），不再伪装成 200+pass；except 前初始化默认变量，消除二次 NameError 裸 500
+- **前端**：AI 叫牌失败不再静默自动 pass（提示 + 停止自动叫牌 + 可"继续"重试）；AI 出牌失败暂停（打破 aiThinking 自激无限重试循环）
+- **引擎兜底**：αμ 残局枚举/搜索加 try/except 回退规则选牌；DDS 可用性真实探测（`is_dds_available`），DD/完美DD/αμ/默认引擎缺失时统一降级规则选牌并提示；`ENDPLAY_AVAILABLE` 不再硬编码 True
+
+### 第二阶段：体验（P1）
+- **叫牌等待**：aiBid 支持 AbortController，"暂停"真正中止在途请求；牌桌中心/打牌面板显示"已等待 N 秒"
+- **DD 提示治理**：前端 300ms 防抖 + AbortController + loading 渲染；后端有界队列（drop-oldest）+ 计算 10s 硬超时
+- **αμ 双预算合并**：残局枚举预算压缩到 10s，αμ 搜索预算扣除枚举耗时（单步最坏 ~62s → ~42s）
+- **P1-3**：`_get_bid_constraints` 的 LLM 约束结果不再被 `return hard_constraints` 丢弃
+- **P2-28**：主路径 dict/list 型"选定叫品"统一 json 规范化，消除 `bid.strip()` 崩溃
+
+### 第三阶段：流程完整性（P2）
+- 双人模式补打牌入口（移除 `gameMode !== 'pair'` 限制）；叫牌中/思考中禁用"切换到打牌"；模式切换有牌局时弹确认
+- 历史进行中记录可续打：优先恢复 `play.state`（真实 phase/current_trick），部分墩从 current_trick 提取（原强制 phase:'complete' 且丢部分墩）
+- `/api/play/init` 定约合法性校验（庄家位置/阶数 1-7/花色）+ Pass Out 友好中文错误；未识别引擎显式报错（不再静默落 LLM）
+- `_slam_cache` 按 `(bidding_sequence, partner_name)` 键控（CLI 长生命周期不再跨牌局串状态）
+
+### 补充修复
+- **LLM 调用链瘦身**：chat_json 去 chat() 回落链、超时/限流指数退避、业务错误不重试、`max_attempts` 参数（chat_play 单次尝试，失败快速回落规则选牌）；错误传播一致（主/回退/人类路径）
+- **测试清理**：修复 test_alpha_mu（max_depth→M）、test_sampling_constraints（按当前采样器 API 重写 + 更新 1NT/2NT 约束期望）；归档 34 个 API 漂移测试至 `tests/_stale/`（附 README 分类）。**tests/ 根目录 13 个测试全部通过**
+- **P2-17**：αμ 世界数滑块生效——`_alpha_mu_play` 读取配置值，上限随滑块成比例缩放（默认 20 行为不变），对纯 αμ 与 DD-αμ-LLM 残局全局有效
+- **P2-24（更正）**：原"undo 跨墩 dd_hints 残留"经逐行验证为误读（undo 逐张同步 pop 保持 1:1）；真实问题是 DD 提示**异步迟到追加**导致 hints 数 > 牌数，append 前检查拦截
+- **P1-4**：采样/worlds 生成时间计入决策预算（start_time 前移；实测最难约束采样 ~1s，语义修正）
+- **第一组小项**：人类叫牌防重复（P2-4）、出牌防重（P2-5）、AI 缺手牌提示暂停（P2-8）、dd_debug.log 移出出牌请求路径（P2-15）、start_backend.bat 去 --reload（P2-25）
+
+### 结论
+- **P2-27（树解析"被拍平"）判定为误诊**：经与设计者确认四类结构性片段 + 真实 JF 文档活体验证，双叫品/第三四家开叫建树正确；开叫类走平面两层提取；开叫轮 23 候选（含 8×1NT）为**有意的规则注入设计**，保留
+
+**修改文件**: api/main.py, bridge/play_service.py, bridge/bidding_service.py, bridge/mcts/dd_search.py, bridge/mcts/alpha_mu.py, bridge/mcts/direct_dds.py, llm/deepseek_client.py, web/src/App.jsx, web/src/services/api.js, web/src/components/{CardTable,CardTablePanel,PlayDetailPanel,BiddingDetailPanel,MainTableArea}.jsx, config.py, AGENTS.md, CLAUDE.md, DEVELOPMENT.md, docs/流程流畅性审查报告.md, start_backend.bat, tests/（修复 test_alpha_mu/test_sampling_constraints + 归档 34 个至 tests/_stale/）
+
 ## 2026-08-11（采样优化方向讨论）
 
 ### 背景
