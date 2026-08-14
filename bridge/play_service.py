@@ -8,6 +8,7 @@ from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER, PARTNE
 from bridge.play_engine import PlayEngine
 from llm.prompts import PLAY_COMMON_RULES, PLAY_COMMON_SITUATION, PLAY_DECLARER_PROMPT, PLAY_DEFENDER_PROMPT
 from bridge.mcts import MctsSearch, RandomizedRollout, DDSearch
+from bridge.mcts.direct_dds import is_dds_available
 from bridge.mcts.constraints import BidConstraint, validate_sample
 from bridge.mcts.signals import format_partner_signals_for_prompt
 from bridge.mcts.bid_constraint_library import extract_constraints_from_bid_history, SYSTEM_JF
@@ -245,6 +246,13 @@ class PlayService:
                 "prompt": ""
             }
 
+        # P0-6 修复：DDS 库不可用时，依赖双明手的引擎（DD/完美DD/αμ/默认 dd_alphamu_llm，
+        # 以及 MCTS 的 dd 搜索模式）统一降级为规则选牌并明确提示，
+        # 避免 DLL 缺失时静默"选第一张牌"或抛异常导致整局卡死
+        if use_perfect or use_dd or use_alphamu or use_dd_alphamu_llm or (use_mcts and MCTS_SEARCH_MODE == "dd"):
+            if not is_dds_available():
+                return self._dds_unavailable_fallback(state)
+
         # === Perfect DD 引擎分支（全知双明手） ===
         if use_perfect:
             return await asyncio.to_thread(self._perfect_play, state)
@@ -269,6 +277,23 @@ class PlayService:
 
         # === LLM 引擎分支 ===
         return await asyncio.to_thread(self._llm_play, state, use_reasoning)
+
+    def _dds_unavailable_fallback(self, state: PlayState) -> Dict[str, Any]:
+        """DDS 库缺失时的降级选牌：回退规则引擎并明确提示（P0-6 修复）。"""
+        playable = self.engine.get_playable_cards()
+        if not playable:
+            return {"error": "没有可出的牌"}
+        card = self._select_best_card(playable, state)
+        return {
+            "card": card.to_dict() if hasattr(card, "to_dict") else None,
+            "reasoning": "[DDS不可用] 双明手 DDS 库未安装（endplay/dds.dll 缺失），已回退规则选牌。安装 endplay 后恢复完整能力。",
+            "full_output": {
+                "推荐出牌": str(card),
+                "核心逻辑": "DDS 双明手库未安装，回退规则选牌",
+                "DDS不可用": True,
+            },
+            "prompt": "",
+        }
 
     def _llm_play(self, state: PlayState, use_reasoning: bool = False,
                   force_reasoning: bool = False,
@@ -800,27 +825,31 @@ class PlayService:
         # 已知、未知仅两家各4张，C(8,4)=70 完全可枚举）。_enumerate_endgame
         # 内部有 est > max 判定会自行回退采样，故放开硬门槛交由它判断。
         # αμ 采样在约束不可满足时会陷入回退链（MH→Level2→Level0），枚举可避免。
-        enum_result = self.dd_search._enumerate_endgame(
-            state,
-            perspective,
-            state.current_player,
-            state.get_playable_cards(state.current_player),
-            state.contract.declarer,
-            state.dummy,
-            state.contract.suit,
-            perspective in (state.contract.declarer, state.dummy),
-        )
-        if enum_result is not None and enum_result.get("card") is not None:
-            enum_card = enum_result["card"]
-            enum_full = enum_result.get("full_output", {})
-            enum_full["引擎阶段"] = "endgame_enum"
-            return {
-                "card": enum_card.to_dict() if hasattr(enum_card, "to_dict") else None,
-                "reasoning": enum_result.get("reasoning", ""),
-                "full_output": enum_full,
-                "prompt": "[αμ] no prompt",
-            }
-        print("[αμ] 残局枚举不可行，回退 αμ 采样搜索")
+        try:
+            enum_result = self.dd_search._enumerate_endgame(
+                state,
+                perspective,
+                state.current_player,
+                state.get_playable_cards(state.current_player),
+                state.contract.declarer,
+                state.dummy,
+                state.contract.suit,
+                perspective in (state.contract.declarer, state.dummy),
+            )
+            if enum_result is not None and enum_result.get("card") is not None:
+                enum_card = enum_result["card"]
+                enum_full = enum_result.get("full_output", {})
+                enum_full["引擎阶段"] = "endgame_enum"
+                return {
+                    "card": enum_card.to_dict() if hasattr(enum_card, "to_dict") else None,
+                    "reasoning": enum_result.get("reasoning", ""),
+                    "full_output": enum_full,
+                    "prompt": "[αμ] no prompt",
+                }
+            print("[αμ] 残局枚举不可行，回退 αμ 采样搜索")
+        except Exception as e:
+            # P0-3 修复：残局枚举异常不中断，回退 αμ 采样搜索
+            print(f"[αμ] 残局枚举异常（回退 αμ 采样搜索）: {e}")
 
         base_worlds = ALPHA_MU_NUM_WORLDS
         # 世界数随牌数减少而增加（残局越小，采样越精确）
@@ -850,15 +879,21 @@ class PlayService:
         if constraints:
             self._apply_constraints(constraints)
 
-        search = AlphaMuSearch(
-            sampler=self.dd_search.sampler,
-            num_worlds=n_worlds,
-            M=M_value,
-            time_limit=time_lim,
-            dds_budget=dds_budget,
-        )
+        try:
+            search = AlphaMuSearch(
+                sampler=self.dd_search.sampler,
+                num_worlds=n_worlds,
+                M=M_value,
+                time_limit=time_lim,
+                dds_budget=dds_budget,
+            )
+            result = search.search(state)
+        except Exception as e:
+            # P0-3 修复：αμ 搜索异常兜底——回退规则选牌，避免整局卡死
+            # （AlphaMuSearch.__init__ 的 _load_dll、worlds 生成、搜索均可抛异常）
+            print(f"[αμ] 搜索异常（回退规则选牌）: {e}")
+            return self._alpha_mu_rule_fallback(state, f"αμ搜索异常: {e}")
 
-        result = search.search(state)
         card = result.get("card")
         if card is None:
             # αμ 无结果时选第一张合法牌（不静默回退其他引擎）
@@ -870,6 +905,23 @@ class PlayService:
             "card": card.to_dict() if hasattr(card, "to_dict") else None,
             "reasoning": result.get("reasoning", ""),
             "full_output": full_output,
+            "prompt": "[αμ] no prompt",
+        }
+
+    def _alpha_mu_rule_fallback(self, state: PlayState, reason: str) -> Dict[str, Any]:
+        """αμ 引擎异常兜底：回退规则选牌（与其他引擎一致的 _select_best_card，P0-3 修复）。"""
+        playable = self.engine.get_playable_cards()
+        if not playable:
+            return {"error": "没有可出的牌"}
+        card = self._select_best_card(playable, state)
+        return {
+            "card": card.to_dict() if hasattr(card, "to_dict") else None,
+            "reasoning": f"[αμ 回退] {reason}",
+            "full_output": {
+                "推荐出牌": str(card),
+                "核心逻辑": f"αμ异常，回退规则选牌: {reason}",
+                "αμ回退": reason,
+            },
             "prompt": "[αμ] no prompt",
         }
 

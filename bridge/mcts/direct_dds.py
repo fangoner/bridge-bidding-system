@@ -42,6 +42,8 @@ MAXNOOFBOARDS = 200
 # ── 加载 DDS DLL ──
 _dds_dll = None
 _dll_lock = threading.Lock()
+# DDS 可用性探测结果缓存（None=未探测，True/False=结果）
+_dds_available = None
 
 
 def _load_dll():
@@ -65,6 +67,25 @@ def _load_dll():
         except Exception:
             pass
     return _dds_dll
+
+
+def is_dds_available() -> bool:
+    """探测 DDS DLL 是否可用（结果缓存）。
+
+    endplay 不在 requirements.txt（可选依赖），打包/干净环境可能缺失。
+    DD/αμ/perfect 引擎入口应调用本函数判断是否可降级（P0-6 修复），
+    避免 DLL 缺失时静默"选第一张牌"或抛异常崩溃。
+    """
+    global _dds_available
+    if _dds_available is not None:
+        return _dds_available
+    try:
+        _load_dll()
+        _dds_available = True
+    except Exception as e:
+        print(f"[DirectDDS] DDS 库不可用（DD/αμ/perfect 引擎将降级为规则选牌）: {e}")
+        _dds_available = False
+    return _dds_available
 
 
 # ── DDS 结构体定义 ──

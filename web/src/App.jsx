@@ -1087,16 +1087,11 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       addBid(result.bid)
     } catch (err) {
       console.error('AI叫牌失败:', err)
-      // 出错时默认pass，同时记录到aiBiddingHistory
-      const errBiddingStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-') + (biddingSequence.length > 0 ? '-' : '')
-      setAiBiddingHistory(prev => [...prev, {
-        position: currentBidder,
-        hand: hands[currentBidder],
-        biddingSequence: errBiddingStr,
-        result: { bid: 'pass', meaning: `AI叫牌异常: ${err.message || err}` },
-        timestamp: makeBidTimestamp()
-      }])
-      addBid('pass')
+      // P0-4 修复：不再静默自动 pass——提示错误并停止自动叫牌，
+      // 用户可点击"继续叫牌"重试（toggleStopBidding 会重新触发 AI 叫牌）
+      const errMsg = err.response?.data?.detail || err.message || '未知错误'
+      setError(`AI叫牌失败: ${errMsg}（已停止自动叫牌，可点击"继续叫牌"重试）`)
+      setStopBidding(true)
     } finally {
       setAiThinking(false)
       setCurrentBiddingPosition(null)
@@ -1981,7 +1976,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           }
         }
       } else {
-        setError(result.error || 'AI出牌失败')
+        // P0-2 修复：引擎返回失败时暂停自动出牌（避免 aiThinking 自激无限重试烧预算），用户点击"继续"重试
+        setError((result.error || 'AI出牌失败') + '（已暂停，点击"继续"重试）')
+        setIsPlayPaused(true)
       }
     } catch (err) {
       if (err.name === 'CanceledError' || err.name === 'AbortError' || controller.signal.aborted) {
@@ -1989,7 +1986,10 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         return
       }
       console.error('AI出牌失败:', err)
-      setError('AI出牌失败: ' + (err.response?.data?.detail || err.message))
+      // P0-2 修复：失败后暂停自动出牌（打破 aiThinking 自激无限重试循环），
+      // 连续失败不会反复烧掉引擎时间预算；用户点击"继续"后重试一次
+      setError('AI出牌失败: ' + (err.response?.data?.detail || err.message) + '（已暂停，点击"继续"重试）')
+      setIsPlayPaused(true)
     } finally {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null

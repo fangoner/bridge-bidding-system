@@ -41,8 +41,13 @@ from bridge.play_types import Card, PlayState, PARTNERS
 from bridge.mcts.state_utils import get_current_trick_state
 from bridge.mcts.sampler import DealSampler
 
-# Phase 1a: ENDPLAY_AVAILABLE 兼容导出（实际使用 DirectDDS，总是可用）
-ENDPLAY_AVAILABLE = True
+# Phase 1a: ENDPLAY_AVAILABLE 兼容导出（实际使用 DirectDDS）
+# P0-6 修复：真实探测 DDS 可用性（endplay 不在 requirements.txt，缺失时不得硬编码 True）
+try:
+    from bridge.mcts.direct_dds import is_dds_available as _is_dds_available
+    ENDPLAY_AVAILABLE = _is_dds_available()
+except Exception:
+    ENDPLAY_AVAILABLE = False
 
 
 # ── 数据结构 ──

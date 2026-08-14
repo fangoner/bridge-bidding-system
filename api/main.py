@@ -262,12 +262,14 @@ async def human_bid(request: HumanBidRequest):
         
         bidding_service = BiddingService(llm_client, jf_retriever)
         bidding_service.set_bid_meanings(request.bid_history if request.bid_history else "")
-        result = bidding_service.human_bid(
+        # LLM 调用（可能 14-90s）卸载到线程，避免阻塞事件循环（P0-1 修复）
+        result = await asyncio.to_thread(
+            bidding_service.human_bid,
             user_input=request.user_input,
             position=request.position,
             bidding_sequence=bidding_str,
             deal_system=request.deal_system,
-            verbose=True
+            verbose=True,
         )
         
         # 人类叫牌时，直接使用用户输入的叫品，而不是LLM返回的"选定叫品"
@@ -372,6 +374,10 @@ async def set_ai_provider(request: AIProviderRequest):
 @app.post("/api/bid", response_model=BidResponse)
 async def bid(request: BidRequest):
     """AI叫牌接口"""
+    # except 分支所需的默认值：异常可能发生在这些变量赋值之前（P1-11 修复，避免 except 内二次 NameError）
+    current_llm_client = None
+    use_doubao = False
+    target_model = ""
     try:
         # 将数组转换为正确格式的字符串
         bidding_str = ""
@@ -427,30 +433,32 @@ async def bid(request: BidRequest):
         # 豆包需将 ::reasoning 追加到模型名以匹配正确的 endpoint
         if use_doubao and use_reasoning:
             target_model = f"{get_base_model(target_model)}::reasoning"
-        original_model = None
 
         if use_doubao:
             current_llm_client = doubao_client
             current_llm_client.set_model(target_model)
             if not current_llm_client.is_configured():
                 available = get_available_models()
-                return BidResponse(
-                    bid="pass",
-                    meaning=f"豆包模型 {target_model} 的推理接入点未配置。请在 .env 中设置对应的 endpoint。当前可用模型: {', '.join(available)}",
-                    selection_process="模型未配置",
-                    full_output=None
+                # P0-4 修复：配置错误走 502，前端提示而非静默 pass
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"豆包模型 {target_model} 的推理接入点未配置。请在 .env 中设置对应的 endpoint。当前可用模型: {', '.join(available)}"
                 )
         else:
             current_llm_client = get_llm_client(request.ai_provider)
             if target_model:
-                original_model = current_llm_client.model
+                # 请求级浅拷贝：并发请求各自持有独立的 model 属性，
+                # 避免共享 llm_client.model 被并发修改导致模型串用（F4 修复）
+                current_llm_client = copy.copy(current_llm_client)
                 current_llm_client.model = target_model
 
         bidding_service = BiddingService(current_llm_client, jf_retriever)
         bidding_service.use_fallback = request.use_fallback
         bidding_service.set_bid_meanings(request.bid_history if request.bid_history else "")
 
-        result = bidding_service.ai_bid(
+        # LLM 调用（14-90s，思考模式最坏 360s）卸载到线程，避免阻塞事件循环（P0-1 修复）
+        result = await asyncio.to_thread(
+            bidding_service.ai_bid,
             hand=hand,
             position=request.position,
             bidding_sequence=bidding_str,
@@ -459,6 +467,9 @@ async def bid(request: BidRequest):
             use_reasoning=use_reasoning,
         )
 
+        # 附带发给 LLM 的完整提示词
+        result["_prompt"] = bidding_service._last_prompt
+
         bid = result.get("选定叫品") or "pass"
         meaning = result.get("叫品含义") or result.get("叫品含义及后续建议") or ""
         if isinstance(meaning, dict):
@@ -466,11 +477,21 @@ async def bid(request: BidRequest):
         selection_process = result.get("叫品筛选过程") or ""
         if isinstance(selection_process, dict):
             selection_process = json.dumps(selection_process, ensure_ascii=False)
-        # 附带发给 LLM 的完整提示词
-        result["_prompt"] = bidding_service._last_prompt
 
-        if not use_doubao and target_model and original_model:
-            current_llm_client.model = original_model
+        # 合规性重试耗尽：保持 200，前端识别"暂停叫牌"标记后停止自动叫牌等待用户处理
+        if result.get("暂停叫牌"):
+            return BidResponse(
+                bid=bid,
+                meaning=meaning,
+                selection_process=selection_process,
+                use_fallback=bidding_service.use_fallback,
+                full_output=result,
+            )
+
+        # 硬错误（LLM 超时/网络/API Key 未配置等）：返回非 200，
+        # 前端提示并允许重试，不再把错误伪装成合法 pass（P0-4 修复）
+        if result.get("error"):
+            raise HTTPException(status_code=502, detail=result["error"])
 
         return BidResponse(
             bid=bid,
@@ -479,16 +500,12 @@ async def bid(request: BidRequest):
             use_fallback=bidding_service.use_fallback,
             full_output=result
         )
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[ERROR] 叫牌失败: {str(e)}")
-        if not use_doubao and target_model and original_model:
-            current_llm_client.model = original_model
-        return BidResponse(
-            bid="pass",
-            meaning=f"叫牌失败: {str(e)}",
-            selection_process="出错",
-            full_output=None
-        )
+        traceback.print_exc()
+        raise HTTPException(status_code=502, detail=f"叫牌失败: {str(e)}")
 
 
 @app.get("/api/health")
@@ -1036,7 +1053,8 @@ async def image_deal(image: bytes = File(..., description="图片文件")):
         
         try:
             print(f"[INFO] 开始调用vision_client识别图片...")
-            result = vision_client.read_cards_from_image(image_path)
+            # 视觉识别（最长 120s）卸载到线程，避免阻塞事件循环（P0-1 修复）
+            result = await asyncio.to_thread(vision_client.read_cards_from_image, image_path)
             print(f"[INFO] vision_client返回结果: {result}")
         finally:
             # 清理临时文件
@@ -1200,7 +1218,8 @@ async def single_hand_image(position: str = Query(...), image: bytes = File(...,
             tmp.write(image)
             image_path = tmp.name
         try:
-            return _recognize_single_hand_image(image_path, position)
+            # 视觉识别（最长 120s）卸载到线程，避免阻塞事件循环（P0-1 修复）
+            return await asyncio.to_thread(_recognize_single_hand_image, image_path, position)
         finally:
             if os.path.exists(image_path):
                 os.unlink(image_path)
@@ -1238,7 +1257,8 @@ async def read_hand_clipboard(position: str = ""):
         print(f"[INFO] 单家截图已保存到: {image_path} ({fmt})")
 
         try:
-            result = _recognize_single_hand_image(image_path, position)
+            # 视觉识别（最长 120s）卸载到线程，避免阻塞事件循环（P0-1 修复）
+            result = await asyncio.to_thread(_recognize_single_hand_image, image_path, position)
         finally:
             os.unlink(image_path)
 
@@ -1282,7 +1302,8 @@ async def read_clipboard():
 
         print(f"[INFO] 截图已保存到: {image_path} ({fmt})")
 
-        result = vision_client.read_cards_from_image(image_path)
+        # 视觉识别（最长 120s）卸载到线程，避免阻塞事件循环（P0-1 修复）
+        result = await asyncio.to_thread(vision_client.read_cards_from_image, image_path)
         print(f"[DEBUG] vision_client返回结果: {result}")
 
         os.unlink(image_path)
@@ -1415,7 +1436,8 @@ async def double_dummy_analysis(request: DoubleDummyRequest):
             )
             hands_dict[pos_name] = hand.to_simple_string()
         
-        result = analyze_all_contracts(hands_dict)
+        # 双明手批分析（秒级到数十秒）卸载到线程，避免阻塞事件循环（P0-1 修复）
+        result = await asyncio.to_thread(analyze_all_contracts, hands_dict)
         
         if result.get("success"):
             return DoubleDummyResponse(
@@ -1735,8 +1757,7 @@ async def ai_play(request: PlayAIRequest):
         # 豆包需将 ::reasoning 追加到模型名以匹配正确的 endpoint
         if use_doubao_play and use_reasoning:
             pm_raw = f"{get_base_model(pm_raw)}::reasoning"
-        original_model = None
-        original_play_client = None
+        original_play_client = service.llm_client  # 记录会话当前客户端，finally 恢复
         actual_model = llm_client.model
 
         if use_doubao_play:
@@ -1748,12 +1769,13 @@ async def ai_play(request: PlayAIRequest):
                     used_model=pm_raw,
                     error=f"豆包模型 {pm_raw} 的推理接入点未配置。请在 .env 中设置对应的 endpoint。当前可用: {', '.join(available)}"
                 )
-            original_play_client = service.llm_client
             service.llm_client = doubao_client
             actual_model = pm_raw
         elif pm_raw and pm_raw in ALL_MODELS:
-            original_model = llm_client.model
-            llm_client.model = pm_raw
+            # 请求级浅拷贝：避免并发修改全局 llm_client.model 导致模型串用（F4 修复）
+            play_client = copy.copy(llm_client)
+            play_client.model = pm_raw
+            service.llm_client = play_client
             actual_model = f"{pm_raw}::reasoning" if use_reasoning else pm_raw
         
         try:
@@ -1825,11 +1847,9 @@ async def ai_play(request: PlayAIRequest):
                     error="当前是人类玩家回合"
                 )
         finally:
-            # 恢复原始模型/客户端
-            if use_doubao_play and original_play_client:
+            # 恢复会话原客户端（拷贝/豆包分支统一恢复，避免污染后续请求）
+            if original_play_client is not None:
                 service.llm_client = original_play_client
-            elif original_model:
-                llm_client.model = original_model
     except Exception as e:
         print(f"[ERROR] AI出牌失败: {str(e)}")
         traceback.print_exc()
@@ -2091,7 +2111,8 @@ async def get_dd_hints(session_id: str = Query("default")):
         if not state:
             return {"success": False, "error": "打牌未初始化"}
 
-        hints = _compute_dd_hints_for_state(service, state)
+        # DDS 求解（秒级）卸载到线程，避免阻塞事件循环（P0-1 修复）
+        hints = await asyncio.to_thread(_compute_dd_hints_for_state, service, state)
         return {"success": True, "hints": hints}
     except Exception as e:
         import traceback
@@ -2228,8 +2249,8 @@ async def get_dd_hints_review(request: ReviewDDHintsRequest):
         state.defender_tricks = len(tricks_completed) - state.declarer_tricks
         state.phase = PlayPhase.PLAYING
 
-        # 9. 计算 DD 提示
-        hints = _compute_dd_hints_for_state_from_state(state)
+        # 9. 计算 DD 提示（DDS 求解卸载到线程，避免阻塞事件循环，P0-1 修复）
+        hints = await asyncio.to_thread(_compute_dd_hints_for_state_from_state, state)
         return {"success": True, "hints": hints}
     except Exception as e:
         import traceback

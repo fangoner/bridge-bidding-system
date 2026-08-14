@@ -159,10 +159,11 @@ def _has_duplicates(hands: Dict[str, List[Card]]) -> bool:
     return False
 
 # Phase 0b: DirectDDS — ctypes 直调 DDS C 库（dds.dll 随 endplay 包分发）
-from bridge.mcts.direct_dds import solve_all_boards_raw
+from bridge.mcts.direct_dds import solve_all_boards_raw, is_dds_available
 
 # 兼容导出：play_service 和 alpha_mu 依赖此标志判断 DDS 是否可用
-ENDPLAY_AVAILABLE = True
+# P0-6 修复：真实探测（endplay 不在 requirements.txt，缺失时不能再硬编码 True）
+ENDPLAY_AVAILABLE = is_dds_available()
 
 
 # Phase 0b fix: DDS suit/rank maps with equals bitmask parsing
