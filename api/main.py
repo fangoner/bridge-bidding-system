@@ -2157,6 +2157,11 @@ def _record_dd_hint_async(state_before_snapshot, target_trick):
             hints = _fut.result(timeout=10.0)
         if not hints:
             return
+        # P2-24 修复：撤销后该墩牌数可能已减少，此时迟到追加会让 hints 数 > 牌数，
+        # 前端按序号取 dd_hints[cardIdx] 会错位显示（与局面不符）。仅在 hints 未超过牌数时追加。
+        # 正常打牌（无撤销）hints 恒 ≤ cards-1，本检查永不触发，无新增风险。
+        if len(target_trick.dd_hints) >= len(target_trick.cards):
+            return
         target_trick.dd_hints.append(hints)
     except TimeoutError:
         print("[DD提示] 计算超时（>10s），丢弃本次提示")
