@@ -10,6 +10,7 @@ function PlayDetailPanel({
   playState,
   aiPlayHistory,
   aiLoading,
+  aiProgress, // 任务化轮询实时进度文案（AI出牌阶段）
   isPaused,
   onResume,
   onResetPlay,
@@ -31,6 +32,9 @@ function PlayDetailPanel({
   onReviewCompletedPlay,
   onBackToBidding,
   playTotalTime, // v1.61：打牌总耗时（秒，打牌完成时计算）
+  playEngine, // P1-10：当前打牌引擎（估算AI单张出牌预计耗时）
+  useLlmReview, // P1-10：LLM 审查开关（开启时预计耗时上浮）
+  playStartTime, // P1-10：打牌开始时间戳（打牌中实时显示本局已进行时长）
 }) {
   const [selectedRecord, setSelectedRecord] = useState(null)
   const [viewMode, setViewMode] = useState('output')
@@ -48,6 +52,32 @@ function PlayDetailPanel({
     }, 1000)
     return () => clearInterval(timer)
   }, [aiLoading])
+
+  // P1-10：本局实时计时（未完成时每秒刷新"已进行时长"；setState 仅发生在异步回调内）
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  useEffect(() => {
+    const complete = playState?.phase === 'complete'
+    if (complete || !playStartTime) return
+    const update = () => setElapsedSeconds(Math.max(0, Math.floor((Date.now() - playStartTime) / 1000)))
+    const reset = setTimeout(update, 0)
+    const timer = setInterval(update, 1000)
+    return () => { clearTimeout(reset); clearInterval(timer) }
+  }, [playState?.phase, playStartTime])
+
+  // P1-10：按引擎估算 AI 单张出牌预计耗时区间（秒）
+  const aiExpectedRange = (() => {
+    if (useLlmReview && (playEngine === 'dd_alphamu_llm' || playEngine === 'alphamu_llm')) return [10, 90]
+    switch (playEngine) {
+      case 'llm': return [10, 40]
+      case 'mcts': return [5, 20]
+      case 'dd': return [5, 25]
+      case 'perfect': return [1, 5]
+      case 'alphamu': return [5, 25]
+      case 'dd_alphamu_llm': return [5, 45]
+      default: return null
+    }
+  })()
+  const aiOverExpected = aiExpectedRange && aiWaitSeconds > aiExpectedRange[1]
 
   // 恢复继续时清除选中记录
   useEffect(() => {
@@ -95,9 +125,23 @@ function PlayDetailPanel({
   const renderAIOutputCard = (record, showClose = false, onCloseExternal = null) => {
     if (!record) {
       return (
-        <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 2 }}>
-          等待AI出牌{aiWaitSeconds > 0 ? `...（已等待 ${aiWaitSeconds}s）` : '...'}
-        </Typography>
+        <Box sx={{ textAlign: 'center', mt: 2 }}>
+          <Typography variant="body2" color="text.secondary">
+            等待AI出牌{aiWaitSeconds > 0 ? `...（已等待 ${aiWaitSeconds}s` : '...（等待中'}
+            {aiExpectedRange ? `，预计 ${aiExpectedRange[0]}~${aiExpectedRange[1]}s` : ''}
+            {'）'}
+          </Typography>
+          {aiProgress && (
+            <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: '#1976d2', fontSize: '0.7rem' }}>
+              {aiProgress}
+            </Typography>
+          )}
+          {aiOverExpected && (
+            <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: '#e65100', fontSize: '0.7rem' }}>
+              已超过预计耗时，可能正在进行深度计算或 LLM 思考，请耐心等待…
+            </Typography>
+          )}
+        </Box>
       )
     }
 
@@ -719,10 +763,18 @@ function PlayDetailPanel({
         </Box>
       </Box>
 
-      {/* v1.61：打牌结束后显示打牌总耗时 */}
+      {/* v1.61：打牌结束后显示打牌总耗时；P1-10：打牌中实时显示本局已进行时长 */}
       {isComplete && playTotalTime != null && (
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5, flexShrink: 0 }}>
           <Chip size="small" color="success" variant="outlined" label={`⏱ 打牌总耗时：${formatTotalTime(playTotalTime)}`} sx={{ fontSize: '0.7rem', height: 22 }} />
+        </Box>
+      )}
+      {!isComplete && playStartTime != null && playInitiated && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5, flexShrink: 0 }}>
+          <Chip size="small" color="info" variant="outlined" label={`⏱ 本局已进行：${formatTotalTime(elapsedSeconds)}`} sx={{ fontSize: '0.7rem', height: 22 }} />
+          {aiExpectedRange && (
+            <Chip size="small" variant="outlined" label={`AI单张预计 ${aiExpectedRange[0]}~${aiExpectedRange[1]}s`} sx={{ fontSize: '0.65rem', height: 22, color: colorMuted, borderColor: isDark ? 'rgba(255,255,255,0.2)' : '#ccc' }} />
+          )}
         </Box>
       )}
 

@@ -15,6 +15,7 @@ import copy
 import threading
 import asyncio
 import hashlib
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 import traceback
 import tempfile
@@ -57,7 +58,9 @@ from config import (
     DD_PARTICLES_MIN, DD_PARTICLES_MAX,
     MCTS_PARTICLES_MIN, MCTS_PARTICLES_MAX,
     ALPHA_MU_WORLDS_MIN, ALPHA_MU_WORLDS_MAX,
+    MCTS_TIME_LIMIT, DD_TIME_LIMIT, ALPHA_MU_TIME_LIMIT,
 )
+from bridge.bidding_service import MAIN_PROMPT_MAX_RETRIES, FALLBACK_PROMPT_MAX_RETRIES
 
 try:
     from dd_analysis import analyze_all_contracts, DDS_AVAILABLE
@@ -371,9 +374,8 @@ async def set_ai_provider(request: AIProviderRequest):
     )
 
 
-@app.post("/api/bid", response_model=BidResponse)
-async def bid(request: BidRequest):
-    """AI叫牌接口"""
+async def _execute_bid(request: BidRequest, progress_cb=None) -> BidResponse:
+    """AI叫牌核心逻辑（同步端点与异步任务共用；progress_cb 用于任务进度回报）"""
     # except 分支所需的默认值：异常可能发生在这些变量赋值之前（P1-11 修复，避免 except 内二次 NameError）
     current_llm_client = None
     use_doubao = False
@@ -465,6 +467,7 @@ async def bid(request: BidRequest):
             deal_system=request.deal_system,
             verbose=True,
             use_reasoning=use_reasoning,
+            progress_cb=progress_cb,
         )
 
         # 附带发给 LLM 的完整提示词
@@ -508,10 +511,194 @@ async def bid(request: BidRequest):
         raise HTTPException(status_code=502, detail=f"叫牌失败: {str(e)}")
 
 
+@app.post("/api/bid", response_model=BidResponse)
+async def bid(request: BidRequest):
+    """AI叫牌接口（同步路径：批量脚本/兼容用；前端走 /api/bid-async 任务化轮询）"""
+    return await _execute_bid(request)
+
+
+# ── 异步任务注册表（任务化轮询：前端提交后短轮询取结果，消除前端超时）──
+_tasks: Dict[str, dict] = {}
+_tasks_lock = threading.Lock()
+_bg_tasks: set = set()
+TASK_DONE_TTL = 600.0      # 已完成任务保留 10 分钟（页面刷新后仍可取回结果）
+TASK_RUNNING_TTL = 2700.0  # 运行超 45 分钟视为孤儿回收（超最坏预算 1210s + 余量）
+
+
+def _task_new(kind: str, progress: str = "排队中") -> str:
+    task_id = uuid.uuid4().hex[:12]
+    now = time.time()
+    with _tasks_lock:
+        _tasks[task_id] = {
+            "task_id": task_id, "kind": kind, "status": "running",
+            "progress": progress, "result": None, "error": None,
+            "cancel_requested": False, "created_ts": now, "updated_ts": now,
+        }
+    return task_id
+
+
+def _task_update(task_id: str, **fields) -> None:
+    with _tasks_lock:
+        t = _tasks.get(task_id)
+        if t is None:
+            return
+        t.update(fields)
+        t["updated_ts"] = time.time()
+
+
+def _task_sweep() -> None:
+    now = time.time()
+    with _tasks_lock:
+        stale = [
+            tid for tid, t in _tasks.items()
+            if (t["status"] in ("done", "error", "cancelled") and now - t["updated_ts"] > TASK_DONE_TTL)
+            or (t["status"] == "running" and now - t["created_ts"] > TASK_RUNNING_TTL)
+        ]
+        for tid in stale:
+            _tasks.pop(tid, None)
+
+
+async def _run_task(task_id: str, coro_factory):
+    """执行任务并回写终态；取消请求到达时丢弃结果（线程不可中断，P2-13 未做前的尽力取消）。"""
+    try:
+        result = await coro_factory()
+        with _tasks_lock:
+            t = _tasks.get(task_id)
+            if t is None:
+                return
+            if t["cancel_requested"]:
+                t["status"] = "cancelled"
+                t["progress"] = "已取消（结果丢弃）"
+            else:
+                t["status"] = "done"
+                t["result"] = result
+                t["progress"] = "完成"
+            t["updated_ts"] = time.time()
+    except HTTPException as e:
+        _task_update(task_id, status="error", error=str(e.detail), progress="失败")
+    except Exception as e:
+        print(f"[task {task_id}] 失败: {e}")
+        traceback.print_exc()
+        _task_update(task_id, status="error", error=str(e), progress="失败")
+
+
+def _spawn_task(kind: str, progress: str, coro_factory) -> str:
+    task_id = _task_new(kind, progress)
+    bg = asyncio.create_task(_run_task(task_id, coro_factory))
+    _bg_tasks.add(bg)
+    bg.add_done_callback(_bg_tasks.discard)
+    return task_id
+
+
+class AsyncSubmitResponse(BaseModel):
+    task_id: str
+    status: str = "running"
+
+
+@app.post("/api/bid-async", response_model=AsyncSubmitResponse)
+async def bid_async(request: BidRequest):
+    """AI叫牌（任务化）：立即返回 task_id，前端轮询 /api/tasks/{task_id}"""
+    task_id = _spawn_task(
+        "bid", "准备叫牌决策",
+        lambda: _execute_bid(request, progress_cb=lambda msg: _task_update(task_id, progress=msg)),
+    )
+    return AsyncSubmitResponse(task_id=task_id)
+
+
+@app.get("/api/tasks/{task_id}")
+async def get_task(task_id: str):
+    """查询任务状态/进度/结果"""
+    with _tasks_lock:
+        t = _tasks.get(task_id)
+        if t is None:
+            raise HTTPException(status_code=404, detail="任务不存在或已过期")
+        resp = {k: t[k] for k in ("task_id", "kind", "status", "progress", "cancel_requested")}
+        if t["status"] == "done":
+            resp["result"] = t["result"]
+        elif t["status"] == "error":
+            resp["error"] = t["error"]
+    return resp
+
+
+@app.post("/api/tasks/{task_id}/cancel")
+async def cancel_task(task_id: str):
+    """请求取消任务：标记后前端停止轮询；在途计算线程完成后结果被丢弃（线程级中断待 P2-13）"""
+    with _tasks_lock:
+        t = _tasks.get(task_id)
+        if t is None:
+            raise HTTPException(status_code=404, detail="任务不存在或已过期")
+        if t["status"] == "running":
+            t["cancel_requested"] = True
+            t["progress"] = "已请求取消，等待计算线程结束（结果将丢弃）"
+            t["updated_ts"] = time.time()
+        resp = {k: t[k] for k in ("task_id", "status", "cancel_requested")}
+    return resp
+
+
 @app.get("/api/health")
 async def health_check():
     """健康检查接口"""
     return {"status": "healthy", "jf_segments_loaded": len(jf_segments)}
+
+
+# ── 请求级超时预算（P1-1：前端超时与后端预算对齐的唯一数据源）──
+# 与 llm/deepseek_client.py、llm/doubao_client.py 的 _get_timeout 保持一致：
+# 两客户端均为 chat 30s / thinking 120s（DeepSeek flash thinking 90s，取更保守的 120s）
+LLM_TIMEOUT_CHAT = 30.0
+LLM_TIMEOUT_REASONING = 120.0
+LLM_CHAIN_BACKOFF = 1.0  # chat_json 瞬时错误指数退避余量
+PLAY_BUDGET_MARGIN = 5.0  # 引擎预算外余量（建提示词/解析/规则回退）
+
+
+def _llm_chain_worst(reasoning: bool) -> float:
+    """单次 chat_json 调用链最坏耗时（内部 2 次尝试 + 退避）。"""
+    t = LLM_TIMEOUT_REASONING if reasoning else LLM_TIMEOUT_CHAT
+    return t * 2 + LLM_CHAIN_BACKOFF
+
+
+def _bid_budget(reasoning: bool) -> float:
+    """ /api/bid 最坏耗时：主提示词 (重试+1) 次 + 备用 (重试+1) 次合规尝试，每次一条完整调用链。"""
+    calls = (MAIN_PROMPT_MAX_RETRIES + 1) + (FALLBACK_PROMPT_MAX_RETRIES + 1)
+    return round(calls * _llm_chain_worst(reasoning) + PLAY_BUDGET_MARGIN, 1)
+
+
+def _play_budget(engine: str, reasoning: bool) -> float:
+    """ /api/play/ai-play 各引擎最坏耗时：引擎时间预算 + LLM 调用链（如有）。"""
+    engine_budgets = {
+        "llm": PLAY_BUDGET_MARGIN,
+        "mcts": MCTS_TIME_LIMIT + PLAY_BUDGET_MARGIN,
+        "dd": DD_TIME_LIMIT + PLAY_BUDGET_MARGIN,
+        "perfect": PLAY_BUDGET_MARGIN,
+        "alphamu": ALPHA_MU_TIME_LIMIT + PLAY_BUDGET_MARGIN,
+        "dd_alphamu_llm": max(DD_TIME_LIMIT, ALPHA_MU_TIME_LIMIT) + PLAY_BUDGET_MARGIN,
+    }
+    engine_budget = engine_budgets.get(engine, DD_TIME_LIMIT + PLAY_BUDGET_MARGIN)
+    if engine == "llm":
+        # chat_play 单次尝试（max_attempts=1，P1-1 后端部分已修）
+        llm_worst = LLM_TIMEOUT_REASONING if reasoning else LLM_TIMEOUT_CHAT
+    elif engine in ("alphamu", "dd_alphamu_llm"):
+        # 分组 LLM 审查走 chat_json 默认 2 次尝试
+        llm_worst = _llm_chain_worst(reasoning)
+    else:
+        llm_worst = 0.0
+    return round(engine_budget + llm_worst, 1)
+
+
+@app.get("/api/time-budgets")
+async def get_time_budgets():
+    """前端超时对齐用：各 AI 接口的最坏合法耗时（秒）。
+
+    前端以「预算 + 10s 网络余量」作为请求超时，保证后端仍在合法
+    重试/计算时前端不会提前 abort（P1-1 前端对齐）。
+    """
+    engines = ["llm", "mcts", "dd", "perfect", "alphamu", "dd_alphamu_llm"]
+    return {
+        "bid": {"chat": _bid_budget(False), "reasoning": _bid_budget(True)},
+        "play": {
+            e: {"chat": _play_budget(e, False), "reasoning": _play_budget(e, True)}
+            for e in engines
+        },
+    }
 
 
 @app.post("/api/reload-jf")
@@ -1497,6 +1684,7 @@ async def _session_cleanup_loop():
         await asyncio.sleep(300)
         with _play_services_lock:
             _sweep_expired_sessions()
+        _task_sweep()
 
 
 @app.on_event("startup")
@@ -1773,9 +1961,8 @@ class PlayAIResponse(BaseModel):
     error: Optional[str] = None
 
 
-@app.post("/api/play/ai-play", response_model=PlayAIResponse)
-async def ai_play(request: PlayAIRequest):
-    """AI出牌"""
+async def _execute_ai_play(request: PlayAIRequest, progress_cb=None) -> PlayAIResponse:
+    """AI出牌核心逻辑（同步端点与异步任务共用；progress_cb 用于任务进度回报）"""
     try:
         service = get_play_service(request.session_id)
 
@@ -1834,6 +2021,8 @@ async def ai_play(request: PlayAIRequest):
                 state_before = service.get_state()
                 tricks_before = len(state_before.tricks) if state_before else 0
                 state_snapshot = copy.deepcopy(state_before) if state_before else None
+                if progress_cb:
+                    progress_cb(f"引擎决策中（{engine}）")
                 result = await service.get_ai_play(
                     use_reasoning=use_reasoning,
                     use_mcts=use_mcts,
@@ -1895,6 +2084,22 @@ async def ai_play(request: PlayAIRequest):
             success=False,
             error=f"AI出牌失败: {str(e)}"
             )
+
+
+@app.post("/api/play/ai-play", response_model=PlayAIResponse)
+async def ai_play(request: PlayAIRequest):
+    """AI出牌（同步路径：批量脚本/兼容用；前端走 /api/play/ai-play-async 任务化轮询）"""
+    return await _execute_ai_play(request)
+
+
+@app.post("/api/play/ai-play-async", response_model=AsyncSubmitResponse)
+async def ai_play_async(request: PlayAIRequest):
+    """AI出牌（任务化）：立即返回 task_id，前端轮询 /api/tasks/{task_id}"""
+    task_id = _spawn_task(
+        "ai_play", "准备出牌决策",
+        lambda: _execute_ai_play(request, progress_cb=lambda msg: _task_update(task_id, progress=msg)),
+    )
+    return AsyncSubmitResponse(task_id=task_id)
 
 
 class UpdatePlayerRolesRequest(BaseModel):

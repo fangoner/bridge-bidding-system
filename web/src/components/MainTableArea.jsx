@@ -18,6 +18,7 @@ export default function MainTableArea({
   // CardTablePanel 业务回调
   onAnalyzeContract,
   onToggleDoubleDummy,
+  onCancelDoubleDummy,
   onDealerChange,
   onPositionRoleChange,
   onClearAllHands,
@@ -73,6 +74,7 @@ export default function MainTableArea({
         directPlayContractInfo={directPlayContractInfo}
         onAnalyzeContract={onAnalyzeContract}
         onToggleDoubleDummy={onToggleDoubleDummy}
+        onCancelDoubleDummy={onCancelDoubleDummy}
         onDealerChange={onDealerChange}
         onPositionRoleChange={onPositionRoleChange}
         onClearAllHands={onClearAllHands}
@@ -160,6 +162,7 @@ function RightPanelSwitcher({
     showAIBiddingOutput,
     readonlyMode,
     aiThinking,
+    aiProgress,
     imageOpeningLead,
     fallbackModel,
   } = useGame()
@@ -189,6 +192,9 @@ function RightPanelSwitcher({
     reviewCursor,
     showPlayPanel,
     playLoading,
+    playEngine,
+    useLlmReview,
+    playStartTime,
   } = usePlay()
 
   // 仅当有人类玩家或显示AI叫牌输出时才展示叫牌面板
@@ -223,6 +229,9 @@ function RightPanelSwitcher({
         onRewindToTrick={onRewindToTrick}
         onReviewCompletedPlay={onReviewCompletedPlay}
         playTotalTime={playTotalTime}
+        playEngine={playEngine}
+        useLlmReview={useLlmReview}
+        playStartTime={playStartTime}
       />
     )
   }
@@ -257,6 +266,7 @@ function RightPanelSwitcher({
         onSave={onSaveBidding}
         canSave={canSaveBiddingProgress}
         aiThinking={aiThinking}
+        aiProgress={aiProgress}
         readonlyMode={readonlyMode}
         fallbackModel={fallbackModel}
         biddingTotalTime={biddingTotalTime}

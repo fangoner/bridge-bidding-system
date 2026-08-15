@@ -28,6 +28,7 @@ import {
   Badge,
   ToggleButtonGroup,
   ToggleButton,
+  LinearProgress,
   useTheme,
   useMediaQuery
 } from '@mui/material'
@@ -105,11 +106,12 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     hands, setHands,
     loading, setLoading,
     aiThinking, setAiThinking,
+    setAiProgress,
     error, setError,
     warning, setWarning,
     gameMode, setGameMode,
     dealer, setDealer,
-    vulnerability, setVulnerability,
+    vulnerability,
     practiceDirection, setPracticeDirection,
     positionRoles, setPositionRoles,
     setShowPartnerHand,
@@ -197,6 +199,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     setAnalyzeLoading,
     setAnalyzeResult,
     setShowDoubleDummy,
+    doubleDummyResult,
     setDoubleDummyResult,
     setDoubleDummyLoading,
   } = useBidding()
@@ -224,6 +227,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     directPlayContractInfo, setDirectPlayContractInfo,
     playEngine,
     handlePlayEngineChange,
+    setPlayStartTime,
     useLlmReview,
     handleLlmReviewChange,
   } = usePlay()
@@ -231,6 +235,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   // ── 打牌总耗时（v1.61）：进入打牌时记录开始时间，完成后计算总时长并显示 ──
   const playStartTimeRef = useRef(null)
   const [playTotalTime, setPlayTotalTime] = useState(null)
+
+  // ── P1-9：回放进度（回放历史已出牌时的"N/M 张"提示）──
+  const [replayProgress, setReplayProgress] = useState(null)
 
   // 页面加载时检测是否有未完成的叫牌草稿
   useEffect(() => {
@@ -702,7 +709,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     handleSingleHandUpload,
     clearAllHands,
     parseBiddingSequenceStr,
-    screenshotCancelledRef,
+    cancelScreenshot,
+    screenshotStatus,
   } = useDealing({ clearBiddingDraft })
 
   // 截屏识别需要关闭设置面板
@@ -1115,7 +1123,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       // 传递数组，后端处理格式
       const bm = parseModelValue(fallbackModel)
       const aiCallStart = Date.now()
-      const result = await aiBid(currentHand, biddingSequence, currentBidder, dealSystem, bidHistory, useFallback, bm.model, 'deepseek', bm.reasoning, controller.signal)
+      setAiProgress(null)
+      const result = await aiBid(currentHand, biddingSequence, currentBidder, dealSystem, bidHistory, useFallback, bm.model, 'deepseek', bm.reasoning, controller.signal, (msg) => setAiProgress(msg))
       if (controller.signal.aborted) {
         // 用户已暂停，丢弃本次结果
         console.log('[AI叫牌] 用户已暂停，丢弃本次结果')
@@ -1172,6 +1181,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         bidAbortRef.current = null
       }
       setAiThinking(false)
+      setAiProgress(null)
       setCurrentBiddingPosition(null)
     }
   }
@@ -1452,24 +1462,48 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     }
   }
 
-  // 双明手分析
+  // 双明手分析（P1-8：手牌未变直接复用结果缓存；支持 AbortController 取消）
+  const lastDDHandsKeyRef = useRef(null)
+  const ddAbortRef = useRef(null)
   const handleDoubleDummy = async () => {
     if (!hands) return
-    
+
+    const handsKey = JSON.stringify(hands)
+    if (lastDDHandsKeyRef.current === handsKey && doubleDummyResult) return
+
+    if (ddAbortRef.current) ddAbortRef.current.abort()
+    const controller = new AbortController()
+    ddAbortRef.current = controller
+
     setDoubleDummyLoading(true)
     try {
-      const result = await doubleDummyAnalysis(hands)
+      const result = await doubleDummyAnalysis(hands, controller.signal)
       if (result.success) {
         setDoubleDummyResult(result.table_data)
+        lastDDHandsKeyRef.current = handsKey
       } else {
         alert(`双明手分析失败: ${result.error}`)
       }
     } catch (err) {
+      if (err?.name === 'CanceledError' || err?.name === 'AbortError') return
       console.error('双明手分析失败:', err)
       alert('双明手分析失败，请检查endplay是否正确安装')
     } finally {
-      setDoubleDummyLoading(false)
+      if (ddAbortRef.current === controller) {
+        setDoubleDummyLoading(false)
+        ddAbortRef.current = null
+      }
     }
+  }
+
+  // P1-8：取消双明手分析（中止在途请求并回到原视图）
+  const cancelDoubleDummy = () => {
+    if (ddAbortRef.current) {
+      ddAbortRef.current.abort()
+      ddAbortRef.current = null
+    }
+    setDoubleDummyLoading(false)
+    setShowDoubleDummy(false)
   }
 
   // 切换显示双明手结果
@@ -1536,14 +1570,24 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     )
     if (!initResult.success) return { error: initResult.error }
 
-    // 回放前 actualKeep 张牌
+    // 回放前 actualKeep 张牌（P1-9：显示 N/M 进度，统计失败张数）
     let lastReplayState = initResult.state
+    let replayFailed = 0
+    if (actualKeep > 0) setReplayProgress({ current: 0, total: actualKeep })
     for (let i = 0; i < actualKeep; i++) {
       const { pos, card } = allPlayed[i]
+      setReplayProgress({ current: i + 1, total: actualKeep })
       try {
         const reply = await playCard(pos, card)
         if (reply?.success) lastReplayState = reply.state
-      } catch (e) { console.warn('回放出牌失败:', pos, card, e) }
+        else replayFailed++
+      } catch (e) {
+        replayFailed++
+        console.warn('回放出牌失败:', pos, card, e)
+      }
+    }
+    if (replayFailed > 0) {
+      setWarning(`回放完成，但 ${replayFailed}/${actualKeep} 张牌回放失败，牌局状态可能与原记录不一致`)
     }
 
     // 构建截断后的 playState
@@ -1637,6 +1681,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       console.error('回放失败:', err)
     } finally {
       setPlayLoading(false)
+      setReplayProgress(null)
     }
   }
 
@@ -1748,14 +1793,24 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         setPlayLoading(false)
         return
       }
-      // 回放前 keepCount 张牌（完整墩 + 部分墩）
+      // 回放前 keepCount 张牌（完整墩 + 部分墩）（P1-9：显示 N/M 进度，统计失败张数）
       const cardsToReplay = allPlayed.slice(0, keepCount).map(p => ({ position: p.pos, card: p.card }))
       let lastReplayState = null
-      for (const { position, card } of cardsToReplay) {
+      let replayFailed = 0
+      if (keepCount > 0) setReplayProgress({ current: 0, total: keepCount })
+      for (const [ri, { position, card }] of cardsToReplay.entries()) {
+        setReplayProgress({ current: ri + 1, total: keepCount })
         try {
           const replayResult = await playCard(position, card)
           if (replayResult?.success) lastReplayState = replayResult.state
-        } catch (e) { console.warn('重放出牌失败:', position, card, e) }
+          else replayFailed++
+        } catch (e) {
+          replayFailed++
+          console.warn('重放出牌失败:', position, card, e)
+        }
+      }
+      if (replayFailed > 0) {
+        setWarning(`回放完成，但 ${replayFailed}/${keepCount} 张牌回放失败，牌局状态可能与原记录不一致`)
       }
       // 裁剪 aiPlayHistory：按实际回放的牌筛选 AI 位置
       let trimmedHistory = []
@@ -1818,6 +1873,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       console.error('重打失败:', err)
     } finally {
       setPlayLoading(false)
+      setReplayProgress(null)
     }
   }
 
@@ -2038,11 +2094,12 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     aiPlayInFlightRef.current = true // v1.61：标记在途，直到后端确认（防 AI 回合重复调度）
 
     setAiThinking(true)
+    setAiProgress(null)
     setError(null)
-    
+
     try {
       const pm = parseModelValue(playModel)
-      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, switchCards, useLlmReview, ddScoringMode)
+      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, switchCards, useLlmReview, ddScoringMode, (msg) => setAiProgress(msg))
       if (controller.signal.aborted) return
       console.log('[AI Play] engine:', result.used_engine, 'elapsed:', result.elapsed_ms + 'ms', 'model:', result.used_model)
 
@@ -2468,6 +2525,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   useEffect(() => {
     if (playInitiated && showPlayPanel) {
       playStartTimeRef.current = Date.now()
+      setPlayStartTime(playStartTimeRef.current)
       setPlayTotalTime(null)
     }
   }, [playInitiated, showPlayPanel])
@@ -2659,10 +2717,30 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         availableModels={availableModels}
       />
 
-      {/* 错误提示 */}
+      {/* 错误提示（P1-7：关闭错误横幅不再隐式取消截屏轮询） */}
       {error && (
-        <Alert severity="error" onClose={() => { screenshotCancelledRef.current = true; setError(null) }} sx={{ mb: 1 }}>
+        <Alert severity="error" onClose={() => setError(null)} sx={{ mb: 1 }}>
           {error}
+        </Alert>
+      )}
+      {/* P1-7：截屏/识别进度（info 样式 + 显式取消按钮） */}
+      {screenshotStatus && (
+        <Alert
+          severity="info"
+          icon={<CircularProgress size={18} />}
+          sx={{ mb: 1 }}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={cancelScreenshot}
+              sx={{ fontSize: '0.7rem', textTransform: 'none' }}
+            >
+              取消截屏
+            </Button>
+          }
+        >
+          {screenshotStatus}
         </Alert>
       )}
       {warning && (
@@ -2675,6 +2753,24 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         </Alert>
       )}
 
+      {/* P1-9：历史回放进度（载入记录 / 倒回重打时显示） */}
+      {replayProgress && replayProgress.total > 0 && (
+        <Alert
+          severity="info"
+          icon={<CircularProgress size={18} />}
+          sx={{ mb: 1, '& .MuiAlert-message': { width: '100%' } }}
+        >
+          <Typography variant="body2" sx={{ fontSize: '0.85rem' }}>
+            正在载入已出牌 {replayProgress.current}/{replayProgress.total} 张…
+          </Typography>
+          <LinearProgress
+            variant="determinate"
+            value={Math.min(100, (replayProgress.current / replayProgress.total) * 100)}
+            sx={{ mt: 0.5 }}
+          />
+        </Alert>
+      )}
+
       {/* 牌桌主区域（桌面横排 / 手机纵排，由 MainTableArea 内部处理） */}
       {hands && (
         <MainTableArea
@@ -2684,6 +2780,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           directPlayContractInfo={directPlayContractInfo}
           onAnalyzeContract={handleAnalyzeContract}
           onToggleDoubleDummy={toggleDoubleDummy}
+          onCancelDoubleDummy={cancelDoubleDummy}
           onDealerChange={handleDealerChange}
           onPositionRoleChange={handlePositionRoleChange}
           onClearAllHands={clearAllHands}

@@ -54,6 +54,7 @@ function CardTable({
   showDoubleDummy,
   doubleDummyResult,
   doubleDummyLoading,
+  onCancelDoubleDummy,
   positionRoles,
   onPositionRoleChange,
   onDealerChange,
@@ -646,6 +647,20 @@ function CardTable({
   }
 
   // 中心区域内容渲染（桌面版和手机版共用）
+  const renderDDLoading = () => (
+    <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%', gap: 1 }}>
+      <CircularProgress size={24} />
+      <Typography variant="caption" sx={{ fontSize: '0.7rem', color: textMuted }}>
+        双明手分析中…（约需 10-30 秒）
+      </Typography>
+      {onCancelDoubleDummy && (
+        <Button size="small" variant="outlined" onClick={onCancelDoubleDummy} sx={{ fontSize: '0.7rem', textTransform: 'none' }}>
+          取消分析
+        </Button>
+      )}
+    </Box>
+  )
+
   const renderCenterContent = () => {
     if (showPlayPanel && playState) {
       if (playCenterView === 'bidding') {
@@ -653,9 +668,7 @@ function CardTable({
       }
       if (playCenterView === 'result' || showDoubleDummy) {
         return doubleDummyLoading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
-            <CircularProgress size={24} />
-          </Box>
+          renderDDLoading()
         ) : doubleDummyResult ? (
           <DoubleDummyTable tableData={doubleDummyResult} />
         ) : (
@@ -668,9 +681,7 @@ function CardTable({
     }
     return showDoubleDummy ? (
       doubleDummyLoading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', width: '100%' }}>
-          <CircularProgress size={24} />
-        </Box>
+        renderDDLoading()
       ) : doubleDummyResult ? (
         <DoubleDummyTable tableData={doubleDummyResult} />
       ) : (

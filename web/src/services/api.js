@@ -10,6 +10,42 @@ const api = axios.create({
   },
 });
 
+// ── 请求级超时预算（P1-1：前端超时与后端预算对齐）──
+// 后端 /api/time-budgets 是唯一数据源；此处兜底值与后端公式保持一致
+//（LLM chat 30s/thinking 120s × chat_json 内部 2 次尝试；bid = 主3+备2条链；play = 引擎预算 + LLM 链）
+const BUDGET_FALLBACK = {
+  bid: { chat: 310, reasoning: 1210 },
+  play: {
+    llm: { chat: 35, reasoning: 125 },
+    mcts: { chat: 15, reasoning: 15 },
+    dd: { chat: 35, reasoning: 35 },
+    perfect: { chat: 5, reasoning: 5 },
+    alphamu: { chat: 126, reasoning: 306 },
+    dd_alphamu_llm: { chat: 126, reasoning: 306 },
+  },
+};
+const BUDGET_MARGIN_S = 10; // 预算外网络余量
+
+let timeBudgets = null;
+let timeBudgetsPromise = null;
+
+const getTimeBudgets = async () => {
+  if (timeBudgets) return timeBudgets;
+  if (!timeBudgetsPromise) {
+    timeBudgetsPromise = api.get('/api/time-budgets')
+      .then((res) => {
+        timeBudgets = res.data;
+        return timeBudgets;
+      })
+      .catch((e) => {
+        console.warn('获取超时预算失败，使用兜底值:', e?.message);
+        return BUDGET_FALLBACK;
+      })
+      .finally(() => { timeBudgetsPromise = null; });
+  }
+  return timeBudgetsPromise;
+};
+
 // 发牌
 export const dealCards = async (mode = 'free') => {
   try {
@@ -82,32 +118,99 @@ export const setFallbackModel = async (fallbackModel) => {
   }
 };
 
+const isAbortError = (e) => e?.name === 'CanceledError' || e?.name === 'AbortError';
+
+// ── 任务化轮询（P0-5）：提交任务 → 短轮询取结果，前端不再受超时限制 ──
+const POLL_INTERVAL_MS = 2000;
+
+const cancelTaskQuiet = (taskId) => {
+  api.post(`/api/tasks/${taskId}/cancel`, {}, { timeout: 5000 }).catch(() => {});
+};
+
+const pollTask = async (taskId, { signal, onProgress } = {}) => {
+  for (;;) {
+    let task = null;
+    try {
+      const res = await api.get(`/api/tasks/${taskId}`, { timeout: 15000, signal });
+      task = res.data;
+    } catch (e) {
+      if (isAbortError(e)) {
+        cancelTaskQuiet(taskId);
+        throw e;
+      }
+      if (e?.response?.status === 404) {
+        // 任务已消失（后端重启/过期回收）：不可无限重试
+        const err = new Error('任务不存在或已过期，后端可能已重启，请重试');
+        err.taskError = true;
+        throw err;
+      }
+      // 瞬时轮询失败（网络抖动等）：下一轮重试
+    }
+    if (task) {
+      if (onProgress && task.progress) onProgress(task.progress, task.status);
+      if (task.status === 'done') return task.result;
+      if (task.status === 'error') {
+        const err = new Error(task.error || '任务执行失败');
+        err.taskError = true;
+        throw err;
+      }
+      if (task.status === 'cancelled' || task.cancel_requested) {
+        cancelTaskQuiet(taskId);
+        const err = new Error('canceled');
+        err.name = 'AbortError';
+        throw err;
+      }
+    }
+    if (signal?.aborted) {
+      cancelTaskQuiet(taskId);
+      const err = new Error('canceled');
+      err.name = 'AbortError';
+      throw err;
+    }
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+};
+
 // AI叫牌
-export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H/2S：自然阻击', bidHistory = '', useFallback = false, fallbackModel = null, aiProvider = null, useReasoning = false, signal = null) => {
+export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H/2S：自然阻击', bidHistory = '', useFallback = false, fallbackModel = null, aiProvider = null, useReasoning = false, signal = null, onProgress = null) => {
+  const requestData = {
+    hand,
+    bidding_sequence: biddingSequence,
+    position,
+    deal_system: dealSystem,
+    bid_history: bidHistory,
+    use_fallback: useFallback,
+    use_reasoning: useReasoning,
+  };
+
+  if (fallbackModel) {
+    requestData.fallback_model = fallbackModel;
+  }
+
+  if (aiProvider) {
+    requestData.ai_provider = aiProvider;
+  }
+
   try {
-    const requestData = {
-      hand,
-      bidding_sequence: biddingSequence,
-      position,
-      deal_system: dealSystem,
-      bid_history: bidHistory,
-      use_fallback: useFallback,
-      use_reasoning: useReasoning,
-    };
-    
-    if (fallbackModel) {
-      requestData.fallback_model = fallbackModel;
+    let submit;
+    try {
+      submit = await api.post('/api/bid-async', requestData, { timeout: 15000, signal });
+    } catch (e) {
+      if (isAbortError(e)) throw e;
+      if (e?.response?.status === 404) {
+        // 旧后端无任务端点：回退同步路径（预算对齐超时，P1-1）
+        const budgets = await getTimeBudgets();
+        const budgetS = budgets?.bid?.[useReasoning ? 'reasoning' : 'chat'] ?? BUDGET_FALLBACK.bid.chat;
+        const config = { timeout: (budgetS + BUDGET_MARGIN_S) * 1000 };
+        if (signal) config.signal = signal;
+        const response = await api.post('/api/bid', requestData, config);
+        return response.data;
+      }
+      throw e;
     }
-    
-    if (aiProvider) {
-      requestData.ai_provider = aiProvider;
-    }
-    
-    const config = signal ? { signal } : {};
-    const response = await api.post('/api/bid', requestData, config);
-    return response.data;
+    return await pollTask(submit.data.task_id, { signal, onProgress });
   } catch (error) {
-    if (error.name === 'CanceledError' || error.name === 'AbortError') {
+    if (isAbortError(error)) {
       throw error; // 用户主动取消，交由调用方处理
     }
     console.error('AI叫牌失败:', error);
@@ -176,12 +279,18 @@ export const customDeal = async (inputText) => {
   }
 };
 
-// 从图片读取牌局
+// 上传类请求：不带 Content-Type（axios 自动为 FormData 设置 multipart boundary），带超时
+const apiUpload = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 90000,
+});
+
+// 从图片读取牌局（P1-7：带超时，避免豆包 Vision 异常时无限等待）
 export const imageDeal = async (imageFile) => {
   try {
     const formData = new FormData();
     formData.append('image', imageFile);
-    const response = await axios.post(`${API_BASE_URL}/api/image-deal`, formData);
+    const response = await apiUpload.post('/api/image-deal', formData);
     return response.data;
   } catch (error) {
     console.error('图片识别牌局失败:', error);
@@ -189,12 +298,12 @@ export const imageDeal = async (imageFile) => {
   }
 };
 
-// 上传单家手牌图片识别（移动端/相册路径）
+// 上传单家手牌图片识别（移动端/相册路径）（P1-7：带超时）
 export const uploadSingleHandImage = async (position, imageFile) => {
   try {
     const formData = new FormData();
     formData.append('image', imageFile);
-    const response = await axios.post(`${API_BASE_URL}/api/single-hand-image?position=${encodeURIComponent(position)}`, formData);
+    const response = await apiUpload.post(`/api/single-hand-image?position=${encodeURIComponent(position)}`, formData);
     return response.data;
   } catch (error) {
     console.error('上传单家手牌识别失败:', error);
@@ -235,12 +344,17 @@ export const readSingleHandClipboard = async (position) => {
   }
 };
 
-// 双明手分析
-export const doubleDummyAnalysis = async (hands) => {
+// 双明手分析（P1-8：支持 AbortController 取消）
+export const doubleDummyAnalysis = async (hands, signal = null) => {
   try {
-    const response = await api.post('/api/double-dummy', { hands });
+    const config = { timeout: 180000 };
+    if (signal) config.signal = signal;
+    const response = await api.post('/api/double-dummy', { hands }, config);
     return response.data;
   } catch (error) {
+    if (error.name === 'CanceledError' || error.name === 'AbortError') {
+      throw error;
+    }
     console.error('双明手分析失败:', error);
     throw error;
   }
@@ -302,36 +416,50 @@ export const undoPlay = async () => {
 };
 
 // AI出牌
-export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null, ddAlphamuSwitchCards = null, useLlmReview = false, ddScoringMode = null) => {
-  try {
-    const requestData = {
-      use_reasoning: useReasoning,
-      use_llm_review: useLlmReview,
-      session_id: PLAY_SESSION_ID,
-    };
+export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null, ddAlphamuSwitchCards = null, useLlmReview = false, ddScoringMode = null, onProgress = null) => {
+  const requestData = {
+    use_reasoning: useReasoning,
+    use_llm_review: useLlmReview,
+    session_id: PLAY_SESSION_ID,
+  };
 
-    if (playModel) {
-      requestData.play_model = playModel;
+  if (playModel) {
+    requestData.play_model = playModel;
+  }
+  if (playEngine) {
+    requestData.play_engine = playEngine;
+  }
+  if (ddSampleCount) {
+    requestData.dd_sample_count = ddSampleCount;
+  }
+  if (ddAlphamuSwitchCards != null) {
+    requestData.dd_alphamu_switch_cards = ddAlphamuSwitchCards;
+  }
+  if (ddScoringMode) {
+    requestData.dd_scoring_mode = ddScoringMode;
+  }
+
+  try {
+    let submit;
+    try {
+      submit = await api.post('/api/play/ai-play-async', requestData, { timeout: 15000, signal });
+    } catch (e) {
+      if (isAbortError(e)) throw e;
+      if (e?.response?.status === 404) {
+        // 旧后端无任务端点：回退同步路径（预算对齐超时，P1-1）
+        const budgets = await getTimeBudgets();
+        const engineKey = playEngine || 'dd_alphamu_llm';
+        const budgetS = budgets?.play?.[engineKey]?.[useReasoning ? 'reasoning' : 'chat']
+          ?? BUDGET_FALLBACK.play.dd_alphamu_llm.chat;
+        const config = { timeout: (budgetS + BUDGET_MARGIN_S) * 1000, signal };
+        const response = await api.post('/api/play/ai-play', requestData, config);
+        return response.data;
+      }
+      throw e;
     }
-    if (playEngine) {
-      requestData.play_engine = playEngine;
-    }
-    if (ddSampleCount) {
-      requestData.dd_sample_count = ddSampleCount;
-    }
-    if (ddAlphamuSwitchCards != null) {
-      requestData.dd_alphamu_switch_cards = ddAlphamuSwitchCards;
-    }
-    if (ddScoringMode) {
-      requestData.dd_scoring_mode = ddScoringMode;
-    }
-    
-    const timeout = useReasoning ? 300000 : 120000;
-    const config = { timeout, signal };
-    const response = await api.post('/api/play/ai-play', requestData, config);
-    return response.data;
+    return await pollTask(submit.data.task_id, { signal, onProgress });
   } catch (error) {
-    if (error.name === 'CanceledError' || error.name === 'AbortError') {
+    if (isAbortError(error)) {
       console.log('[AI Play] 请求已被用户中止')
       throw error
     }

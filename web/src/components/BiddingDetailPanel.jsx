@@ -49,6 +49,7 @@ function BiddingDetailPanel({
   onSave,
   canSave,
   aiThinking,
+  aiProgress, // 任务化轮询实时进度文案（AI叫牌阶段）
   readonlyMode = false,
   fallbackModel,
   biddingTotalTime, // v1.61：叫牌总耗时（秒，叫牌完成时计算）
@@ -99,9 +100,12 @@ function BiddingDetailPanel({
   const renderBiddingDetails = () => {
     if (displayHistory.length === 0) {
       return (
-        <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 4 }}>
-          等待AI叫牌...
-        </Typography>
+        <Box sx={{ textAlign: 'center', mt: 4 }}>
+          {aiThinking && <CircularProgress size={20} sx={{ mb: 1 }} />}
+          <Typography variant="body2" color="text.secondary">
+            {aiThinking ? (aiProgress || 'AI叫牌中...') : '等待AI叫牌...'}
+          </Typography>
+        </Box>
       )
     }
 
@@ -469,6 +473,14 @@ function BiddingDetailPanel({
           </Box>
         ) : (
           <Box sx={{ flex: 1, overflow: 'auto', minHeight: 0, p: 1 }}>
+            {aiThinking && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                <CircularProgress size={14} />
+                <Typography variant="caption" color="text.secondary">
+                  {aiProgress || 'AI叫牌中...'}
+                </Typography>
+              </Box>
+            )}
             {renderBiddingDetails()}
             {renderOutputFormats()}
           </Box>

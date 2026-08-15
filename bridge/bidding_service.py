@@ -205,6 +205,7 @@ class BiddingService:
         deal_system: str,
         verbose: bool = False,
         use_reasoning: bool = False,
+        progress_cb=None,
     ) -> Dict:
         if not self.llm_client.is_configured():
             return {"error": "API Key未配置", "选定叫品": "pass", "叫品含义": "API Key未配置，默认pass"}
@@ -301,6 +302,8 @@ class BiddingService:
         last_result = None
 
         for attempt in range(MAIN_PROMPT_MAX_RETRIES + 1):
+            if progress_cb:
+                progress_cb(f"主提示词尝试 {attempt + 1}/{MAIN_PROMPT_MAX_RETRIES + 1}")
             # 重试时在 bid_meanings 附加反馈，让 LLM 知道上次叫品为何非法
             if attempt > 0 and last_violation:
                 feedback = f"\n[系统反馈] 上次叫品非法: {last_violation}，请严格检查合规性（叫品递增/加倍合法性）后重新选择"
@@ -357,7 +360,8 @@ class BiddingService:
                             is_structural,
                             jf_keyword="成局与满贯",
                             deal_system=deal_system,
-                            verbose=verbose
+                            verbose=verbose,
+                            progress_cb=progress_cb
                         )
                         fallback_result["主提示词输出"] = main_prompt_output
                         return fallback_result
@@ -373,7 +377,8 @@ class BiddingService:
                         is_structural,
                         jf_keyword="成局与满贯",
                         deal_system=deal_system,
-                        verbose=verbose
+                        verbose=verbose,
+                        progress_cb=progress_cb
                     )
 
                 self._inject_computed_fields(result, bidding_sequence, player_name)
@@ -420,7 +425,8 @@ class BiddingService:
             is_structural,
             jf_keyword="成局与满贯",
             deal_system=deal_system,
-            verbose=verbose
+            verbose=verbose,
+            progress_cb=progress_cb
         )
         fallback_result["主提示词输出"] = main_prompt_output
         return fallback_result
@@ -438,7 +444,8 @@ class BiddingService:
         is_structural: bool,
         jf_keyword: str = None,
         deal_system: str = "2D/2H/2S：自然阻击",
-        verbose: bool = False
+        verbose: bool = False,
+        progress_cb=None,
     ) -> Dict:
         actual_jf_content = jf_content
         actual_subsequent_bids = subsequent_bids_str
@@ -450,6 +457,8 @@ class BiddingService:
         last_result = None
 
         for attempt in range(FALLBACK_PROMPT_MAX_RETRIES + 1):
+            if progress_cb:
+                progress_cb(f"备用提示词尝试 {attempt + 1}/{FALLBACK_PROMPT_MAX_RETRIES + 1}")
             # 重试时在 bid_meanings 附加反馈
             if attempt > 0 and last_violation:
                 feedback = f"\n[系统反馈] 上次叫品非法: {last_violation}，请严格检查合规性（叫品递增/加倍合法性）后重新选择"

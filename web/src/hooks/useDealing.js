@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { dealCards, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, readSingleHandClipboard, uploadSingleHandImage } from '../services/api'
 import { setPlayHand as apiSetPlayHand } from '../services/api'
 import { BRIDGE_POSITIONS } from '../utils/position'
@@ -147,6 +147,11 @@ export function useDealing({ clearBiddingDraft }) {
   } = usePlay()
 
   const screenshotCancelledRef = useRef(false)
+  // P1-7：截屏/识别进度提示（info 样式渲染，与红色 error 区分；完成或取消后清空）
+  const [screenshotStatus, setScreenshotStatusState] = useState(null)
+  const setScreenshotStatus = useCallback((msg) => {
+    setScreenshotStatusState(msg)
+  }, [])
 
   // 公共：识别到完整定约时构造 directPlayContractInfo
   const buildDirectPlayInfo = (data) => {
@@ -280,7 +285,8 @@ export function useDealing({ clearBiddingDraft }) {
     if (setShowSettings) setShowSettings(false)
     setLoading(true)
     screenshotCancelledRef.current = false
-    setError('请截图：按 Win+Shift+S 选择区域（或等系统截图工具弹出）。首次使用浏览器会询问"允许读取剪贴板"，请允许')
+    setError(null)
+    setScreenshotStatus('请截图：按 Win+Shift+S 选择区域（或等系统截图工具弹出）。首次使用浏览器会询问"允许读取剪贴板"，请允许')
     setWarning(null)
     try {
       // 尝试触发系统截图工具（后端跑在用户桌面时有效；沙箱托管时弹不出，用户手动 Win+Shift+S 即可）
@@ -324,9 +330,10 @@ export function useDealing({ clearBiddingDraft }) {
             // 剪贴板还没有图片，继续等待
           }
         }
-        setError(`等待截屏中... (${i + 1}/10)`)
+        setScreenshotStatus(`等待截屏中... (${i + 1}/10)`)
       }
       if (!data) {
+        setScreenshotStatus(null)
         setError(permissionDenied
           ? '浏览器未允许读取剪贴板：请在地址栏右侧点击剪贴板权限并选择"允许"，然后重新截图重试'
           : '截屏识别超时，请确保已完成截图（Win+Shift+S）并重试')
@@ -345,13 +352,14 @@ export function useDealing({ clearBiddingDraft }) {
       const parsedBidding = parseBiddingSequenceStr(data.bidding_sequence)
       setBiddingSequence(parsedBidding)
       if (data.dealer) setCurrentBidder(data.dealer)
-      setError(null)
+      setScreenshotStatus(null)
     } catch {
+      setScreenshotStatus(null)
       setError('截屏识别失败，请检查API服务是否正常运行')
     } finally {
       setLoading(false)
     }
-  }, [loading, setLoading, setError, setWarning, setHands, setDealer, setVulnerability,
+  }, [loading, setLoading, setError, setWarning, setScreenshotStatus, setHands, setDealer, setVulnerability,
       setBiddingSequence, setCurrentBidder, resetGameState])
 
   // 4b. 单家手牌截屏识别
@@ -361,7 +369,8 @@ export function useDealing({ clearBiddingDraft }) {
     if (setShowSettings) setShowSettings(false)
     setLoading(true)
     screenshotCancelledRef.current = false
-    setError(`请截图 ${position} 家手牌：按 Win+Shift+S 选择区域（首次使用浏览器会询问剪贴板权限，请允许）`)
+    setError(null)
+    setScreenshotStatus(`请截图 ${position} 家手牌：按 Win+Shift+S 选择区域（首次使用浏览器会询问剪贴板权限，请允许）`)
     setWarning(null)
     try {
       // 尝试触发系统截图工具（后端跑在用户桌面时有效；沙箱托管时弹不出，用户手动截图即可）
@@ -403,9 +412,10 @@ export function useDealing({ clearBiddingDraft }) {
             // 剪贴板还没有图片，继续等待
           }
         }
-        setError(`等待 ${position} 家截屏中... (${i + 1}/10)`)
+        setScreenshotStatus(`等待 ${position} 家截屏中... (${i + 1}/10)`)
       }
       if (!data) {
+        setScreenshotStatus(null)
         setError(permissionDenied
           ? `浏览器未允许读取剪贴板：请在地址栏右侧点击剪贴板权限并选择"允许"，然后重新截图 ${position} 家重试`
           : `${position} 家截屏识别超时，请确保已完成截图并重试`)
@@ -427,13 +437,14 @@ export function useDealing({ clearBiddingDraft }) {
         // 不在打牌阶段时 API 调用可能失败，忽略即可
       }
       if (data.message && data.message !== '识别成功') setWarning(`${position}家: ${data.message}`)
-      setError(null)
+      setScreenshotStatus(null)
     } catch {
+      setScreenshotStatus(null)
       setError(`${position} 家截屏识别失败，请检查API服务是否正常运行`)
     } finally {
       setLoading(false)
     }
-  }, [loading, setLoading, setError, setWarning, setHands, setPlayState])
+  }, [loading, setLoading, setError, setWarning, setScreenshotStatus, setHands, setPlayState])
 
   // 4c. 单家手牌图片上传识别（移动端/相册路径）
   const handleSingleHandUpload = useCallback(async (position, imageFile) => {
@@ -441,7 +452,8 @@ export function useDealing({ clearBiddingDraft }) {
     if (!position || !['南','西','北','东'].includes(position)) return
     setLoading(true)
     screenshotCancelledRef.current = false
-    setError(`正在识别 ${position} 家手牌图片...`)
+    setError(null)
+    setScreenshotStatus(`正在识别 ${position} 家手牌图片...`)
     setWarning(null)
     try {
       const data = await uploadSingleHandImage(position, imageFile)
@@ -465,13 +477,14 @@ export function useDealing({ clearBiddingDraft }) {
         // 不在打牌阶段时 API 调用可能失败，忽略即可
       }
       if (data.message && data.message !== '识别成功') setWarning(`${position}家: ${data.message}`)
-      setError(null)
+      setScreenshotStatus(null)
     } catch {
+      setScreenshotStatus(null)
       setError(`${position} 家手牌识别失败，请检查API服务是否正常运行`)
     } finally {
       setLoading(false)
     }
-  }, [loading, setLoading, setError, setWarning, setHands, setPlayState])
+  }, [loading, setLoading, setError, setWarning, setScreenshotStatus, setHands, setPlayState])
 
   // 5. 清除所有手牌
   const clearAllHands = useCallback(() => {
@@ -512,10 +525,12 @@ export function useDealing({ clearBiddingDraft }) {
       setIsPlayPaused, setPlayStarted, setPlayInitiated, setLoadedPlayRecord,
       setShowPartnerHand, setShowOpponentHands, setDirectPlayContractInfo, setImageOpeningLead])
 
-  // 取消截屏
+  // 取消截屏（P1-7：同时清除进度提示）
   const cancelScreenshot = useCallback(() => {
     screenshotCancelledRef.current = true
-  }, [])
+    setScreenshotStatusState(null)
+    setLoading(false)
+  }, [setLoading])
 
   return {
     handleDeal,
@@ -528,6 +543,7 @@ export function useDealing({ clearBiddingDraft }) {
     cancelScreenshot,
     parseBiddingSequenceStr,
     screenshotCancelledRef,
+    screenshotStatus,
   }
 }
 

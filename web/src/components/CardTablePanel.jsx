@@ -20,6 +20,7 @@ function CardTablePanel({
   // 业务回调
   onAnalyzeContract,
   onToggleDoubleDummy,
+  onCancelDoubleDummy,
   onDealerChange,
   onPositionRoleChange,
   onClearAllHands,
@@ -388,6 +389,7 @@ function CardTablePanel({
           showDoubleDummy={showDoubleDummy}
           doubleDummyResult={doubleDummyResult}
           doubleDummyLoading={doubleDummyLoading}
+          onCancelDoubleDummy={onCancelDoubleDummy}
           biddingTotalTime={biddingTotalTime}
           positionRoles={positionRoles}
           onPositionRoleChange={onPositionRoleChange}

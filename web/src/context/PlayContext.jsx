@@ -52,6 +52,9 @@ export function PlayProvider({ children }) {
     }
   })
 
+  // ── 打牌开始时间（P1-10：打牌中显示已进行时长与预计耗时的基准）──
+  const [playStartTime, setPlayStartTime] = useState(null)
+
   // ── LLM 分组审查开关（DD-αμ-LLM 引擎内，默认关闭以与纯引擎对比）──
   const [useLlmReview, setUseLlmReview] = useState(() => {
     try { return localStorage.getItem(LLM_REVIEW_KEY) === 'true' } catch { return false }
@@ -98,6 +101,7 @@ export function PlayProvider({ children }) {
       directPlayContractInfo, setDirectPlayContractInfo,
       playEngine, setPlayEngineState,
       handlePlayEngineChange,
+      playStartTime, setPlayStartTime,
       useLlmReview, setUseLlmReview,
       handleLlmReviewChange,
     }),
@@ -108,7 +112,7 @@ export function PlayProvider({ children }) {
       showDDHints, ddHints, ddHintsLoading,
       contractDialogOpen,
       resetOpeningLeadDialogOpen, directPlayContractInfo,
-      playEngine, useLlmReview,
+      playEngine, playStartTime, useLlmReview,
     ],
   )
 
