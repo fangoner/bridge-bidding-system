@@ -320,6 +320,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const humanBidInFlightRef = useRef(false) // P2-4：人类叫牌处理中（含含义获取）防重复点击
   const playCardInFlightRef = useRef(false) // P2-5：出牌请求在途时防连点
   const aiPlayInFlightRef = useRef(false) // v1.61：AI 出牌请求在途（含乐观更新窗口），防同一回合重复调度
+  const undoSeqRef = useRef(0) // 撤销序号：出牌请求在途期间发生撤销时，丢弃过期响应避免覆盖撤销结果
   const aiBiddingHistoryRef = useRef(aiBiddingHistory) // 叫牌历史 ref：同步追踪最新值
   useEffect(() => { playStateRef.current = playState }, [playState])
   useEffect(() => { aiPlayHistoryRef.current = aiPlayHistory }, [aiPlayHistory])
@@ -1985,6 +1986,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     if (playCardInFlightRef.current) return
     playCardInFlightRef.current = true
     aiPlayInFlightRef.current = true // v1.61：标记在途，直到后端确认（乐观更新窗口内挡住重复调度）
+    const seqAtStart = undoSeqRef.current
     // 乐观更新：立即在桌面上显示点击的牌，避免等待后端DD计算造成延迟
     setPlayState(prev => {
       if (!prev || !prev.current_trick) return prev
@@ -2005,6 +2007,12 @@ function AppShell({ darkMode, onToggleDarkMode }) {
 
     try {
       const result = await playCard(position, card)
+
+      // 撤销序号守卫：出牌在途期间用户点了撤销 → 丢弃本次响应，以后端撤销后的真实状态为准
+      if (undoSeqRef.current !== seqAtStart) {
+        await reconcilePlayState()
+        return
+      }
 
       if (result.success) {
         console.log('[DEBUG handlePlayCard] result.state.current_trick:', result.state.current_trick)
@@ -2092,6 +2100,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     const controller = new AbortController()
     abortControllerRef.current = controller
     aiPlayInFlightRef.current = true // v1.61：标记在途，直到后端确认（防 AI 回合重复调度）
+    const seqAtStart = undoSeqRef.current
 
     setAiThinking(true)
     setAiProgress(null)
@@ -2101,6 +2110,11 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       const pm = parseModelValue(playModel)
       const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, switchCards, useLlmReview, ddScoringMode, (msg) => setAiProgress(msg))
       if (controller.signal.aborted) return
+      // 撤销序号守卫：AI 出牌在途期间用户点了撤销 → 丢弃本次响应，以后端撤销后的真实状态为准
+      if (undoSeqRef.current !== seqAtStart) {
+        await reconcilePlayState()
+        return
+      }
       console.log('[AI Play] engine:', result.used_engine, 'elapsed:', result.elapsed_ms + 'ms', 'model:', result.used_model)
 
       if (result.success) {
@@ -2238,22 +2252,38 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const handleUndoPlay = async () => {
     try {
       // 记录撤销前的状态，用于判断撤销了谁出的牌
-      
+      const prevTrickCards = playState?.current_trick?.cards || []
+      const prevLastTrick = playState?.tricks?.[playState.tricks.length - 1]
+      const undoneCard = prevTrickCards.length > 0
+        ? prevTrickCards[prevTrickCards.length - 1][1]
+        : prevLastTrick?.cards?.[prevLastTrick.cards.length - 1]?.[1]
+
       const result = await undoPlay()
       if (result.success) {
+        // 撤销序号递增：让在途的出牌/AI响应感知撤销已发生，丢弃过期状态
+        undoSeqRef.current += 1
+        // 中止在途 AI 出牌请求并清除思考态，防止响应回来覆盖撤销结果
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort()
+          abortControllerRef.current = null
+        }
+        setAiThinking(false)
         const state = result.state
         setPlayState(state)
           setSelectedPlayRecord(null)
-        
+
         // 撤销的牌是刚出的那张，出牌者现在是current_player（撤销后轮到他重新出牌）
         // 如果这张牌是AI出的，从aiPlayHistory中删除对应记录
         const undonePlayer = state.current_player
-        // 检查aiPlayHistory最后一条是否属于被撤销的出牌者
+        // 修复：必须位置+牌张双匹配——撤销人类/快速通道出的牌时，
+        // 只按位置匹配会误删同位置更早的AI记录（如12墩AI记录被13墩唯一牌撤销误删）
         setAiPlayHistory(prev => {
           if (prev.length > 0) {
             const lastRecord = prev[prev.length - 1]
-            // 如果最后一条AI记录的位置和被撤销的出牌者匹配，删除它
-            if (lastRecord.position === undonePlayer) {
+            if (lastRecord.position === undonePlayer &&
+                undoneCard &&
+                lastRecord.card?.suit === undoneCard.suit &&
+                lastRecord.card?.rank === undoneCard.rank) {
               return prev.slice(0, -1)
             }
           }
@@ -2496,6 +2526,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   // 仅剩一张合法出牌时自动打出（无需用户选择）
   useEffect(() => {
     if (!showPlayPanel || !playState || aiThinking || playLoading || !playInitiated) return
+    if (isPlayPaused) return // 暂停/撤销后不自动出牌，等用户点击"继续"
     if (playState.phase === 'complete') return
     const cp = playState.current_player
     if (!cp) return
@@ -2507,7 +2538,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       const timer = setTimeout(() => handlePlayCard(cp, card), 400)
       return () => clearTimeout(timer)
     }
-  }, [playState?.current_player, playState?.current_trick, playState?.hands, showPlayPanel, playInitiated, aiThinking, playLoading])
+  }, [playState?.current_player, playState?.current_trick, playState?.hands, showPlayPanel, playInitiated, aiThinking, playLoading, isPlayPaused])
 
   // 轮到人类出牌时自动暂停（每墩首张除外，由继续按钮控制）
   useEffect(() => {

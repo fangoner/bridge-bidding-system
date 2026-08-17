@@ -1250,13 +1250,24 @@ def extract_constraints_from_bid_history(bid_history: str, system: str = SYSTEM_
                         if pb_p and pb_p[0] not in (SPECIAL_PASS, SPECIAL_DOUBLE, SPECIAL_REDOUBLE):
                             prev_own_parsed = pb_p
                             break
+                    # 判断该位置是否用过斯台曼问叫（2♣ 问高花）：同伴开叫1NT/2NT后应叫2♣
+                    used_stayman = False
+                    if first_parsed_p:
+                        for pb in pos_bids.get(pos, []):
+                            pb_p = _normalize_bid(pb)
+                            if pb_p and pb_p[0] == 2 and pb_p[1] == "♣":
+                                used_stayman = True
+                                break
                     if prev_own_parsed:
                         prev_level, prev_suit_own = prev_own_parsed
                         if suit == prev_suit_own and level > prev_level + 1:
                             is_jump_rebid = True
                         elif partner_suit and suit == partner_suit:
                             # 加叫同伴：如果跳一阶以上算跳叫
-                            if level > 2:  # 平加叫通常到2阶（1M-2M是平加）
+                            # 例外：斯台曼后跳加同伴所答高花 = 进局加叫（应叫人 9-12 点，4 张支持），非 16-18 跳加叫
+                            if used_stayman and partner_suit in ("♠", "♥"):
+                                is_jump_rebid = False
+                            elif level > 2:  # 平加叫通常到2阶（1M-2M是平加）
                                 is_jump_rebid = True
                         elif suit == "NT":
                             # NT跳叫
@@ -1279,13 +1290,25 @@ def extract_constraints_from_bid_history(bid_history: str, system: str = SYSTEM_
                     if first_parsed_p and first_parsed_p[0] not in (SPECIAL_PASS, SPECIAL_DOUBLE, SPECIAL_REDOUBLE):
                         is_reverse_bid = _is_reverse(level, suit, first_parsed_p[0], first_parsed_p[1])
 
-                    constraint = get_rebid_constraint(
-                        bid_str,
-                        first_bid_by_player,
-                        partner_suit,
-                        is_jump_rebid,
-                        is_reverse_bid,
-                    )
+                    # 斯台曼后跳加叫同伴所答高花：进局加叫（应叫人 8-12HCP，4 张支持），
+                    # 不按自然"跳加叫 16-18 / 平加叫 12-14"处理
+                    if used_stayman and partner_suit in ("♠", "♥") and suit == partner_suit and level >= 4:
+                        constraint = BidConstraint(
+                            position="",
+                            min_hcp=8,
+                            max_hcp=14,
+                            suit_min={suit: 4},
+                            min_hcp_target=10,
+                            inference_source="stayman_game_raise",
+                        )
+                    else:
+                        constraint = get_rebid_constraint(
+                            bid_str,
+                            first_bid_by_player,
+                            partner_suit,
+                            is_jump_rebid,
+                            is_reverse_bid,
+                        )
                 elif constraint is None:
                     # 第一次叫牌：争叫或应叫
                     our_side_opened = False

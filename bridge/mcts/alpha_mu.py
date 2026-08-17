@@ -287,7 +287,7 @@ class AlphaMuSearch:
         self._prev_best_score: float = -1.0
         self._is_root: bool = False  # 标记当前是否在根节点
 
-    def search(self, state: PlayState) -> dict:
+    def search(self, state: PlayState, worlds: Optional[List[Dict[str, List[Card]]]] = None) -> dict:
         self._nodes_searched = 0
         self._dds_calls = 0
         self._dds_time_total = 0.0
@@ -344,18 +344,23 @@ class AlphaMuSearch:
                 "full_output": {"推荐出牌": str(playable[0])},
             }
 
-        # ── 1. 生成 possible worlds（均匀采样 + 分级约束验证）──
-        # Phase 0a: 直接调用 sampler.sample_n()，等权均匀 world 集合
-        # P1-4 修复：时间限制从 worlds 生成开始计时（原在生成后，约束难满足时
-        # worlds 生成耗时不受 time_limit 约束）
+        # ── 1. 生成 possible worlds ──
+        # 残局时可传入完备枚举世界集（worlds_source=enumerated）：
+        # 枚举只是替代采样的世界生成方式，决策算法不变（αμ 布尔成功率/Pareto）
         self._start_time = time.time()
-        worlds: List[Dict[str, List[Card]]] = []
-        try:
-            worlds = self.sampler.sample_n(self.num_worlds, state, perspective)
-        except Exception:
-            worlds = []
-        if not worlds:
-            raise RuntimeError("αμ: 无法生成 possible worlds")
+        worlds_source = "sampled"
+        if worlds:
+            worlds_source = "enumerated"
+        else:
+            # Phase 0a: 直接调用 sampler.sample_n()，等权均匀 world 集合
+            # P1-4 修复：时间限制从 worlds 生成开始计时（原在生成后，约束难满足时
+            # worlds 生成耗时不受 time_limit 约束）
+            try:
+                worlds = self.sampler.sample_n(self.num_worlds, state, perspective)
+            except Exception:
+                worlds = []
+            if not worlds:
+                raise RuntimeError("αμ: 无法生成 possible worlds")
 
         # 诊断
         has_constraints = bool(getattr(self.sampler, 'constraints', None))
@@ -364,7 +369,10 @@ class AlphaMuSearch:
             print(f"[αμ] 约束: { {p: f'HCP[{c.min_hcp}-{c.max_hcp}]' for p, c in constr.items()} }")
 
         n_worlds = len(worlds)
-        print(f"[αμ] worlds生成完成: {n_worlds}个, 耗时{time.time()-self._start_time:.2f}s")
+        if worlds_source == "enumerated":
+            print(f"[αμ] 使用完备枚举世界集: {n_worlds}个（决策算法与采样路径一致）")
+        else:
+            print(f"[αμ] worlds生成完成: {n_worlds}个, 耗时{time.time()-self._start_time:.2f}s")
 
         # ── 我方/对手方 + 目标设定 ──
         partner = PARTNERS.get(perspective, perspective)
@@ -567,7 +575,7 @@ class AlphaMuSearch:
             for s in move_scores[:5]
         )
         reasoning = (
-            f"αμ搜索: {n_worlds} worlds, M={self.M}, "
+            f"αμ搜索: {n_worlds} worlds({'枚举' if worlds_source == 'enumerated' else '采样'}), M={self.M}, "
             f"{self._nodes_searched} nodes, {self._dds_calls} DDS calls, "
             f"{elapsed:.1f}s. Top: {top_str}"
         )
@@ -595,13 +603,14 @@ class AlphaMuSearch:
                 "推荐出牌": str(best_move),
                 "核心逻辑": reasoning,
                 "候选对比": str(move_scores),
-                "局面评估": f"αμ搜索：{n_worlds}个possible worlds联合评估",
+                "局面评估": f"αμ搜索：{n_worlds}个possible worlds联合评估（{'完备枚举' if worlds_source == 'enumerated' else '均匀采样'}）",
                 "DDS诊断": f"DDS路径统计: {err_diag} | 样本: {err_samples_str}",
                 "mcts_stats": {
                     "iterations": self._dds_calls,
                     "time_sec": round(elapsed, 2),
                     "candidates": move_scores,
                     "num_worlds": n_worlds,
+                    "worlds_source": worlds_source,
                     "nodes_searched": self._nodes_searched,
                     "algorithm": "alpha_mu",
                     "err_stats": dict(self._err_stats),

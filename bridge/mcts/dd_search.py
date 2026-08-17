@@ -15,7 +15,6 @@ from bridge.mcts.state_utils import (
     get_current_trick_state,
 )
 from bridge.mcts.sampler import DealSampler, ALL_CARDS
-from bridge.mcts.constraints import validate_sample
 
 _DEBUG_LOG = os.path.join(BASE_DIR, "dd_debug.log")
 
@@ -668,23 +667,22 @@ class DDSearch:
             },
         }
 
-    def _enumerate_endgame(self, state: PlayState, perspective: str, actual_turn: str,
-                           playable: List[Card], declarer: str, dummy: str,
-                           trump: str, is_declarer_side: bool) -> Optional[dict]:
-        """残局精确枚举：枚举所有可能的未知牌分布，对每个做双明手求解。
+    def _enumerate_endgame_worlds(self, state: PlayState, perspective: str) -> Optional[List[Dict[str, List[Card]]]]:
+        """残局完备世界枚举：穷举未知牌的所有可能分布，返回完整四家手牌列表。
 
-        返回同 search() 的 dict 格式，若枚举不可行则返回 None（回退采样）。
+        只负责世界生成（枚举替代采样），不做 DDS 求解与决策；
+        供 αμ 引擎以完备世界集运行与采样路径一致的 αμ 决策算法。
+        不可行（数量超限/一致性失败/未知位置数异常）返回 None。
         """
-        start_time = time.time()
-
-        # ── 1. 识别已知/未知位置和未知牌池 ──
         known_positions = {perspective}
-        if dummy and state.phase != PlayPhase.LEAD:
-            known_positions.add(dummy)
-        if dummy and perspective in (declarer, dummy):
-            known_positions.add(declarer)
+        if state.dummy and state.phase != PlayPhase.LEAD:
+            known_positions.add(state.dummy)
+        if state.dummy and perspective in (state.contract.declarer, state.dummy):
+            known_positions.add(state.contract.declarer)
 
         unknown_positions = [p for p in POSITION_ORDER if p not in known_positions]
+        if len(unknown_positions) not in (2, 3):
+            return None
 
         # 收集已知牌
         known_card_set = set()
@@ -714,7 +712,7 @@ class DDSearch:
             # 一致性检查失败
             return None
 
-        # ── 2. 估算枚举总数 ──
+        # 估算枚举总数
         counts = [remaining_counts[p] for p in unknown_positions]
         est = 1
         rem = len(pool)
@@ -726,46 +724,29 @@ class DDSearch:
                   f"falling back to sampling")
             return None
 
-        # ── 3. 预计算共享状态 ──
-        trick_state = get_current_trick_state(state)
-        trick_cards = trick_state["cards"]
-        trick_leader = trick_state.get("leader")
-
-        all_played = []
-        for trick in state.tricks:
-            all_played.extend(trick.cards)
-        all_played.extend(trick_cards)
-
-        total_played_tricks = state.declarer_tricks + state.defender_tricks
-        remaining_tricks = 13 - total_played_tricks
-
-        card_scores = {str(c): [] for c in playable}
         # 残局枚举直接对真实剩余牌池穷举所有分布，无需用叫牌约束过滤。
         # 叫牌约束（如整手16HCP）针对发牌时13张手牌，残局剩余1-2张必然不满足，
         # 若在此验证会导致所有分布被过滤、枚举返回None，进而回退到同样错误的采样。
-        constraints = None
+        all_played = []
+        for trick in state.tricks:
+            all_played.extend(trick.cards)
+        all_played.extend(state.current_trick.cards)
 
         n_pool = len(pool)
         indices = list(range(n_pool))
         n1 = remaining_counts[unknown_positions[0]]
-        enum_count = 0
-        valid_count = 0
+        worlds: List[Dict[str, List[Card]]] = []
 
-        # ── 4. 枚举所有分布 ──
         for combo1_idx in itertools.combinations(indices, n1):
-            if time.time() - start_time > self.time_limit:
-                break
-
             cards1 = [pool[i] for i in combo1_idx]
             combo1_set = set(combo1_idx)
             remaining_idx = [i for i in indices if i not in combo1_set]
 
-            # 构建分布迭代器
             if len(unknown_positions) == 2:
                 cards2 = [pool[i] for i in remaining_idx]
                 distributions = [{unknown_positions[0]: cards1,
                                   unknown_positions[1]: cards2}]
-            elif len(unknown_positions) == 3:
+            else:
                 n2 = remaining_counts[unknown_positions[1]]
                 distributions = []
                 for combo2_idx in itertools.combinations(remaining_idx, n2):
@@ -775,67 +756,83 @@ class DDSearch:
                     distributions.append({unknown_positions[0]: cards1,
                                           unknown_positions[1]: cards2,
                                           unknown_positions[2]: cards3})
-            else:
-                # 1或4个未知位置（极端情况），回退
-                return None
 
             for dist in distributions:
-                enum_count += 1
-                if time.time() - start_time > self.time_limit:
-                    break
-
-                # 构建完整四家手牌
                 hands = {}
                 for pos in known_positions:
                     hands[pos] = list(state.hands.get(pos, []))
                 for pos, cards in dist.items():
                     hands[pos] = list(cards)
 
-                # 约束验证
-                if constraints:
-                    if not validate_sample(hands, constraints):
-                        continue
-                valid_count += 1
+                # 安全网清除已出牌（只从打出位置移除）
+                for pos, card in all_played:
+                    if pos in hands:
+                        hands[pos] = [c for c in hands[pos]
+                                      if not (c.suit == card.suit and c.rank == card.rank)]
+                if _has_duplicates(hands):
+                    continue
+                worlds.append(hands)
 
-                try:
-                    # 安全网清除已出牌（只从打出位置移除）
-                    for pos, card in all_played:
-                        if pos in hands:
-                            hands[pos] = [c for c in hands[pos]
-                                          if not (c.suit == card.suit and c.rank == card.rank)]
-                    # 验证无重复牌
-                    if _has_duplicates(hands):
-                        continue
-                    # DDS: trick_cards 不能出现在 hands 中（否则 remainCards 与 currentTrickSuit 双重计算）
-                    # all_played 已包含 trick_cards，上面已移除，不再加回
+        return worlds if worlds else None
 
-                    # Phase 0b: DirectDDS 替换 endplay
-                    first_p = trick_leader if trick_cards else actual_turn
-                    solved_list = solve_all_boards_raw([(hands, trump, first_p, trick_cards)])
-                    if not solved_list or solved_list[0] is None:
-                        continue
-                    result = solved_list[0]
-                    score_map = _dds_result_to_score_map(result)
+    def _enumerate_endgame(self, state: PlayState, perspective: str, actual_turn: str,
+                           playable: List[Card], declarer: str, dummy: str,
+                           trump: str, is_declarer_side: bool) -> Optional[dict]:
+        """残局精确枚举：枚举所有可能的未知牌分布，对每个做双明手求解。
 
-                    _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
-                    cur_p = (_DD_POS.get(first_p, 0) + len(trick_cards)) % 4
-                    curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
+        返回同 search() 的 dict 格式，若枚举不可行则返回 None（回退采样）。
+        """
+        start_time = time.time()
 
-                    for card in playable:
-                        key = (card.suit, card.rank)
-                        target_tricks = score_map.get(key, 0)
-                        if curplayer_is_declarer:
-                            decl_side_tricks = target_tricks
-                        else:
-                            decl_side_tricks = remaining_tricks - target_tricks
-                        total = state.declarer_tricks + decl_side_tricks
-                        card_scores[str(card)].append(total)
+        worlds = self._enumerate_endgame_worlds(state, perspective)
+        if worlds is None:
+            return None
+        enum_count = len(worlds)
+        valid_count = len(worlds)
 
-                except Exception:
-                    continue  # 跳过无效分布
+        # ── 预计算共享状态 ──
+        trick_state = get_current_trick_state(state)
+        trick_cards = trick_state["cards"]
+        trick_leader = trick_state.get("leader")
 
+        total_played_tricks = state.declarer_tricks + state.defender_tricks
+        remaining_tricks = 13 - total_played_tricks
+
+        card_scores = {str(c): [] for c in playable}
+
+        # ── 逐世界 DDS 求解 ──
+        for hands in worlds:
             if time.time() - start_time > self.time_limit:
                 break
+
+            try:
+                # DDS: trick_cards 不能出现在 hands 中（否则 remainCards 与 currentTrickSuit 双重计算）
+                # 生成器安全网已移除，不再加回
+
+                # Phase 0b: DirectDDS 替换 endplay
+                first_p = trick_leader if trick_cards else actual_turn
+                solved_list = solve_all_boards_raw([(hands, trump, first_p, trick_cards)])
+                if not solved_list or solved_list[0] is None:
+                    continue
+                result = solved_list[0]
+                score_map = _dds_result_to_score_map(result)
+
+                _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
+                cur_p = (_DD_POS.get(first_p, 0) + len(trick_cards)) % 4
+                curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
+
+                for card in playable:
+                    key = (card.suit, card.rank)
+                    target_tricks = score_map.get(key, 0)
+                    if curplayer_is_declarer:
+                        decl_side_tricks = target_tricks
+                    else:
+                        decl_side_tricks = remaining_tricks - target_tricks
+                    total = state.declarer_tricks + decl_side_tricks
+                    card_scores[str(card)].append(total)
+
+            except Exception:
+                continue  # 跳过无效分布
 
         # ── 5. 汇总结果 ──
         elapsed = time.time() - start_time

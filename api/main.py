@@ -2149,6 +2149,14 @@ class PlayStateResponse(BaseModel):
     error: Optional[str] = None
 
 
+@app.get("/api/debug/play-sessions")
+async def debug_play_sessions():
+    """调试接口：列出所有活跃打牌会话 ID（仅会话 ID，不含牌面内容）"""
+    with _play_services_lock:
+        sessions = [{"session_id": sid, "last_access_ts": ts} for sid, (_, ts) in _play_services.items()]
+    return {"success": True, "count": len(sessions), "sessions": sessions}
+
+
 @app.get("/api/play/state", response_model=PlayStateResponse)
 async def get_play_state(session_id: str = Query("default")):
     """获取当前打牌状态"""

@@ -823,43 +823,23 @@ class PlayService:
         perspective = state.current_player
         cards = len(state.hands.get(perspective, []))
 
-        # 残局枚举：优先尝试精确枚举所有未知分布。
+        # 残局枚举：优先尝试精确枚举所有未知分布，作为完备世界集交给 αμ。
+        # 一致性原则：枚举只是替代采样的世界生成方式（采样→穷举），
+        # 决策算法不变——仍走 αμ 的布尔成功率/Pareto 逻辑，不沿用 DD 决策。
         # 门槛不再用"当前玩家手牌数"（如东5张会被挡下，但此时东/明手手牌
-        # 已知、未知仅两家各4张，C(8,4)=70 完全可枚举）。_enumerate_endgame
+        # 已知、未知仅两家各4张，C(8,4)=70 完全可枚举）。_enumerate_endgame_worlds
         # 内部有 est > max 判定会自行回退采样，故放开硬门槛交由它判断。
         # αμ 采样在约束不可满足时会陷入回退链（MH→Level2→Level0），枚举可避免。
-        # P1-2 修复：枚举与 αμ 搜索共享总预算——枚举预算从 DD 的 30s 压缩到 10s，
-        # 且 αμ 搜索预算会扣除枚举已用时间，避免"枚举30s+搜索32s"双预算叠加到 ~62s
         _t_alpha_start = time.time()
-        _saved_dd_time_limit = self.dd_search.time_limit
-        self.dd_search.time_limit = min(10.0, _saved_dd_time_limit)
+        enum_worlds = None
         try:
-            enum_result = self.dd_search._enumerate_endgame(
-                state,
-                perspective,
-                state.current_player,
-                state.get_playable_cards(state.current_player),
-                state.contract.declarer,
-                state.dummy,
-                state.contract.suit,
-                perspective in (state.contract.declarer, state.dummy),
-            )
-            if enum_result is not None and enum_result.get("card") is not None:
-                enum_card = enum_result["card"]
-                enum_full = enum_result.get("full_output", {})
-                enum_full["引擎阶段"] = "endgame_enum"
-                return {
-                    "card": enum_card.to_dict() if hasattr(enum_card, "to_dict") else None,
-                    "reasoning": enum_result.get("reasoning", ""),
-                    "full_output": enum_full,
-                    "prompt": "[αμ] no prompt",
-                }
-            print("[αμ] 残局枚举不可行，回退 αμ 采样搜索")
+            enum_worlds = self.dd_search._enumerate_endgame_worlds(state, perspective)
+            if enum_worlds:
+                print(f"[αμ] 残局完备世界集: {len(enum_worlds)} 个（枚举替代采样，αμ 决策）")
         except Exception as e:
             # P0-3 修复：残局枚举异常不中断，回退 αμ 采样搜索
             print(f"[αμ] 残局枚举异常（回退 αμ 采样搜索）: {e}")
-        finally:
-            self.dd_search.time_limit = _saved_dd_time_limit
+            enum_worlds = None
 
         # P2-17 修复：世界数优先读取设置面板配置的值（滑块仅在纯 αμ 引擎下修改，
         # 但值在 session 内持久，对 DD-αμ-LLM 残局阶段同样全局生效，与 DD 样本数滑块行为一致）
@@ -907,7 +887,7 @@ class PlayService:
                 time_limit=time_lim,
                 dds_budget=dds_budget,
             )
-            result = search.search(state)
+            result = search.search(state, worlds=enum_worlds)
         except Exception as e:
             # P0-3 修复：αμ 搜索异常兜底——回退规则选牌，避免整局卡死
             # （AlphaMuSearch.__init__ 的 _load_dll、worlds 生成、搜索均可抛异常）
@@ -920,6 +900,8 @@ class PlayService:
             playable = self.engine.get_playable_cards()
             card = playable[0] if playable else None
         full_output = result.get("full_output", {})
+        if enum_worlds:
+            full_output["引擎阶段"] = "endgame_enum_αμ"
         full_output["叫牌约束"] = self._format_constraints_for_display(constraints)
         return {
             "card": card.to_dict() if hasattr(card, "to_dict") else None,
