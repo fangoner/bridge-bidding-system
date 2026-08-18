@@ -48,6 +48,9 @@ screenshots/
 # Third-party tools
 Deep Finesse 2014 v2/
 
+# 版权书籍/原始文档（不纳入版本控制，避免版权问题）
+书籍/
+
 # Temporary files
 *.tmp
 *.temp

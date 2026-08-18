@@ -213,6 +213,52 @@ SINGLE_HAND_VISION_PROMPT = """你的任务是从桥牌游戏截图中识别**�
   "手牌": "如 ♠KT85 ♥AT863 ♦- ♣63（♦缺门用-占位）"
 }"""
 
+BIDDING_VISION_PROMPT = """你的任务是从桥牌游戏截图中识别**叫牌过程**（叫牌序列）。截图可能只包含叫牌区域，不要脑补手牌。
+
+═══════════════════════════════════════
+识别规则
+═══════════════════════════════════════
+- **叫牌表中空着的位置不等于pass！** 第一轮中，发牌人之前的空位只是还没轮到叫牌，不要记录为pass
+- **pass 的多种表示形式**：pass 可能显示为"不叫"、"-"、"/"、"Pass"、"P"、"pass"等，这些都是pass，必须记录为"pass"。与之区别的是**完全空白的格子**（无任何字符），那才是未叫牌，不能记录
+- **叫品标准化**：无论图片中显示的是"不叫"、"-"、"/"、"P"，输出JSON时统一写成"pass"
+- **"=" 是叫牌结束标记**：最后一个pass后面有时会带"="符号（如"pass="、"P="、"-"=），表示叫牌到此结束。遇到带"="的叫品，仍然按pass处理，但**输出JSON时去掉"="符号**，只写"pass"。不要单独输出"="作为一条叫品
+- **发牌人（dealer）的判断方法——极其重要！**：
+  - 叫牌表第一行中，**第一个有内容（pass/不叫/-//具体叫品）的位置就是发牌人**
+  - **绝不能跳过发牌人！** 即使发牌人pass，也必须从发牌人开始记录序列
+  - 即使第一行的"-"/"P"/"不叫"看起来像"空"，那也是发牌人发出的pass，必须记录
+  * 例如第一行南为空白、西为空白、北为"-"、东为"1H" → 发牌人是北（北pass），序列从北的pass开始：["北:pass", "东:1H", ...]
+  * 例如第一行南为"-"、西为"1S"、北为空白、东为空白 → 发牌人是南（南pass），序列从南的pass开始：["南:pass", "西:1S", ...]
+- **从发牌人开始**，按顺时针方向（南→西→北→东→南→...）依次记录每个位置的叫品
+- **只记录叫牌表中有内容的格子**（pass/不叫/-//具体叫品），完全空白的格子一律跳过
+- 所有实际存在的叫品都必须记录，包括pass
+- 最终定约叫品之后通常还有三个pass结束叫牌，也可能有加倍/再加倍
+- 仔细观察叫牌区域，每个叫品框通常有位置标签，不要混淆相邻位置的叫品
+
+**BBO/桥友圈等平台的叫牌表识别要点**：
+- 叫牌表通常是**纵向排列**的，每一行代表一轮叫牌，列代表方位（北/东/南/西 或 N/E/S/W）
+- **必须按行从上到下识别**，每一行从左到右依次读取4个位置的叫品
+- **同一轮叫牌中，每个位置只能出现一次**！如果识别到同一位置在同一轮中出现两次，说明识别错误
+- **后续轮次的叫品必须比前一轮叫牌阶数更高**（同类花色），如果识别到叫品阶数倒退，说明识别错误
+- **同一玩家不可能连续叫两次**（中间必须隔其他玩家），如果出现连续两次同位置叫品，说明识别错误
+- 识别时请仔细核对每个格子的位置标签（N/E/S/W 或 北/东/南/西），不要把列看错
+- 如果叫牌表区域较小或模糊，优先识别能看清的部分，不要猜测不清晰的叫品
+
+═══════════════════════════════════════
+当前定约（辅助校验，尽量提取）
+═══════════════════════════════════════
+- 定约格式为"级别花色 由庄家位置做庄"，级别1-7，花色为C/D/H/S/NT，加倍用X、再加倍用XX
+- 即使图片中显示的是花色符号（♠♥♦♣），也请转换为字母（S/H/D/C）
+- 示例："4H 由南做庄"、"3NT 由北做庄"、"2SX 由西做庄"
+- 截图只含叫牌区域、无定约显示时返回null
+
+═══════════════════════════════════════
+输出格式（严格JSON，不要markdown代码块）
+═══════════════════════════════════════
+{
+  "叫牌序列": ["北:pass", "东:pass", "南:1NT", ...] 或 null,
+  "当前定约": "如 4H 由南做庄" 或 null
+}"""
+
 
 class DoubaoVisionClient:
     def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, endpoint: Optional[str] = None):
@@ -394,6 +440,80 @@ class DoubaoVisionClient:
                     json_match = result_text
                 parsed = json.loads(json_match.strip())
                 print(f"[DoubaoVision-单家] 总耗时: {time.time()-t0:.1f}s")
+                return parsed
+            except json.JSONDecodeError:
+                return {"raw_response": result_text, "error": "JSON解析失败"}
+
+        except FileNotFoundError:
+            return {"error": f"图片文件不存在: {image_path}"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def read_bidding_from_image(self, image_path: str) -> Dict[str, Any]:
+        if not self.client:
+            return {"error": "Doubao API Key未配置，请设置环境变量 DOUBAO_API_KEY"}
+
+        if not self.endpoint or self.endpoint == "YOUR_VISION_ENDPOINT_ID":
+            return {"error": "Doubao Vision Endpoint未配置"}
+
+        try:
+            t0 = time.time()
+
+            with open(image_path, "rb") as f:
+                raw_bytes = f.read()
+            print(f"[DoubaoVision-叫牌] 原始图片: {len(raw_bytes)/1024:.1f} KB")
+
+            try:
+                from PIL import Image
+                img = Image.open(io.BytesIO(raw_bytes))
+                orig_w, orig_h = img.size
+                if max(orig_w, orig_h) > VISION_MAX_IMAGE_SIZE:
+                    ratio = VISION_MAX_IMAGE_SIZE / max(orig_w, orig_h)
+                    new_w, new_h = int(orig_w * ratio), int(orig_h * ratio)
+                    img = img.resize((new_w, new_h), Image.LANCZOS)
+                buf = io.BytesIO()
+                img.convert("RGB").save(buf, format="JPEG", quality=VISION_JPEG_QUALITY)
+                compressed_bytes = buf.getvalue()
+                mime_type = "image/jpeg"
+            except Exception as e:
+                print(f"[DoubaoVision-叫牌] 图片压缩失败({e})，使用原始图片")
+                compressed_bytes = raw_bytes
+                ext = image_path.lower().split(".")[-1]
+                mime_type = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}.get(ext, "image/jpeg")
+
+            image_b64 = base64.b64encode(compressed_bytes).decode("utf-8")
+
+            t2 = time.time()
+            print(f"[DoubaoVision-叫牌] 开始调用API...")
+            response = self.client.chat.completions.create(
+                model=self.endpoint,
+                messages=[
+                    {"role": "system", "content": BIDDING_VISION_PROMPT},
+                    {
+                        "role": "user",
+                        "content": [{
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime_type};base64,{image_b64}"}
+                        }]
+                    }
+                ],
+                temperature=0,
+                max_tokens=1024,
+                extra_body={"thinking": {"type": "disabled"}}
+            )
+            print(f"[DoubaoVision-叫牌] API耗时: {time.time()-t2:.1f}s")
+
+            result_text = response.choices[0].message.content
+
+            try:
+                if "```json" in result_text:
+                    json_match = result_text.split("```json")[1].split("```")[0]
+                elif "```" in result_text:
+                    json_match = result_text.split("```")[1].split("```")[0]
+                else:
+                    json_match = result_text
+                parsed = json.loads(json_match.strip())
+                print(f"[DoubaoVision-叫牌] 总耗时: {time.time()-t0:.1f}s")
                 return parsed
             except json.JSONDecodeError:
                 return {"raw_response": result_text, "error": "JSON解析失败"}

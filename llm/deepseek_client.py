@@ -243,11 +243,11 @@ class DeepSeekClient:
 
         return {"raw_response": "", "error": "JSON mode failed"}
     
-    def chat_bidding(self, system_prompt: str, temperature: float = 0.7, model: str = None, thinking: bool = False) -> Dict[str, Any]:
-        return self.chat_json(system_prompt, "", temperature, BIDDING_SCHEMA, model, thinking=thinking)
+    def chat_bidding(self, system_prompt: str, temperature: float = 0.7, model: str = None, thinking: bool = False, max_tokens: int = None) -> Dict[str, Any]:
+        return self.chat_json(system_prompt, "", temperature, BIDDING_SCHEMA, model, thinking=thinking, max_tokens=max_tokens)
     
-    def chat_bidding_fallback(self, system_prompt: str, temperature: float = 0.7, model: str = None, thinking: bool = False) -> Dict[str, Any]:
-        return self.chat_json(system_prompt, "", temperature, BIDDING_FALLBACK_SCHEMA, model, thinking=thinking)
+    def chat_bidding_fallback(self, system_prompt: str, temperature: float = 0.7, model: str = None, thinking: bool = False, max_tokens: int = None) -> Dict[str, Any]:
+        return self.chat_json(system_prompt, "", temperature, BIDDING_FALLBACK_SCHEMA, model, thinking=thinking, max_tokens=max_tokens)
     
     def chat_human_bid(self, system_prompt: str, temperature: float = 0, model: str = None, thinking: bool = False) -> Dict[str, Any]:
         return self.chat_json(system_prompt, "", temperature, HUMAN_BID_SCHEMA, model, thinking=thinking)
