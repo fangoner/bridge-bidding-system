@@ -45,6 +45,7 @@ export function GameProvider({ children }) {
   const [dealMode, setDealMode] = useState('free') // free/game/slam
   const [showSettings, setShowSettings] = useState(false)
   const [dealSystem, setDealSystem] = useState('2D/2H/2S：自然阻击')
+  const [bidSystem, setBidSystem] = useState('jf')
   // 人类叫牌时是否调用AI解释该叫品含义（关闭可显著加快叫牌速度）
   const [humanBidInterpret, setHumanBidInterpret] = useState(() => {
     try {
@@ -108,6 +109,7 @@ export function GameProvider({ children }) {
       dealMode, setDealMode,
       showSettings, setShowSettings,
       dealSystem, setDealSystem,
+      bidSystem, setBidSystem,
       humanBidInterpret, setHumanBidInterpret,
       fallbackModel, setFallbackModelState,
       playModel, setPlayModelState,
@@ -126,7 +128,7 @@ export function GameProvider({ children }) {
       hands, loading, aiThinking, aiProgress, error, warning,
       gameMode, dealer, vulnerability, practiceDirection, positionRoles,
       showPartnerHand, showOpponentHands, showAIBiddingOutput, useFallback,
-      dealMode, showSettings, dealSystem,
+      dealMode, showSettings, dealSystem, bidSystem,
       humanBidInterpret,
       fallbackModel, playModel,
       apiStatus, currentRecordId, showDraftBanner,

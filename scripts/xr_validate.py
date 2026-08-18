@@ -7,12 +7,12 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE / "knowledge"))
 DATA = BASE / "scripts" / "xr_data"
-MD = DATA / (sys.argv[1] if len(sys.argv) > 1 else "新睿实战_二盖一体系_试点.md")
-BUILT = DATA / "tables_built.json"
+MD = DATA / (sys.argv[1] if len(sys.argv) > 1 else "新睿实战_二盖一体系.md")
+BUILT = DATA / "md_tables.json"
 
 TREE_LINE = re.compile(r"^(│-----)*(├|└)([1-7](?:C|D|H|S|NT)(?:/[1-7](?:C|D|H|S|NT))*|pass|X|XX)(：(.*))?$")
-KEYWORD_LINE = re.compile(r"^[1-7](?:C|D|H|S|NT)(?:-[1-7](?:C|D|H|S|NT))*$")
-RESP_LINE = re.compile(r"^[1-7](?:C|D|H|S|NT)-(pass|[1-7](?:C|D|H|S|NT)|X|XX)：")
+KEYWORD_LINE = re.compile(r"^(?:[1-7](?:C|D|H|S|NT)|\([1-7](?:C|D|H|S|NT)\)|\((?:X|XX|pass)\)|X{1,2})(?:-(?:[1-7](?:C|D|H|S|NT)|\([1-7](?:C|D|H|S|NT)\)|\((?:X|XX|pass)\)|X{1,2}))*$")
+RESP_LINE = re.compile(r"^[1-7](?:C|D|H|S|NT)-(?:pass|[1-7](?:C|D|H|S|NT)|X|XX)：")
 
 BID_ORDER = {"C": 0, "D": 1, "H": 2, "S": 3, "NT": 4}
 
@@ -112,15 +112,9 @@ def main():
         if kwbids and "-".join(kwbids) != kw:
             errors.append(f"段{si + 1}: loader关键词 {kwbids} != 文档关键词 {kw}")
 
-    built = json.loads(BUILT.read_text(encoding="utf-8"))
-    rendered_bids = set()
-    for seg in segments:
-        for line in seg.splitlines():
-            m = TREE_LINE.match(line.rstrip())
-            if m:
-                rendered_bids.update(m.group(3).split("/"))
-    total_entries = sum(len(v) for v in built["tables"].values())
-    no_bid = sum(1 for v in built["tables"].values() for e in v if not e["bids"])
+    md = json.loads(BUILT.read_text(encoding="utf-8"))
+    total_entries = sum(len(t["entries"]) for t in md.values())
+    no_bid = sum(1 for t in md.values() for e in t["entries"] if not e["bids"])
 
     print("=" * 60)
     print("结构统计:", stats)

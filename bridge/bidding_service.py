@@ -2,6 +2,11 @@ from typing import Dict, Optional, Any, List, Tuple
 import json
 from bridge.bidding import extract_retrieval_keyword, get_partner_position, get_position_name, is_valid_bid, parse_bidding_sequence, parse_bidding_sequence_with_positions
 from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT
+from llm.xr_prompts import (
+    XR_OPENING_CONVENTIONS, XR_FALLBACK_CONVENTIONS,
+    XR_SYSTEM_PROMPT, XR_FALLBACK_PROMPT, XR_HUMAN_PROMPT,
+)
+from knowledge.xr_retriever import XrSeq
 from config import MAIN_PROMPT_TEMPERATURE, FALLBACK_PROMPT_TEMPERATURE
 
 # 合规性检查重试次数配置
@@ -13,9 +18,10 @@ FALLBACK_PROMPT_MAX_RETRIES = 1
 
 
 class BiddingService:
-    def __init__(self, llm_client, jf_retriever):
+    def __init__(self, llm_client, jf_retriever, xr_retriever=None):
         self.llm_client = llm_client
         self.jf_retriever = jf_retriever
+        self.xr_retriever = xr_retriever
         self.use_fallback = False
         self.bid_meanings = ""
         self._slam_cache = None
@@ -205,8 +211,19 @@ class BiddingService:
         deal_system: str,
         verbose: bool = False,
         use_reasoning: bool = False,
+        bid_system: str = "jf",
         progress_cb=None,
     ) -> Dict:
+        if bid_system == "xr":
+            return self._ai_bid_xr(
+                hand=hand,
+                position=position,
+                bidding_sequence=bidding_sequence,
+                deal_system=deal_system,
+                verbose=verbose,
+                use_reasoning=use_reasoning,
+                progress_cb=progress_cb,
+            )
         if not self.llm_client.is_configured():
             return {"error": "API Key未配置", "选定叫品": "pass", "叫品含义": "API Key未配置，默认pass"}
         
@@ -446,10 +463,13 @@ class BiddingService:
         deal_system: str = "2D/2H/2S：自然阻击",
         verbose: bool = False,
         progress_cb=None,
+        prompt_template=None,
+        max_tokens: int = None,
     ) -> Dict:
         actual_jf_content = jf_content
         actual_subsequent_bids = subsequent_bids_str
         actual_jf_keyword = jf_keyword
+        prompt_tpl = prompt_template if prompt_template is not None else BIDDING_FALLBACK_PROMPT
 
         # 合规性检查重试循环：不合规时重新调用 LLM，重试时附加反馈
         original_bid_meanings = self.bid_meanings
@@ -466,7 +486,7 @@ class BiddingService:
             else:
                 self.bid_meanings = original_bid_meanings
 
-            prompt = BIDDING_FALLBACK_PROMPT.format(
+            prompt = prompt_tpl.format(
                 jf_content=actual_jf_content,
                 subsequent_bids=actual_subsequent_bids,
                 player=player_name,
@@ -483,7 +503,7 @@ class BiddingService:
             self._last_prompt = prompt
 
             try:
-                result = self.llm_client.chat_bidding_fallback(prompt, temperature=FALLBACK_PROMPT_TEMPERATURE, thinking=self._use_reasoning)
+                result = self.llm_client.chat_bidding_fallback(prompt, temperature=FALLBACK_PROMPT_TEMPERATURE, thinking=self._use_reasoning, max_tokens=max_tokens)
                 # P0-5 修复：chat_json 失败返回 error dict，直接传播错误（前端 502 提示重试），
                 # 不再把失败当正常结果继续处理
                 if result.get("error"):
@@ -545,7 +565,17 @@ class BiddingService:
         deal_system: str,
         verbose: bool = False,
         use_reasoning: bool = False,
+        bid_system: str = "jf",
     ) -> Dict:
+        if bid_system == "xr":
+            return self._human_bid_xr(
+                user_input=user_input,
+                position=position,
+                bidding_sequence=bidding_sequence,
+                deal_system=deal_system,
+                verbose=verbose,
+                use_reasoning=use_reasoning,
+            )
         bid = user_input.strip().upper()
         if bid == "P":
             bid = "pass"
@@ -621,3 +651,205 @@ class BiddingService:
         except Exception as e:
             full_sequence = f"{bidding_sequence}({player_name}){bid}-"
             return {"选定叫品": bid, "叫品含义": f"获取叫品含义失败: {e}", "JF约定": actual_jf_keyword, "完整叫牌序列": full_sequence}
+
+    # ───────── 新睿二盖一体系（与 JF 完全隔离） ─────────
+    _XR_OPENING_BIDS = [
+        {"bid": "1C", "line": "12~21点，3张以上♣，自然开叫"},
+        {"bid": "1D", "line": "12~21点，4张以上♦，自然开叫"},
+        {"bid": "1H", "line": "12~21点，5张以上♥，自然开叫"},
+        {"bid": "1S", "line": "12~21点，5张以上♠，自然开叫"},
+        {"bid": "1NT", "line": "15~17点均型，无5张高花"},
+        {"bid": "2C", "line": "22点以上强牌或必进局，逼叫到局"},
+        {"bid": "2NT", "line": "20~21点均型，逼叫到局"},
+        {"bid": "2D", "line": "6~10点，6张以上♦，弱二阻击"},
+        {"bid": "2H", "line": "6~10点，6张以上♥，弱二阻击"},
+        {"bid": "2S", "line": "6~10点，6张以上♠，弱二阻击"},
+    ]
+
+    def _ai_bid_xr(self, hand, position, bidding_sequence, deal_system,
+                   verbose=False, use_reasoning=False, progress_cb=None) -> Dict:
+        if not self.llm_client.is_configured():
+            return {"error": "API Key未配置", "选定叫品": "pass", "叫品含义": "API Key未配置，默认pass"}
+        self._use_reasoning = use_reasoning
+        player_name = position
+        partner_name = get_partner_position(position)
+
+        seq = XrSeq.build(bidding_sequence, player_name)
+        if verbose:
+            print(f"[ai_bid_xr] bidding_sequence={bidding_sequence!r}, position={player_name}, seq={seq!r}")
+
+        is_opener = self._check_is_opener(bidding_sequence)
+        if is_opener:
+            self.use_fallback = False
+
+        # 开叫位置：注入开叫约定作为备选开叫；否则按 seq 检索进程表
+        if not seq:
+            fake_result = {"subsequent_bids": self._XR_OPENING_BIDS, "partner_bid": None}
+            fallback_content = XR_OPENING_CONVENTIONS
+        else:
+            fake_result = self.xr_retriever.retrieve_with_preprocess(seq, bidding_sequence, partner_name)
+            fallback_content = XR_FALLBACK_CONVENTIONS
+
+        subsequent_bids = fake_result.get("subsequent_bids", [])
+        has_subsequent = len(subsequent_bids) > 0
+
+        if not has_subsequent:
+            if verbose:
+                print(f"[ai_bid_xr] PATH: fallback - 无该 seq 的备选叫品，注入兜底约定 seq={seq!r}")
+            return self._xr_output(self._fallback_bid(
+                fallback_content, "",
+                player_name, partner_name,
+                hand.to_display_string() if hasattr(hand, 'to_display_string') else str(hand),
+                hand.hcp if hasattr(hand, 'hcp') else 0,
+                hand.distribution if hasattr(hand, 'distribution') else "",
+                bidding_sequence, False,
+                jf_keyword=seq or "开叫", deal_system=deal_system,
+                verbose=verbose, progress_cb=progress_cb, prompt_template=XR_FALLBACK_PROMPT, max_tokens=8192,
+            ))
+
+        subsequent_bids_str = self._format_subsequent_bids(fake_result, partner_name, is_opener)
+
+        original_bid_meanings = self.bid_meanings
+        last_violation = None
+        last_result = None
+
+        for attempt in range(MAIN_PROMPT_MAX_RETRIES + 1):
+            if progress_cb:
+                progress_cb(f"主提示词尝试 {attempt + 1}/{MAIN_PROMPT_MAX_RETRIES + 1}")
+            if attempt > 0 and last_violation:
+                feedback = f"\n[系统反馈] 上次叫品非法: {last_violation}，请严格检查合规性（叫品递增/加倍合法性）后重新选择"
+                self.bid_meanings = (original_bid_meanings + feedback) if original_bid_meanings else feedback
+            else:
+                self.bid_meanings = original_bid_meanings
+
+            prompt = XR_SYSTEM_PROMPT.format(
+                jf_content="",
+                subsequent_bids=subsequent_bids_str,
+                player=player_name,
+                partner=partner_name,
+                hand=hand.to_display_string() if hasattr(hand, 'to_display_string') else str(hand),
+                hcp=hand.hcp if hasattr(hand, 'hcp') else 0,
+                dist=hand.distribution if hasattr(hand, 'distribution') else "",
+                bidding=bidding_sequence if bidding_sequence else "空（开叫位置）",
+                jf_keyword=seq or "开叫",
+                bid_meaning=self.bid_meanings if self.bid_meanings else "无",
+                deal_system=deal_system,
+            )
+            self._last_prompt = prompt
+
+            try:
+                result = self.llm_client.chat_bidding(prompt, temperature=MAIN_PROMPT_TEMPERATURE, thinking=self._use_reasoning, max_tokens=8192)
+                if result.get("error"):
+                    raise RuntimeError(result["error"])
+                result["XR约定"] = seq or "开叫"
+
+                if self._is_no_valid_bid(result):
+                    self.bid_meanings = original_bid_meanings
+                    return self._xr_output(self._fallback_bid(
+                        fallback_content, "",
+                        player_name, partner_name,
+                        hand.to_display_string() if hasattr(hand, 'to_display_string') else str(hand),
+                        hand.hcp if hasattr(hand, 'hcp') else 0,
+                        hand.distribution if hasattr(hand, 'distribution') else "",
+                        bidding_sequence, False,
+                        jf_keyword=seq or "开叫", deal_system=deal_system,
+                        verbose=verbose, progress_cb=progress_cb, prompt_template=XR_FALLBACK_PROMPT, max_tokens=8192,
+                    ))
+
+                self._inject_computed_fields(result, bidding_sequence, player_name)
+                violation = self._check_bid_validity(result, bidding_sequence, player_name)
+                if violation is None:
+                    self.bid_meanings = original_bid_meanings
+                    return result
+                last_violation = violation
+                last_result = result
+                if verbose:
+                    print(f"[ai_bid_xr] 主提示词第 {attempt + 1} 次叫品非法: {violation}")
+            except Exception as e:
+                self.bid_meanings = original_bid_meanings
+                if verbose:
+                    print(f"\n--- 主提示词异常(xr) ---\n{e}")
+                return {"error": str(e), "选定叫品": "pass", "叫品含义": f"主提示词异常: {e}"}
+
+        self.bid_meanings = original_bid_meanings
+        if verbose:
+            print(f"[ai_bid_xr] 主提示词连续 {MAIN_PROMPT_MAX_RETRIES + 1} 次叫品非法({last_violation})，走 fallback")
+        main_prompt_output = {
+            "选定叫品": last_result.get("选定叫品", "N/A") if last_result else "N/A",
+            "叫品筛选过程": (last_result.get("叫品筛选过程", "N/A") if last_result else "N/A") + f"\n[合规性重试耗尽] {last_violation}",
+            "合规性违规": last_violation,
+        }
+        fallback_result = self._fallback_bid(
+            fallback_content, "",
+            player_name, partner_name,
+            hand.to_display_string() if hasattr(hand, 'to_display_string') else str(hand),
+            hand.hcp if hasattr(hand, 'hcp') else 0,
+            hand.distribution if hasattr(hand, 'distribution') else "",
+            bidding_sequence, False,
+            jf_keyword=seq or "开叫", deal_system=deal_system,
+            verbose=verbose, progress_cb=progress_cb, prompt_template=XR_FALLBACK_PROMPT, max_tokens=8192,
+        )
+        fallback_result["主提示词输出"] = main_prompt_output
+        return self._xr_output(fallback_result)
+
+    def _xr_output(self, result: Dict) -> Dict:
+        if "JF约定" in result:
+            result["XR约定"] = result.pop("JF约定")
+        else:
+            result.setdefault("XR约定", result.get("新睿约定", ""))
+        result.pop("阻击叫体系", None)
+        result.pop("新睿约定", None)
+        return result
+
+    def _human_bid_xr(self, user_input, position, bidding_sequence, deal_system,
+                      verbose=False, use_reasoning=False) -> Dict:
+        bid = user_input.strip().upper()
+        if bid == "P":
+            bid = "pass"
+        player_name = position
+        partner_name = get_partner_position(position)
+
+        if bid.lower() == "pass":
+            full_sequence = f"{bidding_sequence}({player_name})pass-"
+            return {"选定叫品": "pass", "叫品含义": "pass：不叫", "新睿约定": "", "完整叫牌序列": full_sequence}
+
+        seq = XrSeq.build(bidding_sequence, player_name)
+        meaning = None
+        if seq:
+            xr_result = self.xr_retriever.retrieve_with_preprocess(seq, bidding_sequence, partner_name)
+            for item in xr_result.get("subsequent_bids", []):
+                if item.get("bid", "").upper() == bid.upper():
+                    meaning = item.get("line", "")
+                    break
+            if meaning:
+                if verbose:
+                    print(f"[human_bid_xr] 匹配到 {bid} 含义: {meaning}")
+                full_sequence = f"{bidding_sequence}({player_name}){bid}-"
+                return {"选定叫品": bid, "叫品含义": meaning, "新睿约定": seq, "完整叫牌序列": full_sequence}
+
+        if not self.llm_client.is_configured():
+            full_sequence = f"{bidding_sequence}({player_name}){bid}-"
+            return {"选定叫品": bid, "叫品含义": "API Key未配置，无法获取叫品含义", "新睿约定": seq or "开叫", "完整叫牌序列": full_sequence}
+
+        prompt = XR_HUMAN_PROMPT.format(
+            bidding=bidding_sequence if bidding_sequence else "空",
+            player=player_name,
+            user_input=user_input,
+            jf_content=XR_FALLBACK_CONVENTIONS,
+            deal_system=deal_system,
+            bid_meaning=self.bid_meanings if self.bid_meanings else "（暂无）"
+        )
+        self._last_prompt = prompt
+
+        try:
+            result = self.llm_client.chat_human_bid(prompt, temperature=0, thinking=use_reasoning)
+            full_sequence = f"{bidding_sequence}({player_name}){bid}-"
+            if result.get("error"):
+                return {"选定叫品": bid, "叫品含义": f"获取叫品含义失败: {result['error']}", "新睿约定": seq or "开叫", "完整叫牌序列": full_sequence}
+            result["新睿约定"] = seq or "开叫"
+            if "完整叫牌序列" not in result:
+                result["完整叫牌序列"] = full_sequence
+            return result
+        except Exception as e:
+            full_sequence = f"{bidding_sequence}({player_name}){bid}-"
+            return {"选定叫品": bid, "叫品含义": f"获取叫品含义失败: {e}", "新睿约定": seq or "开叫", "完整叫牌序列": full_sequence}

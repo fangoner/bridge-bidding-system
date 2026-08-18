@@ -556,6 +556,15 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.63
+- **新睿（XR）二盖一叫牌体系引入**（与 JF 完全隔离，方案见 `docs/新睿体系引入方案.md`）
+  - **数据层**：`scripts/xr_md_parse.py` 解析《新睿实战 二盖一体系》准确版 → `xr_md_build.py` 重建树、`xr_validate.py` 校验 → `scripts/xr_data/md_tables.json`（439 表/450 seq）。多叫品括号笛卡尔积展开、迈克尔斯扣叫映射、附录一索引补齐 12 张表并对齐正文
+  - **检索层**：`knowledge/xr_retriever.py`（`XrRetriever`）独立加载 md_tables.json，多 seq 索引 + `_canon` 连字符归一；端到端命中验证（1H-(2H)→迈克尔斯、1NT-(2C)→6-41、1D-1H-(2C)→3-71、(1C)-X→11-13）
+  - **提示词层**：`llm/xr_prompts.py`（主/备用/人类），对照 JF 补齐牌型点、关键张显式计算、止张标准、扣叫控制分级等通用规则，排除 JF 专有内容
+  - **后端集成**：`bid_system`（jf/新睿）分流，新睿走 `_ai_bid_xr`；`/api/analyze` 开叫注入 `XR_OPENING_CONVENTIONS`；`_xr_output` 统一输出字段（`JF约定`→`XR约定`、移除 `阻击叫体系`）；新睿 `max_tokens` 4096→8192 防截断
+  - **前端集成**：`SettingsPanel` 叫牌体系下拉（新睿时隐藏阻击叫体系）、`GameContext.bidSystem` 随 aiBid/humanBid/analyze 透传、`BiddingDetailPanel` 标签/内容以 UI 当前体系为准随动；中心圆圈计时以 `playInitiated` 门控（未点开始打牌不提前旋转）
+- 修改文件: api/main.py, bridge/bidding_service.py, knowledge/xr_retriever.py（新增）, llm/xr_prompts.py（新增）, scripts/xr_{md_parse,md_build,validate}.py, scripts/xr_data/md_tables.json, 书籍/新睿自然.md, docs/新睿体系引入方案.md（新增）, web/src/{App.jsx,context/GameContext.jsx,hooks/useDealing.js,services/api.js}, web/src/components/{BiddingDetailPanel,BiddingTable,CardTable,CardTablePanel,MainTableArea,SettingsPanel}.jsx（另清理废弃 xr 一次性脚本）
+
 ### v1.62
 - **CDP 全流程批测工具链**：`scripts/cdp_batch20.py`（headless Chrome 发牌→叫牌→打牌完成，N 副连跑）+ `scripts/analyze_batch_results.py`（统计）。修复：点击判定（JSON.stringify 包裹致 startswith 误判）、两步进打牌（对话框确认 doPlayInit + 面板开始 handleBeginPlay）、结果提取（超N/宕N）。实测 1 副 164s（4H 超 0）
 - **截屏发牌绕过沙箱剪贴板隔离**：后端沙箱托管时读不到用户桌面剪贴板（window station 隔离）→ 改浏览器直读剪贴板（`navigator.clipboard.read()`）→ 图片上传识别接口；后端 read-clipboard 兜底。首次使用需允许浏览器剪贴板权限

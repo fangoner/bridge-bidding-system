@@ -111,6 +111,8 @@ function SettingsPanel({
   handleDdScoringModeChange,
   dealSystem,
   setDealSystem,
+  bidSystem,
+  setBidSystem,
   dealMode,
   setDealMode,
   humanBidInterpret,
@@ -191,13 +193,23 @@ function SettingsPanel({
             models={visibleModels}
           />
 
-          <FormControl sx={{ minWidth: 140 }} size="small">
-            <InputLabel>阻击叫牌体系</InputLabel>
-            <Select value={dealSystem} label="阻击叫牌体系" onChange={(e) => setDealSystem(e.target.value)}>
-              <MenuItem value="自然阻击">自然阻击</MenuItem>
-              <MenuItem value="2D：多功能，2H/S：麦德伯格，2NT：双低花">多功能/麦德伯格</MenuItem>
+          <FormControl sx={{ minWidth: 120 }} size="small">
+            <InputLabel>叫牌体系</InputLabel>
+            <Select value={bidSystem} label="叫牌体系" onChange={(e) => setBidSystem(e.target.value)}>
+              <MenuItem value="jf">JF体系</MenuItem>
+              <MenuItem value="xr">新睿二盖一</MenuItem>
             </Select>
           </FormControl>
+
+          {bidSystem === 'jf' && (
+            <FormControl sx={{ minWidth: 140 }} size="small">
+              <InputLabel>阻击叫牌体系</InputLabel>
+              <Select value={dealSystem} label="阻击叫牌体系" onChange={(e) => setDealSystem(e.target.value)}>
+                <MenuItem value="自然阻击">自然阻击</MenuItem>
+                <MenuItem value="2D：多功能，2H/S：麦德伯格，2NT：双低花">多功能/麦德伯格</MenuItem>
+              </Select>
+            </FormControl>
+          )}
 
           <ToggleButtonGroup
             value={humanBidInterpret ? 'on' : 'off'}

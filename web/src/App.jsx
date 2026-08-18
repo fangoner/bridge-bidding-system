@@ -120,6 +120,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     dealMode, setDealMode,
     showSettings, setShowSettings,
     dealSystem, setDealSystem,
+    bidSystem, setBidSystem,
     humanBidInterpret, setHumanBidInterpret,
     fallbackModel,
     playModel,
@@ -133,6 +134,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     imageOpeningLead, setImageOpeningLead,
     mode, setMode,
     setReadonlyMode,
+    readonlyMode,
   } = useGame()
 
   // 修正手牌/编辑叫牌对话框的校验信息（仅在该对话框内显示）
@@ -231,6 +233,10 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     useLlmReview,
     handleLlmReviewChange,
   } = usePlay()
+
+  // 载入已完成牌局时的操作选择：null=未决定, 'replay'=只重新打牌, 'review'=复盘
+  const [recordActionDialogOpen, setRecordActionDialogOpen] = useState(false)
+  const [recordActionMode, setRecordActionMode] = useState(null)
 
   // ── 打牌总耗时（v1.61）：进入打牌时记录开始时间，完成后计算总时长并显示 ──
   const playStartTimeRef = useRef(null)
@@ -706,16 +712,26 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     handleDeal,
     handleImageDeal,
     handleScreenshotDeal,
+    handleBiddingScreenshot,
+    handleBiddingImageUpload,
     handleSingleHandScreenshot,
     handleSingleHandUpload,
     clearAllHands,
     parseBiddingSequenceStr,
     cancelScreenshot,
     screenshotStatus,
+    loading: dealingLoading,
   } = useDealing({ clearBiddingDraft })
 
   // 截屏识别需要关闭设置面板
   const onScreenshotDeal = () => handleScreenshotDeal({ setShowSettings })
+
+  // 中心面板识别叫牌过程：仅在未开始叫牌且尚无叫牌序列时可用
+  // 桌面点击走剪贴板截屏流程；移动端从图库选图后以 File 参数回调，走上传识别路径
+  const showBiddingScreenshotBtn = !showPlayPanel && !biddingStarted && (biddingSequence?.length || 0) === 0 && !readonlyMode
+  const onScreenshotBidding = showBiddingScreenshotBtn
+    ? (file) => file ? handleBiddingImageUpload(file) : handleBiddingScreenshot({ setShowSettings })
+    : null
 
   // 开始叫牌
   const startBidding = () => {
@@ -886,7 +902,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
               : (record.result.meaning || '')
             return `(${record.position})${record.result.bid}：${meaning}`
           }).join('\n')
-          const result = await humanBid(biddingSequence, currentBidder, bid, dealSystem, bidHistory)
+          const result = await humanBid(biddingSequence, currentBidder, bid, dealSystem, bidHistory, bidSystem)
           
           appendBidHistory({
             position: currentBidder,
@@ -1125,7 +1141,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       const bm = parseModelValue(fallbackModel)
       const aiCallStart = Date.now()
       setAiProgress(null)
-      const result = await aiBid(currentHand, biddingSequence, currentBidder, dealSystem, bidHistory, useFallback, bm.model, 'deepseek', bm.reasoning, controller.signal, (msg) => setAiProgress(msg))
+      const result = await aiBid(currentHand, biddingSequence, currentBidder, dealSystem, bidHistory, useFallback, bm.model, 'deepseek', bm.reasoning, controller.signal, (msg) => setAiProgress(msg), bidSystem)
       if (controller.signal.aborted) {
         // 用户已暂停，丢弃本次结果
         console.log('[AI叫牌] 用户已暂停，丢弃本次结果')
@@ -1187,7 +1203,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     }
   }
 
-  // 获取JF约定片段
+  // 获取约定片段（按叫牌体系取JF或新睿）
   const getJFSuggestion = async () => {
     if (!hands || !currentBidder || isBiddingComplete()) return
     
@@ -1196,12 +1212,13 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       // 构建叫牌序列字符串
       const biddingStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
       
-      // 调用分析API获取JF约定片段
-      const result = await analyzeBidding(biddingStr, currentBidder, dealSystem)
+      // 调用分析API获取约定片段（随叫牌体系切换JF/新睿）
+      const result = await analyzeBidding(biddingStr, currentBidder, dealSystem, bidSystem)
       
       setBidSuggestion({
         keyword: result.keyword,
-        content: result.content
+        content: result.content,
+        bidSystem,
       })
     } catch (err) {
       console.error('获取JF约定片段失败:', err)
@@ -1687,13 +1704,27 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   }
 
   // 开始打牌
-  const handleStartPlay = async () => {
+  const handleStartPlay = async (chosenMode) => {
     if (loadedPlayRecord) {
-      await startReplay('all')
-      // 完成后停在全部已出位置，牌桌显示完整结果（最后一张也在桌上）
       const savedState = loadedPlayRecord.playState
       const totalCards = (savedState.tricks || []).reduce((s, t) => s + (t.cards?.length || 0), 0)
         + (savedState.current_trick?.cards?.length || 0)
+      // 完成态记录：提供"复盘 / 只重新打牌"二选一；复盘才带 DD hint 数据，只重新打牌不带
+      const isComplete = savedState.phase === 'complete'
+      const mode = chosenMode || recordActionMode
+      if (isComplete && !mode) {
+        setRecordActionMode(null)
+        setRecordActionDialogOpen(true)
+        return
+      }
+      if (isComplete && mode === 'replay') {
+        setRecordActionMode(null)
+        await startReplay(0)
+        return
+      }
+      setRecordActionMode(null)
+      await startReplay('all')
+      // 复盘：完成后停在全部已出位置，牌桌显示完整结果（最后一张也在桌上）
       setReviewCursor(totalCards)
       return
     }
@@ -1716,6 +1747,12 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     }
     setContractDialogOpen(true)
     return
+  }
+
+  // 载入已完成牌局时的二选一确认
+  const confirmRecordAction = (mode) => {
+    setRecordActionDialogOpen(false)
+    handleStartPlay(mode)
   }
 
   // 复盘：从历史记录载入最新一条打牌完成的记录，与"从历史记录载入"走同一路径
@@ -2108,6 +2145,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
 
     try {
       const pm = parseModelValue(playModel)
+      const t0 = performance.now()
       const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, switchCards, useLlmReview, ddScoringMode, (msg) => setAiProgress(msg))
       if (controller.signal.aborted) return
       // 撤销序号守卫：AI 出牌在途期间用户点了撤销 → 丢弃本次响应，以后端撤销后的真实状态为准
@@ -2116,6 +2154,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         return
       }
       console.log('[AI Play] engine:', result.used_engine, 'elapsed:', result.elapsed_ms + 'ms', 'model:', result.used_model)
+      console.log(`[AI Play] frontend_total=${Math.round(performance.now() - t0)}ms (engine=${result.elapsed_ms}ms, overhead=${Math.round(performance.now() - t0 - result.elapsed_ms)}ms)`)
 
       if (result.success) {
         const aiRecord = {
@@ -2738,6 +2777,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         ddScoringMode={ddScoringMode} handleDdScoringModeChange={handleDdScoringModeChange}
         dealSystem={dealSystem}
         setDealSystem={setDealSystem}
+        bidSystem={bidSystem}
+        setBidSystem={setBidSystem}
         dealMode={dealMode}
         setDealMode={setDealMode}
         humanBidInterpret={humanBidInterpret}
@@ -2825,8 +2866,10 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           }}
           onPlayCardClick={handlePlayCardClick}
           onSetPlayHand={handleSetPlayHand}
-          onImageDeal={() => setImageDealOpen(true)}
+          onImageDeal={(file) => file ? handleImageDeal(file) : setImageDealOpen(true)}
           onScreenshotDeal={onScreenshotDeal}
+          onScreenshotBidding={onScreenshotBidding}
+          screenshotBiddingDisabled={dealingLoading || aiThinking}
           onSingleHandScreenshot={handleSingleHandScreenshot}
           onSingleHandUpload={handleSingleHandUpload}
           onCustomDeal={() => setCustomDealOpen(true)}
@@ -3230,6 +3273,48 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         <DialogActions>
           <Button onClick={() => setContractDialogOpen(false)}>取消</Button>
           <Button onClick={handleContractDialogConfirm} variant="contained">开始打牌</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 载入已完成牌局 — 复盘 / 只重新打牌 二选一对话框 */}
+      <Dialog
+        open={recordActionDialogOpen}
+        onClose={() => {
+          if (recordActionMode) return
+          setRecordActionDialogOpen(false)
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontSize: '1rem' }}>载入已完成牌局</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mt: 1 }}>
+            <Button
+              variant="contained"
+              color="primary"
+              fullWidth
+              onClick={() => confirmRecordAction('review')}
+            >
+              复盘
+            </Button>
+            <Typography variant="caption" color="text.secondary">
+              载入已有出牌与 DD 最佳分析（hint），逐张查看整局。
+            </Typography>
+            <Button
+              variant="outlined"
+              color="primary"
+              fullWidth
+              onClick={() => confirmRecordAction('replay')}
+            >
+              只重新打牌
+            </Button>
+            <Typography variant="caption" color="text.secondary">
+              从这副牌重新开始打牌，不载入已有出牌与 DD 数据。
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRecordActionDialogOpen(false)}>取消</Button>
         </DialogActions>
       </Dialog>
 

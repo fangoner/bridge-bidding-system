@@ -53,6 +53,7 @@ function BiddingDetailPanel({
   readonlyMode = false,
   fallbackModel,
   biddingTotalTime, // v1.61：叫牌总耗时（秒，叫牌完成时计算）
+  bidSystem = 'jf',
 }) {
   const theme = useTheme()
   const [viewMode, setViewMode] = useState('output') // 'input' | 'output'
@@ -64,6 +65,12 @@ function BiddingDetailPanel({
   const borderPanel = isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #e0e0e0'
   const colorMuted = isDark ? '#94a3b8' : '#666'
   const [detailTab, setDetailTab] = useState('jf')
+
+  // 叫牌体系（JF / 新睿），决定标签与内容；以 UI 当前选择为主
+  const effectiveSystem = bidSystem || (bidSuggestion?.bidSystem) || 'jf'
+  const isXr = effectiveSystem === 'xr'
+  const systemLabel = isXr ? 'XR' : 'JF'
+  const systemName = isXr ? '新睿' : 'JF'
 
   // 人类回合自动切换到 JF 标签（渲染期间调整 state，避免 effect 内同步 setState）
   const [prevHumanTurn, setPrevHumanTurn] = useState(false)
@@ -321,13 +328,13 @@ function BiddingDetailPanel({
       minHeight: 0,
     }}>
       <Typography variant="h6" gutterBottom sx={{ flexShrink: 0 }}>
-        JF约定片段
+        {systemName}约定片段
       </Typography>
       <Box sx={{ flex: 1, overflow: 'auto', maxWidth: '100%', minWidth: 0, minHeight: 0 }}>
         {suggestionLoading ? (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, justifyContent: 'center', height: '100%' }}>
             <CircularProgress size={20} />
-            <Typography variant="body2">获取JF约定片段中...</Typography>
+            <Typography variant="body2">获取{systemName}约定片段中...</Typography>
           </Box>
         ) : bidSuggestion ? (
           <Box>
@@ -344,12 +351,12 @@ function BiddingDetailPanel({
                 </Typography>
               </Box>
             ) : (
-              <Alert severity="info" sx={{ mt: 1 }}>JF尚未提供建议</Alert>
+              <Alert severity="info" sx={{ mt: 1 }}>{systemName}尚未提供建议</Alert>
             )}
           </Box>
         ) : (
           <Alert severity="info" sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            JF尚未提供建议
+            {systemName}尚未提供建议
           </Alert>
         )}
       </Box>
@@ -401,7 +408,7 @@ function BiddingDetailPanel({
             size="small"
             sx={{ height: 24 }}
           >
-            <ToggleButton value="jf" sx={{ px: 1, py: 0, fontSize: '0.7rem', minWidth: 36 }}>JF</ToggleButton>
+            <ToggleButton value="jf" sx={{ px: 1, py: 0, fontSize: '0.7rem', minWidth: 36 }}>{systemLabel}</ToggleButton>
             <ToggleButton value="details" sx={{ px: 1, py: 0, fontSize: '0.7rem', minWidth: 36 }}>细节</ToggleButton>
           </ToggleButtonGroup>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, ml: isMobile ? 0 : 'auto' }}>

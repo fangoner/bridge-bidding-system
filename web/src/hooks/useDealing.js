@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import { dealCards, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, readSingleHandClipboard, uploadSingleHandImage } from '../services/api'
+import { dealCards, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, readSingleHandClipboard, uploadSingleHandImage, biddingImageDeal, readBiddingClipboard } from '../services/api'
 import { setPlayHand as apiSetPlayHand } from '../services/api'
 import { BRIDGE_POSITIONS } from '../utils/position'
 import { useGame } from '../context/GameContext'
@@ -40,6 +40,21 @@ const contentKey = async (file) => {
   } catch {
     return `${file.size}:${file.name}`
   }
+}
+
+// 已录入手牌 → 紧凑串（后端交叉校验用）："南:SJT4|HKJ5..|D..|C..;西:..."
+// 一副牌 52 张唯一：单家识别结果与已录入手牌重复 ⇒ 截取到了其他位置的牌
+const formatKnownHands = (hands, excludePos) => {
+  const parts = []
+  for (const pos of ['南', '西', '北', '东']) {
+    if (pos === excludePos) continue
+    const h = hands?.[pos]
+    if (!h) continue
+    const all = (h.spades || '') + (h.hearts || '') + (h.diamonds || '') + (h.clubs || '')
+    if (!all) continue
+    parts.push(`${pos}:S${h.spades || ''}|H${h.hearts || ''}|D${h.diamonds || ''}|C${h.clubs || ''}`)
+  }
+  return parts.join(';')
 }
 
 // 解析后端返回的叫牌序列字符串为 biddingSequence 数组
@@ -104,6 +119,7 @@ export function parseBiddingSequenceStr(biddingStr) {
 // clearBiddingDraft 由调用方传入（依赖 BIDDING_DRAFT_KEY 等本地逻辑）
 export function useDealing({ clearBiddingDraft }) {
   const {
+    hands,
     setHands,
     loading, setLoading,
     setError,
@@ -386,6 +402,7 @@ export function useDealing({ clearBiddingDraft }) {
       // 轮询：优先浏览器直读 → 上传单家识别；后端接口兜底
       let data = null
       let permissionDenied = false
+      const knownStr = formatKnownHands(hands, position)
       for (let i = 0; i < 10; i++) {
         await new Promise(resolve => setTimeout(resolve, 2000))
         if (screenshotCancelledRef.current) {
@@ -397,8 +414,14 @@ export function useDealing({ clearBiddingDraft }) {
           if (file) {
             const key = await contentKey(file)
             if (key !== prevKey) {
-              const resp = await uploadSingleHandImage(position, file)
+              const resp = await uploadSingleHandImage(position, file, knownStr)
               if (resp.success) { data = resp; break }
+              if (resp.duplicate_error) {
+                setScreenshotStatus(null)
+                setError(resp.message)
+                setLoading(false)
+                return
+              }
             }
           }
         } catch (err) {
@@ -406,8 +429,14 @@ export function useDealing({ clearBiddingDraft }) {
         }
         if (!data) {
           try {
-            const resp = await readSingleHandClipboard(position)
+            const resp = await readSingleHandClipboard(position, knownStr)
             if (resp.success) { data = resp; break }
+            if (resp.duplicate_error) {
+              setScreenshotStatus(null)
+              setError(resp.message)
+              setLoading(false)
+              return
+            }
           } catch {
             // 剪贴板还没有图片，继续等待
           }
@@ -444,7 +473,7 @@ export function useDealing({ clearBiddingDraft }) {
     } finally {
       setLoading(false)
     }
-  }, [loading, setLoading, setError, setWarning, setScreenshotStatus, setHands, setPlayState])
+  }, [loading, setLoading, setError, setWarning, setScreenshotStatus, setHands, setPlayState, hands])
 
   // 4c. 单家手牌图片上传识别（移动端/相册路径）
   const handleSingleHandUpload = useCallback(async (position, imageFile) => {
@@ -456,7 +485,7 @@ export function useDealing({ clearBiddingDraft }) {
     setScreenshotStatus(`正在识别 ${position} 家手牌图片...`)
     setWarning(null)
     try {
-      const data = await uploadSingleHandImage(position, imageFile)
+      const data = await uploadSingleHandImage(position, imageFile, formatKnownHands(hands, position))
       if (!data.success) {
         setError(data.message || '识别失败')
         setLoading(false)
@@ -484,7 +513,7 @@ export function useDealing({ clearBiddingDraft }) {
     } finally {
       setLoading(false)
     }
-  }, [loading, setLoading, setError, setWarning, setScreenshotStatus, setHands, setPlayState])
+  }, [loading, setLoading, setError, setWarning, setScreenshotStatus, setHands, setPlayState, hands])
 
   // 5. 清除所有手牌
   const clearAllHands = useCallback(() => {
@@ -532,11 +561,130 @@ export function useDealing({ clearBiddingDraft }) {
     setLoading(false)
   }, [setLoading])
 
+  // 4c. 叫牌过程截屏识别（仅识别叫牌序列，不覆盖已有手牌）
+  const handleBiddingScreenshot = useCallback(async ({ setShowSettings = null } = {}) => {
+    if (loading) return
+    if (setShowSettings) setShowSettings(false)
+    setLoading(true)
+    screenshotCancelledRef.current = false
+    setError(null)
+    setScreenshotStatus('请截图叫牌过程区域：按 Win+Shift+S 选择区域（首次使用浏览器会询问剪贴板权限，请允许）')
+    setWarning(null)
+    try {
+      triggerScreenshot().catch(() => {})
+      let prevKey = null
+      try {
+        const warmFile = await readClipboardImageFromBrowser()
+        if (warmFile) prevKey = await contentKey(warmFile)
+      } catch {
+        // 权限被拒：继续（后端兜底或用户允许后重试）
+      }
+      // 轮询：优先浏览器直读 → 上传叫牌识别；后端接口兜底
+      let data = null
+      let permissionDenied = false
+      for (let i = 0; i < 10; i++) {
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        if (screenshotCancelledRef.current) {
+          setLoading(false)
+          return
+        }
+        try {
+          const file = await readClipboardImageFromBrowser()
+          if (file) {
+            const key = await contentKey(file)
+            if (key !== prevKey) {
+              const resp = await biddingImageDeal(file)
+              if (resp.success) { data = resp; break }
+            }
+          }
+        } catch (err) {
+          if (err?.message === 'PERMISSION_DENIED') permissionDenied = true
+        }
+        if (!data) {
+          try {
+            const resp = await readBiddingClipboard()
+            if (resp.success) { data = resp; break }
+          } catch {
+            // 剪贴板还没有图片，继续等待
+          }
+        }
+        setScreenshotStatus(`等待叫牌过程截屏中... (${i + 1}/10)`)
+      }
+      if (!data) {
+        setScreenshotStatus(null)
+        setError(permissionDenied
+          ? '浏览器未允许读取剪贴板：请在地址栏右侧点击剪贴板权限并选择"允许"，然后重新截图重试'
+          : '截屏识别超时，请确保已完成截图（Win+Shift+S）并重试')
+        setLoading(false)
+        return
+      }
+      const parsedBidding = parseBiddingSequenceStr(data.bidding_sequence)
+      if (parsedBidding.length === 0) {
+        setScreenshotStatus(null)
+        setError('叫牌序列解析为空，请重新截取包含叫牌区域的截图')
+        setLoading(false)
+        return
+      }
+      setBiddingSequence(parsedBidding)
+      if (data.dealer) {
+        setDealer(data.dealer)
+        setCurrentBidder(data.dealer)
+      }
+      if (data.message && data.message !== '叫牌过程已识别') setWarning(data.message)
+      setScreenshotStatus(null)
+    } catch {
+      setScreenshotStatus(null)
+      setError('叫牌过程识别失败，请检查API服务是否正常运行')
+    } finally {
+      setLoading(false)
+    }
+  }, [loading, setLoading, setError, setWarning, setScreenshotStatus, setBiddingSequence,
+      setDealer, setCurrentBidder])
+
+  // 4d. 叫牌过程图片上传识别（移动端图库路径）
+  const handleBiddingImageUpload = useCallback(async (imageFile) => {
+    if (loading) return
+    setLoading(true)
+    screenshotCancelledRef.current = false
+    setError(null)
+    setScreenshotStatus('正在识别叫牌过程图片...')
+    setWarning(null)
+    try {
+      const data = await biddingImageDeal(imageFile)
+      if (!data.success) {
+        setError(data.message || '叫牌过程识别失败')
+        setLoading(false)
+        return
+      }
+      const parsedBidding = parseBiddingSequenceStr(data.bidding_sequence)
+      if (parsedBidding.length === 0) {
+        setError('叫牌序列解析为空，请更换包含叫牌区域的图片重试')
+        setLoading(false)
+        return
+      }
+      setBiddingSequence(parsedBidding)
+      if (data.dealer) {
+        setDealer(data.dealer)
+        setCurrentBidder(data.dealer)
+      }
+      if (data.message && data.message !== '叫牌过程已识别') setWarning(data.message)
+      setScreenshotStatus(null)
+    } catch {
+      setScreenshotStatus(null)
+      setError('叫牌过程识别失败，请检查API服务是否正常运行')
+    } finally {
+      setLoading(false)
+    }
+  }, [loading, setLoading, setError, setWarning, setScreenshotStatus, setBiddingSequence,
+      setDealer, setCurrentBidder])
+
   return {
     handleDeal,
     handleCustomDeal,
     handleImageDeal,
     handleScreenshotDeal,
+    handleBiddingScreenshot,
+    handleBiddingImageUpload,
     handleSingleHandScreenshot,
     handleSingleHandUpload,
     clearAllHands,
@@ -544,6 +692,7 @@ export function useDealing({ clearBiddingDraft }) {
     parseBiddingSequenceStr,
     screenshotCancelledRef,
     screenshotStatus,
+    loading,
   }
 }
 

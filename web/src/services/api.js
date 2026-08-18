@@ -58,12 +58,13 @@ export const dealCards = async (mode = 'free') => {
 };
 
 // 分析叫牌序列
-export const analyzeBidding = async (biddingSequence, position = null, dealSystem = '2D/2H/2S：自然阻击') => {
+export const analyzeBidding = async (biddingSequence, position = null, dealSystem = '2D/2H/2S：自然阻击', bidSystem = 'jf') => {
   try {
     const response = await api.post('/api/analyze', {
       bidding_sequence: biddingSequence,
       position,
       deal_system: dealSystem,
+      bid_system: bidSystem,
     });
     return response.data;
   } catch (error) {
@@ -121,13 +122,18 @@ export const setFallbackModel = async (fallbackModel) => {
 const isAbortError = (e) => e?.name === 'CanceledError' || e?.name === 'AbortError';
 
 // ── 任务化轮询（P0-5）：提交任务 → 短轮询取结果，前端不再受超时限制 ──
-const POLL_INTERVAL_MS = 2000;
+// 自适应间隔：快任务（引擎几百ms~几秒）前几次用 300ms 快速探测，避免睡满 2s；
+// 长任务逐步放宽到 2s，不增加请求负担
+const POLL_INTERVAL_FAST_MS = 300;
+const POLL_INTERVAL_SLOW_MS = 2000;
 
 const cancelTaskQuiet = (taskId) => {
   api.post(`/api/tasks/${taskId}/cancel`, {}, { timeout: 5000 }).catch(() => {});
 };
 
 const pollTask = async (taskId, { signal, onProgress } = {}) => {
+  let pollCount = 0;
+  const t0 = performance.now();
   for (;;) {
     let task = null;
     try {
@@ -148,7 +154,10 @@ const pollTask = async (taskId, { signal, onProgress } = {}) => {
     }
     if (task) {
       if (onProgress && task.progress) onProgress(task.progress, task.status);
-      if (task.status === 'done') return task.result;
+      if (task.status === 'done') {
+        console.log(`[pollTask] ${taskId} done: polls=${pollCount + 1}, wait=${Math.round(performance.now() - t0)}ms`);
+        return task.result;
+      }
       if (task.status === 'error') {
         const err = new Error(task.error || '任务执行失败');
         err.taskError = true;
@@ -167,12 +176,18 @@ const pollTask = async (taskId, { signal, onProgress } = {}) => {
       err.name = 'AbortError';
       throw err;
     }
-    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    // 自适应轮询间隔：前 6 次 300ms 快速探测（快任务几百ms完成，取回延迟从~2s降到~300ms），
+    // 之后 1s，超过 ~15 次放宽到 2s（长任务不浪费请求）
+    const delayMs = pollCount < 6 ? POLL_INTERVAL_FAST_MS
+      : pollCount < 15 ? 1000
+      : POLL_INTERVAL_SLOW_MS;
+    pollCount += 1;
+    await new Promise((r) => setTimeout(r, delayMs));
   }
 };
 
 // AI叫牌
-export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H/2S：自然阻击', bidHistory = '', useFallback = false, fallbackModel = null, aiProvider = null, useReasoning = false, signal = null, onProgress = null) => {
+export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H/2S：自然阻击', bidHistory = '', useFallback = false, fallbackModel = null, aiProvider = null, useReasoning = false, signal = null, onProgress = null, bidSystem = 'jf') => {
   const requestData = {
     hand,
     bidding_sequence: biddingSequence,
@@ -181,6 +196,7 @@ export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H
     bid_history: bidHistory,
     use_fallback: useFallback,
     use_reasoning: useReasoning,
+    bid_system: bidSystem,
   };
 
   if (fallbackModel) {
@@ -219,7 +235,7 @@ export const aiBid = async (hand, biddingSequence, position, dealSystem = '2D/2H
 };
 
 // 人类叫牌 - 获取叫品含义
-export const humanBid = async (biddingSequence, position, userInput, dealSystem = '2D/2H/2S：自然阻击', bidHistory = '') => {
+export const humanBid = async (biddingSequence, position, userInput, dealSystem = '2D/2H/2S：自然阻击', bidHistory = '', bidSystem = 'jf') => {
   try {
     const response = await api.post('/api/human-bid', {
       bidding_sequence: biddingSequence,
@@ -227,6 +243,7 @@ export const humanBid = async (biddingSequence, position, userInput, dealSystem 
       user_input: userInput,
       deal_system: dealSystem,
       bid_history: bidHistory,
+      bid_system: bidSystem,
     });
     return response.data;
   } catch (error) {
@@ -299,11 +316,13 @@ export const imageDeal = async (imageFile) => {
 };
 
 // 上传单家手牌图片识别（移动端/相册路径）（P1-7：带超时）
-export const uploadSingleHandImage = async (position, imageFile) => {
+export const uploadSingleHandImage = async (position, imageFile, knownHands = null) => {
   try {
     const formData = new FormData();
     formData.append('image', imageFile);
-    const response = await apiUpload.post(`/api/single-hand-image?position=${encodeURIComponent(position)}`, formData);
+    let url = `/api/single-hand-image?position=${encodeURIComponent(position)}`;
+    if (knownHands) url += `&known=${encodeURIComponent(knownHands)}`;
+    const response = await apiUpload.post(url, formData);
     return response.data;
   } catch (error) {
     console.error('上传单家手牌识别失败:', error);
@@ -334,12 +353,38 @@ export const readClipboardDeal = async () => {
 };
 
 // 从剪贴板读取截图并识别单家手牌
-export const readSingleHandClipboard = async (position) => {
+export const readSingleHandClipboard = async (position, knownHands = null) => {
   try {
-    const response = await api.post(`/api/read-hand-clipboard?position=${encodeURIComponent(position)}`);
+    let url = `/api/read-hand-clipboard?position=${encodeURIComponent(position)}`;
+    if (knownHands) url += `&known=${encodeURIComponent(knownHands)}`;
+    const response = await api.post(url);
     return response.data;
   } catch (error) {
     console.error('单家识别失败:', error);
+    throw error;
+  }
+};
+
+// 上传截图识别叫牌过程（仅叫牌序列+定约，不识别手牌）
+export const biddingImageDeal = async (imageFile) => {
+  try {
+    const formData = new FormData();
+    formData.append('image', imageFile);
+    const response = await apiUpload.post('/api/bidding-image', formData);
+    return response.data;
+  } catch (error) {
+    console.error('叫牌过程识别失败:', error);
+    throw error;
+  }
+};
+
+// 从剪贴板读取截图识别叫牌过程（后端兜底路径）
+export const readBiddingClipboard = async () => {
+  try {
+    const response = await api.post('/api/read-bidding-clipboard', {}, { timeout: 150000 });
+    return response.data;
+  } catch (error) {
+    console.error('叫牌剪贴板识别失败:', error);
     throw error;
   }
 };

@@ -1,5 +1,20 @@
 # 开发日志
 
+## 2026-08-19（新睿二盖一叫牌体系引入 v1.63）
+
+**背景**: 引入与 JF 完全隔离的第二个完整叫牌体系「新睿二盖一」，由 439 张表数据 + 独立检索/提示词 + 后端分流 + 前端切换构成。方案详见 `docs/新睿体系引入方案.md`。
+
+**改进**:
+- **数据层**: `scripts/xr_md_parse.py` 解析《新睿实战 二盖一体系》准确版，`xr_md_build.py` 重建树、`xr_validate.py` 校验，产出 `scripts/xr_data/md_tables.json`（439 表/450 seq）。多叫品括号笛卡尔积展开、迈克尔斯扣叫映射、附录一索引补齐 12 张表并对齐正文
+- **检索层**: `knowledge/xr_retriever.py`（`XrRetriever`）与 JF 完全隔离，独立加载 md_tables.json，`_canon` 归一连字符，多 seq 索引；关键 seq（1H-(2H)、1NT-(2C)、1D-1H-(2C)、(1C)-X）端到端命中验证
+- **提示词层**: `llm/xr_prompts.py` 提供主/备用/人类三个提示词，对照 JF 补齐牌型点、关键张显式计算、止张标准、扣叫控制分级等通用规则，排除 JF 专有内容
+- **后端集成**: `api/main.py`/`BiddingService` 按 `bid_system`（jf/新睿）分流，新睿走 `_ai_bid_xr`；`/api/analyze` 开叫位置注入 `XR_OPENING_CONVENTIONS`；新增 `_xr_output` 将 `JF约定`→`XR约定`、移除 `阻击叫体系`；新睿 `max_tokens` 4096→8192 防超长截断
+- **前端集成**: `SettingsPanel` 叫牌体系下拉（新睿时隐藏阻击叫体系）、`GameContext.bidSystem` 随 aiBid/humanBid/analyze 透传、`BiddingDetailPanel` 标签/内容随体系切换（以 UI 当前体系为准）；中心圆圈计时以 `playInitiated`（点击开始打牌）门控，首攻 AI 未开始前不提前旋转
+
+**修改文件**: api/main.py, bridge/bidding_service.py, knowledge/xr_retriever.py（新增）, llm/xr_prompts.py（新增）, scripts/xr_md_parse.py, scripts/xr_md_build.py, scripts/xr_validate.py, scripts/xr_data/md_tables.json, 书籍/新睿自然.md, docs/新睿体系引入方案.md（新增）, web/src/{App.jsx, context/GameContext.jsx, hooks/useDealing.js, services/api.js}, web/src/components/{BiddingDetailPanel,BiddingTable,CardTable,CardTablePanel,MainTableArea,SettingsPanel}.jsx（另含清理废弃 xr 一次性脚本）
+
+**测试验证**: md_tables.json validate ERRORS:0；新睿开叫请求返回开叫约定原文；`_xr_output` 三种输入归一正确；后端无 `--reload` 重启加载新数据生效；前端体系切换标签/内容即时联动。
+
 ## 2026-08-14（自动出牌状态机重构 + 总耗时显示 + 批测工具链 + 截屏修复）
 
 ### 自动出牌状态机重构（v1.61）

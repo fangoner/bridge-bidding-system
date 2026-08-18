@@ -44,7 +44,9 @@ from bridge.output_format import generate_all_outputs, generate_compact_output, 
 from bridge.deep_finesse import analyze_with_deep_finesse, parse_df_deal, df_format_to_hand
 from bridge.bidding_service import BiddingService
 from knowledge.loader import JFLoader, JFRetriever
+from knowledge.xr_retriever import XrRetriever, XrSeq
 from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT
+from llm.xr_prompts import XR_OPENING_CONVENTIONS
 from llm.deepseek_client import DeepSeekClient
 from llm.doubao_client import DoubaoVisionClient, DoubaoSeedClient
 from utils.screenshot import trigger_screenshot_shortcut, read_clipboard_image
@@ -84,6 +86,7 @@ app.add_middleware(
 jf_loader = JFLoader(JF_CONVENTION_FILE)
 jf_segments = jf_loader.load()
 jf_retriever = JFRetriever(jf_segments)
+xr_retriever = XrRetriever()
 llm_client = DeepSeekClient()
 doubao_client = DoubaoSeedClient()
 vision_client = DoubaoVisionClient()
@@ -131,6 +134,7 @@ class BidRequest(BaseModel):
     fallback_model: Optional[str] = None
     ai_provider: Optional[str] = None
     use_reasoning: bool = False
+    bid_system: str = "jf"
 
 
 class FallbackModelRequest(BaseModel):
@@ -154,6 +158,7 @@ class AnalyzeRequest(BaseModel):
     bidding_sequence: str
     deal_system: str = DEFAULT_DEAL_SYSTEM
     position: Optional[str] = None
+    bid_system: str = "jf"
 
 
 class AnalyzeResponse(BaseModel):
@@ -167,6 +172,7 @@ class HumanBidRequest(BaseModel):
     user_input: str
     deal_system: str = DEFAULT_DEAL_SYSTEM
     bid_history: str = ""  # 已累积的叫牌含义文本，供 LLM 理解上下文
+    bid_system: str = "jf"
 
 
 class HumanBidResponse(BaseModel):
@@ -237,13 +243,26 @@ async def deal(request: DealRequest):
 async def analyze(request: AnalyzeRequest):
     """分析叫牌序列，提取关键字"""
     try:
+        partner_name = get_partner_position(request.position) if request.position else "北"
+        if request.bid_system == "xr":
+            seq = XrSeq.build(request.bidding_sequence, request.position or "北")
+            # 开叫位置：无 seq，注入新睿开叫约定
+            if not seq:
+                return AnalyzeResponse(keyword="开叫", content=XR_OPENING_CONVENTIONS)
+            xr_result = xr_retriever.retrieve_with_preprocess(seq, request.bidding_sequence, partner_name)
+            title = xr_result.get("original_content", "")
+            content = title
+            if xr_result.get("subsequent_bids"):
+                lines = [title, ""]
+                for sb in xr_result["subsequent_bids"]:
+                    lines.append(f"{sb.get('bid', '')}：{sb.get('line', '')}")
+                content = "\n".join(lines)
+            return AnalyzeResponse(keyword=seq or "开叫", content=content)
         keyword = extract_retrieval_keyword(
             request.bidding_sequence,
             request.deal_system,
             request.position
         )
-        
-        partner_name = get_partner_position(request.position) if request.position else "北"
         result = jf_retriever.retrieve_with_preprocess(keyword, request.bidding_sequence, partner_name)
         
         return AnalyzeResponse(
@@ -263,7 +282,7 @@ async def human_bid(request: HumanBidRequest):
         if request.bidding_sequence and len(request.bidding_sequence) > 0:
             bidding_str = "-".join([f"({b['position']}){b['bid']}" for b in request.bidding_sequence]) + "-"
         
-        bidding_service = BiddingService(llm_client, jf_retriever)
+        bidding_service = BiddingService(llm_client, jf_retriever, xr_retriever)
         bidding_service.set_bid_meanings(request.bid_history if request.bid_history else "")
         # LLM 调用（可能 14-90s）卸载到线程，避免阻塞事件循环（P0-1 修复）
         result = await asyncio.to_thread(
@@ -273,6 +292,7 @@ async def human_bid(request: HumanBidRequest):
             bidding_sequence=bidding_str,
             deal_system=request.deal_system,
             verbose=True,
+            bid_system=request.bid_system,
         )
         
         # 人类叫牌时，直接使用用户输入的叫品，而不是LLM返回的"选定叫品"
@@ -454,7 +474,7 @@ async def _execute_bid(request: BidRequest, progress_cb=None) -> BidResponse:
                 current_llm_client = copy.copy(current_llm_client)
                 current_llm_client.model = target_model
 
-        bidding_service = BiddingService(current_llm_client, jf_retriever)
+        bidding_service = BiddingService(current_llm_client, jf_retriever, xr_retriever)
         bidding_service.use_fallback = request.use_fallback
         bidding_service.set_bid_meanings(request.bid_history if request.bid_history else "")
 
@@ -467,6 +487,7 @@ async def _execute_bid(request: BidRequest, progress_cb=None) -> BidResponse:
             deal_system=request.deal_system,
             verbose=True,
             use_reasoning=use_reasoning,
+            bid_system=request.bid_system,
             progress_cb=progress_cb,
         )
 
@@ -1319,6 +1340,8 @@ class TriggerScreenshotResponse(BaseModel):
 _pre_screenshot_hash: Optional[str] = None
 # 单家截屏识别的独立哈希（避免与整体识别互相干扰）
 _pre_single_hand_hash: Optional[str] = None
+# 叫牌过程截屏识别的独立哈希（避免与其他识别互相干扰）
+_pre_bidding_hash: Optional[str] = None
 
 
 @app.post("/api/trigger-screenshot")
@@ -1349,8 +1372,41 @@ async def trigger_screenshot():
         return {"success": False, "message": "触发截屏失败"}
 
 
-def _recognize_single_hand_image(image_path: str, position: str) -> dict:
-    """识别单张图片中的某一家手牌。剪贴板与上传两条路径共用。"""
+def _parse_known_hands(known_hands: Optional[str]) -> Dict[str, set]:
+    """解析前端传入的已录入手牌紧凑串："南:SJT4|HKJ5..|D..|C..;西:..." → {位置: {(花色, 牌点)}}"""
+    result: Dict[str, set] = {}
+    if not known_hands:
+        return result
+    suit_map = {"S": "♠", "H": "♥", "D": "♦", "C": "♣"}
+    for seg in known_hands.split(";"):
+        if ":" not in seg:
+            continue
+        pos, cards_part = seg.split(":", 1)
+        pos = pos.strip()
+        if pos not in ("南", "西", "北", "东"):
+            continue
+        cards = set()
+        for suit_seg in cards_part.split("|"):
+            suit_seg = suit_seg.strip()
+            if not suit_seg:
+                continue
+            letter, ranks = suit_seg[0].upper(), suit_seg[1:]
+            suit = suit_map.get(letter)
+            if not suit:
+                continue
+            for r in re.sub(r'[^AKQJT98765432]', '', ranks.upper()):
+                cards.add((suit, r))
+        if cards:
+            result[pos] = cards
+    return result
+
+
+def _recognize_single_hand_image(image_path: str, position: str, known_hands: Optional[str] = None) -> dict:
+    """识别单张图片中的某一家手牌。剪贴板与上传两条路径共用。
+
+    known_hands: 前端已录入的其他家手牌（紧凑串），用于交叉校验——
+    一副牌 52 张唯一，若识别结果与已录入手牌重复，说明截取到了其他位置的牌。
+    """
     import time
     t_start = time.time()
     result = vision_client.read_single_hand_from_image(image_path, position)
@@ -1376,7 +1432,31 @@ def _recognize_single_hand_image(image_path: str, position: str) -> dict:
     hand = Hand(spades=suits["spades"], hearts=suits["hearts"], diamonds=suits["diamonds"], clubs=suits["clubs"])
     total_cards = len(hand.spades) + len(hand.hearts) + len(hand.diamonds) + len(hand.clubs)
 
+    # 交叉校验：仅当与其他家大量重复（≥8张，必为截错位置）才硬错误提示重新截屏；
+    # 内部个别重复、与其他家个别牌重叠、总数不齐均不阻断，走警告路径由用户通过编辑手牌修正
+    new_cards = [(s, r) for s, key in (("♠", "spades"), ("♥", "hearts"), ("♦", "diamonds"), ("♣", "clubs"))
+                 for r in suits[key]]
+    rank_order = "AKQJT98765432"
     warnings = []
+    if len(new_cards) != len(set(new_cards)):
+        dups = sorted({c for c in new_cards if new_cards.count(c) > 1})
+        dup_str = " ".join(f"{s}{r}" for s, r in dups)
+        warnings.append(f"识别到重复牌：{dup_str}，请通过编辑手牌修正")
+    for pos, cards in _parse_known_hands(known_hands).items():
+        if pos == position:
+            continue
+        overlap = set(new_cards) & cards
+        if not overlap:
+            continue
+        dup_str = " ".join(f"{s}{r}" for s, r in
+                           sorted(overlap, key=lambda c: rank_order.index(c[1]))[:6])
+        more = f" 等{len(overlap)}张" if len(overlap) > 6 else ""
+        if len(overlap) >= 8:
+            return {"success": False, "duplicate_error": True,
+                    "message": f"识别到与{pos}家已录入手牌重复：{dup_str}{more}，"
+                               f"可能截取到了{pos}家的牌，请重新截取{position}家"}
+        warnings.append(f"与{pos}家重复{len(overlap)}张：{dup_str}{more}，请通过编辑手牌修正")
+
     if total_cards != 13:
         warnings.append(f"识别到{total_cards}张牌（标准为13张）")
 
@@ -1395,7 +1475,8 @@ def _recognize_single_hand_image(image_path: str, position: str) -> dict:
 
 
 @app.post("/api/single-hand-image")
-async def single_hand_image(position: str = Query(...), image: bytes = File(..., description="单家手牌图片")):
+async def single_hand_image(position: str = Query(...), known: Optional[str] = Query(None, description="已录入的其他家手牌（交叉校验用）"),
+                            image: bytes = File(..., description="单家手牌图片")):
     """上传单家手牌图片并识别（移动端/相册路径）。"""
     try:
         if position not in ["南", "西", "北", "东"]:
@@ -1406,7 +1487,7 @@ async def single_hand_image(position: str = Query(...), image: bytes = File(...,
             image_path = tmp.name
         try:
             # 视觉识别（最长 120s）卸载到线程，避免阻塞事件循环（P0-1 修复）
-            return await asyncio.to_thread(_recognize_single_hand_image, image_path, position)
+            return await asyncio.to_thread(_recognize_single_hand_image, image_path, position, known)
         finally:
             if os.path.exists(image_path):
                 os.unlink(image_path)
@@ -1417,7 +1498,7 @@ async def single_hand_image(position: str = Query(...), image: bytes = File(...,
 
 
 @app.post("/api/read-hand-clipboard")
-async def read_hand_clipboard(position: str = ""):
+async def read_hand_clipboard(position: str = "", known: Optional[str] = Query(None, description="已录入的其他家手牌（交叉校验用）")):
     """从剪贴板读取截图，识别单家手牌"""
     global _pre_single_hand_hash
     try:
@@ -1445,7 +1526,7 @@ async def read_hand_clipboard(position: str = ""):
 
         try:
             # 视觉识别（最长 120s）卸载到线程，避免阻塞事件循环（P0-1 修复）
-            result = await asyncio.to_thread(_recognize_single_hand_image, image_path, position)
+            result = await asyncio.to_thread(_recognize_single_hand_image, image_path, position, known)
         finally:
             os.unlink(image_path)
 
@@ -1459,6 +1540,105 @@ async def read_hand_clipboard(position: str = ""):
             "success": False,
             "message": f"单家识别失败: {str(e)}"
         }
+
+
+class BiddingImageResponse(BaseModel):
+    success: bool
+    message: Optional[str] = None
+    bidding_sequence: Optional[str] = None
+    dealer: Optional[str] = None
+    contract: Optional[str] = None
+    contract_level: Optional[int] = None
+    contract_suit: Optional[str] = None
+    contract_declarer: Optional[str] = None
+    contract_doubled: Optional[bool] = None
+    contract_redoubled: Optional[bool] = None
+    page_type: Optional[str] = None
+
+
+def _recognize_bidding_image(image_path: str) -> dict:
+    """识别截图中的叫牌过程（仅叫牌序列+定约，不识别手牌）。上传与剪贴板两条路径共用。"""
+    import time
+    t_start = time.time()
+    result = vision_client.read_bidding_from_image(image_path)
+    if "error" in result:
+        return {"success": False, "message": f"识别失败: {result['error']}"}
+
+    bidding_raw = result.get("叫牌序列")
+    bidding_str = _format_bidding_sequence(bidding_raw)
+    if not bidding_str:
+        return {"success": False, "message": "未识别到叫牌序列（截图中可能没有叫牌区域），请重新截取"}
+
+    contract_str = result.get("当前定约")
+    contract_info = _parse_contract_string(contract_str)
+    dealer = _extract_dealer_from_bidding(bidding_raw)
+
+    print(f"[INFO] 叫牌识别总耗时: {time.time() - t_start:.1f}s, 发牌人: {dealer}")
+    return {
+        "success": True,
+        "message": "叫牌过程已识别",
+        "bidding_sequence": bidding_str,
+        "dealer": dealer,
+        "contract": contract_str,
+        "contract_level": contract_info.get("level"),
+        "contract_suit": contract_info.get("suit"),
+        "contract_declarer": contract_info.get("declarer"),
+        "contract_doubled": contract_info.get("doubled", False),
+        "contract_redoubled": contract_info.get("redoubled", False),
+        "page_type": result.get("页面类型", "未知"),
+    }
+
+
+@app.post("/api/bidding-image", response_model=BiddingImageResponse)
+async def bidding_image(image: bytes = File(..., description="叫牌过程截图")):
+    """上传截图识别叫牌过程"""
+    try:
+        print(f"[INFO] 收到叫牌截图上传请求，大小: {len(image)} bytes")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+            tmp.write(image)
+            image_path = tmp.name
+        try:
+            return await asyncio.to_thread(_recognize_bidding_image, image_path)
+        finally:
+            if os.path.exists(image_path):
+                os.unlink(image_path)
+    except Exception as e:
+        print(f"[ERROR] 叫牌截图识别失败: {str(e)}")
+        traceback.print_exc()
+        return BiddingImageResponse(success=False, message=f"识别失败: {str(e)}")
+
+
+@app.post("/api/read-bidding-clipboard", response_model=BiddingImageResponse)
+async def read_bidding_clipboard():
+    """从剪贴板读取截图，识别叫牌过程"""
+    global _pre_bidding_hash
+    try:
+        result = read_clipboard_image()
+        if result is None:
+            return BiddingImageResponse(success=False, message="剪贴板中没有图片，请先截屏")
+
+        image_data, fmt = result
+        current_hash = hashlib.md5(image_data).hexdigest()
+        if current_hash == _pre_bidding_hash:
+            print(f"[INFO] 叫牌识别：剪贴板图片无变化（哈希: {current_hash[:8]}...），跳过")
+            return BiddingImageResponse(success=False, message="剪贴板图片无变化（已处理过），请先截取新截图")
+
+        print(f"[INFO] 叫牌识别：检测到新剪贴板内容（哈希: {current_hash[:8]}...）")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{fmt}") as tmp:
+            tmp.write(image_data)
+            image_path = tmp.name
+        try:
+            resp = await asyncio.to_thread(_recognize_bidding_image, image_path)
+        finally:
+            os.unlink(image_path)
+
+        _pre_bidding_hash = current_hash
+        return BiddingImageResponse(**resp)
+
+    except Exception as e:
+        print(f"[ERROR] 叫牌剪贴板识别失败: {str(e)}")
+        traceback.print_exc()
+        return BiddingImageResponse(success=False, message=f"读取剪贴板失败: {str(e)}")
 
 
 @app.post("/api/read-clipboard")
@@ -2040,11 +2220,15 @@ async def _execute_ai_play(request: PlayAIRequest, progress_cb=None) -> PlayAIRe
                     card = Card(suit=result["card"]["suit"], rank=result["card"]["rank"])
                     current_player = service.get_current_player()
                     reason = result.get("reasoning", "")
+                    t_pc = time.time()
                     success, message = service.play_card(current_player, card, is_ai=True, reason=reason)
+                    pc_ms = int((time.time() - t_pc) * 1000)
                     # 记录DD提示到trick（后台异步计算，不阻塞响应）
                     state_after = service.get_state()
                     _submit_dd_hint(state_snapshot, state_after, tricks_before)
+                    t_ser = time.time()
                     state_dict = service.get_state_dict()
+                    print(f"[ai_play] engine={elapsed_ms}ms play_card={pc_ms}ms serialize={int((time.time() - t_ser) * 1000)}ms total={int((time.time() - t0) * 1000)}ms")
 
                     return PlayAIResponse(
                         success=success,

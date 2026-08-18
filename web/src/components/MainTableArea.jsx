@@ -28,6 +28,8 @@ export default function MainTableArea({
   onSetPlayHand,
   onImageDeal,
   onScreenshotDeal,
+  onScreenshotBidding,
+  screenshotBiddingDisabled,
   onSingleHandScreenshot,
   onSingleHandUpload,
   onCustomDeal,
@@ -84,6 +86,8 @@ export default function MainTableArea({
         onSetPlayHand={onSetPlayHand}
         onImageDeal={onImageDeal}
         onScreenshotDeal={onScreenshotDeal}
+        onScreenshotBidding={onScreenshotBidding}
+        screenshotBiddingDisabled={screenshotBiddingDisabled}
         onSingleHandScreenshot={onSingleHandScreenshot}
         onSingleHandUpload={onSingleHandUpload}
         onCustomDeal={onCustomDeal}
@@ -165,6 +169,7 @@ function RightPanelSwitcher({
     aiProgress,
     imageOpeningLead,
     fallbackModel,
+    bidSystem,
   } = useGame()
 
   const {
@@ -270,6 +275,7 @@ function RightPanelSwitcher({
         readonlyMode={readonlyMode}
         fallbackModel={fallbackModel}
         biddingTotalTime={biddingTotalTime}
+        bidSystem={bidSystem}
       />
     )
   }

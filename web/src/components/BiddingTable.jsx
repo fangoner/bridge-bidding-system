@@ -1,5 +1,5 @@
-import React from 'react';
-import { Box, Typography, useTheme, alpha } from '@mui/material';
+import React, { useRef } from 'react';
+import { Box, Typography, Button, useTheme, alpha } from '@mui/material';
 import { BRIDGE_POSITIONS } from '../utils/position';
 
 /**
@@ -8,10 +8,13 @@ import { BRIDGE_POSITIONS } from '../utils/position';
  * @param {Object} props
  * @param {Array} props.biddingSequence - Array of bid objects { position, bid }
  * @param {string} props.dealer - Dealer position
+ * @param {Function} [props.onScreenshotBidding] - 截屏识别叫牌过程回调（传入时且序列为空才显示按钮）
+ * @param {boolean} [props.screenshotBiddingDisabled] - 截屏按钮禁用状态
  */
-function BiddingTable({ biddingSequence, dealer }) {
+function BiddingTable({ biddingSequence, dealer, onScreenshotBidding, screenshotBiddingDisabled }) {
   const theme = useTheme();
   const isMobile = window.innerWidth < 600;
+  const fileRef = useRef(null);
 
   if (biddingSequence.length === 0) {
     return (
@@ -20,9 +23,46 @@ function BiddingTable({ biddingSequence, dealer }) {
         fontStyle: 'italic',
         textAlign: 'center',
         padding: 3,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 1.5,
       }}>
-        等待叫牌...<br />
-        <small>发牌人: {dealer}</small>
+        <Box>
+          等待叫牌...<br />
+          <small>发牌人: {dealer}</small>
+        </Box>
+        {onScreenshotBidding && (
+          <Button
+            variant="outlined"
+            size="small"
+            color="primary"
+            onClick={() => {
+              const isTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches
+              const isMobileUA = isTouch || /Android|iPhone|iPad|iPod|Mobile|Mobi/i.test(navigator.userAgent) || ('ontouchstart' in window)
+              if (isMobileUA) {
+                fileRef.current?.click()
+              } else {
+                onScreenshotBidding()
+              }
+            }}
+            disabled={screenshotBiddingDisabled}
+            sx={{ textTransform: 'none', fontStyle: 'normal' }}
+          >
+            图片识别叫牌过程
+          </Button>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const file = e.target.files && e.target.files[0]
+            e.target.value = ''
+            if (file) onScreenshotBidding(file)
+          }}
+        />
       </Box>
     );
   }

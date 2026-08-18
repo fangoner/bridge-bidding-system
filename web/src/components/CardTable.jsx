@@ -131,14 +131,18 @@ function CardTable({
   // P1 修复：AI 思考中显示"已等待 N 秒"（叫牌与打牌共用 aiLoading；setState 仅发生在 interval 回调内）
   const aiThinkingStartRef = useRef(0)
   const [aiThinkingSeconds, setAiThinkingSeconds] = useState(0)
+  // 每个玩家独立计时：轮到某玩家（current_player 变化）即归零从 0 开始，
+  // 同时覆盖 AI（aiLoading）与人类回合；亚秒平滑显示一位小数。
   useEffect(() => {
-    if (!aiLoading) return
+    const isTurn = showPlayPanel && playInitiated && playState && playState.phase !== 'complete' && !!playState.current_player && reviewCursor == null
+    if (!isTurn || isPlayPaused) return
     aiThinkingStartRef.current = Date.now()
+    setAiThinkingSeconds(0)
     const timer = setInterval(() => {
-      setAiThinkingSeconds(Math.floor((Date.now() - aiThinkingStartRef.current) / 1000))
-    }, 1000)
+      setAiThinkingSeconds((Date.now() - aiThinkingStartRef.current) / 1000)
+    }, 200)
     return () => clearInterval(timer)
-  }, [aiLoading])
+  }, [aiLoading, showPlayPanel, playState?.phase, playState?.current_player, reviewCursor, isPlayPaused])
 
   const getTableRightPos = () => {
     if (!tableRef.current) return isMobile
@@ -175,6 +179,7 @@ function CardTable({
           dragPanelRef.current.style.left = newX + 'px'
           dragPanelRef.current.style.top = newY + 'px'
           dragPanelRef.current.style.right = 'auto'
+          dragPanelRef.current.style.bottom = 'auto'
         }
       })
     }
@@ -855,16 +860,19 @@ function CardTable({
         </Box>
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px' }}>
           {renderCard('西')}
-          <Box sx={{ width: 56, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', borderRadius: '50%', bgcolor: 'rgba(0,0,0,0.2)' }}>
-            {aiLoading ? (
-              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px' }}>
-                <CircularProgress size={20} sx={{ color: 'rgba(255,255,255,0.8)' }} />
-                {aiThinkingSeconds > 0 && (
-                  <Typography sx={{ fontSize: '0.5rem', fontWeight: 600, color: 'rgba(255,255,255,0.7)', lineHeight: 1 }}>
-                    {aiThinkingSeconds}s
+          <Box sx={{ width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', borderRadius: '50%', bgcolor: 'rgba(0,0,0,0.2)' }}>
+            {playInitiated && (aiLoading || (!isReview && !isComplete && !!current_player)) ? (
+              <>
+                <CircularProgress size={58} sx={{ color: 'rgba(255,255,255,0.8)', position: 'absolute' }} />
+                <Box sx={{ position: 'absolute', textAlign: 'center', lineHeight: 1.1 }}>
+                  <Typography sx={{ fontSize: '0.8rem', fontWeight: 700, color: 'rgba(255,255,255,0.95)' }}>
+                    {current_player || ''}
                   </Typography>
-                )}
-              </Box>
+                  <Typography sx={{ fontSize: '0.6rem', fontWeight: 600, color: 'rgba(255,255,255,0.75)' }}>
+                    {aiThinkingSeconds.toFixed(1)}s
+                  </Typography>
+                </Box>
+              </>
             ) : isReview ? (
               displayTrickIdx < 0 ? (
                 // 首攻（游标在第1墩开头）：显示首攻位置
@@ -1325,7 +1333,7 @@ function CardTable({
                   选牌
                 </Button>
                 {(onSingleHandScreenshot || onSingleHandUpload) && (
-                  <Tooltip title={`截牌识别 ${position} 家手牌`} arrow slotProps={{
+                  <Tooltip title={`图片识别 ${position} 家手牌`} arrow slotProps={{
                     tooltip: { sx: { bgcolor: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)', color: isDark ? '#1e293b' : '#fff' } },
                     arrow: { sx: { color: isDark ? '#e2e8f0' : 'rgba(0,0,0,0.8)' } },
                   }}>
@@ -1347,7 +1355,7 @@ function CardTable({
                       }}
                     >
                       {aiLoading ? <CircularProgress size={14} sx={{ color: 'white' }} /> : <CameraAltIcon sx={{ fontSize: '0.9rem' }} />}
-                      截牌
+                      图片
                     </Button>
                   </Tooltip>
                 )}
@@ -2189,7 +2197,12 @@ function CardTable({
           ? { left: playPanelPos.x, top: playPanelPos.y }
           : isMobile
             ? { left: Math.max(8, window.innerWidth / 2 - 140), top: window.innerHeight - 170 }
-            : getTableRightPos()
+            : (() => {
+                const rect = tableRef.current?.getBoundingClientRect()
+                return rect
+                  ? { left: rect.right + 8, bottom: window.innerHeight - rect.bottom }
+                  : { right: 16, bottom: 100 }
+              })()
 
         const onMouseDown = (e) => {
           if (e.button !== 0) return

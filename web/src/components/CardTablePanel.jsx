@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, Button, IconButton, Tooltip, useTheme } from '@mui/material'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
@@ -30,6 +30,8 @@ function CardTablePanel({
   onSetPlayHand,
   onImageDeal,
   onScreenshotDeal,
+  onScreenshotBidding,
+  screenshotBiddingDisabled,
   onSingleHandScreenshot,
   onSingleHandUpload,
   onCustomDeal,
@@ -41,6 +43,7 @@ function CardTablePanel({
 }) {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
+  const imgFileRef = useRef(null)
 
   // ── 从 Context 获取 state（替代原 70 个 props）──
   const {
@@ -243,8 +246,28 @@ function CardTablePanel({
             >
               发牌
             </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => imgFileRef.current?.click()}
+              disabled={loading}
+              sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5 }}
+            >
+              图片
+            </Button>
           </Box>
           )}
+          <input
+            ref={imgFileRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files && e.target.files[0]
+              e.target.value = ''
+              if (file) onImageDeal(file)
+            }}
+          />
 
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: isMobile ? 'center' : 'center', flex: isMobile ? 'none' : 1, flexWrap: 'wrap', minHeight: isMobile ? 0 : undefined }}>
@@ -343,7 +366,7 @@ function CardTablePanel({
           <Button
             variant="outlined"
             size="small"
-            onClick={onImageDeal}
+            onClick={() => onImageDeal()}
             disabled={loading}
             sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5 }}
           >
@@ -379,7 +402,7 @@ function CardTablePanel({
           showPartnerHand={showPartnerHand}
           showOpponentHands={showOpponentHands}
           getPartnerPosition={getPartnerPosition}
-          renderBiddingTable={() => <BiddingTable biddingSequence={biddingSequence} dealer={dealer} />}
+          renderBiddingTable={() => <BiddingTable biddingSequence={biddingSequence} dealer={dealer} onScreenshotBidding={onScreenshotBidding} screenshotBiddingDisabled={screenshotBiddingDisabled} />}
           checkBiddingComplete={isBiddingComplete}
           outputFormats={outputFormats}
           outputFormatsLoading={outputFormatsLoading}
