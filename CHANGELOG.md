@@ -1,5 +1,20 @@
 # 开发日志
 
+## 2026-08-19（新睿与 JF 提示词统一共享模板 v1.64）
+
+**背景**: 新睿体系此前独立维护一套提示词，与 JF 逐步对齐但存在分叉风险。JF 提示词经长期验证，为保证新睿除注入内容外与 JF 逐字一致，决定将 JF 提示词抽象为共享模板，JF 与新睿共用，差异仅收敛到注入内容。
+
+**改进**:
+- **共享模板机制**（`llm/prompts.py`）：定义 `_SHARED_SYSTEM_PROMPT` / `_SHARED_FALLBACK_PROMPT` / `_SHARED_HUMAN_PROMPT` 与 `_make_prompt(template, system_tag, deal_system_block, no_valid_bid)`；JF 三件 = 模板 + `system_tag="JF"`、`deal_system_block=<阻击叫体系段>`、`no_valid_bid="JF无合格叫品"`
+- **XR 复用共享模板**（`llm/xr_prompts.py`）：移除独立提示词正文，改经 `_make_prompt` 生成，注入 `system_tag="新睿二盖一"`、`deal_system_block=""`（不渲染阻击叫体系段）、`no_valid_bid="无合格叫品"`；开叫/兜底约定仍为 XR 各自注入内容
+- **`XR_FALLBACK_CONVENTIONS` 对齐最终 JF 文档**：直接采用「JF实战_标准自然 - Rev 3.2.docx」「成局与满贯」片段全文（替代早期精简版），覆盖 3.1/4.1 扣叫控制六步、4.2 RKCB、4.3 将牌Q/大满贯试探、4.4 特殊情况、4.5 DOPI/DEPO/R1P0，满贯探查细节与 JF 完全一致
+- **共享模板恢复精确片段引用**：`3.1`（速达原则）、`4.1`（满贯门槛/扣叫控制）编号内置，指向注入片段对应小节，JF 与 XR 一并受益
+- **满贯答叫表命中评估**：实测常见满贯序列（1NT-4NT、1H-4NT 等 8 组）均未命中第 10 章答叫表（其 seq 为裸单叫品，运行时不可达），满贯细节由 `XR_FALLBACK_CONVENTIONS`（即完整 JF「成局与满贯」）兜底
+
+**修改文件**: llm/prompts.py, llm/xr_prompts.py, docs/新睿体系引入方案.md, DEVELOPMENT.md
+
+**测试验证**: 渲染验证 JF 三套提示词无占位符残留、`3.1`/`4.1` 编号保留、`system_tag` 正确注入 "JF"/"新睿二盖一"；`XR_FALLBACK_CONVENTIONS` 与 loader（`_dump_jf_slam.py`）解析的最终 JF docx「成局与满贯」片段逐字一致；后端无 `--reload` 重启加载新提示词生效。
+
 ## 2026-08-19（新睿二盖一叫牌体系引入 v1.63）
 
 **背景**: 引入与 JF 完全隔离的第二个完整叫牌体系「新睿二盖一」，由 439 张表数据 + 独立检索/提示词 + 后端分流 + 前端切换构成。方案详见 `docs/新睿体系引入方案.md`。

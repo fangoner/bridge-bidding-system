@@ -168,6 +168,19 @@ JF文档统计：
 
 ### 提示词系统
 
+#### 共享模板机制（JF 与 XR 共用）
+
+`llm/prompts.py` 将主/备用/人类三套提示词定义为共享模板 `_SHARED_SYSTEM_PROMPT` / `_SHARED_FALLBACK_PROMPT` / `_SHARED_HUMAN_PROMPT`，经 `_make_prompt(template, system_tag, deal_system_block, no_valid_bid)` 参数化生成 JF 与新睿（XR）两套体系提示词，正文逐字共用，仅注入内容不同：
+
+| 注入点 | JF | XR |
+|--------|----|----|
+| `{system_tag}` | `JF` | `新睿二盖一` |
+| `{deal_system_block}` | 阻击叫体系段 | 空串（不渲染） |
+| `{no_valid_bid}` | `JF无合格叫品` | `无合格叫品` |
+
+- 共享模板保留对注入片段的精确定位引用，如 `3.1`（速达原则）、`4.1`（满贯门槛/扣叫控制规则），确保 LLM 能直接指向片段对应小节。
+- 新睿 `XR_FALLBACK_CONVENTIONS` 直接采用最终 JF 文档「成局与满贯」片段全文，覆盖完整满贯探查细节（扣叫六步、RKCB、将牌Q、大满贯试探、DOPI/DEPO/R1P0）。
+
 #### 三种叫牌提示词
 
 | 提示词 | 用途 | 输出字段 | 触发条件 |
@@ -555,6 +568,14 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 3. 启动前端：`cd web && npm run dev`
 
 ## 版本历史
+
+### v1.64
+- **JF 与新睿提示词统一共享模板 + 备用约定对齐最终 JF 文档**
+  - **共享模板机制**：`llm/prompts.py` 定义 `_SHARED_SYSTEM_PROMPT` / `_SHARED_FALLBACK_PROMPT` / `_SHARED_HUMAN_PROMPT` 与 `_make_prompt`，JF 与新睿三套提示词由同一模板参数化生成，正文逐字共用，仅注入 `{system_tag}`（JF/新睿二盖一）、`{deal_system_block}`（JF 传阻击叫体系段、XR 传空串）、`{no_valid_bid}`（JF无合格叫品/无合格叫品）不同。消除 JF/XR 提示词分叉，保证两者在通用规则上一字不差
+  - **`llm/xr_prompts.py` 复用共享模板**：移除独立维护的三套 XR 提示词正文，改经 `_make_prompt` 从共享模板生成
+  - **`XR_FALLBACK_CONVENTIONS` 对齐最终 JF 文档**：直接采用「JF实战_标准自然 - Rev 3.2.docx」的「成局与满贯」片段全文（替代早期精简版），覆盖 3.1/4.1 扣叫控制六步、4.2 RKCB、4.3 将牌Q/大满贯试探、4.4 特殊情况、4.5 DOPI/DEPO/R1P0
+  - **共享模板恢复精确片段引用**：`3.1`（速达原则）、`4.1`（满贯门槛/扣叫控制）编号内置，指向注入片段对应小节，JF 与 XR 一并受益
+- 修改文件: llm/prompts.py, llm/xr_prompts.py, docs/新睿体系引入方案.md
 
 ### v1.63
 - **新睿（XR）二盖一叫牌体系引入**（与 JF 完全隔离，方案见 `docs/新睿体系引入方案.md`）

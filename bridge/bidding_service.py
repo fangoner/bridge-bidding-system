@@ -664,6 +664,10 @@ class BiddingService:
         {"bid": "2D", "line": "6~10点，6张以上♦，弱二阻击"},
         {"bid": "2H", "line": "6~10点，6张以上♥，弱二阻击"},
         {"bid": "2S", "line": "6~10点，6张以上♠，弱二阻击"},
+        {"bid": "3C/3D/3H/3S", "line": "6~10点，7张好套，阻击叫"},
+        {"bid": "3NT", "line": "9~12点，赌博性，7张坚强低花套"},
+        {"bid": "4C/4D/4H/4S", "line": "6~10点，8张好套，阻击叫"},
+        {"bid": "5C/5D", "line": "6~10点，9张好套，或8张有单缺，阻击叫"},
     ]
 
     def _ai_bid_xr(self, hand, position, bidding_sequence, deal_system,
@@ -683,7 +687,9 @@ class BiddingService:
             self.use_fallback = False
 
         # 开叫位置：注入开叫约定作为备选开叫；否则按 seq 检索进程表
-        if not seq:
+        # 开叫候选已覆盖全部合格开叫，无合格开叫即 pass，绝不走备用提示词
+        is_opening = not seq
+        if is_opening:
             fake_result = {"subsequent_bids": self._XR_OPENING_BIDS, "partner_bid": None}
             fallback_content = XR_OPENING_CONVENTIONS
         else:
@@ -696,6 +702,8 @@ class BiddingService:
         if not has_subsequent:
             if verbose:
                 print(f"[ai_bid_xr] PATH: fallback - 无该 seq 的备选叫品，注入兜底约定 seq={seq!r}")
+            if is_opening:
+                return self._xr_output(self._opening_pass(bidding_sequence, player_name, "无合格开叫，选择pass"))
             return self._xr_output(self._fallback_bid(
                 fallback_content, "",
                 player_name, partner_name,
@@ -745,6 +753,8 @@ class BiddingService:
 
                 if self._is_no_valid_bid(result):
                     self.bid_meanings = original_bid_meanings
+                    if is_opening:
+                        return self._xr_output(self._opening_pass(bidding_sequence, player_name, result.get("叫品筛选过程", "无合格开叫，选择pass")))
                     return self._xr_output(self._fallback_bid(
                         fallback_content, "",
                         player_name, partner_name,
@@ -774,6 +784,8 @@ class BiddingService:
         self.bid_meanings = original_bid_meanings
         if verbose:
             print(f"[ai_bid_xr] 主提示词连续 {MAIN_PROMPT_MAX_RETRIES + 1} 次叫品非法({last_violation})，走 fallback")
+        if is_opening:
+            return self._xr_output(self._opening_pass(bidding_sequence, player_name, f"主提示词连续 {MAIN_PROMPT_MAX_RETRIES + 1} 次无合格开叫，选择pass（{last_violation}）"))
         main_prompt_output = {
             "选定叫品": last_result.get("选定叫品", "N/A") if last_result else "N/A",
             "叫品筛选过程": (last_result.get("叫品筛选过程", "N/A") if last_result else "N/A") + f"\n[合规性重试耗尽] {last_violation}",
@@ -791,6 +803,16 @@ class BiddingService:
         )
         fallback_result["主提示词输出"] = main_prompt_output
         return self._xr_output(fallback_result)
+
+    def _opening_pass(self, bidding_sequence: str, player_name: str, reason: str) -> Dict:
+        full_sequence = f"{bidding_sequence}({player_name})pass-"
+        return {
+            "选定叫品": "pass",
+            "叫品含义": f"无合格开叫，选择pass",
+            "XR约定": "开叫",
+            "完整叫牌序列": full_sequence,
+            "叫牌筛选过程": reason,
+        }
 
     def _xr_output(self, result: Dict) -> Dict:
         if "JF约定" in result:
