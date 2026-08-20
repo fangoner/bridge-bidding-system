@@ -1892,6 +1892,7 @@ class PlayInitRequest(BaseModel):
     bid_meanings: Optional[str] = None  # 叫牌含义文本，复用LLM已分析信息
     vulnerability: Optional[str] = None  # 局况: "NV"/"NS"/"EW"/"All"
     session_id: str = "default"  # 打牌会话隔离标识
+    bid_system: str = "jf"  # 叫牌体系: jf / xr / natural
 
 
 class PlayInitResponse(BaseModel):
@@ -1946,6 +1947,7 @@ async def play_init(request: PlayInitRequest):
             bid_history=request.bid_history or "",
             bid_meanings=request.bid_meanings or "",
             vulnerability=_normalize_vulnerability(request.vulnerability) or "NV",
+            bid_system=request.bid_system or "jf",
         )
 
         if state is None:

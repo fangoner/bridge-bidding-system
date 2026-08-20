@@ -412,7 +412,7 @@ export const doubleDummyAnalysis = async (hands, signal = null) => {
 const PLAY_SESSION_ID = `play_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
 // 初始化打牌
-export const playInit = async (hands, contract, declarer, playerRoles = null, doubled = false, redoubled = false, biddingSequence = null, bidHistory = '', bidMeanings = '', vulnerability = null) => {
+export const playInit = async (hands, contract, declarer, playerRoles = null, doubled = false, redoubled = false, biddingSequence = null, bidHistory = '', bidMeanings = '', vulnerability = null, bidSystem = 'jf') => {
   try {
     const response = await api.post('/api/play/init', {
       hands,
@@ -426,6 +426,7 @@ export const playInit = async (hands, contract, declarer, playerRoles = null, do
       bid_meanings: bidMeanings,
       vulnerability,
       session_id: PLAY_SESSION_ID,
+      bid_system: bidSystem,
     });
     return response.data;
   } catch (error) {

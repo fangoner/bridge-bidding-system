@@ -235,10 +235,14 @@ class BiddingGame:
             self.last_real_bid = bid
         
         meaning = bid_result.get("叫品含义", "") or bid_result.get("叫品含义及后续建议", "")
+        constraint = (bid_result.get("叫品约束", "") or "").strip()
         if meaning:
             current = self.current_bidder
             player_name = get_position_name(current)
-            self.bid_meanings += f"\n({player_name}){meaning}"
+            line = f"\n({player_name}){meaning}"
+            if constraint:
+                line += f"[约束:{constraint}]"
+            self.bid_meanings += line
         
         return bid
     

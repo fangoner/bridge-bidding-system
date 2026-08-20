@@ -19,6 +19,7 @@ from bridge.mcts.constraints import BidConstraint
 # 叫牌体系常量
 SYSTEM_NATURAL = "natural"
 SYSTEM_JF = "jf"
+SYSTEM_XR = "xr"
 
 # 体系参数配置（不同体系的阈值差异）
 SYSTEM_CONFIGS = {
@@ -53,6 +54,22 @@ SYSTEM_CONFIGS = {
         "weak_two_min": 6,              # JF: 弱二6-10
         "weak_two_max": 10,
         "strong_2c_min": 22,            # JF: 2♣强开叫22+
+    },
+    SYSTEM_XR: {
+        "opening_min_hcp": 12,          # XR: 12点开叫
+        "response_min_hcp": 6,          # XR: 一盖一应叫6点起
+        "overcall_1_min_hcp": 8,        # XR: 1阶争叫8点起
+        "overcall_2_min_hcp": 10,       # XR: 2阶争叫10点起
+        "response_to_1nt_min_hcp": 8,   # XR: Stayman/转移8点起
+        "first_seat_pass_max": 11,      # XR: pass<12点
+        "response_pass_max": 4,         # XR: 5点以上应叫 → pass≤4
+        "overcall_pass_max": 7,         # XR: 8点以上争叫 → pass≤7
+        "response_1nt_pass_max": 7,     # XR: 8点以上应叫 → pass≤7
+        "nt_opening_min": 15,           # XR: 1NT 15-17
+        "nt_opening_max": 17,
+        "weak_two_min": 6,              # XR: 弱二6-10
+        "weak_two_max": 10,
+        "strong_2c_min": 22,            # XR: 2♣强开叫22+
     },
 }
 

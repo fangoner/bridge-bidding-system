@@ -271,6 +271,15 @@ success_rate = sum(effective_value) / n
 
 约束系统用于打牌阶段的手牌采样验证，核心在 `bridge/mcts/constraints.py` 和 `bridge/mcts/bid_constraint_library.py`。
 
+#### 约束来源：双通道（v1.65）
+
+打牌采样的叫牌约束来源由 `bid_meanings` 是否携带**结构化约束段**决定，与牌局来源无关（方案见 `docs/叫牌约束提取优化方案.md`），按"家"粒度独立判定：
+
+- **通道A（结构化约束）**：叫牌阶段 LLM 在 `叫品含义` 后输出 `叫品约束` 字段（如 `[约束:HCP16+|C5+|D4+|非均]`），表示该位置**累计至今的自身承诺**（点力区间 + 花色长度 + 均型与否），并按单调收紧不变式生成（同位置相对上轮只能收紧或不变）。解析器优先解析该段（`_build_constraint_from_structured`），并将此类家作为**权威来源**——不再与规则库硬约束取交集，避免规则库误判过度收紧污染结构化结果。
+- **通道B（含义文本 + 规则库）**：外部导入/无结构化段的裸叫牌序列走原 `_parse_constraints_from_meanings` 正则解析（`_build_constraint_from_meaning_free`）+ `extract_constraints_from_bid_history` 通用规则库兜底，行为与旧版完全一致（向下兼容）。
+
+**体系适配**：`play_service` 打牌初始化接收实际 `bid_system`（jf / xr / natural），规则库按对应 `SYSTEM_CONFIGS` 参数提取，不再硬编码 `SYSTEM_JF`；新增 `SYSTEM_XR` 配置项。
+
 #### BidConstraint 数据结构
 
 ```python
@@ -568,6 +577,14 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 3. 启动前端：`cd web && npm run dev`
 
 ## 版本历史
+
+### v1.65
+- **叫牌约束提取优化：约束来源双通道 + 体系适配**（方案见 `docs/叫牌约束提取优化方案.md`）
+  - **通道A（结构化约束）**：`llm/prompts.py` 三处模板（首轮/兜底/人工）在 `叫品含义` 后新增 `叫品约束` 字段，定义单行紧凑串语法（HCP段 `HCP12-21/HCP16+/HCP≤7`、花色段 `S/H/D/C+张数[+/-]`、牌型段 `均型/非均/单缺`）；`main.py` `process_bid` 与前端 `formatBidMeaningLine` 将该字段拼入 `bid_meanings`（`[约束:...]`）
+  - **通道B（含义正则 + 规则库）**：`play_service.py` 抽出 `_build_constraint_from_meaning_free` 保留原正则解析；`_parse_constraints_from_meanings` 按是否含结构化段分派（结构化→`_build_constraint_from_structured`），并返回结构化家集合；`_get_bid_constraints` 对结构化家作**权威来源**（不再与规则库取交集，防过度收紧污染），非结构化家照旧交集合并
+  - **体系适配（消除硬编码）**：`_get_bid_constraints` 原硬编码 `SYSTEM_JF` → 改从打牌初始化接收实际 `bid_system`（jf/xr/natural）；`bid_constraint_library.py` 新增 `SYSTEM_XR` 常量与配置；`api/main.py` `PlayInitRequest` 新增 `bid_system` 字段，前端 `playInit`/三个调用点透传
+- 验证：逆叫样例（南1C-北1S-南2D）结构化解得 `HCP16-21·C5+·D4+·非均`，北保持 `HCP6+·S4+`（规则库曾在第三次叫牌误判北为 12-15，现不被污染）；通道B正则空集/下游行为不变；Python 语法、前端 eslint 0 错误
+- 修改文件: api/main.py, bridge/play_service.py, bridge/mcts/bid_constraint_library.py, llm/prompts.py, main.py, web/src/App.jsx, web/src/services/api.js, docs/叫牌约束提取优化方案.md（新增）
 
 ### v1.64
 - **JF 与新睿提示词统一共享模板 + 备用约定对齐最终 JF 文档**

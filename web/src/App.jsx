@@ -53,6 +53,14 @@ import { validateHands, validateBidding } from './utils/validation'
 import { formatElapsedTime } from './utils/biddingUtils'
 import './App.css'
 
+/** 拼装一条叫牌含义行（含结构化叫品约束，供打牌通道A解析）：(位置)叫品: 含义[约束:...] */
+const formatBidMeaningLine = (r) => {
+  const meaning = r.result?.meaning || ''
+  const constraint = r.result?.full_output?.['叫品约束'] || ''
+  const cText = constraint ? `[约束:${constraint}]` : ''
+  return `(${r.position})${r.result?.bid || ''}: ${meaning}${cText}`
+}
+
 /** 确保手牌每门花色按 A→2 排序，并计算 HCP */
 const ensureSortedHands = (hands) => {
   if (!hands || typeof hands !== 'object') return hands
@@ -1548,7 +1556,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
       meaningLines = aiBiddingHistory
         .filter(r => r.result?.meaning)
-        .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
+        .map(formatBidMeaningLine)
         .join('\n')
       biddingStr = meaningLines
         ? `${seqStr}\n\n叫牌含义:\n${meaningLines}`
@@ -1584,7 +1592,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       biddingStr,
       seqStr,
       meaningLines,
-      vulnerability
+      vulnerability,
+      bidSystem
     )
     if (!initResult.success) return { error: initResult.error }
 
@@ -1812,7 +1821,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
         meaningLines = aiBiddingHistory
           .filter(r => r.result?.meaning)
-          .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
+          .map(formatBidMeaningLine)
           .join('\n')
         biddingStr = meaningLines
           ? `${seqStr}\n\n叫牌含义:\n${meaningLines}`
@@ -1828,7 +1837,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         biddingStr,
         seqStr,
         meaningLines,
-        vulnerability
+        vulnerability,
+        bidSystem
       )
       if (!initResult.success) {
         console.error('重打初始化失败:', initResult.error)
@@ -1940,7 +1950,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       seqStr = biddingSeq.map(b => `(${b.position})${b.bid}`).join('-')
       meaningLines = aiHistory
         .filter(r => r.result?.meaning)
-        .map(r => `(${r.position})${r.result.bid || ''}: ${r.result.meaning}`)
+        .map(formatBidMeaningLine)
         .join('\n')
       biddingStr = meaningLines
         ? `${seqStr}\n\n叫牌含义:\n${meaningLines}`
@@ -1967,7 +1977,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         biddingStr,
         seqStr,
         meaningLines,
-        vulnerability
+        vulnerability,
+        bidSystem
       )
 
       if (result.success) {

@@ -12,7 +12,7 @@ from bridge.mcts import MctsSearch, RandomizedRollout, DDSearch
 from bridge.mcts.direct_dds import is_dds_available
 from bridge.mcts.constraints import BidConstraint, validate_sample
 from bridge.mcts.signals import format_partner_signals_for_prompt
-from bridge.mcts.bid_constraint_library import extract_constraints_from_bid_history, SYSTEM_JF
+from bridge.mcts.bid_constraint_library import extract_constraints_from_bid_history, SYSTEM_NATURAL
 from config import (
     MCTS_ITERATIONS, MCTS_TIME_LIMIT, MCTS_EXPLORATION_CONSTANT,
     ROLLOUT_GREEDY_PROB, MCTS_SEARCH_MODE, DD_NUM_SAMPLES, DD_MIN_SAMPLES, DD_TIME_LIMIT,
@@ -134,6 +134,7 @@ class PlayService:
         bid_history: str = "",
         bid_meanings: str = "",
         vulnerability: str = "NV",
+        bid_system: str = "",
     ) -> PlayState:
         from bridge.play_types import Contract
 
@@ -147,6 +148,7 @@ class PlayService:
         # 缓存叫牌约束（供MCTS采样器使用）
         self.bid_history = bid_history
         self.bid_meanings = bid_meanings  # 叫牌含义文本（复用LLM已分析信息）
+        self.bid_system = bid_system or SYSTEM_NATURAL  # 实际叫牌体系
         self.bid_constraints = None  # 延迟提取
         # Phase 0a: BeliefTracker 已移除，粒子缓存不再需要清理
 
@@ -625,10 +627,11 @@ class PlayService:
             (北)2♥: 雅各比转移叫，5+张♠，0+HCP
 
         Returns:
-            {position: BidConstraint}
+            (constraints, structured_homes): 各家约束表，以及走通道A（含结构化约束段）的家集合
         """
         import re
         constraints: Dict[str, BidConstraint] = {}
+        structured_homes: set = set()  # 走通道A（结构化约束）的家，作为权威来源
 
         # 逐行解析
         for line in meanings_text.split('\n'):
@@ -648,53 +651,14 @@ class PlayService:
             if bid.lower() in ('pass', '不叫'):
                 continue
 
-            c = BidConstraint(position=pos, inference_source="meaning_parsed")
-
-            # 解析 HCP 范围: "15-17HCP"、"12+HCP"、"0-16HCP"、"≤7HCP"
-            hcp_patterns = [
-                (r'(\d+)\s*-\s*(\d+)\s*HCP', lambda m: (int(m.group(1)), int(m.group(2)))),
-                (r'HCP\s*(\d+)\s*-\s*(\d+)', lambda m: (int(m.group(1)), int(m.group(2)))),
-                (r'(\d+)\+\s*HCP', lambda m: (int(m.group(1)), None)),
-                (r'HCP\s*≥\s*(\d+)', lambda m: (int(m.group(1)), None)),
-                (r'≤\s*(\d+)\s*HCP', lambda m: (None, int(m.group(1)))),
-                (r'(\d+)\s*HCP', lambda m: (int(m.group(1)), int(m.group(1)))),
-            ]
-            for pat, fn in hcp_patterns:
-                hm = re.search(pat, meaning)
-                if hm:
-                    mn, mx = fn(hm)
-                    c.min_hcp = mn
-                    c.max_hcp = mx
-                    break
-
-            # 解析均型/非均型
-            if re.search(r'均[型衡]', meaning):
-                c.balanced = True
-            elif re.search(r'非均[型衡]|不均[型衡]', meaning):
-                c.balanced = False
-
-            # 解析花色张数: "5+张♠"、"♠≥5"、"♥≤4"、"♣3-5张"
-            suit_map = {'♠': '♠', '♥': '♥', '♦': '♦', '♣': '♣',
-                        'S': '♠', 'H': '♥', 'D': '♦', 'C': '♣'}
-            # 张数≥: "5+张♠"、"♠≥5"、"5张+♠"
-            for sm in re.finditer(r'(\d+)\+?\s*张\s*([♠♥♦♣])', meaning):
-                cnt = int(sm.group(1))
-                suit = sm.group(2)
-                c.suit_min[suit] = max(c.suit_min.get(suit, 0), cnt)
-            for sm in re.finditer(r'([♠♥♦♣])\s*≥\s*(\d+)', meaning):
-                suit = sm.group(1)
-                cnt = int(sm.group(2))
-                c.suit_min[suit] = max(c.suit_min.get(suit, 0), cnt)
-            # ≤张数: "♥≤4"
-            for sm in re.finditer(r'([♠♥♦♣])\s*≤\s*(\d+)', meaning):
-                suit = sm.group(1)
-                cnt = int(sm.group(2))
-                c.suit_max[suit] = min(c.suit_max.get(suit, 13), cnt)
-            # 精确张数: "♠=6"
-            for sm in re.finditer(r'([♠♥♦♣])\s*=\s*(\d+)', meaning):
-                suit = sm.group(1)
-                cnt = int(sm.group(2))
-                c.exact_suit[suit] = cnt
+            # 通道A：优先解析结构化"叫品约束"段（[约束:HCP12-21|S5+|...]），
+            # 该字段是叫牌阶段LLM输出的该位置累计自身承诺，且按单调收紧不变式生成。
+            mseg = re.search(r'\[约束\s*[：:]\s*([^\]]+)\]', meaning)
+            if mseg:
+                c = self._build_constraint_from_structured(mseg.group(1).strip(), pos)
+                structured_homes.add(pos)
+            else:
+                c = self._build_constraint_from_meaning_free(meaning, pos)
 
             # 同位置多叫品：与已有约束合并而非覆盖
             if pos in constraints:
@@ -720,7 +684,107 @@ class PlayService:
                 if pos in constraints:
                     constraints[pos].balanced = True
 
-        return constraints
+        return constraints, structured_homes
+
+    def _build_constraint_from_structured(self, segs: str, pos: str) -> BidConstraint:
+        """解析通道A的结构化"叫品约束"段，返回该段对应的累计约束。
+
+        段格式（单行紧凑串，按|分段）：
+        - HCP段：HCP下界[-上界]，如 HCP12-21 / HCP16+ / HCP≤7
+        - 花色段：S/H/D/C + 张数[+/-]，+至少，-至多，裸数字精确，如 S5+ / D4
+        - 牌型段：均型 / 非均 / 单缺（可选）
+        """
+        c = BidConstraint(position=pos, inference_source="structured")
+        suit_map = {'S': '♠', 'H': '♥', 'D': '♦', 'C': '♣'}
+        for seg in segs.split('|'):
+            seg = seg.strip()
+            if not seg:
+                continue
+            if seg.startswith('HCP'):
+                body = seg[3:].strip().replace('≥', '>=').replace('≤', '<=').replace('，', '').replace(' ', '')
+                if not body:
+                    continue
+                if body.startswith('>='):
+                    c.min_hcp = int(body[2:])
+                elif body.startswith('<='):
+                    c.max_hcp = int(body[2:])
+                elif body.startswith('<'):
+                    c.max_hcp = int(body[1:]) - 1
+                elif body.startswith('>'):
+                    c.min_hcp = int(body[1:]) + 1
+                elif '-' in body:
+                    lo, _, hi = body.partition('-')
+                    c.min_hcp = int(lo) if lo else None
+                    c.max_hcp = int(hi) if hi else None
+                elif body.endswith('+'):
+                    c.min_hcp = int(body[:-1])
+                elif body.isdigit():
+                    c.min_hcp = c.max_hcp = int(body)
+            elif seg in ('均型', '非均', '单缺'):
+                c.balanced = (seg == '均型')
+            else:
+                sm = re.match(r'([SHDC])(\d+)\s*([+-]?)', seg)
+                if sm:
+                    suit = suit_map.get(sm.group(1))
+                    cnt = int(sm.group(2))
+                    op = sm.group(3)
+                    if op == '+':
+                        c.suit_min[suit] = max(c.suit_min.get(suit, 0), cnt)
+                    elif op == '-':
+                        c.suit_max[suit] = min(c.suit_max.get(suit, 13), cnt)
+                    else:
+                        c.exact_suit[suit] = cnt
+        return c
+
+    def _build_constraint_from_meaning_free(self, meaning: str, pos: str) -> BidConstraint:
+        """通道B（含义自由文本）解析：从叫牌含义文本中用正则解析约束。"""
+        c = BidConstraint(position=pos, inference_source="meaning_parsed")
+
+        # 解析 HCP 范围: "15-17HCP"、"12+HCP"、"0-16HCP"、"≤7HCP"
+        hcp_patterns = [
+            (r'(\d+)\s*-\s*(\d+)\s*HCP', lambda m: (int(m.group(1)), int(m.group(2)))),
+            (r'HCP\s*(\d+)\s*-\s*(\d+)', lambda m: (int(m.group(1)), int(m.group(2)))),
+            (r'(\d+)\+\s*HCP', lambda m: (int(m.group(1)), None)),
+            (r'HCP\s*≥\s*(\d+)', lambda m: (int(m.group(1)), None)),
+            (r'≤\s*(\d+)\s*HCP', lambda m: (None, int(m.group(1)))),
+            (r'(\d+)\s*HCP', lambda m: (int(m.group(1)), int(m.group(1)))),
+        ]
+        for pat, fn in hcp_patterns:
+            hm = re.search(pat, meaning)
+            if hm:
+                mn, mx = fn(hm)
+                c.min_hcp = mn
+                c.max_hcp = mx
+                break
+
+        # 解析均型/非均型
+        if re.search(r'均[型衡]', meaning):
+            c.balanced = True
+        elif re.search(r'非均[型衡]|不均[型衡]', meaning):
+            c.balanced = False
+
+        # 解析花色张数: "5+张♠"、"♠≥5"、"♥≤4"、"♣3-5张"
+        # 张数≥: "5+张♠"、"♠≥5"、"5张+♠"
+        for sm in re.finditer(r'(\d+)\+?\s*张\s*([♠♥♦♣])', meaning):
+            cnt = int(sm.group(1))
+            suit = sm.group(2)
+            c.suit_min[suit] = max(c.suit_min.get(suit, 0), cnt)
+        for sm in re.finditer(r'([♠♥♦♣])\s*≥\s*(\d+)', meaning):
+            suit = sm.group(1)
+            cnt = int(sm.group(2))
+            c.suit_min[suit] = max(c.suit_min.get(suit, 0), cnt)
+        # ≤张数: "♥≤4"
+        for sm in re.finditer(r'([♠♥♦♣])\s*≤\s*(\d+)', meaning):
+            suit = sm.group(1)
+            cnt = int(sm.group(2))
+            c.suit_max[suit] = min(c.suit_max.get(suit, 13), cnt)
+        # 精确张数: "♠=6"
+        for sm in re.finditer(r'([♠♥♦♣])\s*=\s*(\d+)', meaning):
+            suit = sm.group(1)
+            cnt = int(sm.group(2))
+            c.exact_suit[suit] = cnt
+
+        return c
 
     def _apply_constraints(self, constraints: Dict[str, BidConstraint], sampler=None) -> None:
         """将约束应用到采样器"""
@@ -737,11 +801,12 @@ class PlayService:
             return self.bid_constraints
 
         # Step 1: 先用硬编码约束库提取确定性约束
-        # 规则：提供了叫牌历史 → 按JF约定处理；无叫牌历史 → 返回空约束（普通随机/自然）
+        # 规则：提供了叫牌历史 → 按实际体系处理；无叫牌历史 → 返回空约束（普通随机/自然）
         hard_constraints = {}
         try:
-            hard_constraints = extract_constraints_from_bid_history(self.bid_history, system=SYSTEM_JF)
-            print(f"[DD] 硬编码约束提取(JF体系): { {p: f'HCP{c.min_hcp}-{c.max_hcp}[{c.inference_source}]' for p, c in hard_constraints.items()} }")
+            system_name = self.bid_system or SYSTEM_NATURAL
+            hard_constraints = extract_constraints_from_bid_history(self.bid_history, system=system_name)
+            print(f"[DD] 硬编码约束提取({system_name}体系): { {p: f'HCP{c.min_hcp}-{c.max_hcp}[{c.inference_source}]' for p, c in hard_constraints.items()} }")
         except Exception as e:
             print(f"[DD] 硬编码约束提取失败: {e}")
             hard_constraints = {}
@@ -752,13 +817,17 @@ class PlayService:
 
         if meanings_text.strip():
             try:
-                meaning_constraints = self._parse_constraints_from_meanings(meanings_text)
+                meaning_constraints, structured_homes = self._parse_constraints_from_meanings(meanings_text)
                 for pos_cn, mc in meaning_constraints.items():
-                    if pos_cn in constraints:
+                    # 通道A（结构化约束）家作为权威来源：直接采用结构化累计约束，
+                    # 不与规则库硬约束取交集，避免规则库误判过度收紧污染结构化结果。
+                    if pos_cn in structured_homes:
+                        constraints[pos_cn] = mc
+                    elif pos_cn in constraints:
                         constraints[pos_cn] = self._merge_constraints(constraints[pos_cn], mc)
                     else:
                         constraints[pos_cn] = mc
-                print(f"[DD] 含义文本解析补充约束: { {p: f'HCP{c.min_hcp}-{c.max_hcp}' for p, c in meaning_constraints.items()} }")
+                print(f"[DD] 含义文本解析补充约束: { {p: f'HCP{c.min_hcp}-{c.max_hcp}' for p, c in meaning_constraints.items()} } 结构化家: {sorted(structured_homes)}")
             except Exception as e:
                 print(f"[DD] 含义文本解析失败: {e}")
 
