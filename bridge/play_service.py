@@ -17,7 +17,7 @@ from config import (
     MCTS_ITERATIONS, MCTS_TIME_LIMIT, MCTS_EXPLORATION_CONSTANT,
     ROLLOUT_GREEDY_PROB, MCTS_SEARCH_MODE, DD_NUM_SAMPLES, DD_MIN_SAMPLES, DD_TIME_LIMIT,
     DD_ENDGAME_CARD_THRESHOLD, DD_ENDGAME_MAX_ENUMERATIONS,
-    DD_MAXIMIN_ENABLE, DD_ALPHAMU_SWITCH_CARDS,
+    DD_ALPHAMU_SWITCH_CARDS,
     ALPHA_MU_ENABLE, ALPHA_MU_ENDGAME_CARDS, ALPHA_MU_NUM_WORLDS,
     ALPHA_MU_MAX_DEPTH, ALPHA_MU_TIME_LIMIT, ALPHA_MU_M,
     ALPHAMU_LLM_GAP_CAP,
@@ -47,7 +47,6 @@ class PlayService:
             time_limit=DD_TIME_LIMIT,
             endgame_card_threshold=DD_ENDGAME_CARD_THRESHOLD,
             max_enumerations=DD_ENDGAME_MAX_ENUMERATIONS,
-            use_maximin=DD_MAXIMIN_ENABLE,
         )
         # Phase 0a: BeliefTracker 已移除（均匀采样不需要粒子加权）
         # DD 和 αμ 直接通过 sampler.sample_n() 生成无偏样本/world

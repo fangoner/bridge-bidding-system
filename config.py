@@ -99,8 +99,6 @@ ROLLOUT_GREEDY_PROB = 0.80  # probability of heuristic vs random in rollout
 DD_NUM_SAMPLES = 200  # DD 引擎默认采样数
 DD_MIN_SAMPLES = 15   # floor for adaptive sample scaling
 DD_TIME_LIMIT = 30.0  # seconds per DD play decision (30秒预算，允许首攻冷启动)
-DD_MAXIMIN_ENABLE = True   # 最大化选牌：混合avg和min，偏好稳定牌
-DD_REGRET_BASE = 0.25      # 领先时 min 权重（保守）；落后时 min 权重=0（纯avg冒险）
 # DD 决策计分制："imp"（期望IMP，考虑宕分/超墩/局况）| "make_rate"（做成率，类似αμ）| "avg_tricks"（平均赢墩，纯MP思路）
 DD_SCORING_MODE = "imp"
 

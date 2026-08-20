@@ -1685,8 +1685,10 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       setAiPlayHistory(isFresh ? [] : result.trimmedHistory)
       setLastCompletedTrick(null)
       setShowPlayPanel(true)
+      // 只重新打牌(fresh)：先停在初始态，等用户点“开始打牌”后再启动（四家AI也不自动开始）；
+      // 复盘(keepCount>0)：直接进入回放态
       setIsPlayPaused(isFresh ? false : true)
-      setPlayInitiated(true)
+      setPlayInitiated(isFresh ? false : true)
       setPlayStarted(isFresh ? false : result.actualKeep > 0)
       setReviewCursor(null)
       if (isFresh) {
@@ -1764,6 +1766,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       setError('没有可复盘的记录')
       return
     }
+    // 点“复盘”意图已明确，直接进入复盘，不再弹“复盘 / 只重新打牌”二选一对话框
+    setRecordActionMode('review')
     loadRecordToTable(latest)
   }
 

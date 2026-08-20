@@ -180,6 +180,17 @@ class XrRetriever:
                     continue
                 line = ent.get("desc", "")
                 pt = ent.get("points", "")
+                # 术语消歧：把容易误读的“高花”描述改显式（高花=♥或♠任一达N张）
+                line = line.replace("有4张高花套", "有4张高花套（♥或♠任一达4张）")
+                line = line.replace("无4张高花套", "无4张高花套（♥、♠均不足4张）")
+                line = line.replace("没有4张高花", "没有4张高花（♥、♠均不足4张）")
+                if pt and "/" in pt and line and "；" in line:
+                    pt_list = pt.split("/")
+                    desc_list = line.split("；")
+                    if len(pt_list) == len(desc_list):
+                        line = "；".join(
+                            f"情形{i+1}[{p}点]：{d}" for i, (p, d) in enumerate(zip(pt_list, desc_list))
+                        )
                 text_parts = []
                 if pt:
                     text_parts.append(f"{pt}点")

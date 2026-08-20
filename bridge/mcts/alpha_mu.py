@@ -91,7 +91,7 @@ class OutcomeVector:
         return sum(useful_vals) / len(useful_vals)
 
     def worst(self) -> int:
-        """useful worlds 中的最小值（0 或 1）。Maximin 选牌用。"""
+        """useful worlds 中的最小值（0 或 1）。"""
         useful_vals = [v for v, m in zip(self.values, self.useful_mask) if m]
         if not useful_vals:
             return 0
@@ -205,17 +205,6 @@ class ParetoFront:
             return None
         return max(self.vectors, key=lambda v: v.success_rate())
 
-    def maximin_vector(self) -> Optional[OutcomeVector]:
-        """Maximin 选牌：优先最大化最小成功率，次按成功率均值决胜。"""
-        if not self.vectors:
-            return None
-        # primary: max worst (0 or 1), secondary: max success_rate
-        return max(self.vectors, key=lambda v: (v.worst(), v.success_rate()))
-
-    def maximin_score(self) -> float:
-        v = self.maximin_vector()
-        return v.success_rate() if v else 0.0
-
     def __len__(self) -> int:
         return len(self.vectors)
 
@@ -234,7 +223,7 @@ class AlphaMuSearch:
     在残局（每手 ≤8 张）启用，用 belief tracker 的粒子作为 possible worlds。
     Max = 我方，必须在所有 worlds 选同一动作。
     Min = 对手方，假设完美信息，每个 world 独立选最优动作。
-    根节点用 Maximin 选牌。
+    根节点选牌 = Pareto front 中成功率最高的向量。
     """
 
     def __init__(self, sampler: DealSampler = None,

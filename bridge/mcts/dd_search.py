@@ -392,14 +392,13 @@ class DDSearch:
     def __init__(self, sampler: DealSampler = None, num_samples: int = 100,
                  min_samples: int = 15, time_limit: float = 5.0,
                  endgame_card_threshold: int = 4, max_enumerations: int = 5000,
-                 use_maximin: bool = True, scoring_mode: Optional[str] = None):
+                 scoring_mode: Optional[str] = None):
         self.sampler = sampler or DealSampler()
         self.num_samples = num_samples
         self.min_samples = min_samples
         self.time_limit = time_limit
         self.endgame_card_threshold = endgame_card_threshold
         self.max_enumerations = max_enumerations
-        self.use_maximin = use_maximin
         if scoring_mode is None:
             from config import DD_SCORING_MODE
             scoring_mode = DD_SCORING_MODE
@@ -407,7 +406,7 @@ class DDSearch:
 
     def _decision_value(self, scores: List[int], state: PlayState):
         """按计分制返回决策值（从庄家方越优数值越高的视角）。
-        imp/make_rate 覆盖默认 avg_tricks 逻辑；返回 None 表示走既有 avg/regret 逻辑。"""
+        imp/make_rate/avg_tricks 返回各自决策值；返回 None 表示走既有 avg/regret 逻辑。"""
         mode = self.scoring_mode
         if mode == "imp":
             vul_decl = _declarer_side_vulnerable(state.contract.declarer,
@@ -415,6 +414,9 @@ class DDSearch:
             return _expected_imp_value(scores, state.contract, vul_decl)
         if mode == "make_rate":
             return _make_rate_value(scores, state.contract.tricks_needed)
+        if mode == "avg_tricks":
+            # 纯平均赢墩（MP 思路）：不混合 min，避免 maximin 的保守惩罚
+            return sum(scores) / len(scores) if scores else 0.0
         return None
 
     def search(self, state: PlayState) -> dict:
@@ -567,8 +569,6 @@ class DDSearch:
         child_stats = []
         blended_map = {}
         scores_map = {}
-        use_maximin = getattr(self, 'use_maximin', True)
-
         for card in playable:
             stats = card_scores[str(card)]
             scores = stats["scores"]
@@ -592,29 +592,6 @@ class DDSearch:
             scoring_val = self._decision_value(scores, state)
             if scoring_val is not None:
                 blended = scoring_val
-            elif use_maximin:
-                from config import DD_REGRET_BASE
-                declarer_tricks = state.declarer_tricks
-                defender_tricks = state.defender_tricks
-                tricks_needed = state.contract.tricks_needed
-                remaining = 13 - (declarer_tricks + defender_tricks)
-
-                if is_declarer_side:
-                    margin = declarer_tricks + remaining - tricks_needed
-                else:
-                    tricks_to_beat = 14 - tricks_needed
-                    margin = defender_tricks + remaining - tricks_to_beat
-
-                if margin > 1:
-                    regret_weight = DD_REGRET_BASE
-                elif margin == 1:
-                    regret_weight = DD_REGRET_BASE * 0.7
-                elif margin == 0:
-                    regret_weight = DD_REGRET_BASE * 0.4
-                else:
-                    regret_weight = 0.0
-
-                blended = (1 - regret_weight) * w_avg + regret_weight * mn
             else:
                 blended = w_avg
 
@@ -862,30 +839,10 @@ class DDSearch:
                 "scores": scores,
             })
             rank_val = RANK_ORDER.get(card.rank, 0)
-            # 残局枚举同样支持计分制决策；否则回退 maximin/avg
+            # 残局枚举同样支持计分制决策；否则回退纯平均
             scoring_val = self._decision_value(scores, state)
             if scoring_val is not None:
                 blended = scoring_val
-            elif getattr(self, 'use_maximin', True):
-                from config import DD_REGRET_BASE
-                declarer_tricks = state.declarer_tricks
-                defender_tricks = state.defender_tricks
-                tricks_needed = state.contract.tricks_needed
-                remaining = 13 - (declarer_tricks + defender_tricks)
-                if is_declarer_side:
-                    margin = declarer_tricks + remaining - tricks_needed
-                else:
-                    tricks_to_beat = 14 - tricks_needed
-                    margin = defender_tricks + remaining - tricks_to_beat
-                if margin > 1:
-                    regret_weight = DD_REGRET_BASE
-                elif margin == 1:
-                    regret_weight = DD_REGRET_BASE * 0.7
-                elif margin == 0:
-                    regret_weight = DD_REGRET_BASE * 0.4
-                else:
-                    regret_weight = 0.0
-                blended = (1 - regret_weight) * avg + regret_weight * mn
             else:
                 blended = avg
             blended_map[str(card)] = blended

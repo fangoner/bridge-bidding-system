@@ -109,10 +109,6 @@ def test_pareto_front():
     ])
     assert abs(pf3.best_score() - 2/3) < 1e-6
     print(f"  ✓ best_score = {pf3.best_score():.1%}")
-    mv = pf3.maximin_vector()
-    assert mv is not None and mv.worst() == 0  # both have worst=0, maximin picks the one with higher rate
-    assert mv.success_rate() == 2/3
-    print(f"  ✓ maximin: worst={mv.worst()}, rate={mv.success_rate():.1%} (picks [0,1,1] with 2/3)")
 
     print("  测试通过!\n")
 

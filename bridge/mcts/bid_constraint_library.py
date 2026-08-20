@@ -892,6 +892,7 @@ def get_rebid_constraint(
     partner_suit: Optional[str] = None,
     is_jump: bool = False,
     is_reverse: bool = False,
+    competitive: bool = False,
 ) -> Optional[BidConstraint]:
     """获取同一位置第二次叫牌（再叫）的约束。
 
@@ -947,11 +948,12 @@ def get_rebid_constraint(
             )
         else:
             # 平叫原花：12-15HCP，原花≥6张（低限再叫）
+            # 竞争性叫牌下重叫原花到高阶属竞叫，不强制 6 张，5 张即可
             return BidConstraint(
                 position="",
                 min_hcp=12,
                 max_hcp=15,
-                suit_min={suit: 6},
+                suit_min={suit: 5 if competitive else 6},
                 min_hcp_target=13,
             )
 
@@ -1244,12 +1246,29 @@ def extract_constraints_from_bid_history(bid_history: str, system: str = SYSTEM_
 
                     # 判断是否跳叫：找上一个我方的实质性叫品，对比阶数
                     is_jump_rebid = False
+                    # 竞争性叫牌：对方已有实叫品（花色/NT/加倍），加叫或重叫原花不再套强牌跳叫约束
+                    competitive = False
+                    for ci, (cpos, cbid) in enumerate(bid_sequence[:idx]):
+                        if cpos in (pos, partner):
+                            continue
+                        cp = _normalize_bid(cbid)
+                        if cp and cp[0] not in (SPECIAL_PASS, SPECIAL_REDOUBLE):
+                            competitive = True
+                            break
                     prev_own_parsed = None
                     for pb in reversed(pos_bids[pos]):
                         pb_p = _normalize_bid(pb)
                         if pb_p and pb_p[0] not in (SPECIAL_PASS, SPECIAL_DOUBLE, SPECIAL_REDOUBLE):
                             prev_own_parsed = pb_p
                             break
+                    # 该位置此前实质叫品数量：前两次（开叫+一次再叫）已把点力/张数限定，
+                    # 第三次以后的叫牌（冲局/止叫/竞叫）不再套自然再叫规则收紧约束
+                    prior_substantive_count = 0
+                    for pb in pos_bids.get(pos, []):
+                        pb_p = _normalize_bid(pb)
+                        if pb_p and pb_p[0] not in (SPECIAL_PASS, SPECIAL_DOUBLE, SPECIAL_REDOUBLE):
+                            prior_substantive_count += 1
+                    is_third_plus_rebid = prior_substantive_count >= 2
                     # 判断该位置是否用过斯台曼问叫（2♣ 问高花）：同伴开叫1NT/2NT后应叫2♣
                     used_stayman = False
                     if first_parsed_p:
@@ -1260,14 +1279,15 @@ def extract_constraints_from_bid_history(bid_history: str, system: str = SYSTEM_
                                 break
                     if prev_own_parsed:
                         prev_level, prev_suit_own = prev_own_parsed
-                        if suit == prev_suit_own and level > prev_level + 1:
+                        if not competitive and suit == prev_suit_own and level > prev_level + 1:
                             is_jump_rebid = True
                         elif partner_suit and suit == partner_suit:
                             # 加叫同伴：如果跳一阶以上算跳叫
-                            # 例外：斯台曼后跳加同伴所答高花 = 进局加叫（应叫人 9-12 点，4 张支持），非 16-18 跳加叫
+                            # 例外1：斯台曼后跳加同伴所答高花 = 进局加叫（应叫人 9-12 点，4 张支持），非 16-18 跳加叫
+                            # 例外2：竞争性叫牌（对方已插叫）下，加叫到成局属抢叫，不套 16-18 强牌跳加叫
                             if used_stayman and partner_suit in ("♠", "♥"):
                                 is_jump_rebid = False
-                            elif level > 2:  # 平加叫通常到2阶（1M-2M是平加）
+                            elif not competitive and level > 2:  # 平加叫通常到2阶（1M-2M是平加）
                                 is_jump_rebid = True
                         elif suit == "NT":
                             # NT跳叫
@@ -1301,6 +1321,10 @@ def extract_constraints_from_bid_history(bid_history: str, system: str = SYSTEM_
                             min_hcp_target=10,
                             inference_source="stayman_game_raise",
                         )
+                    elif is_third_plus_rebid:
+                        # 第三次及以后的实质叫牌：前两次已限定点力/张数，
+                        # 冲局/止叫/竞叫不再逆转已确立的范围，保持已有约束不变
+                        constraint = None
                     else:
                         constraint = get_rebid_constraint(
                             bid_str,
@@ -1308,6 +1332,7 @@ def extract_constraints_from_bid_history(bid_history: str, system: str = SYSTEM_
                             partner_suit,
                             is_jump_rebid,
                             is_reverse_bid,
+                            competitive,
                         )
                 elif constraint is None:
                     # 第一次叫牌：争叫或应叫
