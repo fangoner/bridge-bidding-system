@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:tunnel": "vite --config vite.tunnel.config.js --mode tunnel",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"

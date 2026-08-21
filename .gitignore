@@ -60,6 +60,19 @@ bidding_history.json
 # 临时归档目录（未跟踪杂物暂存，一个月后未使用则清理）
 _tmp_archive_20260813/
 
+# 隧道对外联调（纯本地产物，永不提交）
+.tunnel-tools/
+start_tunnel.ps1
+web/vite.tunnel.config.js
+web/.env.tunnel
+
+# 一次性验证/调试临时脚本（永不提交）
+/_play_state.json
+/_verify_*.py
+/autoplay_*.py
+/autoplay_*.txt
+scripts/_*.py
+
 # DDS debug dumps and backups
 dump.txt
 api/dump.txt

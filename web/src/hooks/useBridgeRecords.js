@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 
 const BRIDGE_RECORDS_KEY = 'bridge_records'
-const API_BASE = `http://${window.location.hostname}:8003`
+const API_BASE = import.meta.env.VITE_API_BASE ?? `http://${window.location.hostname}:8003`
 
 function useBridgeRecords() {
   const [records, setRecords] = useState([])
