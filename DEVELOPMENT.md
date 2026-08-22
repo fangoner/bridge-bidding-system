@@ -578,6 +578,21 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.66
+- **打牌引擎：计分制贯穿候选分组与输出 + 首攻信号方案注册表**
+  - `bridge/play_strategies.py`（新增）：首攻/信号方案注册表（`LeadScheme`/`SignalScheme`），标准方案取自新睿自然 Rev 3.2 第十二章，预留扩展接口；`config.py` 新增 `LEAD_SIGNAL_SCHEME`
+  - `play_service._group_candidates_by_tricks_vec` 按 scoring_mode 生成决策向量（IMP 向量/0-1 向量/赢墩向量，防守方取反），`success_rate` 修正为当前方目标达成率（坐庄=成约率，防守=击垮率），修复防守分组符号与排序方向
+  - `dd_search.py` child_stats 带 `scoring_val`/`scoring_mode`，top_plays 按制式格式化输出
+  - αμ 残局枚举门槛与 DD 统一为固定最后 4 墩；修复 `state.tricks_remaining` 误用（改 `13 - len(state.tricks)`）
+- **人类叫牌强制按用户输入解释**：`prompts.py` 加「只解释不决策」硬约束；`bidding_service._fixup_human_bid_result` 在 LLM 提取与输入冲突时强制覆盖选定叫品/完整序列并追加警示（修复叫 X 被擅改 pass）
+- **历史记录轻量索引 + 按需加载**：`/api/records/index`（列表常驻摘要）+ `/api/records/full/{id}`（按需完整记录），`useBridgeRecords` 重构为索引常驻 + 详情按需加载，缓解长驻全量记录的内存膨胀；`api.js` 改相对路径 + vite `/api` 代理/trycloudflare allowedHosts 支持隧道访问
+- **前端渲染性能优化（界面迟滞治理）**
+  - 日常使用切换生产构建（`npm run build` + preview），消除 dev/StrictMode 双重渲染开销
+  - CardTable memo 修复：`renderBiddingTable` 用 `useCallback` 固化，CardTable 移除内部 `useGame/usePlay` 改 props；App.jsx 16 个处理函数 `useCallback` 稳定化
+  - `aiProgress` 拆出 GameContext：新增 `AIProgressContext`（value/setter 双 Context），轮询文案更新仅触发详情面板局部重渲染；顺带修复 PlayDetailPanel 进度文案从未显示的问题
+  - 附带：`doPlayInit` 清空 `selectedPlayRecord`
+- 修改文件: bridge/play_strategies.py（新增）, config.py, bridge/play_service.py, bridge/mcts/dd_search.py, llm/prompts.py, bridge/bidding_service.py, api/main.py, web/src/{App.jsx, hooks/useBridgeRecords.js, services/api.js, context/GameContext.jsx, context/AIProgressContext.jsx（新增）}, web/src/components/{CardTable,CardTablePanel,MainTableArea,BiddingDetailPanel,PlayDetailPanel,HistoryDialog}.jsx, web/vite.config.js
+
 ### v1.65
 - **叫牌约束提取优化：约束来源双通道 + 体系适配**（方案见 `docs/叫牌约束提取优化方案.md`）
   - **通道A（结构化约束）**：`llm/prompts.py` 三处模板（首轮/兜底/人工）在 `叫品含义` 后新增 `叫品约束` 字段，定义单行紧凑串语法（HCP段 `HCP12-21/HCP16+/HCP≤7`、花色段 `S/H/D/C+张数[+/-]`、牌型段 `均型/非均/单缺`）；`main.py` `process_bid` 与前端 `formatBidMeaningLine` 将该字段拼入 `bid_meanings`（`[约束:...]`）

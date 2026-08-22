@@ -1,5 +1,54 @@
 # 开发日志
 
+## 2026-08-22（计分制贯穿 + 首攻信号方案 + 人类叫牌纠偏 + 记录按需加载 + 前端性能优化 v1.66）
+
+### 打牌引擎：计分制贯穿候选分组与输出 + 首攻信号方案注册表
+
+**背景**: DD/αμ 的 LLM 审查分组此前只用赢墩向量，success_rate 一律按"庄家成约率"计算，防守方场景下符号与排序方向全错；IMP/make_rate 计分制未贯穿到分组与输出。首攻/信号此前无方案抽象，无法接入标准方案。
+
+**改进**:
+- **首攻与信号方案注册表**（`bridge/play_strategies.py` 新增）：`LeadScheme`/`SignalScheme` 数据类 + 标准方案全文（源自新睿自然 Rev 3.2 第十二章，含 NT/将牌首攻牌张表、姿态/张数/花色偏好信号），预留扩展接口（如反式信号）；`config.py` 新增 `LEAD_SIGNAL_SCHEME = "standard"`
+- **分组按计分制生成决策向量**（`play_service._group_candidates_by_tricks_vec`）：IMP→IMP 分数向量（防守方取负）、make_rate→0/1 向量（防守方取反）、avg_tricks→赢墩向量；`success_rate` 修正为**当前方目标达成率**（坐庄=成约率，防守=击垮率），修复防守方 IMP/赢墩符号与排序方向错误
+- **DD 输出带计分制**（`dd_search.py`）：child_stats 记录 `scoring_val`/`scoring_mode`，top_plays 按制式格式化（`+1.000IMP` / `85.0%` / 赢墩区间）
+- **αμ 残局枚举门槛与 DD 统一**：固定最后 4 墩触发精确枚举（原动态估算 C(n,k)≤5000），保留异常回退采样；修复误用不存在的 `state.tricks_remaining`（改 `13 - len(state.tricks)`，该 bug 仅残局分支触发，此前未暴露）
+
+**修改文件**: bridge/play_strategies.py（新增）, config.py, bridge/play_service.py, bridge/mcts/dd_search.py
+
+### 人类叫牌强制按用户输入解释
+
+**背景**: 人类叫 X（加倍）时 LLM 解释阶段擅自把叫品改成 pass，后端只覆盖"选定叫品"字段，"叫品含义"与"完整叫牌序列"仍按 pass 展示，三者不一致。
+
+**改进**:
+- `llm/prompts.py` 人类提示词新增「只解释不决策」硬约束：必须原样提取用户输入叫品，严禁擅改（含非 pass 改 pass），含义必须解释所提取叫品
+- `bridge/bidding_service.py` 新增 `_norm_bid_str` + `_fixup_human_bid_result`：LLM 提取与输入冲突时，强制以用户输入覆盖选定叫品/完整叫牌序列，并在含义前追加警示
+
+**修改文件**: llm/prompts.py, bridge/bidding_service.py
+
+### 历史记录轻量索引 + 按需加载
+
+**背景**: 前端长驻全部历史记录全量数据（含牌张/play 明细），多局累积后浏览器内存膨胀、界面变慢（重启浏览器可恢复）。
+
+**改进**:
+- 后端新增 `/api/records/index`（轻量摘要索引，供列表常驻）与 `/api/records/full/{id}`（按需取单条完整记录）
+- `useBridgeRecords.js` 重构为索引常驻 + 打开详情按需加载；`HistoryDialog.jsx` 配套调整
+- `api.js` 改相对路径 + `vite.config.js` 新增 `/api` 代理与 trycloudflare allowedHosts，支持隧道远程访问
+
+**修改文件**: api/main.py, web/src/hooks/useBridgeRecords.js, web/src/components/HistoryDialog.jsx, web/src/services/api.js, web/vite.config.js
+
+### 前端渲染性能优化（界面迟滞治理）
+
+**背景**: 叫牌/打牌过程界面明显迟滞。诊断确认三层放大：dev 模式 + StrictMode 双重渲染（渲染耗时差 10~20 倍）；单一 GameContext 大对象致轮询进度文案（最快 300ms/次）触发全树重渲染；2332 行 CardTable 的 React.memo 因不稳定 props 与内部 Context 订阅完全失效。
+
+**改进**:
+- **日常使用切换生产构建**：`npm run build` + `vite preview` 访问（构建产物零 dev 开销、StrictMode 不双渲染），`/api` 经 preview 代理到 8003
+- **CardTable memo 修复**：`renderBiddingTable` 改 `useCallback` 固化引用；CardTable 移除内部 `useGame/usePlay` 订阅，fallbackModel/playModel/playEngine 改 props 传入；App.jsx 16 个处理函数 `useCallback` 稳定化，`handsToEditText`/`biddingToEditText` 提为模块级纯函数
+- **aiProgress 独立 Context**：新增 `AIProgressContext`（value/setter 双 Context 拆分），生产者 App 只订阅稳定 setter（轮询写入不再触发 AppShell 重渲染），消费者仅两个详情面板局部更新；GameContext/MainTableArea 移除 aiProgress；顺带修复 PlayDetailPanel 的 aiProgress prop 从未传入导致打牌阶段进度文案不显示的问题
+- 附带修复：`doPlayInit` 清空 `selectedPlayRecord`（重新打牌后详情面板不再残留旧记录）
+
+**修改文件**: web/src/App.jsx, web/src/components/{CardTable,CardTablePanel,MainTableArea,BiddingDetailPanel,PlayDetailPanel}.jsx, web/src/context/{GameContext,AIProgressContext}.jsx（后者新增）
+
+**测试验证**: 浏览器全流程实测——发牌→AI 叫牌（4H 定约，1分7秒）→切打牌→DD 引擎出牌（231 样本/1.5s），叫牌/打牌进度文案均正常显示，控制台 0 error/0 warning；eslint 0 error；用户实测流畅度明显改善。午后三项改动经各自会话验证（防守分组排序、人类叫 X 含义正确、历史记录按需加载）。
+
 ## 2026-08-21（叫牌约束提取优化：约束来源双通道 v1.65）
 
 **背景**: 打牌采样的叫牌约束来源存在两类矛盾诉求——自叫牌流程的牌局已有体系一致、信息完整的含义说明，应直接复用；而截屏/图片/历史导入的牌局只有裸叫牌序列，只能靠通用规则推导。原实现中含义文本解析器（正则以「去了还不懂」）认不得 `点/草花/X张以上` 等真实措辞，最有价值的体系含义几乎解析为空；且规则库对 JF/新睿/自然不做约定级差异化、`play_service.py` 硬编码 `SYSTEM_JF`。
