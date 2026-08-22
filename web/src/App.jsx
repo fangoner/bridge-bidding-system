@@ -97,8 +97,31 @@ const ensureSortedHands = (hands) => {
 import { GameProvider, useGame } from './context/GameContext'
 import { BiddingProvider, useBidding } from './context/BiddingContext'
 import { PlayProvider, usePlay } from './context/PlayContext'
+import { AIProgressProvider, useAIProgressSetter } from './context/AIProgressContext'
 
 const BIDDING_DRAFT_KEY = 'bridge_bidding_draft'
+
+// 将当前手牌转换为自定义牌局文本格式（带花色符号，便于阅读编辑）
+const handsToEditText = (handsObj) => {
+  if (!handsObj) return ''
+  const order = ['南', '西', '北', '东']
+  const suitSymbols = ['♠', '♥', '♦', '♣']
+  const suitKeys = ['spades', 'hearts', 'diamonds', 'clubs']
+  return order.map(pos => {
+    const hand = handsObj[pos]
+    if (!hand) return ''
+    return suitKeys.map((k, i) => {
+      const cards = hand[k] || ''
+      return cards ? `${suitSymbols[i]}${cards}` : `${suitSymbols[i]}-`
+    }).join(' ')
+  }).join('\n')
+}
+
+// 将叫牌序列转换为编辑文本
+const biddingToEditText = (seq) => {
+  if (!seq || seq.length === 0) return ''
+  return seq.map(b => `(${b.position})${b.bid}`).join('-')
+}
 
 function AppShell({ darkMode, onToggleDarkMode }) {
   const theme = useTheme()
@@ -109,12 +132,13 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const draftSaveTimerRef = useRef(null) // debounce 叫牌草稿自动保存
   const lastBidTimeRef = useRef(null) // 上一条叫牌记录完成的时间戳，用于计算单次耗时
   const biddingStartTimeRef = useRef(null) // 同步存储叫牌开始时间，避免 React state 异步问题
+  // AI 轮询进度文案 setter（独立 Context，文案更新不触发本组件重渲染）
+  const setAiProgress = useAIProgressSetter()
   // ── Game 域状态（迁入 GameContext）──
   const {
     hands, setHands,
     loading, setLoading,
     aiThinking, setAiThinking,
-    setAiProgress,
     error, setError,
     warning, setWarning,
     gameMode, setGameMode,
@@ -160,28 +184,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     isDouble: false, isRedouble: false,
   })
   const [resetOpeningLeadValue, setResetOpeningLeadValue] = useState('')
-
-  // 将当前手牌转换为自定义牌局文本格式（带花色符号，便于阅读编辑）
-  const handsToEditText = (handsObj) => {
-    if (!handsObj) return ''
-    const order = ['南', '西', '北', '东']
-    const suitSymbols = ['♠', '♥', '♦', '♣']
-    const suitKeys = ['spades', 'hearts', 'diamonds', 'clubs']
-    return order.map(pos => {
-      const hand = handsObj[pos]
-      if (!hand) return ''
-      return suitKeys.map((k, i) => {
-        const cards = hand[k] || ''
-        return cards ? `${suitSymbols[i]}${cards}` : `${suitSymbols[i]}-`
-      }).join(' ')
-    }).join('\n')
-  }
-
-  // 将叫牌序列转换为编辑文本
-  const biddingToEditText = (seq) => {
-    if (!seq || seq.length === 0) return ''
-    return seq.map(b => `(${b.position})${b.bid}`).join('-')
-  }
 
   // ── Bidding 域状态（迁入 BiddingContext）──
   const {
@@ -317,6 +319,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     records: bridgeRecords,
     historyDialogOpen, setHistoryDialogOpen,
     loadRecords: loadBridgeRecords,
+    fetchFullRecord, fetchFullRecords,
     saveRecord: saveBridgeRecord,
     deleteRecords: deleteBridgeRecords,
     updateRecordNote,
@@ -369,11 +372,10 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     availableModels,
   } = useModelSettings()
 
-  // 检查API状态 + 加载历史记录
+  // 检查API状态（历史记录改为打开历史对话框时按需加载，不在启动时常驻）
   useEffect(() => {
     checkApiStatus()
-    loadBridgeRecords()
-  }, [checkApiStatus, loadBridgeRecords])
+  }, [checkApiStatus])
 
 
 
@@ -400,7 +402,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
 
   // 生成叫牌时间戳：累计时间 (单次耗时)
   // individualMs: 单次耗时毫秒，AI 调用在 await 后直接传入，避免 React 渲染延迟
-  const makeBidTimestamp = (individualMs = null) => {
+  const makeBidTimestamp = useCallback((individualMs = null) => {
     const now = Date.now()
     const start = biddingStartTimeRef.current
     if (!start) {
@@ -422,7 +424,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     }
     lastBidTimeRef.current = now
     return individual ? `${cumulative} (+${individual})` : cumulative
-  }
+  }, [biddingStartTime])
 
 
   // 加载历史记录到牌桌
@@ -732,23 +734,26 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   } = useDealing({ clearBiddingDraft })
 
   // 截屏识别需要关闭设置面板
-  const onScreenshotDeal = () => handleScreenshotDeal({ setShowSettings })
+  const onScreenshotDeal = useCallback(() => handleScreenshotDeal({ setShowSettings }), [handleScreenshotDeal, setShowSettings])
 
   // 中心面板识别叫牌过程：仅在未开始叫牌且尚无叫牌序列时可用
   // 桌面点击走剪贴板截屏流程；移动端从图库选图后以 File 参数回调，走上传识别路径
   const showBiddingScreenshotBtn = !showPlayPanel && !biddingStarted && (biddingSequence?.length || 0) === 0 && !readonlyMode
-  const onScreenshotBidding = showBiddingScreenshotBtn
-    ? (file) => file ? handleBiddingImageUpload(file) : handleBiddingScreenshot({ setShowSettings })
-    : null
+  const onScreenshotBidding = useMemo(
+    () => showBiddingScreenshotBtn
+      ? (file) => file ? handleBiddingImageUpload(file) : handleBiddingScreenshot({ setShowSettings })
+      : null,
+    [showBiddingScreenshotBtn, handleBiddingImageUpload, handleBiddingScreenshot, setShowSettings]
+  )
 
   // 开始叫牌
-  const startBidding = () => {
+  const startBidding = useCallback(() => {
     if (hands) {
       // 检查AI位置是否都有手牌
       const aiPositions = Object.entries(positionRoles)
         .filter(([, role]) => role === 'ai')
         .map(([pos]) => pos)
-      
+
       for (const pos of aiPositions) {
         const hand = hands[pos]
         if (!hand || (!hand.spades && !hand.hearts && !hand.diamonds && !hand.clubs)) {
@@ -756,7 +761,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           return
         }
       }
-      
+
       // 重置叫牌序列并标记开始
       setBiddingSequence([])
       setCurrentBidder(dealer)
@@ -777,7 +782,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       setBiddingHistory([initialSnapshot])
       setHistoryIndex(0)
     }
-  }
+  }, [hands, positionRoles, dealer, setError, setBiddingSequence, setCurrentBidder, markBiddingStarted, setAiBiddingHistory, setStopBidding, setPassedAIPositions, setBiddingTotalTime, setBiddingHistory, setHistoryIndex])
 
   // 重新叫牌（保持当前牌局）
   const resetBidding = () => {
@@ -860,7 +865,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   }
 
   // 添加叫牌
-  const addBid = async (bid) => {
+  const addBid = useCallback(async (bid) => {
     // 花色符号→字母规范化（统一显示为字母格式）
     const suitSymbolToLetter = { '♠': 'S', '♥': 'H', '♦': 'D', '♣': 'C' }
     bid = bid.replace(/[♠♥♦♣]/g, sym => suitSymbolToLetter[sym] || sym)
@@ -1089,7 +1094,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         }
       }
     }
-  }
+  }, [positionRoles, currentBidder, biddingStarted, biddingSequence, customBidMeaning, humanBidInterpret, hands, dealSystem, bidSystem, gameMode, practiceDirection, historyIndex, biddingHistory, appendBidHistory, makeBidTimestamp, setBiddingStarted, setCustomBidMeaning, setCurrentBiddingPosition, setBiddingSequence, setCurrentBidder, setBiddingHistory, setHistoryIndex, setPassedAIPositions])
 
   // 检查AI位置是否需要自动pass
   const shouldAIAutoPass = (position) => {
@@ -1469,9 +1474,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   }
 
   // 检验定约 - 调用Deep Finesse
-  const handleAnalyzeContract = async () => {
+  const handleAnalyzeContract = useCallback(async () => {
     if (!outputFormats?.deep_finesse) return
-    
+
     setAnalyzeLoading(true)
     setAnalyzeResult(null)
     try {
@@ -1486,7 +1491,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     } finally {
       setAnalyzeLoading(false)
     }
-  }
+  }, [outputFormats?.deep_finesse, setAnalyzeLoading, setAnalyzeResult])
 
   // 双明手分析（P1-8：手牌未变直接复用结果缓存；支持 AbortController 取消）
   const lastDDHandsKeyRef = useRef(null)
@@ -1523,14 +1528,14 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   }
 
   // P1-8：取消双明手分析（中止在途请求并回到原视图）
-  const cancelDoubleDummy = () => {
+  const cancelDoubleDummy = useCallback(() => {
     if (ddAbortRef.current) {
       ddAbortRef.current.abort()
       ddAbortRef.current = null
     }
     setDoubleDummyLoading(false)
     setShowDoubleDummy(false)
-  }
+  }, [setDoubleDummyLoading, setShowDoubleDummy])
 
   // 切换显示双明手结果
   const toggleDoubleDummy = (checked) => {
@@ -1767,17 +1772,23 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   }
 
   // 复盘：从历史记录载入最新一条打牌完成的记录，与"从历史记录载入"走同一路径
-  const handleReviewCompletedPlay = () => {
+  const handleReviewCompletedPlay = async () => {
     const latest = [...bridgeRecords]
-      .filter(r => r.type === 'play_complete' && r.play?.tricks?.length > 0)
+      .filter(r => r.type === 'play_complete' && r.play?.tricks)
       .sort((a, b) => String(b.id || 0).localeCompare(String(a.id || 0)))[0]
     if (!latest) {
       setError('没有可复盘的记录')
       return
     }
+    // 列表项是轻量摘要，复盘需先从后端取完整记录
+    const full = await fetchFullRecord(latest.id)
+    if (!full) {
+      setError('加载复盘记录失败')
+      return
+    }
     // 点“复盘”意图已明确，直接进入复盘，不再弹“复盘 / 只重新打牌”二选一对话框
     setRecordActionMode('review')
-    loadRecordToTable(latest)
+    loadRecordToTable(full)
   }
 
   const handleRewindToTrick = async (targetCardIdx) => {
@@ -1942,6 +1953,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     setLastCompletedTrick(null)
     setReviewCursor(null)
     setAiPlayHistory([])
+    setSelectedPlayRecord(null)
 
     let biddingStr = null
     let meaningLines = ''
@@ -2024,16 +2036,16 @@ function AppShell({ darkMode, onToggleDarkMode }) {
 
   // 出牌
   // 出牌失败时回退乐观更新，重新拉取后端真实状态
-  const reconcilePlayState = async () => {
+  const reconcilePlayState = useCallback(async () => {
     try {
       const s = await getPlayState()
       if (s.success) setPlayState(s.state)
     } catch (err) {
       console.error('回退状态失败:', err)
     }
-  }
+  }, [setPlayState])
 
-  const handlePlayCard = async (position, card) => {
+  const handlePlayCard = useCallback(async (position, card) => {
     // P2-5 修复：出牌请求在途时忽略重复点击（连点两张 → 第二张被后端拒绝 → 桌面闪跳）
     if (playCardInFlightRef.current) return
     playCardInFlightRef.current = true
@@ -2091,16 +2103,16 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       aiPlayInFlightRef.current = false
       setPlayLoading(false)
     }
-  }
+  }, [reconcilePlayState, setPlayState, setPlayLoading, setError, setPlayStarted, setIsPlayPaused])
 
   // 点击牌桌上的手牌直接出牌
-  const handleHandCardClick = (suitSymbol, rank) => {
+  const handleHandCardClick = useCallback((suitSymbol, rank) => {
     if (!playState?.current_player) return
     handlePlayCard(playState.current_player, { suit: suitSymbol, rank })
-  }
+  }, [playState?.current_player, handlePlayCard])
 
   // 人类手动输入牌张（无手牌数据时）
-  const handleManualPlay = (position, cardStr) => {
+  const handleManualPlay = useCallback((position, cardStr) => {
     cardStr = cardStr.trim()
     // 解析格式: "♠A" / "S A" / "♠10" / "SA"
     let suit, rank
@@ -2123,9 +2135,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     const suitMap = { 'S': '♠', 'H': '♥', 'D': '♦', 'C': '♣' }
     suit = suitMap[suit.toUpperCase()] || suit
     handlePlayCard(position, { suit, rank })
-  }
+  }, [setError, handlePlayCard])
 
-  const handleSetPlayHand = async (position, hand) => {
+  const handleSetPlayHand = useCallback(async (position, hand) => {
     setPlayLoading(true)
     try {
       const result = await setPlayHand(position, hand)
@@ -2141,7 +2153,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     } finally {
       setPlayLoading(false)
     }
-  }
+  }, [setPlayLoading, setPlayState, setHands, setError])
 
   // AI出牌
   const handleAIPlay = async () => {
@@ -2433,9 +2445,10 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   }
 
   // 桌面点击已出牌，切换到对应的打牌细节
-  const handlePlayCardClick = (position, card) => {
-    if (!aiPlayHistory || aiPlayHistory.length === 0) return
-    const found = aiPlayHistory.find(record =>
+  const handlePlayCardClick = useCallback((position, card) => {
+    const history = aiPlayHistoryRef.current
+    if (!history || history.length === 0) return
+    const found = history.find(record =>
       record.position === position &&
       record.card?.suit === card.suit &&
       record.card?.rank === card.rank
@@ -2443,7 +2456,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     if (found) {
       setSelectedPlayRecord(found)
     }
-  }
+  }, [setSelectedPlayRecord])
 
   // 前端计算当前玩家的合法出牌（与 PlayPanel.getPlayableCards 一致）
   const getLegalPlaysForPlayer = (position) => {
@@ -2705,7 +2718,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   }, [playState, hands, biddingSequence, dealer, gameMode, practiceDirection, positionRoles, directPlayContractInfo, aiBiddingHistory, dealSystem, aiPlayHistory, currentRecordId, imageOpeningLead])
 
   // 处理位置角色变化：所有位置全手动设置，无连锁
-  const handlePositionRoleChange = async (position, role) => {
+  const handlePositionRoleChange = useCallback(async (position, role) => {
     const newRoles = { ...positionRoles, [position]: role }
     setPositionRoles(newRoles)
 
@@ -2728,7 +2741,25 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         console.error('更新打牌角色失败:', err)
       }
     }
-  }
+  }, [positionRoles, showPlayPanel, playState, isPlayPaused, setPositionRoles, setIsPlayPaused, setPlayState])
+
+  // 打开修正手牌对话框（稳定引用，供 memo 子组件）
+  const handleOpenEditHands = useCallback(() => {
+    setCustomDealText(handsToEditText(hands))
+    setCustomDealOpen(true)
+  }, [hands, setCustomDealOpen])
+
+  // 打开编辑叫牌序列对话框
+  const handleOpenEditBidding = useCallback(() => {
+    setEditBiddingText(biddingToEditText(biddingSequence))
+    setShowEditBiddingDialog(true)
+  }, [biddingSequence, setShowEditBiddingDialog])
+
+  // 打开自定义发牌对话框
+  const handleOpenCustomDeal = useCallback(() => setCustomDealOpen(true), [setCustomDealOpen])
+
+  // 图片发牌：带 File 参数时直接识别，否则打开图片发牌对话框
+  const handleImageDealProp = useCallback((file) => file ? handleImageDeal(file) : setImageDealOpen(true), [handleImageDeal, setImageDealOpen])
 
 
   return (
@@ -2871,23 +2902,17 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           onDealerChange={handleDealerChange}
           onPositionRoleChange={handlePositionRoleChange}
           onClearAllHands={clearAllHands}
-          onEditHands={() => {
-            setCustomDealText(handsToEditText(hands))
-            setCustomDealOpen(true)
-          }}
-          onEditBidding={() => {
-            setEditBiddingText(biddingToEditText(biddingSequence))
-            setShowEditBiddingDialog(true)
-          }}
+          onEditHands={handleOpenEditHands}
+          onEditBidding={handleOpenEditBidding}
           onPlayCardClick={handlePlayCardClick}
           onSetPlayHand={handleSetPlayHand}
-          onImageDeal={(file) => file ? handleImageDeal(file) : setImageDealOpen(true)}
+          onImageDeal={handleImageDealProp}
           onScreenshotDeal={onScreenshotDeal}
           onScreenshotBidding={onScreenshotBidding}
           screenshotBiddingDisabled={dealingLoading || aiThinking}
           onSingleHandScreenshot={handleSingleHandScreenshot}
           onSingleHandUpload={handleSingleHandUpload}
-          onCustomDeal={() => setCustomDealOpen(true)}
+          onCustomDeal={handleOpenCustomDeal}
           onDeal={handleDeal}
           onHandCardClick={handleHandCardClick}
           onManualPlay={handleManualPlay}
@@ -2951,28 +2976,34 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         records={bridgeRecords}
         onLoad={loadRecordToTable}
         onDelete={(ids) => deleteBridgeRecords(ids)}
-        onExport={(records) => {
-          try {
-            if (records.length === 0) { setError('没有可导出的记录'); return }
-            const exportData = { version: '2.0', exportDate: new Date().toISOString(), records }
-            const dataStr = JSON.stringify(exportData, null, 2)
-            const blob = new Blob([dataStr], { type: 'application/json' })
-            const url = URL.createObjectURL(blob)
-            const link = document.createElement('a')
-            link.href = url
-            link.download = `bridge_records_${new Date().toISOString().slice(0, 10)}.json`
-            document.body.appendChild(link)
-            link.click()
-            document.body.removeChild(link)
-            URL.revokeObjectURL(url)
-          } catch (err) {
-            console.error('导出记录失败:', err)
-            setError('导出记录失败')
-          }
+        onExport={(summaries) => {
+          (async () => {
+            try {
+              if (summaries.length === 0) { setError('没有可导出的记录'); return }
+              // 摘要列表只有轻量字段，导出需从后端取完整记录
+              const ids = summaries.map(r => r.id)
+              const full = ids.length ? await fetchFullRecords(ids) : []
+              const exportData = { version: '2.0', exportDate: new Date().toISOString(), records: full }
+              const dataStr = JSON.stringify(exportData, null, 2)
+              const blob = new Blob([dataStr], { type: 'application/json' })
+              const url = URL.createObjectURL(blob)
+              const link = document.createElement('a')
+              link.href = url
+              link.download = `bridge_records_${new Date().toISOString().slice(0, 10)}.json`
+              document.body.appendChild(link)
+              link.click()
+              document.body.removeChild(link)
+              URL.revokeObjectURL(url)
+            } catch (err) {
+              console.error('导出记录失败:', err)
+              setError('导出记录失败')
+            }
+          })()
         }}
         onImport={importRecords}
         onUpdateNote={updateRecordNote}
         onError={setError}
+        onGetFull={fetchFullRecord}
       />
 
       {/* 自定义牌局对话框 */}
@@ -3384,7 +3415,9 @@ function App({ darkMode, onToggleDarkMode }) {
     <GameProvider>
       <BiddingProvider>
         <PlayProvider>
-          <AppShell darkMode={darkMode} onToggleDarkMode={onToggleDarkMode} />
+          <AIProgressProvider>
+            <AppShell darkMode={darkMode} onToggleDarkMode={onToggleDarkMode} />
+          </AIProgressProvider>
         </PlayProvider>
       </BiddingProvider>
     </GameProvider>

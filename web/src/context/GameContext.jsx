@@ -25,8 +25,7 @@ export function GameProvider({ children }) {
     '西': { spades: '', hearts: '', diamonds: '', clubs: '', hcp: 0 },
   })
   const [loading, setLoading] = useState(false)
-  const [aiThinking, setAiThinking] = useState(false)
-  const [aiProgress, setAiProgress] = useState(null) // 任务化轮询的当前阶段文案（叫牌/打牌共用）
+  const [aiThinking, setAiThinking] = useState(false) // AI思考中
   const [error, setError] = useState(null)
   const [warning, setWarning] = useState(null)
 
@@ -94,7 +93,6 @@ export function GameProvider({ children }) {
       hands, setHands,
       loading, setLoading,
       aiThinking, setAiThinking,
-      aiProgress, setAiProgress,
       error, setError,
       warning, setWarning,
       gameMode, setGameMode,
@@ -125,7 +123,7 @@ export function GameProvider({ children }) {
       readonlyMode, setReadonlyMode,
     }),
     [
-      hands, loading, aiThinking, aiProgress, error, warning,
+      hands, loading, aiThinking, error, warning,
       gameMode, dealer, vulnerability, practiceDirection, positionRoles,
       showPartnerHand, showOpponentHands, showAIBiddingOutput, useFallback,
       dealMode, showSettings, dealSystem, bidSystem,

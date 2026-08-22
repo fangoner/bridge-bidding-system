@@ -4,13 +4,13 @@ import { KeyboardArrowDown, KeyboardArrowRight } from '@mui/icons-material'
 import { getSuitColor } from '../constants/suits'
 import { PANEL_LAYOUT } from '../styles/constants'
 import { formatTotalTime } from '../utils/format'
+import { useAIProgress } from '../context/AIProgressContext'
 
 function PlayDetailPanel({
   isMobile,
   playState,
   aiPlayHistory,
   aiLoading,
-  aiProgress, // 任务化轮询实时进度文案（AI出牌阶段）
   isPaused,
   onResume,
   onResetPlay,
@@ -36,6 +36,7 @@ function PlayDetailPanel({
   useLlmReview, // P1-10：LLM 审查开关（开启时预计耗时上浮）
   playStartTime, // P1-10：打牌开始时间戳（打牌中实时显示本局已进行时长）
 }) {
+  const aiProgress = useAIProgress() // 任务化轮询实时进度文案（AI出牌阶段）
   const [selectedRecord, setSelectedRecord] = useState(null)
   const [viewMode, setViewMode] = useState('output')
   const [collapsed, setCollapsed] = useState(false)
@@ -317,13 +318,18 @@ function PlayDetailPanel({
 
                 const isAlphaMu = mctsData.algorithm === 'alpha_mu'
                 const isDD = (record.used_engine || '') === 'dd' || (!isAlphaMu && candidates[0].samples !== undefined)
+                const ddScoringMode = isDD && candidates[0] ? (candidates[0].scoring_mode || 'avg_tricks') : null
 
-                // αμ: bar = success_rate (成功率 0-1); DD: bar = avg_tricks; MCTS: bar = visits
-                const barValues = candidates.map(c =>
-                  isAlphaMu ? ((c.success_rate || 0) * 100) :
-                  isDD ? (c.avg_tricks || 0) :
-                  (c.visits || 0)
-                )
+                // αμ: bar = success_rate (成功率 0-1); DD: bar = scoring_val/avg_tricks; MCTS: bar = visits
+                const barValues = candidates.map(c => {
+                  if (isAlphaMu) return (c.success_rate || 0) * 100
+                  if (isDD) {
+                    if (ddScoringMode === 'imp') return c.scoring_val || 0
+                    if (ddScoringMode === 'make_rate') return (c.scoring_val || 0) * 100
+                    return c.avg_tricks || 0
+                  }
+                  return c.visits || 0
+                })
                 const maxVal = Math.max(...barValues.map(v => Math.abs(v)), 0.01)
                 const barColors = isAlphaMu
                   ? ['#263238', '#37474f', '#546e7a', '#78909c', '#b0bec5']
@@ -333,7 +339,9 @@ function PlayDetailPanel({
                     <Typography variant="caption" sx={{ fontSize: '0.7rem', color: colorMuted, mb: 0.25, display: 'block' }}>
                       {isAlphaMu
                         ? `αμ: ${mctsData.num_worlds || '?'} worlds · depth≤4 · ${mctsData.nodes_searched || '?'} nodes · ${mctsData.iterations || '?'} DDS · ${mctsData.time_sec || '?'}s`
-                        : `${isDD ? 'DDMC' : 'MCTS'}: ${mctsData.iterations}次搜索 · ${mctsData.time_sec}s · ${mctsData.iters_per_sec}it/s · 剩${mctsData.remaining_cards}张`
+                        : isDD
+                          ? `DDMC: ${mctsData.iterations}次搜索 · ${mctsData.time_sec}s · ${mctsData.iters_per_sec}it/s · 剩${mctsData.remaining_cards}张 · ${ddScoringMode === 'imp' ? 'IMP制' : ddScoringMode === 'make_rate' ? '成约率制' : '赢墩制'}`
+                          : `MCTS: ${mctsData.iterations}次搜索 · ${mctsData.time_sec}s · ${mctsData.iters_per_sec}it/s · 剩${mctsData.remaining_cards}张`
                       }
                     </Typography>
                     {candidates.map((c, i) => {
@@ -357,7 +365,11 @@ function PlayDetailPanel({
                           {isAlphaMu
                             ? `${((c.success_rate || 0) * 100).toFixed(0)}% · ${c.avg_tricks ?? '?'}墩 · ${c.success_count || 0}/${c.total_useful || '?'} · front${c.front_size || 1}${isInherited ? ' · 继承' : ''}`
                             : isDD
-                              ? `${c.avg_tricks}墩 [${c.min_tricks}-${c.max_tricks}]`
+                              ? ddScoringMode === 'imp'
+                                ? `${c.scoring_val >= 0 ? '+' : ''}${c.scoring_val}IMP`
+                                : ddScoringMode === 'make_rate'
+                                  ? `${(c.scoring_val * 100).toFixed(1)}%`
+                                  : `${c.avg_tricks}墩 [${c.min_tricks}-${c.max_tricks}]`
                               : `${c.visits}次 · ${c.avg_tricks}墩`
                           }
                         </Typography>

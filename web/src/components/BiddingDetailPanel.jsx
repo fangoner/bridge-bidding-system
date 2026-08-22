@@ -3,6 +3,7 @@ import { Box, Typography, Paper, FormControlLabel, Checkbox, Select, MenuItem, C
 import { PANEL_LAYOUT } from '../styles/constants'
 import { isHumanPosition } from '../utils/position'
 import { formatTotalTime } from '../utils/format'
+import { useAIProgress } from '../context/AIProgressContext'
 
 /** hand对象 → 展示字符串 "♠AKQ ♥J32 ♦KT9 ♣6542 15点"；空手牌返回 "未知" */
 const formatHandDisplay = (hand) => {
@@ -49,12 +50,12 @@ function BiddingDetailPanel({
   onSave,
   canSave,
   aiThinking,
-  aiProgress, // 任务化轮询实时进度文案（AI叫牌阶段）
   readonlyMode = false,
   fallbackModel,
   biddingTotalTime, // v1.61：叫牌总耗时（秒，叫牌完成时计算）
   bidSystem = 'jf',
 }) {
+  const aiProgress = useAIProgress() // 任务化轮询实时进度文案（AI叫牌阶段）
   const theme = useTheme()
   const [viewMode, setViewMode] = useState('output') // 'input' | 'output'
   const isDark = theme.palette.mode === 'dark'

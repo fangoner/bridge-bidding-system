@@ -166,7 +166,6 @@ function RightPanelSwitcher({
     showAIBiddingOutput,
     readonlyMode,
     aiThinking,
-    aiProgress,
     imageOpeningLead,
     fallbackModel,
     bidSystem,
@@ -271,7 +270,6 @@ function RightPanelSwitcher({
         onSave={onSaveBidding}
         canSave={canSaveBiddingProgress}
         aiThinking={aiThinking}
-        aiProgress={aiProgress}
         readonlyMode={readonlyMode}
         fallbackModel={fallbackModel}
         biddingTotalTime={biddingTotalTime}

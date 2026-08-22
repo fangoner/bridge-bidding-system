@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import React, { useMemo, useRef, useCallback } from 'react'
 import { Box, Typography, Paper, ToggleButton, ToggleButtonGroup, FormControlLabel, Checkbox, Button, IconButton, Tooltip, useTheme } from '@mui/material'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
@@ -57,6 +57,7 @@ function CardTablePanel({
     readonlyMode, mode,
     imageOpeningLead,
     dealMode,
+    fallbackModel, playModel,
   } = useGame()
 
   const {
@@ -80,6 +81,7 @@ function CardTablePanel({
     showDDHints, toggleDDHints,
     ddHints, ddHintsLoading,
     reviewCursor,
+    playEngine,
   } = usePlay()
 
   // 复盘游标对应的墩（按牌序号查找所属trick）
@@ -135,6 +137,17 @@ function CardTablePanel({
     }
     return true
   })()
+
+  // 叫牌表渲染函数（useCallback 固化引用，保证 CardTable 的 React.memo 生效）
+  const renderBiddingTable = useCallback(() => (
+    <BiddingTable
+      biddingSequence={biddingSequence}
+      dealer={dealer}
+      onScreenshotBidding={onScreenshotBidding}
+      screenshotBiddingDisabled={screenshotBiddingDisabled}
+    />
+  ), [biddingSequence, dealer, onScreenshotBidding, screenshotBiddingDisabled])
+
   return (
     <Paper elevation={0} sx={{
       m: 0,
@@ -402,7 +415,7 @@ function CardTablePanel({
           showPartnerHand={showPartnerHand}
           showOpponentHands={showOpponentHands}
           getPartnerPosition={getPartnerPosition}
-          renderBiddingTable={() => <BiddingTable biddingSequence={biddingSequence} dealer={dealer} onScreenshotBidding={onScreenshotBidding} screenshotBiddingDisabled={screenshotBiddingDisabled} />}
+          renderBiddingTable={renderBiddingTable}
           checkBiddingComplete={isBiddingComplete}
           outputFormats={outputFormats}
           outputFormatsLoading={outputFormatsLoading}
@@ -451,6 +464,9 @@ function CardTablePanel({
           reviewTrick={reviewTrick}
           onSingleHandScreenshot={onSingleHandScreenshot}
           onSingleHandUpload={onSingleHandUpload}
+          fallbackModel={fallbackModel}
+          playModel={playModel}
+          playEngine={playEngine}
         />
       </Box>
     </Paper>

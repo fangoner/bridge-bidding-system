@@ -12,8 +12,6 @@ import { getCardSuitColor } from '../constants/suits';
 import DoubleDummyTable from './DoubleDummyTable';
 import { isHumanPosition, hasAnyHuman, getHumanPositions, BRIDGE_POSITIONS } from '../utils/position';
 import { calcScore } from '../utils/score';
-import { useGame } from '../context/GameContext';
-import { usePlay } from '../context/PlayContext';
 
 const MODEL_LABELS = {
   'deepseek-v4-flash': 'DSF',
@@ -90,10 +88,10 @@ function CardTable({
   reviewTrick,
   onSingleHandScreenshot,
   onSingleHandUpload,
+  fallbackModel,
+  playModel,
+  playEngine,
 }) {
-  const { fallbackModel, playModel } = useGame()
-  const { playEngine } = usePlay()
-
   /** 手牌信息框中显示的角色/引擎标签 */
   const engineLabel = useCallback((isPlayPanel) => {
     if (!isPlayPanel) return modelLabel(fallbackModel)
