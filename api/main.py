@@ -2905,12 +2905,21 @@ async def upsert_record_single(request: Request):
             raise HTTPException(status_code=400, detail="缺少 record")
         records = _read_backup_records()
         rid = str(record.get("id"))
+        sid = record.get("sourceRecordId")
         replaced = False
         for i, r in enumerate(records):
             if str(r.get("id")) == rid:
                 records[i] = record
                 replaced = True
                 break
+        if not replaced and sid:
+            for i, r in enumerate(records):
+                if str(r.get("id")) == str(sid) or str(r.get("sourceRecordId")) == str(sid):
+                    merged = dict(record)
+                    merged["id"] = r.get("id")
+                    records[i] = merged
+                    replaced = True
+                    break
         if not replaced:
             records.insert(0, record)
         records = records[:RECORDS_BACKUP_MAX]

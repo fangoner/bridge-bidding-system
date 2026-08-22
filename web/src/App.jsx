@@ -1602,24 +1602,35 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     )
     if (!initResult.success) return { error: initResult.error }
 
+    // 完整复盘（回放至整副牌结束）：记录本身就是权威数据，按记录直接渲染，
+    // 不依赖逐张后端合法性回放。实战模拟中对手两家是后期手工输入，早期在缺牌信息下
+    // 产生的出牌顺序可能与最终整副牌不一致，逐张校验会误报“回放失败”。
+    const savedPhase = savedState.phase
+    const isFullReview = keepCount === 'all' && actualKeep >= allPlayed.length && savedPhase === 'complete'
+
     // 回放前 actualKeep 张牌（P1-9：显示 N/M 进度，统计失败张数）
     let lastReplayState = initResult.state
     let replayFailed = 0
-    if (actualKeep > 0) setReplayProgress({ current: 0, total: actualKeep })
-    for (let i = 0; i < actualKeep; i++) {
-      const { pos, card } = allPlayed[i]
-      setReplayProgress({ current: i + 1, total: actualKeep })
-      try {
-        const reply = await playCard(pos, card)
-        if (reply?.success) lastReplayState = reply.state
-        else replayFailed++
-      } catch (e) {
-        replayFailed++
-        console.warn('回放出牌失败:', pos, card, e)
+    if (isFullReview) {
+      // 完整复盘：跳过逐张后端校验，直接用记录构建展示态
+      lastReplayState = null
+    } else if (actualKeep > 0) {
+      setReplayProgress({ current: 0, total: actualKeep })
+      for (let i = 0; i < actualKeep; i++) {
+        const { pos, card } = allPlayed[i]
+        setReplayProgress({ current: i + 1, total: actualKeep })
+        try {
+          const reply = await playCard(pos, card)
+          if (reply?.success) lastReplayState = reply.state
+          else replayFailed++
+        } catch (e) {
+          replayFailed++
+          console.warn('回放出牌失败:', pos, card, e)
+        }
       }
-    }
-    if (replayFailed > 0) {
-      setWarning(`回放完成，但 ${replayFailed}/${actualKeep} 张牌回放失败，牌局状态可能与原记录不一致`)
+      if (replayFailed > 0) {
+        setWarning(`回放完成，但 ${replayFailed}/${actualKeep} 张牌回放失败，牌局状态可能与原记录不一致`)
+      }
     }
 
     // 构建截断后的 playState
@@ -1634,30 +1645,44 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     const isLead = actualKeep === 0
     const allReplayed = actualKeep >= allPlayed.length
 
-    const truncatedState = lastReplayState
-      ? {
-          ...lastReplayState,
-          tricks: keptTricks,
-          current_trick: partialCards.length > 0
-            ? { cards: partialCards, leader: partialCards[0]?.[0] || null, trump: contract.suit || null }
-            : { cards: [], leader: null, trump: contract.suit || null },
-          phase: allReplayed ? savedState.phase : (isLead ? 'lead' : 'playing'),
+    // 展示用四家手牌：优先用完整回放得到的后端状态；否则从已载入的整副手牌重建
+    const suitSym = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' }
+    const buildPlayHands = (h) => {
+      const out = {}
+      for (const pos of ['北', '南', '东', '西']) {
+        const hd = h?.[pos] || {}
+        const cards = []
+        for (const sk of ['spades', 'hearts', 'diamonds', 'clubs']) {
+          for (const r of String(hd[sk] || '')) cards.push({ suit: suitSym[sk], rank: r })
         }
-      : {
-          ...savedState,
-          tricks: keptTricks,
-          current_trick: partialCards.length > 0
-            ? { cards: partialCards, leader: partialCards[0]?.[0] || null, trump: contract.suit || null }
-            : { cards: [], leader: null, trump: contract.suit || null },
-          current_player: null,
-          phase: allReplayed ? savedState.phase : (isLead ? 'lead' : 'playing'),
-          declarer_tricks: keptTricks.filter(t =>
-            t.winner === contract.declarer || t.winner === savedState.dummy
-          ).length,
-          defender_tricks: keptTricks.filter(t =>
-            t.winner && t.winner !== contract.declarer && t.winner !== savedState.dummy
-          ).length,
-        }
+        out[pos] = cards
+      }
+      return out
+    }
+    const displayHands = lastReplayState?.hands || buildPlayHands(hands)
+    const calcDecl = () => keptTricks.filter(t =>
+      t.winner === contract.declarer || t.winner === savedState.dummy).length
+    const calcDef = () => keptTricks.filter(t =>
+      t.winner && t.winner !== contract.declarer && t.winner !== savedState.dummy).length
+    const declTricks = lastReplayState
+      ? (lastReplayState.declarer_tricks ?? calcDecl())
+      : (savedState.declarer_tricks ?? calcDecl())
+    const defTricks = lastReplayState
+      ? (lastReplayState.defender_tricks ?? calcDef())
+      : (savedState.defender_tricks ?? calcDef())
+
+    const truncatedState = {
+      ...(lastReplayState || savedState),
+      hands: displayHands,
+      tricks: keptTricks,
+      current_trick: partialCards.length > 0
+        ? { cards: partialCards, leader: partialCards[0]?.[0] || null, trump: contract.suit || null }
+        : { cards: [], leader: null, trump: contract.suit || null },
+      current_player: lastReplayState?.current_player ?? null,
+      phase: allReplayed ? savedPhase : (isLead ? 'lead' : 'playing'),
+      declarer_tricks: declTricks,
+      defender_tricks: defTricks,
+    }
 
     // 裁剪 aiPlayHistory
     let trimmedHistory = []
@@ -1771,8 +1796,37 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     handleStartPlay(mode)
   }
 
-  // 复盘：从历史记录载入最新一条打牌完成的记录，与"从历史记录载入"走同一路径
-  const handleReviewCompletedPlay = async () => {
+  // 复盘：优先用当前刚打完成的牌局（内存 playState 已在），避免等后端落盘的时序窗口；否则从历史取
+const handleReviewCompletedPlay = async () => {
+    if (showPlayPanel && playState?.phase === 'complete') {
+      const record = {
+        id: currentRecordId || Date.now().toString(),
+        timestamp: new Date().toLocaleString(),
+        type: 'play_complete',
+        sourceRecordId: currentRecordId || undefined,
+        board: {
+          hands,
+          bidding_sequence: biddingSequence,
+          contract: getFinalContract() || directPlayContractInfo,
+          dealer,
+          opening_lead: imageOpeningLead,
+        },
+        bidding: {
+          ai_bidding_history: trimBiddingHistory(aiBiddingHistory),
+          deal_system: dealSystem,
+        },
+        play: {
+          tricks: playState.tricks,
+          ai_play_history: trimPlayHistory(aiPlayHistory),
+          declarer_tricks: playState.declarer_tricks,
+          defender_tricks: playState.defender_tricks,
+        },
+      }
+      setRecordActionMode('review')
+      loadRecordToTable(record)
+      return
+    }
+
     const latest = [...bridgeRecords]
       .filter(r => r.type === 'play_complete' && r.play?.tricks)
       .sort((a, b) => String(b.id || 0).localeCompare(String(a.id || 0)))[0]
