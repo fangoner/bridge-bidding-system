@@ -891,23 +891,19 @@ class PlayService:
         perspective = state.current_player
         cards = len(state.hands.get(perspective, []))
 
-        # 残局枚举：优先尝试精确枚举所有未知分布，作为完备世界集交给 αμ。
-        # 一致性原则：枚举只是替代采样的世界生成方式（采样→穷举），
-        # 决策算法不变——仍走 αμ 的布尔成功率/Pareto 逻辑，不沿用 DD 决策。
-        # 门槛不再用"当前玩家手牌数"（如东5张会被挡下，但此时东/明手手牌
-        # 已知、未知仅两家各4张，C(8,4)=70 完全可枚举）。_enumerate_endgame_worlds
-        # 内部有 est > max 判定会自行回退采样，故放开硬门槛交由它判断。
-        # αμ 采样在约束不可满足时会陷入回退链（MH→Level2→Level0），枚举可避免。
+        # 残局枚举：与 DD 保持一致，固定最后 4 墩时尝试精确枚举所有未知分布。
+        # 枚举只是替代采样的世界生成方式，决策算法不变——仍走 αμ 的布尔成功率/Pareto 逻辑。
         _t_alpha_start = time.time()
         enum_worlds = None
-        try:
-            enum_worlds = self.dd_search._enumerate_endgame_worlds(state, perspective)
-            if enum_worlds:
-                print(f"[αμ] 残局完备世界集: {len(enum_worlds)} 个（枚举替代采样，αμ 决策）")
-        except Exception as e:
-            # P0-3 修复：残局枚举异常不中断，回退 αμ 采样搜索
-            print(f"[αμ] 残局枚举异常（回退 αμ 采样搜索）: {e}")
-            enum_worlds = None
+        remaining_tricks = 13 - len(state.tricks)
+        if remaining_tricks <= 4:
+            try:
+                enum_worlds = self.dd_search._enumerate_endgame_worlds(state, perspective)
+                if enum_worlds:
+                    print(f"[αμ] 残局完备世界集: {len(enum_worlds)} 个（枚举替代采样，αμ 决策）")
+            except Exception as e:
+                print(f"[αμ] 残局枚举异常（回退 αμ 采样搜索）: {e}")
+                enum_worlds = None
 
         # P2-17 修复：世界数优先读取设置面板配置的值（滑块仅在纯 αμ 引擎下修改，
         # 但值在 session 内持久，对 DD-αμ-LLM 残局阶段同样全局生效，与 DD 样本数滑块行为一致）
@@ -1033,7 +1029,7 @@ class PlayService:
         if not self._should_trigger_llm(groups, candidates, gap_threshold=None):
             all_zero = candidates and all(c.get("success_rate", 0) == 0 for c in candidates)
             if all_zero and len(candidates) >= 2:
-                groups = self._build_desperation_groups(candidates, trump_suit=trump_suit)
+                groups = self._build_desperation_groups(candidates, trump_suit=trump_suit, state=state)
                 if len(groups) < 2:
                     full_output["llm_review_status"] = "跳过：无成约机会且分组不足"
                     return alpha_result
@@ -1141,7 +1137,7 @@ class PlayService:
 
         trump_suit = state.contract.suit if state.contract.suit != "NT" else ""
         groups = self._group_candidates_by_tricks_vec(
-            candidates, state.contract.tricks_needed, trump_suit)
+            candidates, state.contract.tricks_needed, trump_suit, state)
 
         # 防守方走独立防守审查（赢墩硬约束下传信号）
         declarer = state.contract.declarer
@@ -1155,7 +1151,7 @@ class PlayService:
         if not self._should_trigger_llm(groups, candidates, n_samples=dd_iterations):
             all_zero = candidates and all(c.get("success_rate", 0) == 0 for c in candidates)
             if all_zero and len(candidates) >= 2:
-                groups = self._build_desperation_groups(candidates, trump_suit=trump_suit)
+                groups = self._build_desperation_groups(candidates, trump_suit=trump_suit, state=state)
                 if len(groups) < 2:
                     full_output["llm_review_status"] = "跳过：无成约机会且分组不足"
                     return dd_result
@@ -1221,23 +1217,70 @@ class PlayService:
 
     def _group_candidates_by_tricks_vec(self, candidates: list,
                                         tricks_needed: int,
-                                        trump_suit: str = "") -> list:
-        """按各world赢墩数向量等价分组（DD中盘用）。
+                                        trump_suit: str = "",
+                                        state: PlayState = None) -> list:
+        """按计分制决策向量等价分组（DD中盘用）。
 
-        DD候选没有αμ的best_vector，但每个候选保留scores（各world庄家方赢墩数）。
-        scores完全相同 → 各世界表现等价 → 一组；组内按花色+rank区间拆分。
-        success_rate = scores中≥tricks_needed的占比，与αμ的成约率同义。
+        tricks_vec 按 scoring_mode 生成：
+        - "imp": IMP分数向量（防守方取负，表示防守方期望IMP）
+        - "make_rate": 0/1向量（防守方取反：1=击垮，0=庄家成约）
+        - "avg_tricks": 赢墩数向量（现状）
+        success_rate 始终为当前方目标达成率（坐庄=成约率，防守=击垮率）。
 
         返回: [{"cards": [...], "success_rate": float, "group_id": int, "best_vector": str}, ...]
         """
+        scoring_mode = getattr(self.dd_search, "scoring_mode", "imp") if self.dd_search else "imp"
+        is_defender = False
+        if state and state.contract:
+            declarer = state.contract.declarer
+            dummy = state.dummy
+            is_defender = state.current_player not in (declarer, dummy)
+
+        vul_decl = False
+        if state and state.contract:
+            from bridge.mcts.dd_search import _declarer_side_vulnerable
+            vul_decl = _declarer_side_vulnerable(
+                state.contract.declarer, getattr(state, "vulnerability", "NV"))
+
         for c in candidates:
             scores = c.get("scores") or []
             if not scores:
                 c["success_rate"] = 0.0
+                c["tricks_vec"] = ()
                 continue
             n = len(scores)
-            c["success_rate"] = sum(1 for s in scores if s >= tricks_needed) / n
-            c["tricks_vec"] = tuple(scores)
+
+            # success_rate：坐庄=成约率，防守=击垮率
+            if is_defender:
+                defender_goal = 14 - tricks_needed
+                c["success_rate"] = sum(1 for s in scores if s <= defender_goal) / n
+            else:
+                c["success_rate"] = sum(1 for s in scores if s >= tricks_needed) / n
+
+            # tricks_vec：按计分制生成，防守方视角取反
+            if scoring_mode == "imp":
+                if state and state.contract:
+                    from bridge.mcts.dd_search import _raw_to_imp, _contract_score
+                    imp_scores = tuple(
+                        _raw_to_imp(_contract_score(t, state.contract, vul_decl))
+                        for t in scores)
+                    if is_defender:
+                        imp_scores = tuple(-x for x in imp_scores)
+                    c["tricks_vec"] = imp_scores
+                else:
+                    c["tricks_vec"] = tuple(scores)
+            elif scoring_mode == "make_rate":
+                if is_defender:
+                    defender_goal = 14 - tricks_needed
+                    c["tricks_vec"] = tuple(1 if t <= defender_goal else 0 for t in scores)
+                else:
+                    c["tricks_vec"] = tuple(1 if t >= tricks_needed else 0 for t in scores)
+            else:
+                # avg_tricks：防守方取负，最小化庄家赢墩 = 最大化防守方"负赢墩"
+                if is_defender:
+                    c["tricks_vec"] = tuple(-t for t in scores)
+                else:
+                    c["tricks_vec"] = tuple(scores)
         if not candidates:
             return []
         above = [c for c in candidates if c.get("success_rate", 0) > 0]
@@ -1251,12 +1294,36 @@ class PlayService:
         result = []
         for vec, cards in by_vec.items():
             for sg in self._split_by_rank_tier(cards):
+                # 组内取 scoring_val 均值；防守方取负转为防守视角（越大越好）
+                scoring_vals = []
+                for c in sg:
+                    sv = c.get("scoring_val")
+                    if sv is not None:
+                        scoring_vals.append(-sv if is_defender else sv)
+                avg_scoring = sum(scoring_vals) / len(scoring_vals) if scoring_vals else None
                 result.append({
                     "cards": sg,
                     "success_rate": max(c.get("success_rate", 0) for c in sg),
+                    "avg_scoring_val": avg_scoring,
                     "best_vector": "DD等价",
                 })
-        result.sort(key=lambda g: g["success_rate"], reverse=True)
+        # 按计分制和当前方视角排序：
+        # - imp: avg_scoring_val（防守方已取负，越大越好）
+        # - avg_tricks: avg_tricks（防守方取负后越大越好，即庄家赢墩越少越好）
+        # - make_rate: success_rate（击垮率/成约率，越大越好）
+        if scoring_mode == "imp" and any(g.get("avg_scoring_val") is not None for g in result):
+            result.sort(key=lambda g: g.get("avg_scoring_val", 0), reverse=True)
+        elif scoring_mode == "avg_tricks":
+            # 组内取 avg_tricks 均值；防守方取负转为防守视角
+            for g in result:
+                vals = []
+                for c in g["cards"]:
+                    av = c.get("avg_tricks", 0)
+                    vals.append(-av if is_defender else av)
+                g["_sort_val"] = sum(vals) / len(vals) if vals else 0
+            result.sort(key=lambda g: g["_sort_val"], reverse=True)
+        else:
+            result.sort(key=lambda g: g["success_rate"], reverse=True)
         for i, g in enumerate(result):
             g["group_id"] = i + 1
         return result
@@ -1463,11 +1530,13 @@ class PlayService:
     def _is_key_defense_trick(self, state: PlayState, current_player: str) -> bool:
         """判断当前防守墩是否值得触发 LLM 审查（触发克制）。
 
-        关键防守墩：跟同伴领出、垫牌、将吃抉择。这些是信号传递的最佳时机。
+        关键防守墩：首攻、跟同伴领出、垫牌、将吃抉择。
+        首攻是防守方最重要的决策，必须触发 LLM 审查。
         """
         current = state.current_trick.cards
         if not current:
-            return False
+            # 首攻：防守方领出第一墩，触发 LLM 审查
+            return True
         lead_pos, lead_card = current[0]
         lead_suit = lead_card.suit
         hand = state.hands.get(current_player, [])
@@ -1483,19 +1552,30 @@ class PlayService:
                              engine_name: str = "αμ") -> dict:
         """防守方分组审查：在不损失赢墩的前提下选牌并传递信号。
 
+        首攻时明手未摊牌，隐藏明手信息；按标准方案注入信号规则。
+
         返回dict:
           - group: int, 选择的组号（1-based）
           - card: str, 本墩实际出的牌张（必须在所选组内且可出）
           - reason: str, 推荐理由（含防守分析与信号意图）
           - llm_prompt: str, 完整提示词
         """
+        from bridge.play_strategies import signal_scheme
+
+        is_lead = state.phase == PlayPhase.LEAD
         hands_info = self._format_hands_info(state)
-        missing_info = self._format_missing_key_cards(state)
-        trump_analysis = self._format_trump_analysis(state)
+        if is_lead:
+            missing_info = "明手未摊牌，庄家方关键大牌分布不可知"
+            trump_analysis = "明手未摊牌，将牌统计待摊牌后确认"
+            played_cards_info = "首攻阶段，无已出牌"
+            partner_signals = ""
+        else:
+            missing_info = self._format_missing_key_cards(state)
+            trump_analysis = self._format_trump_analysis(state)
+            played_cards_info = self._format_played_cards_info(state)
+            partner_signals = format_partner_signals_for_prompt(state, state.current_player)
         completed_tricks = self._format_completed_tricks(state)
         current_trick = self._format_current_trick(state)
-        played_cards_info = self._format_played_cards_info(state)
-        partner_signals = format_partner_signals_for_prompt(state, state.current_player)
 
         declarer = state.contract.declarer
         dummy = state.dummy
@@ -1507,27 +1587,80 @@ class PlayService:
         defender_remaining = max(0, (14 - state.contract.tricks_needed) - state.defender_tricks)
         bidding_seq = state.bidding_sequence or "未提供"
 
-        system_prompt = (
-            "你是桥牌防守专家。"
-            + f"{engine_name}引擎已默认选定第1组出牌（该组在防守视角下最优，最小化庄家赢墩）。"
-            + "你的任务是：在**不损失赢墩**的前提下选择最佳出牌，"
-            + "并利用赢墩等价组内牌张差异向同伴传递防守信号。"
-            + "赢墩是硬约束，信号是赢墩等价组内的软选择。"
-            + "除非非第1组有明显更好的防守价值（进张保留/防飞牌/信号意图），否则返回第1组。"
-            + "请以JSON格式输出分析结果。"
-        )
+        # 按标准方案生成信号规则文本
+        sig = signal_scheme()
+        signal_rules = f"""## 防守信号（{sig.name}）
+**核心原则**：赢墩是硬约束，信号是赢墩等价组内的软选择。绝不能为传信号而损失赢墩。
+
+### 姿态信号
+{sig.attitude_rules}
+
+### 张数信号
+{sig.count_rules}
+
+### 花色偏好信号
+{sig.discard_rules}
+
+### 使用约束
+信号只在赢墩等价组内的牌张差异上体现，绝不能为传信号而换组（换组可能丢赢墩）。"""
+
+        if is_lead:
+            system_prompt = (
+                "你是桥牌防守专家。"
+                + f"{engine_name}引擎已完成首攻花色评估，给出多个候选组（按防守视角最优排序）。"
+                + "你的任务是：在**不损失赢墩**的前提下，从候选组中选择首攻花色和具体牌张。"
+                + "首攻是防守最重要的决策，需综合考虑："
+                + "1) 叫牌过程推断的庄家/明手花色长度和大牌位置；"
+                + "2) 标准首攻方案（长套首攻/助攻同伴花色/攻定约方未叫花色等）；"
+                + "3) 组内牌张按标准首攻表选择。"
+                + "赢墩是硬约束，首攻方案是软选择。"
+                + "请以JSON格式输出分析结果。"
+            )
+        else:
+            system_prompt = (
+                "你是桥牌防守专家。"
+                + f"{engine_name}引擎已默认选定第1组出牌（该组在防守视角下最优，最大化防守方期望IMP/击垮率）。"
+                + "你的任务是：在**不损失赢墩**的前提下选择最佳出牌，"
+                + "并利用赢墩等价组内牌张差异向同伴传递防守信号。"
+                + "赢墩是硬约束，信号是赢墩等价组内的软选择。"
+                + "除非非第1组有明显更好的防守价值（进张保留/防飞牌/信号意图），否则返回第1组。"
+                + "请以JSON格式输出分析结果。"
+            )
 
         group_lines = []
+        is_defender = state.current_player not in (state.contract.declarer, state.dummy)
         for g in groups:
             card_strs = [c.get("card", "") for c in g["cards"]]
             rate = f"{g['success_rate']:.0%}"
             dds_eq_label = "DDS等价" if len(card_strs) > 1 else ""
             default_mark = f" ← {engine_name}默认选择" if g["group_id"] == 1 else ""
+            if is_defender:
+                rate_label = "防守击垮率"
+            else:
+                rate_label = "庄家成约率"
             group_lines.append(
                 f"组{g['group_id']}: {' '.join(card_strs)} "
-                f"(庄家成约率{rate}) {dds_eq_label}{default_mark}".rstrip()
+                f"({rate_label}{rate}) {dds_eq_label}{default_mark}".rstrip()
             )
         groups_text = "\n".join(group_lines)
+
+        # 首攻时注入首攻方案，否则注入信号方案
+        if is_lead:
+            from bridge.play_strategies import lead_scheme
+            lead = lead_scheme()
+            is_nt = state.contract.suit == "NT"
+            lead_rules = lead.nt_lead_rules if is_nt else lead.trump_lead_rules
+            lead_section = f"""## 首攻方案（{lead.name}）
+{lead_rules}
+
+### 首攻花色选择原则
+- 无将定约：首攻长套，助攻同伴叫过的花色，攻定约方没有叫过的花色，首攻有连张大牌的花色，攻自己最强的花色
+- 有将定约：首攻有连张大牌的花色，攻自己最强的花色，攻短套准备将吃，攻将牌削弱庄家将吃能力，保护性首攻以不损失大牌，不从有A的花色中攻小牌
+
+### 组内选牌
+选定花色后，在组内按上述首攻表选择具体牌张。"""
+        else:
+            lead_section = signal_rules
 
         user_prompt = f"""## 局面信息
 定约: {state.contract}
@@ -1566,12 +1699,7 @@ class PlayService:
 **第1组是{engine_name}引擎默认选择（防守视角最优），除非其他组有第1组做不到的防守价值，否则选组1。**
 {groups_text}
 
-## 防守信号（本墩出牌的软约束）
-选择组内具体牌张时，在**不损失赢墩**的前提下传递信号：
-1. **跟同伴领出**：高牌=欢迎续攻，低牌=不欢迎
-2. **垫牌**：花色偏好——高牌=偏好高级别花色（♠/♥），低牌=低级别（♦/♣）
-3. **张数**：同花色先大后小=偶数张，先小后大=奇数张
-**约束**：信号只在赢墩等价组内的牌张差异上体现，绝不能为传信号而换组（换组可能丢赢墩）。
+{lead_section}
 {partner_signals}
 
 ## 输出JSON
@@ -1690,13 +1818,20 @@ class PlayService:
             g["group_id"] = i + 1
         return result
 
-    def _build_desperation_groups(self, candidates: list, trump_suit: str = "") -> list:
+    def _build_desperation_groups(self, candidates: list, trump_suit: str = "",
+                                   state: PlayState = None) -> list:
         """αμ认为无成约机会时，按花色+rank区间构建分组供LLM审查。
 
         目标是尽可能多拿墩少宕，而不是追求成约。
+        防守方按庄家赢墩升序（庄家赢墩越少防守越好）。
         """
         if len(candidates) < 2:
             return []
+        is_defender = False
+        if state and state.contract:
+            declarer = state.contract.declarer
+            dummy = state.dummy
+            is_defender = state.current_player not in (declarer, dummy)
         by_suit = {}
         for c in candidates:
             card_str = c.get("card", "")
@@ -1711,7 +1846,11 @@ class PlayService:
                     "success_rate": max(c.get("success_rate", 0) for c in sg),
                     "best_vector": "绝望模式",
                 })
-        result.sort(key=lambda g: max(c.get("avg_tricks", 0) for c in g.get("cards", [])), reverse=True)
+        # 坐庄：avg_tricks越大越好；防守：avg_tricks越小越好
+        if is_defender:
+            result.sort(key=lambda g: max(c.get("avg_tricks", 0) for c in g.get("cards", [])))
+        else:
+            result.sort(key=lambda g: max(c.get("avg_tricks", 0) for c in g.get("cards", [])), reverse=True)
         for i, g in enumerate(result):
             g["group_id"] = i + 1
         return result

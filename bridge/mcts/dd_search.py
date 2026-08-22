@@ -585,6 +585,8 @@ class DDSearch:
                 "min_tricks": mn,
                 "max_tricks": mx,
                 "scores": scores,
+                "scoring_val": None,
+                "scoring_mode": self.scoring_mode,
             })
 
             rank_val = RANK_ORDER.get(card.rank, 0)
@@ -592,6 +594,7 @@ class DDSearch:
             scoring_val = self._decision_value(scores, state)
             if scoring_val is not None:
                 blended = scoring_val
+                child_stats[-1]["scoring_val"] = round(scoring_val, 3)
             else:
                 blended = w_avg
 
@@ -614,8 +617,17 @@ class DDSearch:
             )
         ))
 
+        def _fmt_score(s):
+            mode = s.get("scoring_mode", "avg_tricks")
+            if mode == "imp":
+                return f"{s.get('scoring_val', 0):+.3f}IMP"
+            elif mode == "make_rate":
+                return f"{s.get('scoring_val', 0)*100:.1f}%"
+            else:
+                return f"{s['avg_tricks']}[{s['min_tricks']}-{s['max_tricks']}]"
+
         top_plays_str = ", ".join(
-            f"{s['card']}({s['avg_tricks']}[{s['min_tricks']}-{s['max_tricks']}])"
+            f"{s['card']}({_fmt_score(s)})"
             for s in child_stats[:5]
         )
         reasoning = (

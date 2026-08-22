@@ -102,6 +102,9 @@ DD_TIME_LIMIT = 30.0  # seconds per DD play decision (30秒预算，允许首攻
 # DD 决策计分制："imp"（期望IMP，考虑宕分/超墩/局况）| "make_rate"（做成率，类似αμ）| "avg_tricks"（平均赢墩，纯MP思路）
 DD_SCORING_MODE = "imp"
 
+# 首攻与信号方案："standard"（标准方案，源自新睿自然）| 预留扩展（如"reverse"反式信号）
+LEAD_SIGNAL_SCHEME = "standard"
+
 # DD 残局精确枚举
 DD_ENDGAME_CARD_THRESHOLD = 4    # 每手剩余牌数≤此值时触发枚举所有分布
 DD_ENDGAME_MAX_ENUMERATIONS = 5000  # 枚举总数超过此值时回退采样
