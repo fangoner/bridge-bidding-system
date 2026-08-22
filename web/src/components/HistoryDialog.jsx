@@ -91,6 +91,7 @@ function HistoryDialog({
   onExport,
   onImport,
   onUpdateNote,
+  onGetFull,
   onError,
 }) {
   const [selectedIds, setSelectedIds] = useState(new Set())
@@ -130,14 +131,24 @@ function HistoryDialog({
     setSelectedIds(new Set())
   }, [records, selectedIds, onDelete])
 
-  const handleLoad = useCallback(() => {
+  const handleLoad = useCallback(async () => {
     if (selectedIds.size !== 1) return
     const record = records.find(r => selectedIds.has(r.id))
     if (record) {
-      onLoad(record)
-      onClose()
+      try {
+        // 列表项是轻量摘要，加载/复盘前先从后端取完整记录
+        const full = await onGetFull(record.id)
+        if (full) {
+          onLoad(full)
+          onClose()
+        } else {
+          onError('加载记录失败')
+        }
+      } catch {
+        onError('加载记录失败')
+      }
     }
-  }, [records, selectedIds, onLoad, onClose])
+  }, [records, selectedIds, onLoad, onClose, onGetFull, onError])
 
   const handleExport = useCallback(() => {
     const toExport = selectedIds.size > 0 ? records.filter(r => selectedIds.has(r.id)) : records

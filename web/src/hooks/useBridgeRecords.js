@@ -1,11 +1,32 @@
 import { useState, useCallback, useRef } from 'react'
 
-const BRIDGE_RECORDS_KEY = 'bridge_records'
-const API_BASE = import.meta.env.VITE_API_BASE ?? `http://${window.location.hostname}:8003`
+const API_BASE = import.meta.env.VITE_API_BASE ?? ''
+
+// 把完整记录提炼为轻量摘要，仅供历史列表展示，不携带牌张/play 全量等大字段
+function indexify(r) {
+  const b = r.board || {}
+  const p = r.play
+  const play = p ? {
+    state: !!p.state, tricks: !!p.tricks,
+    declarer_tricks: p.declarer_tricks, defender_tricks: p.defender_tricks,
+  } : null
+  return {
+    id: r.id, timestamp: r.timestamp, type: r.type,
+    note: r.note, sourceRecordId: r.sourceRecordId,
+    dealer: b.dealer || r.dealer,
+    finalContract: r.finalContract || b.contract,
+    biddingSequence: r.biddingSequence || b.bidding_sequence,
+    board: {
+      contract: b.contract, dealer: b.dealer,
+      bidding_sequence: b.bidding_sequence, opening_lead: b.opening_lead,
+    },
+    play,
+  }
+}
 
 function useBridgeRecords() {
   const [records, setRecords] = useState([])
-  const [historyDialogOpen, setHistoryDialogOpen] = useState(false)
+  const [historyDialogOpen, setHistoryDialogOpenRaw] = useState(false)
   const [editNoteDialogOpen, setEditNoteDialogOpen] = useState(false)
   const [editingRecordId, setEditingRecordId] = useState(null)
   const [editingNote, setEditingNote] = useState('')
@@ -34,39 +55,24 @@ function useBridgeRecords() {
     }, 2000)
   }, [])
 
-  // 从 localStorage 加载记录，兼容旧格式
+  // 从后端备份文件加载记录（不常驻内存）
   const loadRecords = useCallback(() => {
-    try {
-      // 1. 尝试加载新格式
-      const newRecords = localStorage.getItem(BRIDGE_RECORDS_KEY)
-      if (newRecords) {
-        const parsed = JSON.parse(newRecords)
-        if (parsed.length > 0) {
-          setRecords(parsed)
-          // 同步到服务器备份
-          syncBackupToServer(parsed)
-          return
-        }
-      }
-
-      // 2. 本地为空，尝试从服务器恢复
-      console.log('[记录] 本地无记录，尝试从服务器恢复...')
-      fetch(`${API_BASE}/api/records/backup`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.success && data.records && data.records.length > 0) {
-            console.log('[记录] 从服务器恢复了', data.records.length, '条记录')
-            localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(data.records))
-            setRecords(data.records)
-          } else {
-            // 3. 尝试迁移旧格式（叫牌记录）
-            tryMigrateOldFormat()
-          }
-        })
-        .catch(() => {
-          // 服务器不可用，尝试迁移旧格式
+    // 历史记录一律以后端备份文件为准，前端不常驻、不写 localStorage
+    fetch(`${API_BASE}/api/records/index`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.success && data.records && data.records.length > 0) {
+          console.log('[记录] 从服务器加载', data.records.length, '条记录')
+          setRecords(data.records)
+        } else {
+          // 服务端无记录，尝试迁移旧本地格式作为首次兜底
           tryMigrateOldFormat()
-        })
+        }
+      })
+      .catch(() => {
+        // 服务器不可用，尝试迁移旧本地格式作为兜底
+        tryMigrateOldFormat()
+      })
 
       // 辅助：迁移旧格式
       const tryMigrateOldFormat = () => {
@@ -133,138 +139,94 @@ function useBridgeRecords() {
             play: null, note: r.note || '',
           }
         })
-        localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(migrated))
-        setRecords(migrated)
+        setRecords(migrated.map(indexify))
         syncBackupToServer(migrated)
       }
-    } catch (err) {
-      console.error('加载记录失败:', err)
-      setRecords([])
-    }
   }, [syncBackupToServer])
+
+  // 按 id 从后端取完整记录（点击加载/复盘时用）
+  const fetchFullRecord = useCallback(async (id) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/records/full/${encodeURIComponent(id)}`)
+      const data = await res.json()
+      return data.success ? data.record : null
+    } catch (e) {
+      console.warn('[加载] 获取完整记录失败:', e)
+      return null
+    }
+  }, [])
+
+  // 按 id 集合批量取完整记录（导出时用）
+  const fetchFullRecords = useCallback(async (ids) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/records/export`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+      const data = await res.json()
+      return data.success ? (data.records || []) : []
+    } catch (e) {
+      console.warn('[导出] 获取完整记录失败:', e)
+      return []
+    }
+  }, [])
 
   const saveRecord = useCallback((record) => {
     console.log('[saveRecord] 开始保存, type:', record.type, 'sourceRecordId:', record.sourceRecordId, 'id:', record.id)
+    // 完整记录只落盘到后端（按 id upsert），前端仅保留轻量摘要
+    fetch(`${API_BASE}/api/records/upsert`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record }),
+    }).catch(err => console.warn('[保存] 同步失败（后端可能未启动）:', err.message))
+
+    const summary = indexify(record)
     setRecords(prev => {
       try {
-        let newRecords
-        if (record.sourceRecordId) {
-          const existingIndex = prev.findIndex(r =>
-            r.id === record.sourceRecordId || r.sourceRecordId === record.sourceRecordId
-          )
-          console.log('[saveRecord] 查找sourceRecordId, existingIndex:', existingIndex, 'prev count:', prev.length)
-          if (existingIndex >= 0) {
-            newRecords = [...prev]
-            newRecords[existingIndex] = { ...record, id: prev[existingIndex].id }
-          } else {
-            newRecords = [record, ...prev]
-          }
+        const sid = record.sourceRecordId
+        let existingIndex = -1
+        if (sid) {
+          existingIndex = prev.findIndex(r => (r.id === sid) || (r.sourceRecordId === sid))
+        }
+        let next
+        if (existingIndex >= 0) {
+          next = [...prev]
+          next[existingIndex] = { ...summary, id: prev[existingIndex].id }
         } else {
-          newRecords = [record, ...prev]
+          next = [summary, ...prev.filter(r => String(r.id) !== String(record.id))]
         }
-        newRecords = newRecords.slice(0, 100)
-
-        // 在 updater 内直接写 localStorage（避免 React 18 并发模式下 resultRecords 未赋值）
-        try {
-          localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(newRecords))
-          console.log('[saveRecord] 持久化成功, count:', newRecords.length)
-          // 异步同步到服务器备份（不阻塞）
-          syncBackupToServer(newRecords)
-        } catch (err) {
-          if (err.name === 'QuotaExceededError' && newRecords.length > 10) {
-            console.warn('[saveRecord] localStorage quota 超限，自动清理旧记录')
-            const trimmed = newRecords.slice(0, newRecords.length - 10)
-            try {
-              localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(trimmed))
-              return trimmed
-            } catch (e2) {
-              console.error('[saveRecord] 清理后仍无法保存:', e2)
-            }
-          } else {
-            console.error('[saveRecord] 持久化记录失败:', err)
-          }
-        }
-
-        return newRecords
+        return next.slice(0, 200)
       } catch (err) {
-        console.error('[saveRecord] 保存记录失败:', err)
+        console.error('[saveRecord] 更新索引失败:', err)
         return prev
       }
     })
-  }, [syncBackupToServer])
+  }, [])
 
   const deleteRecord = useCallback((id) => {
-    let resultRecords
-    setRecords(prev => {
-      try {
-        const newRecords = prev.filter(r => r.id !== id)
-        resultRecords = newRecords
-        return newRecords
-      } catch (err) {
-        console.error('删除记录失败:', err)
-        resultRecords = prev
-        return prev
-      }
-    })
-    if (resultRecords) {
-      try {
-        localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(resultRecords))
-      } catch (err) {
-        console.error('持久化记录失败:', err)
-      }
-      syncBackupToServer(resultRecords)
-    }
-  }, [syncBackupToServer])
+    setRecords(prev => prev.filter(r => String(r.id) !== String(id)))
+    fetch(`${API_BASE}/api/records/delete`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [id] }),
+    }).catch(err => console.warn('[删除] 同步失败:', err.message))
+  }, [])
 
   const deleteRecords = useCallback((ids) => {
-    let resultRecords
-    setRecords(prev => {
-      try {
-        const idsSet = new Set(ids)
-        const newRecords = prev.filter(r => !idsSet.has(r.id))
-        resultRecords = newRecords
-        return newRecords
-      } catch (err) {
-        console.error('批量删除记录失败:', err)
-        resultRecords = prev
-        return prev
-      }
-    })
+    const idsSet = new Set(ids.map(String))
+    setRecords(prev => prev.filter(r => !idsSet.has(String(r.id))))
     setSelectedRecordIds(new Set())
-    if (resultRecords) {
-      try {
-        localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(resultRecords))
-      } catch (err) {
-        console.error('持久化记录失败:', err)
-      }
-      syncBackupToServer(resultRecords)
-    }
-  }, [syncBackupToServer])
+    fetch(`${API_BASE}/api/records/delete`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    }).catch(err => console.warn('[删除] 同步失败:', err.message))
+  }, [])
 
   const updateRecordNote = useCallback((id, note) => {
-    let resultRecords
-    setRecords(prev => {
-      try {
-        const newRecords = prev.map(r =>
-          r.id === id ? { ...r, note } : r
-        )
-        resultRecords = newRecords
-        return newRecords
-      } catch (err) {
-        console.error('更新注释失败:', err)
-        resultRecords = prev
-        return prev
-      }
-    })
-    if (resultRecords) {
-      try {
-        localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(resultRecords))
-      } catch (err) {
-        console.error('持久化记录失败:', err)
-      }
-      syncBackupToServer(resultRecords)
-    }
-  }, [syncBackupToServer])
+    setRecords(prev => prev.map(r => String(r.id) === String(id) ? { ...r, note } : r))
+    fetch(`${API_BASE}/api/records/note`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, note }),
+    }).catch(err => console.warn('[注释] 同步失败:', err.message))
+  }, [])
 
   const toggleSelectAll = useCallback(() => {
     setSelectedRecordIds(prev => {
@@ -333,26 +295,16 @@ function useBridgeRecords() {
         }
 
         const importedRecords = importData.records
-        setRecords(prev => {
-          // 合并后按牌局去重：同一手牌+叫牌序列保留最新的
-          const merged = [...importedRecords, ...prev]
-          const unique = []
-          const seen = new Set()
-          
-          for (const record of merged) {
-            const key = JSON.stringify(record.board?.hands || record.hands || {}) + 
-                        JSON.stringify(record.board?.bidding_sequence || record.biddingSequence || [])
-            if (!seen.has(key)) {
-              seen.add(key)
-              unique.push(record)
-            }
-          }
-          
-          const mergedRecords = unique.slice(0, 100)
-          localStorage.setItem(BRIDGE_RECORDS_KEY, JSON.stringify(mergedRecords))
-          syncBackupToServer(mergedRecords)
-          return mergedRecords
-        })
+        // 逐条 upsert 到后端（后端按 id 去重合并），成功后刷新摘要索引
+        const requests = importedRecords.map(rec =>
+          fetch(`${API_BASE}/api/records/upsert`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ record: rec }),
+          })
+        )
+        Promise.all(requests)
+          .then(() => loadRecords())
+          .catch(err => console.error('导入记录失败:', err))
       } catch (err) {
         console.error('导入记录失败:', err)
       }
@@ -360,7 +312,17 @@ function useBridgeRecords() {
     reader.readAsText(file)
     if (event.target) event.target.value = ''
     return { success: true }
-  }, [syncBackupToServer])
+  }, [loadRecords])
+
+  // 历史对话框：打开时按需从后端加载，关闭时释放记录，避免常驻内存
+  const setHistoryDialogOpen = useCallback((open) => {
+    setHistoryDialogOpenRaw(open)
+    if (open) {
+      loadRecords()
+    } else {
+      setRecords([])
+    }
+  }, [loadRecords])
 
   return {
     records,
@@ -376,6 +338,8 @@ function useBridgeRecords() {
     selectedRecordIds,
     setSelectedRecordIds,
     loadRecords,
+    fetchFullRecord,
+    fetchFullRecords,
     saveRecord,
     deleteRecord,
     deleteRecords,

@@ -29,7 +29,7 @@ if sys.platform == 'win32':
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Query
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -2825,6 +2825,149 @@ async def save_records_backup(request: RecordsBackupRequest):
         return {"success": True, "count": len(unique)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"备份失败: {e}")
+
+
+def _read_backup_records() -> list:
+    if RECORDS_BACKUP_FILE.exists():
+        with open(RECORDS_BACKUP_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
+
+
+def _write_backup_records(records: list) -> None:
+    with open(RECORDS_BACKUP_FILE, "w", encoding="utf-8") as f:
+        json.dump(records, f, ensure_ascii=False, indent=2)
+
+
+def _index_record(r: dict) -> dict:
+    """把完整记录提炼成轻量摘要，供历史列表常驻内存（不携带牌张/play 全量等大字段）。"""
+    b = r.get("board") or {}
+    p = r.get("play")
+    play_summary = None
+    if p:
+        play_summary = {
+            "state": bool(p.get("state")),
+            "tricks": bool(p.get("tricks")),
+            "declarer_tricks": p.get("declarer_tricks"),
+            "defender_tricks": p.get("defender_tricks"),
+        }
+    return {
+        "id": r.get("id"),
+        "timestamp": r.get("timestamp"),
+        "type": r.get("type"),
+        "note": r.get("note"),
+        "sourceRecordId": r.get("sourceRecordId"),
+        "dealer": b.get("dealer") or r.get("dealer"),
+        "finalContract": r.get("finalContract") or b.get("contract"),
+        "biddingSequence": r.get("biddingSequence") or b.get("bidding_sequence"),
+        "board": {
+            "contract": b.get("contract"),
+            "dealer": b.get("dealer"),
+            "bidding_sequence": b.get("bidding_sequence"),
+            "opening_lead": b.get("opening_lead"),
+        },
+        "play": play_summary,
+    }
+
+
+@app.get("/api/records/index")
+async def get_records_index():
+    """历史记录轻量索引：只含列表展示所需字段，供前端常驻显示。"""
+    try:
+        return {"success": True, "records": [_index_record(r) for r in _read_backup_records()]}
+    except Exception as e:
+        return {"success": False, "error": str(e), "records": []}
+
+
+@app.get("/api/records/full/{record_id}")
+async def get_record_full(record_id: str):
+    """按 id 返回某条记录的完整数据（牌张/play 全量）。"""
+    try:
+        for r in _read_backup_records():
+            if str(r.get("id")) == record_id:
+                return {"success": True, "record": r}
+        return {"success": False, "error": "记录不存在"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+class RecordsExportRequest(BaseModel):
+    ids: List[str]
+
+
+@app.post("/api/records/upsert")
+async def upsert_record_single(request: Request):
+    """按 id 单条 upsert 记录（前端只需提交本条完整数据，不携带完整历史）。"""
+    try:
+        body = await request.json()
+        record = body.get("record")
+        if not isinstance(record, dict):
+            raise HTTPException(status_code=400, detail="缺少 record")
+        records = _read_backup_records()
+        rid = str(record.get("id"))
+        replaced = False
+        for i, r in enumerate(records):
+            if str(r.get("id")) == rid:
+                records[i] = record
+                replaced = True
+                break
+        if not replaced:
+            records.insert(0, record)
+        records = records[:RECORDS_BACKUP_MAX]
+        _write_backup_records(records)
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存失败: {e}")
+
+
+@app.post("/api/records/export")
+async def export_records_batch(request: RecordsExportRequest):
+    """按 id 集合批量返回完整记录，供前端导出。"""
+    try:
+        ids = set(request.ids)
+        matched = [r for r in _read_backup_records() if str(r.get("id")) in ids]
+        return {"success": True, "records": matched}
+    except Exception as e:
+        return {"success": False, "error": str(e), "records": []}
+
+
+@app.post("/api/records/delete")
+async def delete_records_batch(request: RecordsExportRequest):
+    """按 id 集合从备份文件删除记录。"""
+    try:
+        ids = set(request.ids)
+        records = [r for r in _read_backup_records() if str(r.get("id")) not in ids]
+        _write_backup_records(records)
+        return {"success": True, "count": len(records)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除失败: {e}")
+
+
+class RecordNoteRequest(BaseModel):
+    id: str
+    note: str
+
+
+@app.post("/api/records/note")
+async def update_record_note(request: RecordNoteRequest):
+    """更新某条记录的注释。"""
+    try:
+        records = _read_backup_records()
+        found = False
+        for r in records:
+            if str(r.get("id")) == request.id:
+                r["note"] = request.note
+                found = True
+                break
+        if not found:
+            record = {"id": request.id, "note": request.note}
+            records.insert(0, record)
+        _write_backup_records(records)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"更新注释失败: {e}")
 
 
 if __name__ == "__main__":
