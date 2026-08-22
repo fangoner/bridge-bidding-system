@@ -17,6 +17,36 @@ MAIN_PROMPT_MAX_RETRIES = 2
 FALLBACK_PROMPT_MAX_RETRIES = 1
 
 
+def _norm_bid_str(raw) -> str:
+    """归一化叫品字符串，用于比较 LLM 判定的叫品与用户实际输入是否一致。"""
+    s = str(raw or "").strip().upper()
+    if s in ("P", "PASS", "不叫"):
+        return "PASS"
+    if s in ("X", "加倍", "DBL"):
+        return "X"
+    if s in ("XX", "再加倍", "REDBL", "RDOUBLE"):
+        return "XX"
+    return s
+
+
+def _fixup_human_bid_result(result: Dict, bid: str, full_sequence: str) -> Dict:
+    """人类叫牌结果兜底：强制以用户输入为准，避免 LLM 把叫品误判为别的叫品。
+
+    当 LLM 返回的"选定叫品"与用户实际输入不一致时（例如用户叫 X 而 LLM 判成 pass），
+    该 LLM 的"叫品含义"是针对错误叫品的，需加提示以免误导；选定叫品与完整序列一律以用户输入为准。
+    """
+    raw_selected = result.get("选定叫品")
+    result["选定叫品"] = bid
+    result["完整叫牌序列"] = full_sequence
+    if raw_selected is not None and _norm_bid_str(raw_selected) != _norm_bid_str(bid):
+        original_meaning = result.get("叫品含义", "").strip()
+        result["叫品含义"] = (
+            f"（提示：AI 原判定叫品为 {raw_selected}，与你的输入 {bid} 不符，已按你的输入记录）"
+            f"{(' ' + original_meaning) if original_meaning else ''}"
+        )
+    return result
+
+
 class BiddingService:
     def __init__(self, llm_client, jf_retriever, xr_retriever=None):
         self.llm_client = llm_client
@@ -645,9 +675,8 @@ class BiddingService:
                 full_sequence = f"{bidding_sequence}({player_name}){bid}-"
                 return {"选定叫品": bid, "叫品含义": f"获取叫品含义失败: {result['error']}", "JF约定": actual_jf_keyword, "完整叫牌序列": full_sequence}
             result["JF约定"] = actual_jf_keyword
-            if "完整叫牌序列" not in result:
-                result["完整叫牌序列"] = f"{bidding_sequence}({player_name}){bid}-"
-            return result
+            full_sequence = f"{bidding_sequence}({player_name}){bid}-"
+            return _fixup_human_bid_result(result, bid, full_sequence)
         except Exception as e:
             full_sequence = f"{bidding_sequence}({player_name}){bid}-"
             return {"选定叫品": bid, "叫品含义": f"获取叫品含义失败: {e}", "JF约定": actual_jf_keyword, "完整叫牌序列": full_sequence}
@@ -871,7 +900,7 @@ class BiddingService:
             result["新睿约定"] = seq or "开叫"
             if "完整叫牌序列" not in result:
                 result["完整叫牌序列"] = full_sequence
-            return result
+            return _fixup_human_bid_result(result, bid, full_sequence)
         except Exception as e:
             full_sequence = f"{bidding_sequence}({player_name}){bid}-"
             return {"选定叫品": bid, "叫品含义": f"获取叫品含义失败: {e}", "新睿约定": seq or "开叫", "完整叫牌序列": full_sequence}
