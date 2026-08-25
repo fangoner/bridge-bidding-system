@@ -146,6 +146,40 @@ def _make_rate_value(scores, tricks_needed):
     return sum(1 for t in scores if t >= tricks_needed) / len(scores)
 
 
+# ── 安全模式（临界分布过滤）：叠加在三种基础计分口径之上，不影响口径本身 ──
+
+
+def _critical_mask(card_score_lists, tricks_needed):
+    """按世界索引对齐的临界掩码（list[bool]）；无有效样本返回 None。
+
+    对每个 world，取所有候选牌在该 world 的可达墩：
+      - min >= needed：任何合法出牌都能做成（轻松打成）→ False（剔除）
+      - max < needed：没有任何合法出牌能做成（根本打不成）→ False（剔除）
+      - min < needed <= max：有输有赢，出牌选择真正影响结果 → True（保留）
+    """
+    n = min((len(s) for s in card_score_lists), default=0)
+    if n <= 0:
+        return None
+    mask = []
+    for w in range(n):
+        vals = [s[w] for s in card_score_lists if w < len(s)]
+        if len(vals) < 2:
+            mask.append(False)
+            continue
+        mn = min(vals)
+        mx = max(vals)
+        mask.append(mn < tricks_needed <= mx)
+    return mask
+
+
+def _filter_critical(scores, mask):
+    """按临界掩码过滤候选牌的赢墩序列；临界集为空时回退全量，避免无分布可决策。"""
+    if not mask or len(mask) != len(scores):
+        return scores
+    m = [t for t, keep in zip(scores, mask) if keep]
+    return m if m else scores
+
+
 def _has_duplicates(hands: Dict[str, List[Card]]) -> bool:
     """检测采样手牌中是否存在同一张牌出现在多个位置的情况。"""
     seen = set()
@@ -392,7 +426,8 @@ class DDSearch:
     def __init__(self, sampler: DealSampler = None, num_samples: int = 100,
                  min_samples: int = 15, time_limit: float = 5.0,
                  endgame_card_threshold: int = 4, max_enumerations: int = 5000,
-                 scoring_mode: Optional[str] = None):
+                 scoring_mode: Optional[str] = None,
+                 security_filter: Optional[bool] = None):
         self.sampler = sampler or DealSampler()
         self.num_samples = num_samples
         self.min_samples = min_samples
@@ -403,6 +438,10 @@ class DDSearch:
             from config import DD_SCORING_MODE
             scoring_mode = DD_SCORING_MODE
         self.scoring_mode = scoring_mode
+        if security_filter is None:
+            from config import DD_SECURITY_FILTER
+            security_filter = DD_SECURITY_FILTER
+        self.security_filter = security_filter
 
     def _decision_value(self, scores: List[int], state: PlayState):
         """按计分制返回决策值（从庄家方越优数值越高的视角）。
@@ -569,6 +608,19 @@ class DDSearch:
         child_stats = []
         blended_map = {}
         scores_map = {}
+        # 临界过滤：先按临界分布整局算出每个 world 的掩码，再叠加到基础口径
+        crit_mask = ( _critical_mask(
+            [card_scores[str(c)]["scores"] for c in playable],
+            state.contract.tricks_needed)
+            if self.security_filter else None )
+        if crit_mask is not None:
+            _n_kept = sum(1 for w in crit_mask if w)
+            with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                _f.write(f"[SEC-FILTER] ON filter={self.security_filter} "
+                         f"worlds={len(crit_mask)} kept={_n_kept} ({100.0*_n_kept/len(crit_mask):.0f}%)\n")
+        else:
+            with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                _f.write(f"[SEC-FILTER] OFF filter={self.security_filter}\n")
         for card in playable:
             stats = card_scores[str(card)]
             scores = stats["scores"]
@@ -591,10 +643,20 @@ class DDSearch:
 
             rank_val = RANK_ORDER.get(card.rank, 0)
 
-            scoring_val = self._decision_value(scores, state)
+            if crit_mask is not None:
+                # 临界过滤开启：把过滤后的临界集交给所选基础口径（imp/make_rate/avg_tricks）打分
+                filtered_scores = _filter_critical(scores, crit_mask)
+                child_stats[-1]["samples_used"] = len(filtered_scores)
+                scoring_val = self._decision_value(filtered_scores, state)
+                if scoring_val is not None:
+                    child_stats[-1]["scoring_val"] = round(scoring_val, 3)
+            else:
+                child_stats[-1]["samples_used"] = len(scores)
+                scoring_val = self._decision_value(scores, state)
+                if scoring_val is not None:
+                    child_stats[-1]["scoring_val"] = round(scoring_val, 3)
             if scoring_val is not None:
                 blended = scoring_val
-                child_stats[-1]["scoring_val"] = round(scoring_val, 3)
             else:
                 blended = w_avg
 
@@ -647,6 +709,8 @@ class DDSearch:
                 ),
                 "mcts_stats": {
                     "iterations": samples_done,
+                    "samples_used": max((c.get("samples_used", samples_done) for c in child_stats), default=samples_done),
+                    "security_filter": bool(crit_mask is not None),
                     "time_sec": round(elapsed, 2),
                     "iters_per_sec": round(samples_done / elapsed, 1) if elapsed > 0 else 0,
                     "adaptive_cap": self.num_samples,
@@ -836,6 +900,11 @@ class DDSearch:
         child_stats = []
         blended_map = {}
         scores_map = {}
+        # 临界过滤：先按临界分布整局算出每个 world 的掩码，再叠加到基础口径
+        crit_mask = ( _critical_mask(
+            [card_scores[str(c)] for c in playable],
+            state.contract.tricks_needed)
+            if self.security_filter else None )
 
         for card in playable:
             scores = card_scores[str(card)]
@@ -849,10 +918,23 @@ class DDSearch:
                 "min_tricks": mn,
                 "max_tricks": mx,
                 "scores": scores,
+                "scoring_val": None,
+                "scoring_mode": self.scoring_mode,
             })
             rank_val = RANK_ORDER.get(card.rank, 0)
             # 残局枚举同样支持计分制决策；否则回退纯平均
-            scoring_val = self._decision_value(scores, state)
+            if crit_mask is not None:
+                # 临界过滤开启：把过滤后的临界集交给所选基础口径打分
+                filtered_scores = _filter_critical(scores, crit_mask)
+                child_stats[-1]["samples_used"] = len(filtered_scores)
+                scoring_val = self._decision_value(filtered_scores, state)
+                if scoring_val is not None:
+                    child_stats[-1]["scoring_val"] = round(scoring_val, 3)
+            else:
+                child_stats[-1]["samples_used"] = len(scores)
+                scoring_val = self._decision_value(scores, state)
+                if scoring_val is not None:
+                    child_stats[-1]["scoring_val"] = round(scoring_val, 3)
             if scoring_val is not None:
                 blended = scoring_val
             else:
@@ -898,8 +980,10 @@ class DDSearch:
                 "mcts_stats": {
                     "iterations": enum_count,
                     "valid_distributions": valid_count,
+                    "samples_used": max((c.get("samples_used", valid_count) for c in child_stats), default=valid_count),
+                    "security_filter": bool(crit_mask is not None),
                     "time_sec": round(elapsed, 2),
-                    "remaining_cards": len(pool),
+                    "remaining_cards": sum(len(h) for h in worlds[0].values()) if worlds else remaining_tricks,
                     "candidates": child_stats,
                 },
             },

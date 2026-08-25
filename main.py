@@ -27,7 +27,7 @@ from bridge.bidding_service import BiddingService
 from knowledge.loader import JFLoader, JFRetriever
 from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT
 from llm.deepseek_client import DeepSeekClient
-from llm.doubao_client import DoubaoVisionClient
+from llm.doubao_client import VisionClient
 from config import JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM, SHOW_FULL_LLM_OUTPUT, OUTPUT_MODE_GRAPHIC, OUTPUT_MODE_COMPACT, OUTPUT_MODE_DEEP_FINESSE, OUTPUT_MODE_ALL, DEFAULT_OUTPUT_MODE, MAIN_PROMPT_TEMPERATURE, FALLBACK_PROMPT_TEMPERATURE
 from utils.history import HistoryManager
 
@@ -63,7 +63,7 @@ class BiddingGame:
         self.jf_retriever = JFRetriever(self.jf_segments)
         
         self.llm_client = DeepSeekClient(model=self.model)
-        self.vision_client = DoubaoVisionClient()
+        self.vision_client = VisionClient()
         self.history_manager = HistoryManager()
 
         self.bidding_service = BiddingService(self.llm_client, self.jf_retriever)

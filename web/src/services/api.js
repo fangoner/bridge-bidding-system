@@ -462,7 +462,7 @@ export const undoPlay = async () => {
 };
 
 // AI出牌
-export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null, ddAlphamuSwitchCards = null, useLlmReview = false, ddScoringMode = null, onProgress = null) => {
+export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null, ddAlphamuSwitchCards = null, useLlmReview = false, ddScoringMode = null, onProgress = null, ddSecurityFilter = null) => {
   const requestData = {
     use_reasoning: useReasoning,
     use_llm_review: useLlmReview,
@@ -483,6 +483,9 @@ export const aiPlay = async (playModel = null, useReasoning = false, playEngine 
   }
   if (ddScoringMode) {
     requestData.dd_scoring_mode = ddScoringMode;
+  }
+  if (ddSecurityFilter != null) {
+    requestData.dd_security_filter = ddSecurityFilter;
   }
 
   try {
@@ -600,6 +603,28 @@ export const setParticleSettings = async (settings) => {
     return response.data;
   } catch (error) {
     console.error('设置粒子数失败:', error);
+    throw error;
+  }
+};
+
+// 获取当前视觉识别模型 provider
+export const getVisionProvider = async () => {
+  try {
+    const response = await api.get('/api/vision-provider');
+    return response.data;
+  } catch (error) {
+    console.error('获取视觉模型配置失败:', error);
+    throw error;
+  }
+};
+
+// 切换视觉识别模型 provider（deepseek / doubao）
+export const setVisionProvider = async (visionProvider) => {
+  try {
+    const response = await api.post('/api/vision-provider', { vision_provider: visionProvider });
+    return response.data;
+  } catch (error) {
+    console.error('切换视觉模型失败:', error);
     throw error;
   }
 };

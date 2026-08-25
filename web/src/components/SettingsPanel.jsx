@@ -1,7 +1,8 @@
 import { memo, useState } from 'react'
 import {
   Box, Paper, FormControl, InputLabel, Select, MenuItem,
-  ToggleButton, ToggleButtonGroup, Tabs, Tab, Typography
+  ToggleButton, ToggleButtonGroup, Tabs, Tab, Typography,
+  Checkbox, FormControlLabel
 } from '@mui/material'
 import { parseModelValue } from '../hooks/useModelSettings'
 
@@ -109,6 +110,8 @@ function SettingsPanel({
   handleSwitchCardsChange,
   ddScoringMode,
   handleDdScoringModeChange,
+  ddSecurityFilter,
+  handleDdSecurityFilterChange,
   dealSystem,
   setDealSystem,
   bidSystem,
@@ -120,6 +123,9 @@ function SettingsPanel({
   mode,
   hands,
   availableModels,
+  visionProvider,
+  visionProviders,
+  handleVisionProviderChange,
 }) {
   const [tab, setTab] = useState('bidding')
 
@@ -223,6 +229,24 @@ function SettingsPanel({
             <ToggleButton value="off">关AI解释</ToggleButton>
             <ToggleButton value="on">AI解释</ToggleButton>
           </ToggleButtonGroup>
+
+          <FormControl size="small" sx={{ minWidth: 130 }}>
+            <InputLabel>视觉模型</InputLabel>
+            <Select
+              value={visionProvider || 'deepseek'}
+              label="视觉模型"
+              onChange={handleVisionProviderChange}
+            >
+              {(visionProviders && visionProviders.length > 0 ? visionProviders : [
+                { id: 'deepseek', name: 'DeepSeek Vision' },
+                { id: 'doubao', name: '豆包 Vision' },
+              ]).map(p => (
+                <MenuItem key={p.id} value={p.id}>
+                  {p.name}{p.configured === false ? '（未配置）' : ''}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
         </Box>
       )}
 
@@ -255,6 +279,7 @@ function SettingsPanel({
           </FormControl>
 
           {ddScoringVisible && (
+            <>
             <FormControl size="small" sx={{ minWidth: 120 }}>
               <InputLabel>计分制</InputLabel>
               <Select
@@ -267,6 +292,18 @@ function SettingsPanel({
                 <MenuItem value="avg_tricks">平均赢墩</MenuItem>
               </Select>
             </FormControl>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={!!ddSecurityFilter}
+                  onChange={(e) => handleDdSecurityFilterChange(e.target.checked)}
+                  size="small"
+                />
+              }
+              label={<Typography variant="caption" sx={{ fontSize: '0.7rem' }}>临界过滤</Typography>}
+              sx={{ mr: 0, ml: 0.5, '& .MuiFormControlLabel-label': { fontSize: '0.7rem' } }}
+            />
+            </>
           )}
 
           {playEngine === 'dd' && (

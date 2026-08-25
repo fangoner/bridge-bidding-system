@@ -21,7 +21,7 @@ export default function Header({ onModeChange, mode, ...controlProps }) {
       <ToggleButtonGroup
         value={mode}
         exclusive
-        onChange={(e, v) => v && onModeChange && onModeChange(v)}
+        onChange={(e, v) => onModeChange && onModeChange(v || mode)}
         size="small"
         sx={{ height: 28 }}
       >

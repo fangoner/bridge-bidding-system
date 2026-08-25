@@ -364,12 +364,14 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     switchCards, switchCardsRange,
     handleSwitchCardsChange,
     ddScoringMode, handleDdScoringModeChange,
+    ddSecurityFilter, handleDdSecurityFilterChange,
     handleFallbackModelChange,
     handlePlayModelChange,
     checkApiStatus,
     handleReloadJF,
     parseModelValue,
     availableModels,
+    visionProvider, visionProviders, handleVisionProviderChange,
   } = useModelSettings()
 
   // 检查API状态（历史记录改为打开历史对话框时按需加载，不在启动时常驻）
@@ -798,22 +800,30 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   // 清除所有手牌已迁入 useDealing hook
 
   const handleModeChange = (newMode) => {
-    if (newMode !== mode) {
-      // P2 修复：切换模式会清空当前牌局（clearAllHands），有牌局时先确认，避免误触丢失进度
-      const hasActiveGame = hands && Object.values(hands).some(h => h && (
-        (h.spades?.length || 0) + (h.hearts?.length || 0) + (h.diamonds?.length || 0) + (h.clubs?.length || 0) > 0
-      ))
-      if (hasActiveGame && !window.confirm('切换模式将清空当前牌局（手牌与叫牌/打牌进度），确定继续吗？')) {
-        return
-      }
-      setMode(newMode)
+    if (newMode === mode) {
+      // 当前模式再次点击：快速复位到本模式初始空牌桌（不弹确认）
       clearAllHands()
-      // 切到发牌练习：全部AI；切到模拟实战：默认3人+1AI
       if (newMode === 'practice') {
         setPositionRoles({ '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai' })
       } else {
         setPositionRoles({ '南': 'ai', '北': 'human', '东': 'human', '西': 'human' })
       }
+      return
+    }
+    // P2 修复：切换模式会清空当前牌局（clearAllHands），有牌局时先确认，避免误触丢失进度
+    const hasActiveGame = hands && Object.values(hands).some(h => h && (
+      (h.spades?.length || 0) + (h.hearts?.length || 0) + (h.diamonds?.length || 0) + (h.clubs?.length || 0) > 0
+    ))
+    if (hasActiveGame && !window.confirm('切换模式将清空当前牌局（手牌与叫牌/打牌进度），确定继续吗？')) {
+      return
+    }
+    setMode(newMode)
+    clearAllHands()
+    // 切到发牌练习：全部AI；切到模拟实战：默认3人+1AI
+    if (newMode === 'practice') {
+      setPositionRoles({ '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai' })
+    } else {
+      setPositionRoles({ '南': 'ai', '北': 'human', '东': 'human', '西': 'human' })
     }
   }
 
@@ -2227,7 +2237,7 @@ const handleReviewCompletedPlay = async () => {
     try {
       const pm = parseModelValue(playModel)
       const t0 = performance.now()
-      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, switchCards, useLlmReview, ddScoringMode, (msg) => setAiProgress(msg))
+      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, switchCards, useLlmReview, ddScoringMode, (msg) => setAiProgress(msg), ddSecurityFilter)
       if (controller.signal.aborted) return
       // 撤销序号守卫：AI 出牌在途期间用户点了撤销 → 丢弃本次响应，以后端撤销后的真实状态为准
       if (undoSeqRef.current !== seqAtStart) {
@@ -2875,6 +2885,7 @@ const handleReviewCompletedPlay = async () => {
         switchCards={switchCards} switchCardsRange={switchCardsRange}
         handleSwitchCardsChange={handleSwitchCardsChange}
         ddScoringMode={ddScoringMode} handleDdScoringModeChange={handleDdScoringModeChange}
+        ddSecurityFilter={ddSecurityFilter} handleDdSecurityFilterChange={handleDdSecurityFilterChange}
         dealSystem={dealSystem}
         setDealSystem={setDealSystem}
         bidSystem={bidSystem}
@@ -2887,6 +2898,9 @@ const handleReviewCompletedPlay = async () => {
         mode={mode}
         hands={hands}
         availableModels={availableModels}
+        visionProvider={visionProvider}
+        visionProviders={visionProviders}
+        handleVisionProviderChange={handleVisionProviderChange}
       />
 
       {/* 错误提示（P1-7：关闭错误横幅不再隐式取消截屏轮询） */}

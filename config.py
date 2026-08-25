@@ -14,6 +14,9 @@ DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DOUBAO_API_KEY = os.getenv("DOUBAO_API_KEY", "")
 DOUBAO_BASE_URL = os.getenv("DOUBAO_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
 DOUBAO_VISION_ENDPOINT = os.getenv("DOUBAO_VISION_ENDPOINT", "")
+
+DEEPSEEK_VISION_MODEL = os.getenv("DEEPSEEK_VISION_MODEL", "deepseek-v4-flash-vision-exp")
+VISION_PROVIDER = os.getenv("VISION_PROVIDER", "deepseek")
 DOUBAO_SEED_2_1_PRO_CHAT_ENDPOINT = os.getenv("DOUBAO_SEED_2_1_PRO_CHAT_ENDPOINT", "")
 DOUBAO_SEED_2_1_PRO_REASONING_ENDPOINT = os.getenv("DOUBAO_SEED_2_1_PRO_REASONING_ENDPOINT", "")
 DOUBAO_SEED_2_1_TURBO_CHAT_ENDPOINT = os.getenv("DOUBAO_SEED_2_1_TURBO_CHAT_ENDPOINT", "")
@@ -99,8 +102,14 @@ ROLLOUT_GREEDY_PROB = 0.80  # probability of heuristic vs random in rollout
 DD_NUM_SAMPLES = 200  # DD 引擎默认采样数
 DD_MIN_SAMPLES = 15   # floor for adaptive sample scaling
 DD_TIME_LIMIT = 30.0  # seconds per DD play decision (30秒预算，允许首攻冷启动)
-# DD 决策计分制："imp"（期望IMP，考虑宕分/超墩/局况）| "make_rate"（做成率，类似αμ）| "avg_tricks"（平均赢墩，纯MP思路）
+# DD 决策计分制（全量样本口径）："imp"（期望IMP，考虑宕分/超墩/局况）|
+#   "make_rate"（做成率，类似αμ）| "avg_tricks"（平均赢墩，纯MP思路）
 DD_SCORING_MODE = "imp"
+# 临界分布过滤开关：叠加在 DD_SCORING_MODE 之上，不影响其三种口径本身。
+#   开启后只保留"有输有赢"的分布样本（存在能做成的合法出牌、也存在做不成的）
+#   ——剔掉"任何出牌都能做成"（轻松打成）与"没有任何出牌能做成"（根本打不成），
+#   再把过滤集交给所选口径打分，聚焦出牌选择真正影响结果的牌型。
+DD_SECURITY_FILTER = False
 
 # 首攻与信号方案："standard"（标准方案，源自新睿自然）| 预留扩展（如"reverse"反式信号）
 LEAD_SIGNAL_SCHEME = "standard"

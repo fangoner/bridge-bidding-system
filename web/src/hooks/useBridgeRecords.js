@@ -32,6 +32,7 @@ function useBridgeRecords() {
   const [editingNote, setEditingNote] = useState('')
   const [selectedRecordIds, setSelectedRecordIds] = useState(new Set())
   const lastSyncedRef = useRef('')  // 上次同步的 JSON 指纹，避免重复写
+  const upsertChainRef = useRef(Promise.resolve())  // 串行化 upsert 请求，避免并发写丢记录
 
   // ── 服务器备份同步（debounce 2s）──
   const syncTimerRef = useRef(null)
@@ -173,11 +174,20 @@ function useBridgeRecords() {
 
   const saveRecord = useCallback((record) => {
     console.log('[saveRecord] 开始保存, type:', record.type, 'sourceRecordId:', record.sourceRecordId, 'id:', record.id)
-    // 完整记录只落盘到后端（按 id upsert），前端仅保留轻量摘要
-    fetch(`${API_BASE}/api/records/upsert`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ record }),
-    }).catch(err => console.warn('[保存] 同步失败（后端可能未启动）:', err.message))
+    // 完整记录只落盘到后端（按 id upsert），前端仅保留轻量摘要。
+    // 请求串行化（Promise 链）：同一副牌叫牌/打牌推进的多个保存按序到达后端，
+    // 配合后端锁，避免并发写文件互相覆盖导致历史记录丢失。
+    upsertChainRef.current = upsertChainRef.current
+      .catch(() => {})
+      .then(() => fetch(`${API_BASE}/api/records/upsert`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ record }),
+      }))
+      .then(res => res.ok ? res.json() : null)
+      .catch(err => {
+        console.warn('[保存] 同步失败（后端可能未启动）:', err.message)
+        return null
+      })
 
     const summary = indexify(record)
     setRecords(prev => {

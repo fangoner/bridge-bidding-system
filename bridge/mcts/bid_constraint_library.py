@@ -1255,10 +1255,23 @@ def extract_constraints_from_bid_history(bid_history: str, system: str = SYSTEM_
 
                     # 找同伴的最后一个花色叫品（用于加叫判断）
                     partner_suit = None
+                    partner_suit_level = 0
+                    partner_jump_rebid_own = False  # 同伴最后一叫是否为"跳叫原花"（≥6张套）
                     for pb in reversed(pos_bids.get(partner, [])):
                         pb_p = _normalize_bid(pb)
                         if pb_p and pb_p[0] not in (SPECIAL_PASS, SPECIAL_DOUBLE, SPECIAL_REDOUBLE) and pb_p[1] != "NT":
                             partner_suit = pb_p[1]
+                            partner_suit_level = pb_p[0]
+                            # 跳叫原花：同伴更早有过同花色更低阶叫品（开叫/加叫），且本轮比它高两阶以上
+                            for pb0 in pos_bids.get(partner, []):
+                                pb0_p = _normalize_bid(pb0)
+                                if (pb0_p and pb0_p[1] == partner_suit
+                                        and pb0 is not pb
+                                        and pb0_p[0] not in (SPECIAL_PASS, SPECIAL_DOUBLE, SPECIAL_REDOUBLE)
+                                        and pb0_p[0] < pb_p[0]):
+                                    if pb_p[0] >= pb0_p[0] + 2:
+                                        partner_jump_rebid_own = True
+                                    break
                             break
 
                     # 判断是否跳叫：找上一个我方的实质性叫品，对比阶数
@@ -1299,12 +1312,12 @@ def extract_constraints_from_bid_history(bid_history: str, system: str = SYSTEM_
                         if not competitive and suit == prev_suit_own and level > prev_level + 1:
                             is_jump_rebid = True
                         elif partner_suit and suit == partner_suit:
-                            # 加叫同伴：如果跳一阶以上算跳叫
+                            # 加叫同伴：比同伴最后花色叫品高一阶以上才算跳加叫（1M-2M 平加，1M-3M 跳加；3M-4M 也平加）
                             # 例外1：斯台曼后跳加同伴所答高花 = 进局加叫（应叫人 9-12 点，4 张支持），非 16-18 跳加叫
                             # 例外2：竞争性叫牌（对方已插叫）下，加叫到成局属抢叫，不套 16-18 强牌跳加叫
                             if used_stayman and partner_suit in ("♠", "♥"):
                                 is_jump_rebid = False
-                            elif not competitive and level > 2:  # 平加叫通常到2阶（1M-2M是平加）
+                            elif not competitive and partner_suit_level > 0 and level > partner_suit_level + 1:
                                 is_jump_rebid = True
                         elif suit == "NT":
                             # NT跳叫
@@ -1338,9 +1351,33 @@ def extract_constraints_from_bid_history(bid_history: str, system: str = SYSTEM_
                             min_hcp_target=10,
                             inference_source="stayman_game_raise",
                         )
+                    elif (not competitive and partner_jump_rebid_own and suit == partner_suit
+                            and suit in ("♥", "♠") and level >= 4):
+                        # 高花弱牌直封：同伴跳叫原花（≥6张套）后平加到局——高花 6+2 张即 8 张配合，
+                        # 应叫人不要求强牌（1S 已下限≥6），点力收窄到 6-9，将牌只需 ≥2
+                        constraint = BidConstraint(
+                            position="",
+                            min_hcp=6,
+                            max_hcp=9,
+                            suit_min={suit: 2},
+                            min_hcp_target=8,
+                            inference_source="weak_game_raise",
+                        )
+                    elif (not competitive and partner_jump_rebid_own and suit == partner_suit
+                            and suit in ("♦", "♣") and level >= 5):
+                        # 低花弱牌直封：同伴跳叫原花（≥6张套）后冲到 5 阶低花局——低花 6+3 张即 9 张配合，
+                        # 点力同样收窄到 6-9，将牌只需 ≥3
+                        constraint = BidConstraint(
+                            position="",
+                            min_hcp=6,
+                            max_hcp=9,
+                            suit_min={suit: 3},
+                            min_hcp_target=8,
+                            inference_source="weak_game_raise_minor",
+                        )
                     elif is_third_plus_rebid:
                         # 第三次及以后的实质叫牌：前两次已限定点力/张数，
-                        # 冲局/止叫/竞叫不再逆转已确立的范围，保持已有约束不变
+                        # 冲局/止叫/竞叫不再扩大，保持已有约束不变（约束随叫牌单调收缩）
                         constraint = None
                     else:
                         constraint = get_rebid_constraint(
@@ -1480,11 +1517,69 @@ def extract_constraints_from_bid_history(bid_history: str, system: str = SYSTEM_
     return constraints
 
 
+def _is_subset(c1: BidConstraint, c2: BidConstraint) -> bool:
+    """判断新约束 c2 是否为前序约束 c1 的（集合意义上）子集，覆盖所有维度。
+
+    约束把满足条件的手牌集合收缩，约束越严格 → 集合越小。"c2 ⊆ c1"即 c2 满足的
+    手牌集合必须包含在 c1 满足的集合内，即 c2 在每个维度都不比 c1 宽松：
+      - HCP 区间 ⊆ c1 区间（下界≥c1下界，上界≤c1上界）
+      - 花色张数下限不低（c2 收紧时更高）、上限不高（c2 收紧时更低）
+      - exact_suit、控制数、balanced 一致或更严格
+    任何维度上 c2 比 c1 更宽松（集合更大）都判为非子集，调用方整体放弃 c2，
+    从而保证约束随叫牌逐步收紧、任何维度都不扩大。
+    """
+    # HCP 区间：c2 明确声明的边界必须落在 c1 范围内；c2 未声明的边界沿用 c1，不判成败
+    def _within(lo, hi, lo2, hi2):
+        c1_lo = lo if lo is not None else 0
+        c1_hi = hi if hi is not None else 40
+        if lo2 is not None and lo2 < c1_lo:
+            return False
+        if hi2 is not None and hi2 > c1_hi:
+            return False
+        return True
+    if not _within(c1.min_hcp, c1.max_hcp, c2.min_hcp, c2.max_hcp):
+        return False
+
+    # balanced：双方都声明时必须一致；仅一方声明则接受（未声明视为无新增推断）
+    if c1.balanced is not None and c2.balanced is not None and c1.balanced != c2.balanced:
+        return False
+
+    # 花色张数下限：c2 的下限不得低于 c1 的下限（收紧则更高，允许）
+    for suit, m2 in c2.suit_min.items():
+        m1 = c1.suit_min.get(suit, 0)
+        if m2 < m1:
+            return False
+
+    # 花色张数上限：c2 的上限不得高于 c1 的上限（收紧则更低，允许）
+    for suit, m2 in c2.suit_max.items():
+        m1 = c1.suit_max.get(suit, 13)
+        if m2 > m1:
+            return False
+
+    # exact_suit：c2 声明的精确张数不得高于 c1 的（更严格则允许），若 c1 无声明则接受
+    for suit, e2 in c2.exact_suit.items():
+        e1 = c1.exact_suit.get(suit)
+        if e1 is not None and e2 > e1:
+            return False
+
+    # 控制数：c2 的要求不得高于 c1（更高=更严格=允许）
+    if c1.min_controls is not None and c2.min_controls is not None and c2.min_controls > c1.min_controls:
+        return False
+
+    return True
+
+
 def _merge_constraints(c1: BidConstraint, c2: BidConstraint) -> BidConstraint:
-    """合并两个约束：取更严格的限制。"""
+    """合并两个约束：取更严格的限制。
+
+    单调收缩原则：新约束 c2 必须是前序约束 c1 的子集，否则整体放弃 c2、返回 c1，
+    保证约束随叫牌逐步收紧、任何维度都不扩大。
+    """
+    if not _is_subset(c1, c2):
+        return c1
     merged = BidConstraint(position=c1.position)
     
-    # HCP范围取交集
+    # HCP范围取交集（单调收缩）：两次叫牌都限定点力时，交集才成立
     merged.min_hcp = max(c1.min_hcp or 0, c2.min_hcp or 0)
     if merged.min_hcp == 0:
         merged.min_hcp = None
@@ -1572,13 +1667,6 @@ def _merge_constraints(c1: BidConstraint, c2: BidConstraint) -> BidConstraint:
     p1 = _source_priority(c1.inference_source)
     p2 = _source_priority(c2.inference_source)
     merged.inference_source = c1.inference_source if p1 >= p2 else c2.inference_source
-
-    # HCP 反转修正：合并后 min > max 时，保留较可靠来源的约束，放宽较弱方
-    if merged.min_hcp is not None and merged.max_hcp is not None and merged.min_hcp > merged.max_hcp:
-        if p1 >= p2:
-            merged.max_hcp = max(merged.max_hcp, merged.min_hcp)
-        else:
-            merged.min_hcp = min(merged.min_hcp, merged.max_hcp)
 
     return merged
 

@@ -49,7 +49,10 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import DOUBAO_API_KEY, DOUBAO_BASE_URL, DOUBAO_VISION_ENDPOINT
+from config import (
+    DOUBAO_API_KEY, DOUBAO_BASE_URL, DOUBAO_VISION_ENDPOINT,
+    DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_VISION_MODEL,
+)
 
 # 视觉识别最大图片尺寸（长边像素），超过会等比缩放
 VISION_MAX_IMAGE_SIZE = 1920
@@ -260,11 +263,24 @@ BIDDING_VISION_PROMPT = """你的任务是从桥牌游戏截图中识别**叫牌
 }"""
 
 
-class DoubaoVisionClient:
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, endpoint: Optional[str] = None):
-        self.api_key = api_key or DOUBAO_API_KEY
-        self.base_url = base_url or DOUBAO_BASE_URL
-        self.endpoint = endpoint or DOUBAO_VISION_ENDPOINT
+class VisionClient:
+    """通用视觉识别客户端，支持 DeepSeek 和豆包双 provider。
+
+    provider="deepseek": 使用 DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL / DEEPSEEK_VISION_MODEL
+    provider="doubao":   使用 DOUBAO_API_KEY / DOUBAO_BASE_URL / DOUBAO_VISION_ENDPOINT
+    """
+    def __init__(self, provider: str = "deepseek"):
+        self.provider = provider
+        if provider == "deepseek":
+            self.api_key = DEEPSEEK_API_KEY
+            self.base_url = DEEPSEEK_BASE_URL
+            self.endpoint = DEEPSEEK_VISION_MODEL
+            self.label = "DeepSeek Vision"
+        else:
+            self.api_key = DOUBAO_API_KEY
+            self.base_url = DOUBAO_BASE_URL
+            self.endpoint = DOUBAO_VISION_ENDPOINT
+            self.label = "豆包 Vision"
         self.client = None
 
         if self.api_key:
@@ -274,16 +290,20 @@ class DoubaoVisionClient:
                 base_url=self.base_url,
                 timeout=httpx.Timeout(120.0, connect=10.0)
             )
-    
-    def is_configured(self) -> bool:
-        return self.client is not None and self.endpoint and self.endpoint != "YOUR_VISION_ENDPOINT_ID"
-    
-    def read_cards_from_image(self, image_path: str) -> Dict[str, Any]:
-        if not self.client:
-            return {"error": "Doubao API Key未配置，请设置环境变量 DOUBAO_API_KEY"}
 
-        if not self.endpoint or self.endpoint == "YOUR_VISION_ENDPOINT_ID":
-            return {"error": "Doubao Vision Endpoint未配置，请在火山引擎控制台创建视觉模型推理接入点，并设置环境变量 DOUBAO_VISION_ENDPOINT"}
+    def is_configured(self) -> bool:
+        if self.provider == "deepseek":
+            return self.client is not None and bool(self.api_key)
+        return self.client is not None and bool(self.endpoint) and self.endpoint != "YOUR_VISION_ENDPOINT_ID"
+    
+    def _not_configured_error(self) -> str:
+        if self.provider == "deepseek":
+            return "DeepSeek API Key未配置，请设置环境变量 DEEPSEEK_API_KEY"
+        return "豆包 Vision Endpoint未配置，请在火山引擎控制台创建视觉模型推理接入点，并设置环境变量 DOUBAO_VISION_ENDPOINT"
+
+    def read_cards_from_image(self, image_path: str) -> Dict[str, Any]:
+        if not self.client or not self.is_configured():
+            return {"error": self._not_configured_error()}
 
         try:
             t0 = time.time()
@@ -376,11 +396,8 @@ class DoubaoVisionClient:
             return {"error": str(e)}
 
     def read_single_hand_from_image(self, image_path: str, position: str = "") -> Dict[str, Any]:
-        if not self.client:
-            return {"error": "Doubao API Key未配置，请设置环境变量 DOUBAO_API_KEY"}
-
-        if not self.endpoint or self.endpoint == "YOUR_VISION_ENDPOINT_ID":
-            return {"error": "Doubao Vision Endpoint未配置"}
+        if not self.client or not self.is_configured():
+            return {"error": self._not_configured_error()}
 
         try:
             t0 = time.time()
@@ -450,11 +467,8 @@ class DoubaoVisionClient:
             return {"error": str(e)}
 
     def read_bidding_from_image(self, image_path: str) -> Dict[str, Any]:
-        if not self.client:
-            return {"error": "Doubao API Key未配置，请设置环境变量 DOUBAO_API_KEY"}
-
-        if not self.endpoint or self.endpoint == "YOUR_VISION_ENDPOINT_ID":
-            return {"error": "Doubao Vision Endpoint未配置"}
+        if not self.client or not self.is_configured():
+            return {"error": self._not_configured_error()}
 
         try:
             t0 = time.time()

@@ -578,6 +578,18 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.67
+- **DD 打牌引擎：临界分布过滤开关（`DD_SECURITY_FILTER`）**（方案与完整思路见 `docs/临界样本过滤选牌方案.md`）
+  - 过滤语义（用户确认）：逐世界判定，只保留"有输有赢"样本（`min(可达墩) < 所需墩 ≤ max(可达墩)`），剔除"任何出牌都能做成"与"没有任何出牌能做成"的世界；曾尝试"可达墩偏差窗口 k"语义，经数学论证有误后废弃（`DD_SECURITY_K` 已删除）
+  - `dd_search.py`：`_critical_mask`（世界级掩码）+ `_filter_critical`（压缩候选分数；空临界集回退全量保底），采样主循环与残局枚举路径均接入；`_decision_value` 三种计分制接口不变，仅替换世界子集
+  - 数学结论：做成率口径下过滤是充分统计量变换（不改变候选排序，仅缩放）；avg_tricks/IMP 口径下为聚焦做成边界的显式目标重定向
+  - 输出：`mcts_stats.samples_used`/`security_filter`、child_stats 每候选 `samples_used`；`play_service._dd_play` 请求级临时覆盖
+  - 实测：首攻铁牌局保留 22%、残局 28%、kept=0 回退全量；对照脚本捕获选牌分歧（seed=100076 全量选♦A/过滤选♣J）
+- 修改文件: config.py, bridge/mcts/dd_search.py, bridge/play_service.py, api/main.py, web/src/hooks/useModelSettings.js, web/src/components/SettingsPanel.jsx, web/src/components/PlayDetailPanel.jsx, web/src/services/api.js, web/src/App.jsx
+- **叫牌约束：跳加叫判定修正 + 弱牌直封收紧**（`bid_constraint_library.py`）
+  - 跳加叫判定改为相对阶数：对比同伴最后花色叫品的阶数，加一阶=平加、≥两阶=跳加（`3H→4H` 不再误判 16-18 强牌）
+  - 新增弱牌直封特例：同伴跳叫原花（≥6 张套）后平加到局，点力收窄 6-9；高花将牌只需 ≥2（6+2=8 张配合），低花 5 阶局将牌只需 ≥3（6+3=9 张配合），修复低花冲局此前误套 16-18 跳加叫约束
+
 ### v1.66
 - **打牌引擎：计分制贯穿候选分组与输出 + 首攻信号方案注册表**
   - `bridge/play_strategies.py`（新增）：首攻/信号方案注册表（`LeadScheme`/`SignalScheme`），标准方案取自新睿自然 Rev 3.2 第十二章，预留扩展接口；`config.py` 新增 `LEAD_SIGNAL_SCHEME`

@@ -48,7 +48,7 @@ from knowledge.xr_retriever import XrRetriever, XrSeq
 from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT
 from llm.xr_prompts import XR_OPENING_CONVENTIONS
 from llm.deepseek_client import DeepSeekClient
-from llm.doubao_client import DoubaoVisionClient, DoubaoSeedClient
+from llm.doubao_client import VisionClient, DoubaoSeedClient
 from utils.screenshot import trigger_screenshot_shortcut, read_clipboard_image
 from config import (
     JF_CONVENTION_FILE, DEFAULT_DEAL_SYSTEM,
@@ -61,6 +61,7 @@ from config import (
     MCTS_PARTICLES_MIN, MCTS_PARTICLES_MAX,
     ALPHA_MU_WORLDS_MIN, ALPHA_MU_WORLDS_MAX,
     MCTS_TIME_LIMIT, DD_TIME_LIMIT, ALPHA_MU_TIME_LIMIT,
+    VISION_PROVIDER, DEEPSEEK_VISION_MODEL,
 )
 from bridge.bidding_service import MAIN_PROMPT_MAX_RETRIES, FALLBACK_PROMPT_MAX_RETRIES
 
@@ -89,9 +90,18 @@ jf_retriever = JFRetriever(jf_segments)
 xr_retriever = XrRetriever()
 llm_client = DeepSeekClient()
 doubao_client = DoubaoSeedClient()
-vision_client = DoubaoVisionClient()
+vision_client_deepseek = VisionClient(provider="deepseek")
+vision_client_doubao = VisionClient(provider="doubao")
+current_vision_provider = VISION_PROVIDER
 
 current_ai_provider = DEFAULT_AI_PROVIDER
+
+
+def get_vision_client() -> VisionClient:
+    """根据当前 vision provider 返回对应的视觉识别客户端"""
+    if current_vision_provider == "doubao":
+        return vision_client_doubao
+    return vision_client_deepseek
 
 def get_available_models() -> list:
     """返回当前环境实际可用的模型列表（已配置 endpoint / API Key）"""
@@ -387,10 +397,58 @@ async def set_ai_provider(request: AIProviderRequest):
     
     current_ai_provider = request.ai_provider
     provider_name = "DeepSeek" if request.ai_provider == AI_PROVIDER_DEEPSEEK else "Doubao (豆包)"
-    
+
     return AIProviderResponse(
         ai_provider=request.ai_provider,
         message=f"AI提供商已设置为: {provider_name}"
+    )
+
+
+class VisionProviderRequest(BaseModel):
+    vision_provider: str
+
+
+class VisionProviderResponse(BaseModel):
+    vision_provider: str
+    message: str
+
+
+@app.get("/api/vision-provider")
+async def get_vision_provider():
+    """获取当前视觉识别模型 provider 配置及可用列表"""
+    return {
+        "vision_provider": current_vision_provider,
+        "available_providers": [
+            {
+                "id": "deepseek",
+                "name": f"DeepSeek Vision ({DEEPSEEK_VISION_MODEL})",
+                "configured": vision_client_deepseek.is_configured(),
+            },
+            {
+                "id": "doubao",
+                "name": "豆包 Vision",
+                "configured": vision_client_doubao.is_configured(),
+            },
+        ],
+    }
+
+
+@app.post("/api/vision-provider", response_model=VisionProviderResponse)
+async def set_vision_provider(request: VisionProviderRequest):
+    """切换视觉识别模型 provider（DeepSeek / 豆包）"""
+    global current_vision_provider
+    valid = ["deepseek", "doubao"]
+    if request.vision_provider not in valid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"无效的视觉模型提供商。有效选项: {', '.join(valid)}"
+        )
+
+    current_vision_provider = request.vision_provider
+    label = "DeepSeek Vision" if request.vision_provider == "deepseek" else "豆包 Vision"
+    return VisionProviderResponse(
+        vision_provider=request.vision_provider,
+        message=f"视觉识别模型已切换为: {label}"
     )
 
 
@@ -1262,7 +1320,7 @@ async def image_deal(image: bytes = File(..., description="图片文件")):
         try:
             print(f"[INFO] 开始调用vision_client识别图片...")
             # 视觉识别（最长 120s）卸载到线程，避免阻塞事件循环（P0-1 修复）
-            result = await asyncio.to_thread(vision_client.read_cards_from_image, image_path)
+            result = await asyncio.to_thread(get_vision_client().read_cards_from_image, image_path)
             print(f"[INFO] vision_client返回结果: {result}")
         finally:
             # 清理临时文件
@@ -1409,7 +1467,7 @@ def _recognize_single_hand_image(image_path: str, position: str, known_hands: Op
     """
     import time
     t_start = time.time()
-    result = vision_client.read_single_hand_from_image(image_path, position)
+    result = get_vision_client().read_single_hand_from_image(image_path, position)
     if "error" in result:
         return {"success": False, "message": f"识别失败: {result['error']}"}
 
@@ -1560,7 +1618,7 @@ def _recognize_bidding_image(image_path: str) -> dict:
     """识别截图中的叫牌过程（仅叫牌序列+定约，不识别手牌）。上传与剪贴板两条路径共用。"""
     import time
     t_start = time.time()
-    result = vision_client.read_bidding_from_image(image_path)
+    result = get_vision_client().read_bidding_from_image(image_path)
     if "error" in result:
         return {"success": False, "message": f"识别失败: {result['error']}"}
 
@@ -1670,7 +1728,7 @@ async def read_clipboard():
         print(f"[INFO] 截图已保存到: {image_path} ({fmt})")
 
         # 视觉识别（最长 120s）卸载到线程，避免阻塞事件循环（P0-1 修复）
-        result = await asyncio.to_thread(vision_client.read_cards_from_image, image_path)
+        result = await asyncio.to_thread(get_vision_client().read_cards_from_image, image_path)
         print(f"[DEBUG] vision_client返回结果: {result}")
 
         os.unlink(image_path)
@@ -2093,6 +2151,7 @@ class PlayAIRequest(BaseModel):
     dd_sample_count: Optional[int] = None  # DD 蒙地卡罗采样数
     dd_alphamu_switch_cards: Optional[int] = None  # DD-αμ-LLM 引擎中盘/残局切换分界
     dd_scoring_mode: Optional[str] = None  # DD 决策计分制: "imp" | "make_rate" | "avg_tricks"
+    dd_security_filter: Optional[bool] = None  # DD 决策计分制是否叠加临界分布过滤
     use_llm_review: bool = False  # DD-αμ-LLM 引擎是否启用 LLM 分组审查（默认关闭）
     session_id: str = "default"
 
@@ -2198,6 +2257,7 @@ async def _execute_ai_play(request: PlayAIRequest, progress_cb=None) -> PlayAIRe
                               if (use_dd or use_dd_alphamu_llm) else None)
                 dd_switch_cards = request.dd_alphamu_switch_cards if use_dd_alphamu_llm else None
                 dd_scoring_mode = request.dd_scoring_mode if (use_dd or use_dd_alphamu_llm) else None
+                dd_security_filter = request.dd_security_filter if (use_dd or use_dd_alphamu_llm) else None
                 t0 = time.time()
                 # 记录DD提示所需的出牌前状态
                 state_before = service.get_state()
@@ -2215,7 +2275,8 @@ async def _execute_ai_play(request: PlayAIRequest, progress_cb=None) -> PlayAIRe
                     enable_llm_review=enable_llm_review,
                     dd_samples=dd_samples,
                     dd_alphamu_switch_cards=dd_switch_cards,
-                    dd_scoring_mode=dd_scoring_mode)
+                    dd_scoring_mode=dd_scoring_mode,
+                    dd_security_filter=dd_security_filter)
                 elapsed_ms = int((time.time() - t0) * 1000)
 
                 if result.get("card"):
@@ -2785,7 +2846,12 @@ async def set_particle_settings(request: ParticleSettingsRequest):
 # ── 记录自动备份 ──
 
 RECORDS_BACKUP_FILE = Path(__file__).parent.parent / "bridge_records_backup.json"
-RECORDS_BACKUP_MAX = 200  # 服务器端保留最多 200 条
+RECORDS_BACKUP_MAX = 500  # 服务器端保留最多 500 条
+
+# 记录文件的协程级互斥锁（asyncio.Lock，非 threading.Lock）：uvicorn 单进程内所有
+# async 请求跑在同一事件循环，threading.Lock 对协程无互斥作用，会放任并发读-改-写互相
+# 覆盖（历史记录丢失根因）。所有读-改-写路径必须整体 async with 持锁。
+_RECORDS_LOCK = asyncio.Lock()
 
 
 class RecordsBackupRequest(BaseModel):
@@ -2810,18 +2876,17 @@ async def save_records_backup(request: RecordsBackupRequest):
     """保存记录到服务器端备份文件"""
     try:
         records = request.records
-        # 去重：基于 id
-        seen = set()
-        unique = []
-        for r in records:
-            rid = r.get("id", "")
-            if rid and rid not in seen:
-                seen.add(rid)
-                unique.append(r)
-        unique = unique[:RECORDS_BACKUP_MAX]
-
-        with open(RECORDS_BACKUP_FILE, "w", encoding="utf-8") as f:
-            json.dump(unique, f, ensure_ascii=False, indent=2)
+        async with _RECORDS_LOCK:
+            # 去重：基于 id
+            seen = set()
+            unique = []
+            for r in records:
+                rid = r.get("id", "")
+                if rid and rid not in seen:
+                    seen.add(rid)
+                    unique.append(r)
+            unique = unique[:RECORDS_BACKUP_MAX]
+            _write_backup_records(unique)
         return {"success": True, "count": len(unique)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"备份失败: {e}")
@@ -2835,8 +2900,23 @@ def _read_backup_records() -> list:
 
 
 def _write_backup_records(records: list) -> None:
-    with open(RECORDS_BACKUP_FILE, "w", encoding="utf-8") as f:
-        json.dump(records, f, ensure_ascii=False, indent=2)
+    """原子写：先写临时文件再替换，避免写盘中途崩溃损坏主文件。
+
+    注意：本函数原子替换，但调用方的「读-改-写」整体必须由调用方持 _RECORDS_LOCK。"""
+    fd, tmp_path = tempfile.mkstemp(
+        prefix="records_", suffix=".tmp",
+        dir=str(RECORDS_BACKUP_FILE.parent),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(records, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, str(RECORDS_BACKUP_FILE))
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 
 def _index_record(r: dict) -> dict:
@@ -2903,27 +2983,28 @@ async def upsert_record_single(request: Request):
         record = body.get("record")
         if not isinstance(record, dict):
             raise HTTPException(status_code=400, detail="缺少 record")
-        records = _read_backup_records()
-        rid = str(record.get("id"))
-        sid = record.get("sourceRecordId")
-        replaced = False
-        for i, r in enumerate(records):
-            if str(r.get("id")) == rid:
-                records[i] = record
-                replaced = True
-                break
-        if not replaced and sid:
+        async with _RECORDS_LOCK:
+            records = _read_backup_records()
+            rid = str(record.get("id"))
+            sid = record.get("sourceRecordId")
+            replaced = False
             for i, r in enumerate(records):
-                if str(r.get("id")) == str(sid) or str(r.get("sourceRecordId")) == str(sid):
-                    merged = dict(record)
-                    merged["id"] = r.get("id")
-                    records[i] = merged
+                if str(r.get("id")) == rid:
+                    records[i] = record
                     replaced = True
                     break
-        if not replaced:
-            records.insert(0, record)
-        records = records[:RECORDS_BACKUP_MAX]
-        _write_backup_records(records)
+            if not replaced and sid:
+                for i, r in enumerate(records):
+                    if str(r.get("id")) == str(sid) or str(r.get("sourceRecordId")) == str(sid):
+                        merged = dict(record)
+                        merged["id"] = r.get("id")
+                        records[i] = merged
+                        replaced = True
+                        break
+            if not replaced:
+                records.insert(0, record)
+            records = records[:RECORDS_BACKUP_MAX]
+            _write_backup_records(records)
         return {"success": True}
     except HTTPException:
         raise
@@ -2947,8 +3028,9 @@ async def delete_records_batch(request: RecordsExportRequest):
     """按 id 集合从备份文件删除记录。"""
     try:
         ids = set(request.ids)
-        records = [r for r in _read_backup_records() if str(r.get("id")) not in ids]
-        _write_backup_records(records)
+        async with _RECORDS_LOCK:
+            records = [r for r in _read_backup_records() if str(r.get("id")) not in ids]
+            _write_backup_records(records)
         return {"success": True, "count": len(records)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除失败: {e}")
@@ -2963,17 +3045,18 @@ class RecordNoteRequest(BaseModel):
 async def update_record_note(request: RecordNoteRequest):
     """更新某条记录的注释。"""
     try:
-        records = _read_backup_records()
-        found = False
-        for r in records:
-            if str(r.get("id")) == request.id:
-                r["note"] = request.note
-                found = True
-                break
-        if not found:
-            record = {"id": request.id, "note": request.note}
-            records.insert(0, record)
-        _write_backup_records(records)
+        async with _RECORDS_LOCK:
+            records = _read_backup_records()
+            found = False
+            for r in records:
+                if str(r.get("id")) == request.id:
+                    r["note"] = request.note
+                    found = True
+                    break
+            if not found:
+                record = {"id": request.id, "note": request.note}
+                records.insert(0, record)
+            _write_backup_records(records)
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"更新注释失败: {e}")

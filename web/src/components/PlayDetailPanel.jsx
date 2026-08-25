@@ -340,7 +340,7 @@ function PlayDetailPanel({
                       {isAlphaMu
                         ? `αμ: ${mctsData.num_worlds || '?'} worlds · depth≤4 · ${mctsData.nodes_searched || '?'} nodes · ${mctsData.iterations || '?'} DDS · ${mctsData.time_sec || '?'}s`
                         : isDD
-                          ? `DDMC: ${mctsData.iterations}次搜索 · ${mctsData.time_sec}s · ${mctsData.iters_per_sec}it/s · 剩${mctsData.remaining_cards}张 · ${ddScoringMode === 'imp' ? 'IMP制' : ddScoringMode === 'make_rate' ? '成约率制' : '赢墩制'}`
+                          ? `DDMC: ${mctsData.iterations}次搜索${mctsData.samples_used && mctsData.samples_used !== mctsData.iterations ? ` · 实际计算${mctsData.samples_used}样本${mctsData.security_filter ? '(临界过滤)' : ''}` : ''} · ${mctsData.time_sec}s · ${mctsData.iters_per_sec}it/s · 剩${mctsData.remaining_cards}张 · ${ddScoringMode === 'imp' ? 'IMP制' : ddScoringMode === 'make_rate' ? '成约率制' : '赢墩制'}`
                           : `MCTS: ${mctsData.iterations}次搜索 · ${mctsData.time_sec}s · ${mctsData.iters_per_sec}it/s · 剩${mctsData.remaining_cards}张`
                       }
                     </Typography>
@@ -365,11 +365,11 @@ function PlayDetailPanel({
                           {isAlphaMu
                             ? `${((c.success_rate || 0) * 100).toFixed(0)}% · ${c.avg_tricks ?? '?'}墩 · ${c.success_count || 0}/${c.total_useful || '?'} · front${c.front_size || 1}${isInherited ? ' · 继承' : ''}`
                             : isDD
-                              ? ddScoringMode === 'imp'
-                                ? `${c.scoring_val >= 0 ? '+' : ''}${c.scoring_val}IMP`
-                                : ddScoringMode === 'make_rate'
-                                  ? `${(c.scoring_val * 100).toFixed(1)}%`
-                                  : `${c.avg_tricks}墩 [${c.min_tricks}-${c.max_tricks}]`
+                              ? `${ddScoringMode === 'imp'
+                                  ? `${c.scoring_val >= 0 ? '+' : ''}${c.scoring_val}IMP`
+                                  : ddScoringMode === 'make_rate'
+                                    ? `${(c.scoring_val * 100).toFixed(1)}%`
+                                    : `${c.avg_tricks}墩 [${c.min_tricks}-${c.max_tricks}]`}${c.samples_used && c.samples_used !== c.samples ? ` · ${c.samples_used}/${c.samples}样本` : ''}`
                               : `${c.visits}次 · ${c.avg_tricks}墩`
                           }
                         </Typography>
