@@ -172,16 +172,10 @@ def _check_constraint(cards: List[Card], constraint: "BidConstraint") -> bool:
     for (suit, rank) in constraint.specific_cards:
         if not any(c.suit == suit and c.rank == rank for c in cards):
             return False
-    for suit in constraint.suit_controls:
-        suit_cards = [c for c in cards if c.suit == suit]
-        if len(suit_cards) <= 1:
-            continue  # 单/缺本身即控制（短套控制的通用定义）
-        if not any(c.rank in ("A", "K") for c in suit_cards):
-            return False
-    if constraint.min_keycards is not None:
-        keycards = _count_keycards(cards)
-        if keycards < constraint.min_keycards:
-            return False
+    # v1.68 决策：扣叫（suit_controls）与关键张（min_keycards）约束
+    # 只看手牌实际张数校验，对庄家/明手（手牌已知）无意义，只对防守方采样有价值；
+    # 当前集中攻坐庄，暂不用在样本生成上（仍保留字段与提取链路，见 docs/约束生成优化.md
+    # 「决策记录」）。防守打牌研究启用时恢复下列两段校验，并同步处理中局扣减折算。
     return True
 
 
