@@ -35,7 +35,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import HistoryIcon from '@mui/icons-material/History'
-import { aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, doubleDummyAnalysis, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles, undoPlay, setPlayHand, getDDHints, getDDHintsReview, customDeal as apiCustomDeal } from './services/api'
+import { aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, doubleDummyAnalysis, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles, undoPlay, setPlayHand, getDDHints, getDDHintsReview, customDeal as apiCustomDeal, generateConstraints } from './services/api'
 import HandDisplay from './components/HandDisplay'
 import Header from './components/layout/Header'
 import BiddingDetailPanel from './components/BiddingDetailPanel'
@@ -53,12 +53,10 @@ import { validateHands, validateBidding } from './utils/validation'
 import { formatElapsedTime } from './utils/biddingUtils'
 import './App.css'
 
-/** 拼装一条叫牌含义行（含结构化叫品约束，供打牌通道A解析）：(位置)叫品: 含义[约束:...] */
+/** 拼装一条叫牌含义行（公开含义文本，供打牌约束转换LLM转译）：(位置)叫品: 含义 */
 const formatBidMeaningLine = (r) => {
   const meaning = r.result?.meaning || ''
-  const constraint = r.result?.full_output?.['叫品约束'] || ''
-  const cText = constraint ? `[约束:${constraint}]` : ''
-  return `(${r.position})${r.result?.bid || ''}: ${meaning}${cText}`
+  return `(${r.position})${r.result?.bid || ''}: ${meaning}`
 }
 
 /** 确保手牌每门花色按 A→2 排序，并计算 HCP */
@@ -184,6 +182,14 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     isDouble: false, isRedouble: false,
   })
   const [resetOpeningLeadValue, setResetOpeningLeadValue] = useState('')
+  // 弹窗约束生成：打开"确认定约与首攻"时触发生成并展示（唯一约束生成入口）
+  const [dialogConstraints, setDialogConstraints] = useState(null) // {成功值或null}
+  const [dialogConstraintsDisplay, setDialogConstraintsDisplay] = useState('')
+  const [dialogConstraintsLoading, setDialogConstraintsLoading] = useState(false)
+  const [dialogConstraintsError, setDialogConstraintsError] = useState('')
+  // 约束结果 ref 同步，供打牌中/打牌结束自动保存记录使用（避免 useCallback 闭包捕获旧值）
+  const dialogConstraintsRef = useRef(null)
+  const dialogConstraintsDisplayRef = useRef('')
 
   // ── Bidding 域状态（迁入 BiddingContext）──
   const {
@@ -675,6 +681,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         bidding: {
           ai_bidding_history: trimBiddingHistory(aiBiddingHistory),
           deal_system: dealSystem,
+          constraints: dialogConstraintsRef.current,
+          constraints_display: dialogConstraintsDisplayRef.current,
         },
         play: {
           state: stripPlayState(ps),
@@ -905,12 +913,13 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         })
         setCustomBidMeaning('') // 清空输入框
       } else if (!humanBidInterpret) {
-        // 关闭AI解释：直接以叫品本身作为含义，不调用API（加快叫牌速度）
+        // 关闭AI解释：含义置空（无含义→进入打牌时按缺失历史模拟补全复核，
+        // 与截屏等无叫牌历史来源一致触发补全；不调用API以加快叫牌速度）
         appendBidHistory({
           position: currentBidder,
           hand: hands[currentBidder],
           biddingSequence: biddingStr,
-          result: { bid: bid, meaning: bid },
+          result: { bid: bid, meaning: '' },
           timestamp: makeBidTimestamp()
         })
       } else {
@@ -1786,6 +1795,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       setContractDialogForm({ contractStr: '', declarer: '南', openingLead: imageOpeningLead || '', isDouble: false, isRedouble: false })
     }
     setContractDialogOpen(true)
+    prepareDialogConstraints(biddingSequence, aiBiddingHistory)
     return
   }
 
@@ -2024,9 +2034,9 @@ const handleReviewCompletedPlay = async () => {
     return simRecords
   }
 
-  // 构建打牌初始化用的叫牌字符串：seqStr / meaningLines（含[约束:...]）/ biddingStr。
+  // 构建打牌初始化用的叫牌字符串：seqStr / meaningLines（公开含义文本）/ biddingStr。
   // 未经过叫牌过程（无任何含义记录，如截屏、人工输入、历史导入牌例）时，
-  // 自动模拟人类叫牌（新睿二盖一体系）生成含义+结构化约束，规则库仅在该叫品解析失败时兜底。
+  // 自动模拟人类叫牌（新睿二盖一体系）补全含义文本，供弹窗约束生成与打牌约束转换使用。
   const buildBiddingInput = async (biddingSeq, aiHistory) => {
     const result = { biddingStr: null, seqStr: '', meaningLines: '' }
     if (!biddingSeq || biddingSeq.length === 0) return result
@@ -2041,6 +2051,42 @@ const handleReviewCompletedPlay = async () => {
       ? `${result.seqStr}\n\n叫牌含义:\n${result.meaningLines}`
       : result.seqStr
     return result
+  }
+
+  // 弹窗唯一约束生成入口：确保含义历史完整（无→新睿模拟，不全→已由各路径补全），
+  // 调 /api/constraints 将公开含义文本转换为各家约束（不含手牌，无泄露）。
+  const prepareDialogConstraints = async (biddingSeq, aiHistory) => {
+    setDialogConstraints(null)
+    setDialogConstraintsDisplay('')
+    setDialogConstraintsError('')
+    dialogConstraintsRef.current = null
+    dialogConstraintsDisplayRef.current = ''
+    if (!biddingSeq || biddingSeq.length === 0) {
+      setDialogConstraintsError('无叫牌序列，无法生成叫牌约束')
+      return
+    }
+    setDialogConstraintsLoading(true)
+    try {
+      const input = await buildBiddingInput(biddingSeq, aiHistory)
+      if (input.meaningLines) {
+        const resp = await generateConstraints(input.meaningLines, bidSystem)
+        if (resp?.success) {
+          setDialogConstraints(resp.constraints || null)
+          dialogConstraintsRef.current = resp.constraints || null
+          setDialogConstraintsDisplay(resp.display || '')
+          dialogConstraintsDisplayRef.current = resp.display || ''
+        } else {
+          setDialogConstraintsError((resp?.error) || '约束生成失败')
+        }
+      } else {
+        setDialogConstraintsError('无叫牌含义文本，无法生成约束')
+      }
+    } catch (err) {
+      console.error('约束生成失败:', err)
+      setDialogConstraintsError('约束生成失败: ' + (err?.message || err))
+    } finally {
+      setDialogConstraintsLoading(false)
+    }
   }
 
   const doPlayInit = async (contract, biddingSeq, aiHistory) => {
@@ -2088,7 +2134,8 @@ const handleReviewCompletedPlay = async () => {
         seqStr,
         meaningLines,
         vulnerability,
-        bidSystem
+        bidSystem,
+        dialogConstraints
       )
 
       if (result.success) {
@@ -2799,6 +2846,8 @@ const handleReviewCompletedPlay = async () => {
       bidding: {
         ai_bidding_history: trimBiddingHistory(aiBiddingHistory),
         deal_system: dealSystem,
+        constraints: dialogConstraintsRef.current,
+        constraints_display: dialogConstraintsDisplayRef.current,
       },
       play: {
         tricks: playState.tricks,
@@ -3416,11 +3465,36 @@ const handleReviewCompletedPlay = async () => {
               fullWidth
               helperText="格式：位置:花色牌面，如 西:S5。留空则由AI自动决策"
             />
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>
+                叫牌约束
+              </Typography>
+              {dialogConstraintsLoading ? (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'text.secondary' }}>
+                  <CircularProgress size={16} />
+                  <Typography variant="caption">正在根据叫牌历史生成各家约束…</Typography>
+                </Box>
+              ) : dialogConstraintsError ? (
+                <Alert severity="warning" sx={{ py: 0.5, '& .MuiAlert-message': { py: 0.5 } }}>
+                  <Typography variant="caption">{dialogConstraintsError}</Typography>
+                </Alert>
+              ) : dialogConstraintsDisplay ? (
+                <Typography
+                  variant="caption"
+                  component="pre"
+                  sx={{ whiteSpace: 'pre-wrap', m: 0, color: 'text.secondary', fontFamily: 'monospace' }}
+                >
+                  {dialogConstraintsDisplay}
+                </Typography>
+              ) : (
+                <Typography variant="caption" color="text.secondary">（未生成）</Typography>
+              )}
+            </Box>
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setContractDialogOpen(false)}>取消</Button>
-          <Button onClick={handleContractDialogConfirm} variant="contained">开始打牌</Button>
+          <Button onClick={() => { setContractDialogOpen(false); setDialogConstraints(null); dialogConstraintsRef.current = null; setDialogConstraintsDisplay(''); dialogConstraintsDisplayRef.current = ''; setDialogConstraintsError('') }}>取消</Button>
+          <Button onClick={handleContractDialogConfirm} variant="contained" disabled={dialogConstraintsLoading}>确认</Button>
         </DialogActions>
       </Dialog>
 

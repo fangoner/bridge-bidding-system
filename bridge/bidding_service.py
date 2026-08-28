@@ -622,19 +622,8 @@ class BiddingService:
         jf_keyword = extract_retrieval_keyword(bidding_sequence, deal_system, player_name)
         jf_result = self.jf_retriever.retrieve_with_preprocess(jf_keyword, bidding_sequence, partner_name)
 
-        subsequent_bids = jf_result.get("subsequent_bids", [])
-        for item in subsequent_bids:
-            if item.get("bid", "").upper() == bid.upper():
-                meaning = item.get("line", "")
-                if meaning:
-                    if verbose:
-                        print(f"[human_bid] 从JF约定匹配到 {bid} 含义: {meaning}")
-                    full_sequence = f"{bidding_sequence}({player_name}){bid}-"
-                    return {"选定叫品": bid, "叫品含义": meaning, "JF约定": jf_keyword, "完整叫牌序列": full_sequence}
-
         if not self.llm_client.is_configured():
-            full_sequence = f"{bidding_sequence}({player_name}){bid}-"
-            return {"选定叫品": bid, "叫品含义": "API Key未配置，无法获取叫品含义", "JF约定": jf_keyword, "完整叫牌序列": full_sequence}
+            return {"error": "API Key未配置"}
 
         jf_content = jf_result.get("original_content", "")
         actual_jf_keyword = jf_keyword
@@ -647,7 +636,12 @@ class BiddingService:
                 print(f"[human_bid] PATH: fallback - no jf_content, using 成局与满贯")
 
         if verbose:
-            print(f"[human_bid] 未在备选叫品中直接匹配 {bid}，注入 {actual_jf_keyword} 检索内容调用AI解释")
+            print(f"[human_bid] 注入 {actual_jf_keyword} 检索内容调用AI解释 {bid}")
+
+        if jf_content:
+            matched_lines = [it.get("line", "") for it in jf_result.get("subsequent_bids", []) if it.get("bid", "").upper() == bid.upper()]
+            if matched_lines:
+                jf_content += "\n\n【本叫品在约定中的条目】\n" + next((ln for ln in matched_lines if ln), "")
 
         prompt = HUMAN_BID_PROMPT.format(
             bidding=bidding_sequence if bidding_sequence else "空",
@@ -662,16 +656,12 @@ class BiddingService:
         try:
             result = self.llm_client.chat_human_bid(prompt, temperature=0, thinking=use_reasoning)
             if result.get("error"):
-                # P0-5 修复：chat_json 失败返回 error dict，人类叫牌不中断（叫品已由用户输入），
-                # 仅提示含义获取失败
-                full_sequence = f"{bidding_sequence}({player_name}){bid}-"
-                return {"选定叫品": bid, "叫品含义": f"获取叫品含义失败: {result['error']}", "JF约定": actual_jf_keyword, "完整叫牌序列": full_sequence}
+                return {"error": str(result.get("error")), "选定叫品": bid}
             result["JF约定"] = actual_jf_keyword
             full_sequence = f"{bidding_sequence}({player_name}){bid}-"
             return _fixup_human_bid_result(result, bid, full_sequence)
         except Exception as e:
-            full_sequence = f"{bidding_sequence}({player_name}){bid}-"
-            return {"选定叫品": bid, "叫品含义": f"获取叫品含义失败: {e}", "JF约定": actual_jf_keyword, "完整叫牌序列": full_sequence}
+            return {"error": str(e), "选定叫品": bid}
 
     # ───────── 新睿二盖一体系（与 JF 完全隔离） ─────────
     _XR_OPENING_BIDS = [
@@ -857,28 +847,26 @@ class BiddingService:
             return {"选定叫品": "pass", "叫品含义": "pass：不叫", "新睿约定": "", "完整叫牌序列": full_sequence}
 
         seq = XrSeq.build(bidding_sequence, player_name)
-        meaning = None
+        xr_table_hit = ""
         if seq:
             xr_result = self.xr_retriever.retrieve_with_preprocess(seq, bidding_sequence, partner_name)
             for item in xr_result.get("subsequent_bids", []):
                 if item.get("bid", "").upper() == bid.upper():
-                    meaning = item.get("line", "")
+                    xr_table_hit = item.get("line", "")
                     break
-            if meaning:
-                if verbose:
-                    print(f"[human_bid_xr] 匹配到 {bid} 含义: {meaning}")
-                full_sequence = f"{bidding_sequence}({player_name}){bid}-"
-                return {"选定叫品": bid, "叫品含义": meaning, "新睿约定": seq, "完整叫牌序列": full_sequence}
 
         if not self.llm_client.is_configured():
-            full_sequence = f"{bidding_sequence}({player_name}){bid}-"
-            return {"选定叫品": bid, "叫品含义": "API Key未配置，无法获取叫品含义", "新睿约定": seq or "开叫", "完整叫牌序列": full_sequence}
+            return {"error": "API Key未配置"}
+
+        jf_content = XR_FALLBACK_CONVENTIONS
+        if xr_table_hit:
+            jf_content += "\n\n【本叫品在约定表中的条目】\n" + xr_table_hit
 
         prompt = XR_HUMAN_PROMPT.format(
             bidding=bidding_sequence if bidding_sequence else "空",
             player=player_name,
             user_input=user_input,
-            jf_content=XR_FALLBACK_CONVENTIONS,
+            jf_content=jf_content,
             deal_system=deal_system,
             bid_meaning=self.bid_meanings if self.bid_meanings else "（暂无）"
         )
@@ -886,13 +874,12 @@ class BiddingService:
 
         try:
             result = self.llm_client.chat_human_bid(prompt, temperature=0, thinking=use_reasoning)
-            full_sequence = f"{bidding_sequence}({player_name}){bid}-"
             if result.get("error"):
-                return {"选定叫品": bid, "叫品含义": f"获取叫品含义失败: {result['error']}", "新睿约定": seq or "开叫", "完整叫牌序列": full_sequence}
+                return {"error": str(result.get("error")), "选定叫品": bid}
             result["新睿约定"] = seq or "开叫"
+            full_sequence = f"{bidding_sequence}({player_name}){bid}-"
             if "完整叫牌序列" not in result:
                 result["完整叫牌序列"] = full_sequence
             return _fixup_human_bid_result(result, bid, full_sequence)
         except Exception as e:
-            full_sequence = f"{bidding_sequence}({player_name}){bid}-"
-            return {"选定叫品": bid, "叫品含义": f"获取叫品含义失败: {e}", "新睿约定": seq or "开叫", "完整叫牌序列": full_sequence}
+            return {"error": str(e), "选定叫品": bid}

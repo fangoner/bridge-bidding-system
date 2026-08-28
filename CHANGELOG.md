@@ -1,5 +1,24 @@
 # 开发日志
 
+## 2026-08-28（约束生成重构：回归叫牌真实产物 v1.68）
+
+### 约束生成：弹窗统一入口 + LLM 转换，规则库彻底移除
+
+**背景**: 叫牌约束此前混用叫牌阶段 LLM 输出 + 规则库（`bid_constraint_library.py`）兜底。规则库是通用自然近似，准确度低于 JF/新睿约定本身，接入叫牌过程会污染后续叫牌 LLM 上下文；叫牌阶段同时输出"含义+约束"还可能导致 LLM 把真实手牌数据嵌入约束（泄露）。承接 2026-08-26 飞牌教训（决策干预无用、约束是唯一杠杆），约束改为只来自叫牌阶段真实产物（LLM 含义文本 + 约定原义）。方案细节见 `docs/约束生成优化.md`。
+
+**改进**:
+- **约束生成唯一入口（进入打牌弹窗）**：打开"确认定约与首攻"时前端经 `buildBiddingInput` 保证含义历史完整（无/不全 → 新睿体系模拟人类叫牌补全）→ 调 `POST /api/constraints` 生成各家约束并展示；按钮改"确认"，生成期间禁用
+- **约束转换 LLM 主路径**（`play_service.generate_constraints_from_meanings` + `CONSTRAINT_TRANSLATE_PROMPT`）：完整叫牌含义文本 → 每叫品约束；实现负面推断（不叫<12HCP、无1阶争叫<8或无5张套、无2阶争叫<11或无6张套、争叫位pass≤11）、扣叫→`suit_controls`、4NT/5NT答叫→`min_keycards`（A+K计数）；同位置多次叫牌 `_merge_constraints` 单调收紧合并（由规则库迁移本地）
+- **BidConstraint 扩展**（`bridge/mcts/constraints.py`）：新增 `suit_controls`（有控制花色：A/K 或单缺）与 `min_keycards`（关键张数）；`_check_constraint` 双维校验；`relax_constraint` 放宽逻辑
+- **叫牌阶段完全解耦**：三个 JSON Schema（主/备用/人类）删除"叫品约束"字段；人类叫牌（JF/新睿）检索命中必走 LLM，失败/API 未配置 → `/api/human-bid` 抛 502 中断叫牌，不静默 pass
+- **规则库身份改变**：`bid_constraint_library.py` 保留文件不接入系统（研究资产）；依赖它的测试清理
+- **DD 中盘补展示**：`_dd_play` 补齐"最新约束"字段（此前仅 αμ/完美DD/MCTS 输出，导致第 7 墩切引擎后才可见扣减后约束）
+- **记录保存约束**：打牌中/打牌完成自动保存记录写入 `constraints`/`constraints_display`（前端 ref 同步避免闭包旧值）
+
+**修改文件**: bridge/mcts/constraints.py, bridge/play_service.py, api/main.py, llm/deepseek_client.py, llm/prompts.py, main.py, web/src/App.jsx, web/src/services/api.js, tests/test_sampling_constraints.py, tests/test_mcts_constraints.py, tests/test_new_conventions.py（删除）, docs/约束生成优化.md（新增）
+
+**测试验证**: /api/constraints 实测（1NT/pass/斯泰曼 → 南15-17均型、西/东≤11负面推断、北≥8）；play/init 三路径（种子约束/LLM转换/无约束静默）全通过；约束合并与新字段校验、采样约束满足率（1NT 82.5%、弱二 100%）单测全绿。
+
 ## 2026-08-25（叫牌约束修复 + 历史记录并发防护 + 视觉双provider v1.67）
 
 ### 叫牌约束：跳加叫判定修正 + 弱牌直封收紧

@@ -12,7 +12,6 @@ from bridge.mcts import MctsSearch, RandomizedRollout, DDSearch
 from bridge.mcts.direct_dds import is_dds_available
 from bridge.mcts.constraints import BidConstraint, validate_sample
 from bridge.mcts.signals import format_partner_signals_for_prompt
-from bridge.mcts.bid_constraint_library import extract_constraints_from_bid_history, SYSTEM_NATURAL
 from bridge.mcts.sampler import compute_played_stats, compute_remaining_counts, _reduce_constraint_for_played
 from config import (
     MCTS_ITERATIONS, MCTS_TIME_LIMIT, MCTS_EXPLORATION_CONSTANT,
@@ -134,6 +133,7 @@ class PlayService:
         bidding_sequence: str = "未提供",
         bid_history: str = "",
         bid_meanings: str = "",
+        constraints: Optional[dict] = None,
         vulnerability: str = "NV",
         bid_system: str = "",
     ) -> PlayState:
@@ -149,8 +149,9 @@ class PlayService:
         # 缓存叫牌约束（供MCTS采样器使用）
         self.bid_history = bid_history
         self.bid_meanings = bid_meanings  # 叫牌含义文本（复用LLM已分析信息）
-        self.bid_system = bid_system or SYSTEM_NATURAL  # 实际叫牌体系
+        self.bid_system = bid_system or ""  # 实际叫牌体系（仅存档用，约束不再依赖体系）
         self.bid_constraints = None  # 延迟提取
+        self._seed_constraints = constraints or None  # 前端弹窗已生成的家约束，直接seed
         # Phase 0a: BeliefTracker 已移除，粒子缓存不再需要清理
 
         return self.engine.initialize(hands, contract, player_roles, bidding_sequence, vulnerability)
@@ -473,28 +474,112 @@ class PlayService:
                 "prompt": ""
             }
 
-    BID_CONSTRAINT_PROMPT = """从叫牌历史中提取每名牌手透露的点力范围和花色张数约束。
+    CONSTRAINT_TRANSLATE_PROMPT = """你是桥牌叫牌约束转换器。输入完整叫牌历史（每手每轮叫品的公开含义，含pass），输出每个叫品对应的"叫牌约束"。
+
+叫牌约束表示该叫品对牌情的**公开承诺**（点力范围、花色长度、牌型、单缺、控制、关键张），只能来自含义文本中明确声明的承诺，禁止编造含义未提及的信息，禁止使用实际手牌（你看不到手牌）。
 
 叫牌历史（格式：(位置)叫品：含义）：
 {bid_history}
 
-对每名牌手（南/西/北/东），根据其叫品含义提取：
-- min_hcp: 最低点力（无约束填null）
-- max_hcp: 最高点力（无约束填null）
-- balanced: 均型=true, 非均型=false, 未知=null
-- spades_min: S最少张数（无约束填null）
-- hearts_min: H最少张数（无约束填null）
-- diamonds_min: D最少张数（无约束填null）
-- clubs_min: C最少张数（无约束填null）
+对叫牌历史中的**每一个叫品**（含pass），推断其公开承诺约束，输出JSON对象：
+{{
+  "calls": [
+    {{"position": "南", "bid": "1C", "constraint": "HCP12-21|C3+"}},
+    {{"position": "西", "bid": "pass", "constraint": "HCP≤7"}}
+  ]
+}}
 
-注意：pass/不叫表示无合格叫品，不代表点力或牌型信息。
+约束格式（单行紧凑串，按|分段）：
+- HCP段：HCP下界[-上界]，如 HCP12-21、HCP16+、HCP≤7
+- 花色段：S/H/D/C + 张数（+至少/-至多/裸数字精确），如 S5+、H4
+- 牌型段：均型 / 非均
+- 单缺段：单缺X（X=花色字母），如 单缺H
+- 控制段：控X（承诺该花色有控制=A/K或单/缺），源自扣叫承诺
+- 关键张段：关键张N（A、K合计至少N），仅当4NT/5NT问叫答叫时承诺的数量
+
+转译规则：
+1. 每个叫品：从其"含义"提取公开承诺。含义明确给出的点力区间/花色张数/牌型必须转写；含义未提及的不写。
+2. pass 的负面推断（对方/同伴正常叫牌后仍pass）：
+   - 有开叫机会但未开叫 → HCP≤11
+   - 对方1阶开叫后自己未争叫 → 无5张以上套（或HCP过低无法争叫）
+   - 对方2阶开叫/争叫后自己未叫 → 无6张以上套（或HCP过低）
+3. 扣叫（叫敌方已叫花色/配合将牌后的新花扣叫）→ 承诺该花色有控制，写 控X
+4. 4NT/5NT 问关键张后的答叫（如5C/5D/5H/5S）→ 按答叫承诺写 关键张N（标准黑木：5C=1或4个，5D=0或3个，5H=2或5个，5S=2或5个且有将牌Q）
+5. 同一位置多次叫牌：各自输出当次的承诺（不累计、不合并），由程序合并
+6. pass 若不提供明确上限（如正常跟pass无信息），constraint 可为空字符串
 
 仅输出JSON，不要Markdown代码块："""
 
+    def generate_constraints_from_meanings(self, meanings_text: str) -> Dict[str, BidConstraint]:
+        """约束转换主路径：LLM 从完整叫牌含义文本生成每家累计约束。
+
+        每个叫品独立生成承诺约束，同一位置多次叫牌用 _merge_constraints 单调收紧合并。
+        返回 {位置(南/西/北/东): BidConstraint}。
+        """
+        if not meanings_text or not meanings_text.strip():
+            return {}
+        prompt = self.CONSTRAINT_TRANSLATE_PROMPT.format(bid_history=meanings_text)
+        result = self.llm_client.chat_json(system_prompt=prompt, temperature=0, max_tokens=4096)
+        if result.get("error") or not result.get("calls"):
+            return {}
+        pos_map = {"南": "南", "西": "西", "北": "北", "东": "东",
+                   "south": "南", "west": "西", "north": "北", "east": "东"}
+        merged: Dict[str, BidConstraint] = {}
+        for item in result["calls"]:
+            if not isinstance(item, dict):
+                continue
+            pos_cn = pos_map.get(str(item.get("position", "")).strip().lower())
+            if pos_cn is None:
+                continue
+            cstr = (item.get("constraint") or "").strip()
+            if not cstr:
+                continue
+            c = self._build_constraint_from_structured(cstr, pos_cn)
+            if pos_cn in merged:
+                merged[pos_cn] = self._merge_constraints(merged[pos_cn], c)
+            else:
+                merged[pos_cn] = c
+        return merged
+
     def _merge_constraints(self, c1: BidConstraint, c2: BidConstraint) -> BidConstraint:
-        """合并两个约束：硬编码约束优先，LLM约束作为补充，取更严格的限制"""
-        from bridge.mcts.bid_constraint_library import _merge_constraints
-        return _merge_constraints(c1, c2)
+        """合并同一位置的两次叫牌约束：取更严格限制（单调收紧）。
+
+        - HCP：下界取大、上界取小；单边保留
+        - 花色张数：suit_min 取大、suit_max 取小、exact_suit 取更大（更精确的长套）
+        - balanced：矛盾时保留更明确的（后续叫牌更明确，取后一次非None）
+        - min_controls / min_keycards：取大
+        - specific_cards / suit_controls：并集（都要求）
+        """
+        merged = BidConstraint(position=c1.position, inference_source="merged")
+        lo = c1.min_hcp if c1.min_hcp is not None else c2.min_hcp
+        if c1.min_hcp is not None and c2.min_hcp is not None:
+            lo = max(c1.min_hcp, c2.min_hcp)
+        hi = c1.max_hcp if c1.max_hcp is not None else c2.max_hcp
+        if c1.max_hcp is not None and c2.max_hcp is not None:
+            hi = min(c1.max_hcp, c2.max_hcp)
+        merged.min_hcp, merged.max_hcp = lo, hi
+        if c1.balanced is not None and c2.balanced is not None:
+            merged.balanced = c1.balanced if c1.balanced == c2.balanced else None
+        else:
+            merged.balanced = c1.balanced if c1.balanced is not None else c2.balanced
+        for suit in set(list(c1.suit_min.keys()) + list(c2.suit_min.keys())):
+            merged.suit_min[suit] = max(c1.suit_min.get(suit, 0), c2.suit_min.get(suit, 0))
+        for suit in set(list(c1.suit_max.keys()) + list(c2.suit_max.keys())):
+            merged.suit_max[suit] = min(c1.suit_max.get(suit, 13), c2.suit_max.get(suit, 13))
+        for suit in set(list(c1.exact_suit.keys()) + list(c2.exact_suit.keys())):
+            e1 = c1.exact_suit.get(suit)
+            e2 = c2.exact_suit.get(suit)
+            if e1 is not None and e2 is not None:
+                merged.exact_suit[suit] = max(e1, e2)
+            else:
+                merged.exact_suit[suit] = e1 if e1 is not None else e2
+        if c1.min_controls is not None or c2.min_controls is not None:
+            merged.min_controls = max(c1.min_controls or 0, c2.min_controls or 0)
+        if c1.min_keycards is not None or c2.min_keycards is not None:
+            merged.min_keycards = max(c1.min_keycards or 0, c2.min_keycards or 0)
+        merged.specific_cards = c1.specific_cards.union(c2.specific_cards)
+        merged.suit_controls = c1.suit_controls.union(c2.suit_controls)
+        return merged
 
     def _format_constraints_for_display(self, constraints: Dict[str, BidConstraint]) -> str:
         """将约束格式化为前端展示用的可读文本。"""
@@ -718,6 +803,9 @@ class PlayService:
         - HCP段：HCP下界[-上界]，如 HCP12-21 / HCP16+ / HCP≤7
         - 花色段：S/H/D/C + 张数[+/-]，+至少，-至多，裸数字精确，如 S5+ / D4
         - 牌型段：均型 / 非均 / 单缺（可选）
+        - 单缺段：单缺X（X为该花色字母或花色符），至多1张
+        - 控制段：控X / 控X/Y，X为花色字母，承诺该花色有控制（A/K或单/缺）
+        - 关键张段：关键张N，承诺关键张（A、K）合计至少N张
         """
         c = BidConstraint(position=pos, inference_source="structured")
         suit_map = {'S': '♠', 'H': '♥', 'D': '♦', 'C': '♣'}
@@ -747,6 +835,25 @@ class PlayService:
                     c.min_hcp = c.max_hcp = int(body)
             elif seg in ('均型', '非均', '单缺'):
                 c.balanced = (seg == '均型')
+            elif seg.startswith('单缺'):
+                # 单缺X：该花色≤1张
+                rest = seg[2:].strip()
+                suit = suit_map.get(rest.upper(), rest)
+                if suit in ('♠', '♥', '♦', '♣'):
+                    c.suit_max[suit] = min(c.suit_max.get(suit, 13), 1)
+            elif seg.startswith('控'):
+                # 控X / 控X/Y：承诺花色有控制（A/K或单/缺）
+                rest = seg[1:].strip().upper()
+                for tok in rest.replace('、', '/').replace('，', '/').replace(',', '/').split('/'):
+                    tok = tok.strip()
+                    suit = suit_map.get(tok)
+                    if suit:
+                        c.suit_controls.add(suit)
+            elif seg.startswith('关键张'):
+                # 关键张N：承诺关键张（A、K）合计至少N张
+                m_kc = re.search(r'关键张\s*[：:]?\s*([0-9]+)', seg)
+                if m_kc:
+                    c.min_keycards = int(m_kc.group(1))
             else:
                 sm = re.match(r'([SHDC])(\d+)\s*([+-]?)', seg)
                 if sm:
@@ -817,93 +924,54 @@ class PlayService:
         target_sampler.set_constraints(constraints)
 
     def _get_bid_constraints(self) -> Dict[str, BidConstraint]:
-        """从叫牌历史中提取约束：优先硬编码标准叫品表，LLM提取作为补充，结果缓存"""
+        """获取各家叫牌约束，结果缓存。
+
+        优先使用前端弹窗生成并传入的家约束 payload；否则将完整叫牌含义文本
+        （含pass，公开信息，不含手牌）交给 LLM 转换为各家累计约束。
+        含义文本缺失 → 无约束（前端在进入打牌前已保证历史完整）。
+        """
         if self.bid_constraints is not None:
             return self.bid_constraints
 
-        if not self.bid_history or not self.bid_history.strip():
+        if self._seed_constraints:
+            self.bid_constraints = self._rebuild_bid_constraints(self._seed_constraints)
+            return self.bid_constraints
+
+        meanings_text = getattr(self, 'bid_meanings', '') or ''
+        if not meanings_text.strip():
             self.bid_constraints = {}
             return self.bid_constraints
 
-        # Step 1: 先用硬编码约束库提取确定性约束
-        # 规则：提供了叫牌历史 → 按实际体系处理；无叫牌历史 → 返回空约束（普通随机/自然）
-        hard_constraints = {}
         try:
-            system_name = self.bid_system or SYSTEM_NATURAL
-            hard_constraints = extract_constraints_from_bid_history(self.bid_history, system=system_name)
-            print(f"[DD] 硬编码约束提取({system_name}体系): { {p: f'HCP{c.min_hcp}-{c.max_hcp}[{c.inference_source}]' for p, c in hard_constraints.items()} }")
-        except Exception as e:
-            print(f"[DD] 硬编码约束提取失败: {e}")
-            hard_constraints = {}
-
-        # Step 2: 从叫牌含义文本中提取约束（复用叫牌阶段LLM已分析的信息）
-        constraints = dict(hard_constraints)
-        meanings_text = getattr(self, 'bid_meanings', '') or ''
-
-        if meanings_text.strip():
-            try:
-                meaning_constraints, structured_homes = self._parse_constraints_from_meanings(meanings_text)
-                for pos_cn, mc in meaning_constraints.items():
-                    # 通道A（结构化约束）家作为权威来源：直接采用结构化累计约束，
-                    # 不与规则库硬约束取交集，避免规则库误判过度收紧污染结构化结果。
-                    if pos_cn in structured_homes:
-                        constraints[pos_cn] = mc
-                    elif pos_cn in constraints:
-                        constraints[pos_cn] = self._merge_constraints(constraints[pos_cn], mc)
-                    else:
-                        constraints[pos_cn] = mc
-                print(f"[DD] 含义文本解析补充约束: { {p: f'HCP{c.min_hcp}-{c.max_hcp}' for p, c in meaning_constraints.items()} } 结构化家: {sorted(structured_homes)}")
-            except Exception as e:
-                print(f"[DD] 含义文本解析失败: {e}")
-
-        # Step 3: 如果约束仍不完整，用LLM补充
-        if not constraints:
-            try:
-                prompt = self.BID_CONSTRAINT_PROMPT.format(bid_history=self.bid_history)
-                print(f"[DD] 调用LLM补充提取约束...")
-                result = self.llm_client.chat_json(system_prompt=prompt, temperature=0, max_tokens=1024)
-
-                POS_NAME_MAP = {
-                    "南": "南", "西": "西", "北": "北", "东": "东",
-                    "south": "南", "west": "西", "north": "北", "east": "东",
-                    "s": "南", "w": "西", "n": "北", "e": "东",
-                }
-                for pos, data in result.get("constraints", result).items():
-                    pos_cn = POS_NAME_MAP.get(pos.lower() if isinstance(pos, str) else pos)
-                    if pos_cn is None:
-                        continue
-                    c = BidConstraint(
-                        position=pos_cn,
-                        min_hcp=data.get("min_hcp"),
-                        max_hcp=data.get("max_hcp"),
-                        balanced=data.get("balanced"),
-                        suit_min={},
-                    )
-                    for suit in ("♠", "♥", "♦", "♣"):
-                        key = {"♠": "spades_min", "♥": "hearts_min",
-                               "♦": "diamonds_min", "♣": "clubs_min"}[suit]
-                        val = data.get(key)
-                        if val is not None and isinstance(val, (int, float)):
-                            c.suit_min[suit] = int(val)
-
-                    if pos_cn in constraints:
-                        constraints[pos_cn] = self._merge_constraints(constraints[pos_cn], c)
-                    else:
-                        constraints[pos_cn] = c
-
-                print(f"[DD] 最终合并约束: { {p: f'HCP{c.min_hcp}-{c.max_hcp}, suits={dict(c.suit_min)}' for p, c in constraints.items()} }")
-            except Exception as e:
-                import traceback
-                print(f"[MCTS] LLM约束补充提取失败: {e}，使用纯硬编码约束")
-                traceback.print_exc()
-            # P1-3 修复：返回合并后的约束（含 LLM 提取结果），原代码返回 hard_constraints
-            # 导致 Step 3 的 LLM 补充结果被丢弃（白烧一次 LLM 调用且功能无效）
+            constraints = self.generate_constraints_from_meanings(meanings_text)
+            print(f"[DD] 约束转换LLM: { {p: f'HCP{c.min_hcp}-{c.max_hcp},keycards={c.min_keycards},controls={sorted(c.suit_controls)}' for p, c in constraints.items()} }")
             self.bid_constraints = constraints
-            return constraints
+        except Exception as e:
+            print(f"[DD] 约束转换LLM失败: {e}")
+            self.bid_constraints = {}
+        return self.bid_constraints
 
-        # 一二层已产出约束，缓存并返回
-        self.bid_constraints = constraints
-        return constraints
+    @staticmethod
+    def _rebuild_bid_constraints(payload: dict) -> Dict[str, BidConstraint]:
+        """将接口返回的家约束 payload 重建为 BidConstraint 字典。"""
+        result = {}
+        for pos_cn, data in (payload or {}).items():
+            c = BidConstraint(
+                position=pos_cn,
+                min_hcp=data.get("min_hcp"),
+                max_hcp=data.get("max_hcp"),
+                balanced=data.get("balanced"),
+                min_controls=data.get("min_controls"),
+                min_keycards=data.get("min_keycards"),
+                inference_source="structured",
+            )
+            c.suit_min = dict(data.get("suit_min") or {})
+            c.suit_max = dict(data.get("suit_max") or {})
+            c.exact_suit = dict(data.get("exact_suit") or {})
+            c.suit_controls = set(data.get("suit_controls") or [])
+            c.specific_cards = set(tuple(x) for x in (data.get("specific_cards") or []))
+            result[pos_cn] = c
+        return result
 
     def _alpha_mu_play(self, state: PlayState) -> Dict[str, Any]:
         """αμ 引擎（论文实现，纯αμ无回退）。
@@ -2456,6 +2524,7 @@ class PlayService:
                 card = self._select_best_card(playable, state)
             full_output = result.get("full_output", {})
             full_output["叫牌约束"] = self._format_constraints_for_display(constraints)
+            full_output["最新约束"] = self._format_latest_constraints_for_display(state, constraints)
             full_output["engine_phase"] = "midgame_dd"
             return {
                 "card": card.to_dict() if card else None,

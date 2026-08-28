@@ -14,189 +14,8 @@ import random
 from collections import Counter
 from bridge.mcts.constraints import BidConstraint, validate_sample, filter_hard_constraints, HCP_MAP
 from bridge.mcts.sampler import DealSampler, _sample_uniform
-from bridge.mcts.bid_constraint_library import (
-    extract_constraints_from_bid_history,
-    get_opening_bid_constraint,
-    get_takeout_double_constraint,
-    get_overcall_constraint,
-    _normalize_bid,
-    SPECIAL_PASS, SPECIAL_DOUBLE,
-)
+from bridge.play_service import PlayService
 from bridge.play_types import Card, PlayState, Contract, PlayPhase
-
-
-def test_normalize_bid():
-    """测试叫品标准化解析"""
-    print("=== 测试叫品解析 ===")
-    test_cases = [
-        ("1NT", (1, "NT")),
-        ("1♠", (1, "♠")),
-        ("1S", (1, "♠")),
-        ("2♥", (2, "♥")),
-        ("2H", (2, "♥")),
-        ("3♦", (3, "♦")),
-        ("4♣", (4, "♣")),
-        ("2NT", (2, "NT")),
-        ("7NT", (7, "NT")),
-        ("pass", (SPECIAL_PASS, None)),
-        ("不叫", (SPECIAL_PASS, None)),
-        ("X", (SPECIAL_DOUBLE, None)),
-        ("加倍", (SPECIAL_DOUBLE, None)),
-    ]
-    all_pass = True
-    for bid_text, expected in test_cases:
-        result = _normalize_bid(bid_text)
-        ok = result == expected
-        if not ok:
-            all_pass = False
-        print(f"  {bid_text:6s} → {result} {'✓' if ok else f'✗ 期望 {expected}'}")
-    print(f"叫品解析: {'全部通过' if all_pass else '有失败'}\n")
-    return all_pass
-
-
-def test_opening_constraints():
-    """测试开叫叫品的硬编码约束"""
-    print("=== 测试开叫约束 ===")
-    test_cases = [
-        # (bid, exp_min_hcp, exp_max_hcp, exp_balanced, exp_suit_min, exp_suit_max, exp_exact_suit)
-        # 1NT/2NT 采用当前库定义（见 bid_constraint_library.py 注释）：
-        # 允许 5 张高花/6 张低花，balanced=None（不再要求严格均型、高花≤4）
-        ("1NT", 15, 17, None, {"♠": 2, "♥": 2, "♦": 2, "♣": 2}, {"♠": 5, "♥": 5, "♦": 6, "♣": 6}, {}),
-        ("1♠", 12, 21, None, {"♠": 5}, {}, {}),
-        ("1♥", 12, 21, None, {"♥": 5}, {}, {}),
-        ("1♣", 12, 21, None, {"♣": 3}, {}, {}),
-        ("2♥", 6, 10, None, {}, {}, {"♥": 6}),
-        ("2♠", 6, 10, None, {}, {}, {"♠": 6}),
-        ("2NT", 20, 21, None, {"♠": 2, "♥": 2, "♦": 2, "♣": 2}, {"♠": 5, "♥": 5, "♦": 6, "♣": 6}, {}),
-        ("2♣", 22, None, None, {}, {}, {}),
-    ]
-    
-    all_pass = True
-    for bid, exp_min, exp_max, exp_balanced, exp_suit_min, exp_suit_max, exp_exact in test_cases:
-        c = get_opening_bid_constraint(bid)
-        ok = True
-        issues = []
-        if c is None:
-            ok = False
-            issues.append("返回None")
-        else:
-            if c.min_hcp != exp_min:
-                ok = False
-                issues.append(f"min_hcp={c.min_hcp}≠{exp_min}")
-            if exp_max is not None and c.max_hcp != exp_max:
-                ok = False
-                issues.append(f"max_hcp={c.max_hcp}≠{exp_max}")
-            if exp_balanced is not None and c.balanced != exp_balanced:
-                ok = False
-                issues.append(f"balanced={c.balanced}≠{exp_balanced}")
-            for suit, mn in exp_suit_min.items():
-                if c.suit_min.get(suit) != mn:
-                    ok = False
-                    issues.append(f"suit_min[{suit}]={c.suit_min.get(suit)}≠{mn}")
-            for suit, mx in exp_suit_max.items():
-                if c.suit_max.get(suit) != mx:
-                    ok = False
-                    issues.append(f"suit_max[{suit}]={c.suit_max.get(suit)}≠{mx}")
-            for suit, ex in exp_exact.items():
-                if c.exact_suit.get(suit) != ex:
-                    ok = False
-                    issues.append(f"exact_suit[{suit}]={c.exact_suit.get(suit)}≠{ex}")
-        
-        status = "✓" if ok else "✗"
-        print(f"  {bid:4s} → HCP {c.min_hcp}-{c.max_hcp}, "
-              f"suit_min={c.suit_min}, suit_max={c.suit_max}, exact={c.exact_suit} "
-              f"{status} {'; '.join(issues) if issues else ''}")
-        if not ok:
-            all_pass = False
-    
-    print(f"开叫约束: {'全部通过' if all_pass else '有失败'}\n")
-    return all_pass
-
-
-def test_takeout_double_and_overcall():
-    """测试技术性加倍和2阶争叫约束"""
-    print("=== 测试技术性加倍和2阶争叫约束 ===")
-    all_pass = True
-    
-    # 测试1：对1♠开叫的技术性加倍
-    td = get_takeout_double_constraint("1♠")
-    ok = (td.min_hcp == 12 and td.max_hcp == 21 and td.balanced == False
-          and td.suit_min.get("♥") == 4 and td.suit_min.get("♦") == 3
-          and td.suit_min.get("♣") == 3 and td.suit_max.get("♠") == 2)
-    print(f"  技术性加倍(对1♠): HCP {td.min_hcp}-{td.max_hcp}, "
-          f"未叫高花♥≥{td.suit_min.get('♥')}, ♠≤{td.suit_max.get('♠')}, "
-          f"balanced={td.balanced} {'✓' if ok else '✗'}")
-    if not ok:
-        all_pass = False
-    
-    # 测试2：1阶争叫1♥
-    oc1 = get_overcall_constraint("1♥", is_jump=False)
-    ok = oc1.min_hcp == 8 and oc1.max_hcp == 16 and oc1.suit_min.get("♥") == 5
-    print(f"  1阶争叫1♥: HCP {oc1.min_hcp}-{oc1.max_hcp}, ♥≥{oc1.suit_min.get('♥')} {'✓' if ok else '✗'}")
-    if not ok:
-        all_pass = False
-    
-    # 测试3：2阶非跳争叫2♣（在1♥开叫后）
-    oc2 = get_overcall_constraint("2♣", is_jump=False)
-    ok = oc2.min_hcp == 10 and oc2.max_hcp == 17 and oc2.suit_min.get("♣") == 5
-    print(f"  2阶争叫2♣: HCP {oc2.min_hcp}-{oc2.max_hcp}, ♣≥{oc2.suit_min.get('♣')} {'✓' if ok else '✗'}")
-    if not ok:
-        all_pass = False
-    
-    # 测试4：2NT争叫
-    oc2nt = get_overcall_constraint("2NT", is_jump=False)
-    ok = oc2nt.min_hcp == 16 and oc2nt.max_hcp == 19 and oc2nt.balanced == True
-    print(f"  2NT争叫: HCP {oc2nt.min_hcp}-{oc2nt.max_hcp}, balanced={oc2nt.balanced} {'✓' if ok else '✗'}")
-    if not ok:
-        all_pass = False
-    
-    # 测试5：从叫牌历史提取包含加倍的序列
-    hist = "(南)1♠：开叫 -(西)X：技术性加倍 -(北)pass：不叫 -(东)2♥：应叫"
-    constraints = extract_constraints_from_bid_history(hist)
-    west_c = constraints.get("西")
-    ok_west = (west_c is not None and west_c.min_hcp == 12 and west_c.suit_max.get("♠") == 2
-               and west_c.suit_min.get("♥") == 4 and west_c.balanced == False)
-    print(f"  历史提取西家X: HCP {west_c.min_hcp if west_c else 'None'}, "
-          f"♠≤{west_c.suit_max.get('♠') if west_c else 'None'}, "
-          f"♥≥{west_c.suit_min.get('♥') if west_c else 'None'} {'✓' if ok_west else '✗'}")
-    if not ok_west:
-        all_pass = False
-    
-    # 测试6：(南)1♥-(西)2♣ 2阶争叫提取
-    hist2 = "(南)1♥：开叫 -(西)2♣：2阶争叫"
-    constraints2 = extract_constraints_from_bid_history(hist2)
-    west_c2 = constraints2.get("西")
-    ok_west2 = west_c2 is not None and west_c2.min_hcp == 10 and west_c2.max_hcp == 17 and west_c2.suit_min.get("♣") == 5
-    print(f"  历史提取西家2♣: HCP {west_c2.min_hcp if west_c2 else 'None'}-{west_c2.max_hcp if west_c2 else 'None'}, "
-          f"♣≥{west_c2.suit_min.get('♣') if west_c2 else 'None'} {'✓' if ok_west2 else '✗'}")
-    if not ok_west2:
-        all_pass = False
-    
-    print(f"新加束测试: {'全部通过' if all_pass else '有失败'}\n")
-    return all_pass
-
-
-def test_extract_from_history():
-    """测试从叫牌历史提取约束"""
-    print("=== 测试叫牌历史约束提取 ===")
-    
-    test_histories = [
-        "(南)1NT：15-17均型-",
-        "(南)1♠：12-21HCP，♠≥5-(西)2♥：弱二阻击-",
-        "(南)1♥：12-21，♥≥5-(西)pass-(北)2♥：6-9支持-(东)pass-",
-        "(南)1♠：开叫 -(西)X：加倍 -(北)pass -(东)2♥：应叫",
-        "(南)1♥：开叫 -(西)2♣：2阶争叫",
-    ]
-    
-    for hist in test_histories:
-        constraints = extract_constraints_from_bid_history(hist)
-        print(f"历史: {hist[:55]}...")
-        for pos, c in constraints.items():
-            print(f"  {pos}: HCP {c.min_hcp}-{c.max_hcp}, "
-                  f"suit_min={c.suit_min}, suit_max={c.suit_max}, exact_suit={c.exact_suit}, "
-                  f"balanced={c.balanced}, target={c.min_hcp_target}")
-        print()
-    return True
 
 
 def _make_state_west_fixed():
@@ -228,21 +47,16 @@ def _make_state_west_fixed():
 
 
 def test_sampler_1NT_constraint():
-    """测试采样器满足1NT开叫约束（使用库当前定义：15-17HCP，每门≥2，高花≤5/低花≤6）"""
+    """测试采样器满足1NT开叫约束（15-17HCP，每门≥2，高花≤5/低花≤6）"""
     print("=== 测试1NT开叫约束采样 ===")
     
-    # 使用库的真实定义（与引擎一致），而非旧版"严格均型高花≤4"（该定义已演进，见库注释）
-    lib_constraint = get_opening_bid_constraint("1NT")
-    if lib_constraint is None:
-        print("  ✗ 库未定义 1NT 约束\n")
-        return False
     constraint = BidConstraint(
         position="南",
-        min_hcp=lib_constraint.min_hcp,
-        max_hcp=lib_constraint.max_hcp,
-        balanced=lib_constraint.balanced,
-        suit_min=lib_constraint.suit_min,
-        suit_max=lib_constraint.suit_max,
+        min_hcp=15,
+        max_hcp=17,
+        balanced=None,
+        suit_min={"♠": 2, "♥": 2, "♦": 2, "♣": 2},
+        suit_max={"♠": 5, "♥": 5, "♦": 6, "♣": 6},
     )
     
     sampler = DealSampler()
@@ -407,9 +221,10 @@ def test_validate_sample_new_fields():
 
 
 def test_constraint_merge():
-    """测试约束合并逻辑"""
+    """测试约束合并逻辑（PlayService 本地实现）"""
     print("=== 测试约束合并 ===")
-    from bridge.mcts.bid_constraint_library import _merge_constraints
+    service = PlayService(None)
+    merge = service._merge_constraints
     
     c1 = BidConstraint(position="南", min_hcp=12, max_hcp=21, suit_min={"♠": 5})
     c2 = BidConstraint(position="南", min_hcp=15, max_hcp=17, balanced=True, suit_max={"♠": 4})
@@ -417,7 +232,7 @@ def test_constraint_merge():
     # 测试正常合并
     c1 = BidConstraint(position="南", min_hcp=12, suit_min={"♠": 5})
     c2 = BidConstraint(position="南", max_hcp=17)
-    merged = _merge_constraints(c1, c2)
+    merged = merge(c1, c2)
     ok = merged.min_hcp == 12 and merged.max_hcp == 17 and merged.suit_min.get("♠") == 5
     print(f"  HCP范围合并: {merged.min_hcp}-{merged.max_hcp}, ♠≥{merged.suit_min.get('♠')} {'✓' if ok else '✗'}")
     print(f"约束合并: {'通过' if ok else '失败'}\n")
@@ -431,10 +246,6 @@ if __name__ == "__main__":
     print()
     
     results = []
-    results.append(("叫品解析", test_normalize_bid()))
-    results.append(("开叫约束", test_opening_constraints()))
-    results.append(("加倍/争叫", test_takeout_double_and_overcall()))
-    results.append(("历史提取", test_extract_from_history()))
     results.append(("验证新字段", test_validate_sample_new_fields()))
     results.append(("约束合并", test_constraint_merge()))
     results.append(("1NT采样", test_sampler_1NT_constraint()))

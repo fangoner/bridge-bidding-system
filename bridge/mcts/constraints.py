@@ -63,8 +63,10 @@ def relax_constraint(c: "BidConstraint") -> "BidConstraint":
         relaxed.max_hcp = min(37, c.max_hcp + 2)
     if c.min_controls is not None:
         relaxed.min_controls = max(0, c.min_controls - 1)
+    if c.min_keycards is not None:
+        relaxed.min_keycards = max(0, c.min_keycards - 1)
     relaxed.suit_min = {s: max(1, n // 2) for s, n in c.suit_min.items()}
-    # suit_max / exact_suit / specific_cards / balanced 放宽时不保留
+    # suit_max / exact_suit / specific_cards / suit_controls / balanced 放宽时不保留
     return relaxed
 
 
@@ -86,6 +88,8 @@ class BidConstraint:
     min_controls: Optional[int] = None
     min_hcp_target: Optional[int] = None  # 已废弃：Phase 0a 后不再用于分布引导
     specific_cards: Set[Tuple[str, str]] = field(default_factory=set)
+    suit_controls: Set[str] = field(default_factory=set)  # 有控制的花色（A/K 或单/缺，来自扣叫承诺）
+    min_keycards: Optional[int] = None  # 关键张数量（4NT/5NT 问叫答叫承诺）
     inference_source: str = "hard_coded"
 
 
@@ -168,6 +172,16 @@ def _check_constraint(cards: List[Card], constraint: "BidConstraint") -> bool:
     for (suit, rank) in constraint.specific_cards:
         if not any(c.suit == suit and c.rank == rank for c in cards):
             return False
+    for suit in constraint.suit_controls:
+        suit_cards = [c for c in cards if c.suit == suit]
+        if len(suit_cards) <= 1:
+            continue  # 单/缺本身即控制（短套控制的通用定义）
+        if not any(c.rank in ("A", "K") for c in suit_cards):
+            return False
+    if constraint.min_keycards is not None:
+        keycards = _count_keycards(cards)
+        if keycards < constraint.min_keycards:
+            return False
     return True
 
 
@@ -193,6 +207,11 @@ def _compute_hcp(cards: List[Card]) -> int:
 
 def _compute_controls(cards: List[Card]) -> int:
     return sum(CONTROL_MAP.get(c.rank, 0) for c in cards)
+
+
+def _count_keycards(cards: List[Card]) -> int:
+    """关键张计数：A 与 K 的总数（4NT 问叫答叫按最宽松口径 A+K 计数）。"""
+    return sum(1 for c in cards if c.rank in ("A", "K"))
 
 
 def _count_distribution(cards: List[Card]) -> Dict[str, int]:

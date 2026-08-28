@@ -262,10 +262,11 @@ def test_llm_constraint_extraction():
         return
 
     svc = PlayService(client)
-    svc.bid_history = ""
+    svc.bid_meanings = ""
     svc.bid_constraints = None
+    svc._seed_constraints = None
     # 一个简单的叫牌：南开叫1S(12+,5+S)，西pass(不够开叫)，北加叫2S(6-10,3+S)
-    svc.bid_history = """(南)1S: 12-21点，5张以上S，非均型
+    svc.bid_meanings = """(南)1S: 12-21点，5张以上S，非均型
 (西)pass: 牌力不足，没有合适叫品
 (北)2S: 6-10点，3张以上S支持
 (东)pass: 牌力不足，没有合适叫品"""

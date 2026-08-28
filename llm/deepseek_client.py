@@ -28,8 +28,7 @@ BIDDING_SCHEMA = {
         "叫牌历史": {"type": "string"},
         "叫品筛选过程": {"type": "string"},
         "选定叫品": {"type": "string"},
-        "叫品含义": {"type": "string"},
-        "叫品约束": {"type": "string"}
+        "叫品含义": {"type": "string"}
     },
     "required": [
         "叫牌位置",
@@ -37,8 +36,7 @@ BIDDING_SCHEMA = {
         "叫牌历史",
         "叫品筛选过程",
         "选定叫品",
-        "叫品含义",
-        "叫品约束"
+        "叫品含义"
     ]
 }
 
@@ -57,8 +55,7 @@ BIDDING_FALLBACK_SCHEMA = {
         "自己和队友关键张合计": {"type": "string"},
         "叫品筛选过程": {"type": "string"},
         "选定叫品": {"type": "string"},
-        "叫品含义": {"type": "string"},
-        "叫品约束": {"type": "string"}
+        "叫品含义": {"type": "string"}
     },
     "required": [
         "叫牌位置",
@@ -73,8 +70,7 @@ BIDDING_FALLBACK_SCHEMA = {
         "自己和队友关键张合计",
         "叫品筛选过程",
         "选定叫品",
-        "叫品含义",
-        "叫品约束"
+        "叫品含义"
     ]
 }
 
@@ -85,16 +81,14 @@ HUMAN_BID_SCHEMA = {
         "叫品筛选过程": {"type": "string"},
         "选定叫品": {"type": "string"},
         "叫品含义": {"type": "string"},
-        "完整叫牌序列": {"type": "string"},
-        "叫品约束": {"type": "string"}
+        "完整叫牌序列": {"type": "string"}
     },
     "required": [
         "当前叫牌序列",
         "叫品筛选过程",
         "选定叫品",
         "叫品含义",
-        "完整叫牌序列",
-        "叫品约束"
+        "完整叫牌序列"
     ]
 }
 

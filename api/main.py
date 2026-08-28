@@ -191,6 +191,18 @@ class HumanBidResponse(BaseModel):
     full_output: Optional[dict] = None
 
 
+class ConstraintsRequest(BaseModel):
+    bid_history: str = ""  # 完整叫牌含义文本（含pass，公开信息）
+    bid_system: str = "jf"
+
+
+class ConstraintsResponse(BaseModel):
+    success: bool
+    constraints: Dict[str, dict] = {}  # {位置: {min_hcp, max_hcp, suit_min, suit_max, exact_suit, balanced, min_controls, min_keycards, suit_controls, specific_cards}}
+    display: str = ""  # 可读展示文本
+    error: str = ""
+
+
 class OutputFormatsRequest(BaseModel):
     hands: Dict[str, dict]
     bidding_sequence: str
@@ -310,6 +322,9 @@ async def human_bid(request: HumanBidRequest):
         bid = request.user_input.strip()
         if bid.upper() == "P":
             bid = "pass"
+        if result.get("error"):
+            # P0-5 例外修正：人类叫牌 LLM 失败也中断（含义缺失会导致约束/历史不全，无法进入打牌）
+            raise HTTPException(status_code=502, detail=f"叫牌解释失败: {result['error']}")
         meaning = result.get("叫品含义", "")
         if isinstance(meaning, dict):
             meaning = json.dumps(meaning, ensure_ascii=False)
@@ -319,15 +334,46 @@ async def human_bid(request: HumanBidRequest):
             meaning=meaning,
             full_output=result
         )
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[ERROR] 人类叫牌失败: {str(e)}")
-        bid = request.user_input.strip().upper()
-        if bid == "P":
-            bid = "pass"
-        return HumanBidResponse(
-            bid=bid,
-            meaning=f"获取叫品含义失败: {str(e)}"
+        raise HTTPException(status_code=502, detail=f"叫牌解释失败: {str(e)}")
+
+
+@app.post("/api/constraints", response_model=ConstraintsResponse)
+async def generate_constraints(request: ConstraintsRequest):
+    """约束转换接口：输入完整叫牌含义文本（含pass，公开信息，不含手牌），输出各家叫牌约束。"""
+    if not request.bid_history or not request.bid_history.strip():
+        return ConstraintsResponse(success=False, error="叫牌历史为空")
+    try:
+        service = PlayService(llm_client)
+        constraints = await asyncio.to_thread(
+            service.generate_constraints_from_meanings,
+            request.bid_history,
         )
+        if not constraints:
+            return ConstraintsResponse(success=False, error="约束生成失败")
+        payload = {}
+        for pos_cn, c in constraints.items():
+            payload[pos_cn] = {
+                "min_hcp": c.min_hcp,
+                "max_hcp": c.max_hcp,
+                "balanced": c.balanced,
+                "suit_min": c.suit_min,
+                "suit_max": c.suit_max,
+                "exact_suit": c.exact_suit,
+                "min_controls": c.min_controls,
+                "min_keycards": c.min_keycards,
+                "suit_controls": sorted(c.suit_controls),
+                "specific_cards": sorted(list(c.specific_cards)),
+            }
+        display = service._format_constraints_for_display(constraints)
+        return ConstraintsResponse(success=True, constraints=payload, display=display)
+    except Exception as e:
+        print(f"[ERROR] 约束转换失败: {str(e)}")
+        traceback.print_exc()
+        return ConstraintsResponse(success=False, error=f"约束生成失败: {str(e)}")
 
 
 @app.get("/api/fallback-model")
@@ -1948,6 +1994,7 @@ class PlayInitRequest(BaseModel):
     bidding_sequence: Optional[str] = None
     bid_history: Optional[str] = None  # 叫牌序列，用于MCTS约束采样
     bid_meanings: Optional[str] = None  # 叫牌含义文本，复用LLM已分析信息
+    constraints: Optional[Dict[str, dict]] = None  # 已生成的家约束payload（省略则进打牌时用含义文本LLM生成）
     vulnerability: Optional[str] = None  # 局况: "NV"/"NS"/"EW"/"All"
     session_id: str = "default"  # 打牌会话隔离标识
     bid_system: str = "jf"  # 叫牌体系: jf / xr / natural
@@ -2004,6 +2051,7 @@ async def play_init(request: PlayInitRequest):
             bidding_sequence=request.bidding_sequence or "未提供",
             bid_history=request.bid_history or "",
             bid_meanings=request.bid_meanings or "",
+            constraints=request.constraints,
             vulnerability=_normalize_vulnerability(request.vulnerability) or "NV",
             bid_system=request.bid_system or "jf",
         )

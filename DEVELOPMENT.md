@@ -271,14 +271,15 @@ success_rate = sum(effective_value) / n
 
 约束系统用于打牌阶段的手牌采样验证，核心在 `bridge/mcts/constraints.py` 和 `bridge/mcts/bid_constraint_library.py`。
 
-#### 约束来源：双通道（v1.65）
+#### 约束生成：进入打牌统一生成（v1.68，方案见 `docs/约束生成优化.md`）
 
-打牌采样的叫牌约束来源由 `bid_meanings` 是否携带**结构化约束段**决定，与牌局来源无关（方案见 `docs/叫牌约束提取优化方案.md`），按"家"粒度独立判定：
+打牌采样的叫牌约束**不来自叫牌阶段**，统一在进入打牌的"确认定约与首攻"弹窗一次性生成，规则库（`bid_constraint_library.py`）保留文件但不接入系统：
 
-- **通道A（结构化约束）**：叫牌阶段 LLM 在 `叫品含义` 后输出 `叫品约束` 字段（如 `[约束:HCP16+|C5+|D4+|非均]`），表示该位置**累计至今的自身承诺**（点力区间 + 花色长度 + 均型与否），并按单调收紧不变式生成（同位置相对上轮只能收紧或不变）。解析器优先解析该段（`_build_constraint_from_structured`），并将此类家作为**权威来源**——不再与规则库硬约束取交集，避免规则库误判过度收紧污染结构化结果。
-- **通道B（含义文本 + 规则库）**：外部导入/无结构化段的裸叫牌序列走原 `_parse_constraints_from_meanings` 正则解析（`_build_constraint_from_meaning_free`）+ `extract_constraints_from_bid_history` 通用规则库兜底，行为与旧版完全一致（向下兼容）。
-
-**体系适配**：`play_service` 打牌初始化接收实际 `bid_system`（jf / xr / natural），规则库按对应 `SYSTEM_CONFIGS` 参数提取，不再硬编码 `SYSTEM_JF`；新增 `SYSTEM_XR` 配置项。
+- **唯一入口（前端弹窗）**：打开弹窗 → `buildBiddingInput` 保证叫牌含义历史完整（无/不全 → 新睿体系模拟人类叫牌补全，覆盖截屏/人工输入/历史导入牌局）→ `POST /api/constraints` → 展示各家约束；点击「确认」将约束 payload 传给 `/api/play/init`（`PlayService._seed_constraints`）
+- **约束转换 LLM 主路径**（`generate_constraints_from_meanings` + `CONSTRAINT_TRANSLATE_PROMPT`）：完整叫牌含义文本（公开，不含手牌）→ 每叫品约束；实现负面推断（不叫 <12HCP、无1阶争叫 <8 或无5张套、无2阶争叫 <11 或无6张套、争叫位 pass ≤11）、扣叫 → `suit_controls`、4NT/5NT 答叫 → `min_keycards`（A+K 计数）；同位置多次叫牌经 `_merge_constraints` 单调收紧合并
+- **后端兜底**：`_get_bid_constraints` 优先 `_seed_constraints`（弹窗 payload → `_rebuild_bid_constraints`），否则用 `bid_meanings` 走同一 LLM 转译，再否则无约束（静默随机采样）
+- **叫牌阶段解耦**：三个 LLM JSON Schema 无"叫品约束"字段；人类叫牌（JF/新睿）检索命中必走 LLM，失败/API 未配置 → `/api/human-bid` 抛 502 中断叫牌，不静默 pass
+- **失败语义**（/api/bid 沿用）：LLM 超时/网络/配置错误 → 502 + detail，不再伪装 200+pass
 
 #### BidConstraint 数据结构
 
@@ -288,12 +289,13 @@ BidConstraint:
     suit_min, suit_max         # 各花色长度范围
     exact_suit                 # 精确花色长度
     min_controls               # 最少控制数
-    min_hcp_target             # 目标HCP（高斯采样中心）
     specific_cards             # 特定牌张
-    max_hcp_from_negative_inference  # 负推断HCP上限
-    cannot_have_suit           # 不能持有的花色
-    inference_source           # 推断来源（含system后缀）
+    suit_controls              # 有控制的花色集合（A/K 或单/缺，来自扣叫承诺）
+    min_keycards               # 关键张数量（4NT/5NT 问叫答叫，A+K 计数）
+    inference_source           # 推断来源
 ```
+
+校验：`suit_controls` 要求该门持有 A/K 或 ≤1 张；`min_keycards` 要求剩余采样手牌中 A+K 合计 ≥ 承诺数（自动随已出牌扣减，与中局扣减等价）。
 
 #### 约束分类
 
@@ -577,6 +579,14 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 3. 启动前端：`cd web && npm run dev`
 
 ## 版本历史
+
+### v1.68
+- **约束生成重构：回归叫牌真实产物**（方案见 `docs/约束生成优化.md`）
+  - 约束生成唯一入口移至"确认定约与首攻"弹窗：`buildBiddingInput` 保证含义历史完整（无 → 新睿模拟补全）→ `/api/constraints`（约束转换 LLM：完整含义文本 → 每叫品约束，负面推断/扣叫→suit_controls/4NT答叫→min_keycards）→ 展示并随确认传入 `_seed_constraints`；`_get_bid_constraints` 优先种子 payload，否则 `bid_meanings` 走同一 LLM 转译
+  - `BidConstraint` 新增 `suit_controls`/`min_keycards` 及 `_check_constraint` 双维校验、`relax_constraint` 放宽；`_merge_constraints` 由规则库迁移 play_service 本地（单调收紧合并）
+  - 叫牌阶段解耦：三个 JSON Schema 删"叫品约束"字段；人类叫牌（JF/新睿）检索命中必走 LLM，失败/API 未配置 → 502 中断；规则库 `bid_constraint_library.py` 保留文件不接入系统（研究资产），依赖测试清理
+  - 前端：弹窗"叫牌约束"区展示 + 按钮改"确认"+ 开关关闭含义置空；记录保存 `constraints`/`constraints_display`（ref 同步）；`_dd_play` 中盘补齐"最新约束"字段
+  - 验证：/api/constraints 实测（南15-17均型、西/东≤11、北≥8）；play/init 三路径通过；约束合并/新字段校验/采样满足率单测全绿
 
 ### v1.67
 - **叫牌约束：跳加叫判定修正 + 弱牌直封收紧**（`bid_constraint_library.py`）

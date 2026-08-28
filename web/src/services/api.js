@@ -412,7 +412,7 @@ export const doubleDummyAnalysis = async (hands, signal = null) => {
 const PLAY_SESSION_ID = `play_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
 // 初始化打牌
-export const playInit = async (hands, contract, declarer, playerRoles = null, doubled = false, redoubled = false, biddingSequence = null, bidHistory = '', bidMeanings = '', vulnerability = null, bidSystem = 'jf') => {
+export const playInit = async (hands, contract, declarer, playerRoles = null, doubled = false, redoubled = false, biddingSequence = null, bidHistory = '', bidMeanings = '', vulnerability = null, bidSystem = 'jf', constraints = null) => {
   try {
     const response = await api.post('/api/play/init', {
       hands,
@@ -424,6 +424,7 @@ export const playInit = async (hands, contract, declarer, playerRoles = null, do
       bidding_sequence: biddingSequence,
       bid_history: bidHistory,
       bid_meanings: bidMeanings,
+      constraints,
       vulnerability,
       session_id: PLAY_SESSION_ID,
       bid_system: bidSystem,
@@ -431,6 +432,20 @@ export const playInit = async (hands, contract, declarer, playerRoles = null, do
     return response.data;
   } catch (error) {
     console.error('初始化打牌失败:', error);
+    throw error;
+  }
+};
+
+// 约束转换：输入完整叫牌含义文本（公开信息），输出各家叫牌约束
+export const generateConstraints = async (bidHistory, bidSystem = 'jf') => {
+  try {
+    const response = await api.post('/api/constraints', {
+      bid_history: bidHistory,
+      bid_system: bidSystem,
+    }, { timeout: 120000 });
+    return response.data;
+  } catch (error) {
+    console.error('约束生成失败:', error);
     throw error;
   }
 };
