@@ -1,22 +1,6 @@
 # 开发日志
 
-## 2026-08-25（临界分布过滤叠加计分制 v1.67）
-
-### DD 打牌引擎：临界分布过滤开关（DD_SECURITY_FILTER）
-
-**背景**: 全量采样世界平均会稀释选牌关键信息——"任何出牌都能做成"（轻松打成）与"没有任何出牌能做成"（根本打不成）的世界对候选对比无区分度，只有"存在能做成的出牌、也存在做不成的出牌"（有输有赢）的世界才是选牌决策的胜负手。原方案曾采用"可达墩偏差窗口 k"语义，经论证有误（只看 max 与所需墩距离，未检查候选间输赢分化），废弃窗口参数，改为按输赢分化判定。
-
-**改进**:
-- `config.py` 新增 `DD_SECURITY_FILTER` 布尔开关（默认 False，关闭时行为与旧版逐位一致），删除已废弃的 `DD_SECURITY_K`
-- `dd_search.py` 新增 `_critical_mask`（逐世界判定 `min(可达墩) < 所需墩 ≤ max(可达墩)` → 保留"有输有赢"样本）与 `_filter_critical`（按掩码压缩候选分数序列；临界集为空回退全量保底）；`_decision_value` 三种计分制（imp/make_rate/avg_tricks）接口不变，仅替换参与打分的世界子集
-- `dd_search.py` 采样主循环与残局枚举路径均接入过滤，`mcts_stats` 顶层输出 `samples_used`（实际计算样本数）与 `security_filter` 标记；child_stats 每候选新增 `samples_used`
-- `play_service.py` `_dd_play` 支持请求级 `dd_security_filter` 临时覆盖（用完恢复），经 `_dd_alphamu_llm_play`/`_dd_llm_play` 等所有 DD 路径透传
-- `api/main.py` `AiPlayRequest` 新增 `dd_security_filter` 字段；前端 `useModelSettings.js`/`SettingsPanel.jsx` 新增"临界过滤"复选框（localStorage 持久化），`api.js`/`App.jsx` 随 aiPlay 请求下发，`PlayDetailPanel.jsx` 显示"实际计算 N 样本"及候选级 `实际/采样` 对比
-- 调试日志 `dd_debug.log` 新增 `[SEC-FILTER]` 行（worlds/kept/过滤率）
-
-**修改文件**: config.py, bridge/mcts/dd_search.py, bridge/play_service.py, api/main.py, web/src/hooks/useModelSettings.js, web/src/components/{SettingsPanel,PlayDetailPanel}.jsx, web/src/services/api.js, web/src/App.jsx, docs/临界样本过滤选牌方案.md
-
-**测试验证**: 单测 `_critical_mask` 四个语义边界全部符合（全成→剔除/全败→剔除/有输有赢→保留）；实测 log：首攻铁牌局 350 世界保留 272（22%）、残局 324 保留 91（28%）、临界集为空（kept=0）回退全量；对照脚本 `tests/test_security_ab.py` 捕获选牌分歧（seed=100076：全量选♦A、过滤后选♣J）；eslint 0 error。
+## 2026-08-25（叫牌约束修复 + 历史记录并发防护 + 视觉双provider v1.67）
 
 ### 叫牌约束：跳加叫判定修正 + 弱牌直封收紧
 
@@ -30,6 +14,19 @@
 **修改文件**: bridge/mcts/bid_constraint_library.py
 
 **测试验证**: 1H-1S-3H-4H → 北 HCP6-9、♥≥2、♠≥4；1S-1NT-3S-4S → 北 HCP6-9、♠≥2；1D-1S-3D-5D → 北 HCP6-9、♦≥3、♠≥4（修改前为 16-18、♦≥4）。
+
+### 历史记录备份并发防护
+
+**背景**: 服务器端历史记录备份用 threading.Lock 包住 async 读-改-写，uvicorn 单进程内所有 async 请求跑在同一事件循环，threading.Lock 对协程无互斥作用，并发写互相覆盖丢记录。
+
+**改进**:
+- `api/main.py` 记录备份改协程级 `asyncio.Lock`（`_RECORDS_LOCK`），所有读-改-写路径整体 `async with` 持锁（save/upsert/delete/note）
+- 原子写 `_write_backup_records`：先写临时文件再 `os.replace`，避免写盘中途崩溃损坏主文件；备份上限提至 500
+- 前端 `HistoryDialog.jsx` upsert Promise 串行化，避免连续保存互相覆盖
+
+### 视觉识别双 provider 切换（DeepSeek / 豆包）
+
+**改进**: `llm/doubao_client.py` 重构为 `VisionClient(provider=...)` 双实例（deepseek/doubao）；`api/main.py` 新增 `/api/vision-provider` 查询/切换端点与 `VISION_PROVIDER` 配置；前端视觉模型下拉持久化并随启动同步。涉及 api/main.py, llm/doubao_client.py, config.py, web/src/hooks/useModelSettings.js。
 
 ## 2026-08-22（计分制贯穿 + 首攻信号方案 + 人类叫牌纠偏 + 记录按需加载 + 前端性能优化 v1.66）
 

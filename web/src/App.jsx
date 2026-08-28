@@ -364,7 +364,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     switchCards, switchCardsRange,
     handleSwitchCardsChange,
     ddScoringMode, handleDdScoringModeChange,
-    ddSecurityFilter, handleDdSecurityFilterChange,
     handleFallbackModelChange,
     handlePlayModelChange,
     checkApiStatus,
@@ -1565,18 +1564,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
 
     const contract = savedState.contract
 
-    // 构建叫牌字符串（三方共用）
-    let biddingStr = null, seqStr = '', meaningLines = ''
-    if (biddingSequence.length > 0) {
-      seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
-      meaningLines = aiBiddingHistory
-        .filter(r => r.result?.meaning)
-        .map(formatBidMeaningLine)
-        .join('\n')
-      biddingStr = meaningLines
-        ? `${seqStr}\n\n叫牌含义:\n${meaningLines}`
-        : seqStr
-    }
+    // 构建叫牌字符串（三方共用；未经过叫牌过程的导入牌例由 buildBiddingInput 自动模拟）
+    const { biddingStr, seqStr, meaningLines } = await buildBiddingInput(biddingSequence, aiBiddingHistory)
 
     // 收集所有已出牌（按顺序）
     const allPlayed = []
@@ -1889,19 +1878,8 @@ const handleReviewCompletedPlay = async () => {
     setError(null)
     try {
       const contract = savedState.contract
-      let biddingStr = null
-      let meaningLines = ''
-      let seqStr = ''
-      if (biddingSequence.length > 0) {
-        seqStr = biddingSequence.map(b => `(${b.position})${b.bid}`).join('-')
-        meaningLines = aiBiddingHistory
-          .filter(r => r.result?.meaning)
-          .map(formatBidMeaningLine)
-          .join('\n')
-        biddingStr = meaningLines
-          ? `${seqStr}\n\n叫牌含义:\n${meaningLines}`
-          : seqStr
-      }
+      // 未经过叫牌过程的导入牌例由 buildBiddingInput 自动模拟含义与约束
+      const { biddingStr, seqStr, meaningLines } = await buildBiddingInput(biddingSequence, aiBiddingHistory)
       const initResult = await playInit(
         hands,
         `${contract.level}${contract.suit}`,
@@ -2005,6 +1983,66 @@ const handleReviewCompletedPlay = async () => {
   }
 
   // 抽取公共打牌初始化逻辑（handleStartPlay / handleResetPlay / 直接打牌 共用）
+  // 截屏/人工输入序列未经过叫牌流程：自动模拟人类叫牌（新睿二盖一）生成含义+结构化约束，
+  // 规则库仅在该叫品解析失败时兜底。结果写入 aiBiddingHistory（与真实叫牌一致展示，
+  // 并随记录保存、下次导入直接复用不再重跑）。
+  const simulateSequenceWithHumanBid = async (seqArray) => {
+    const simRecords = []
+    const prefix = []
+    let bidHistoryText = ''
+    setPlayLoading(true)
+    setAiThinking(true)
+    setAiProgress('自动模拟叫牌中（新睿二盖一）...')
+    try {
+      for (const item of seqArray) {
+        const position = item.position
+        const rawBid = String(item.bid || '').trim()
+        const bid = ['P', 'PASS'].includes(rawBid.toUpperCase()) ? 'pass' : rawBid
+        try {
+          const res = await humanBid(prefix, position, bid, dealSystem, bidHistoryText, 'xr')
+          const bidOut = res.bid || bid
+          const meaningOut = res.meaning || ''
+          simRecords.push({ position, hand: hands?.[position] || null, result: { bid: bidOut, meaning: meaningOut, full_output: res.full_output || {} }, timestamp: new Date().toLocaleString() })
+          if (meaningOut) bidHistoryText += `(${position})${bidOut}：${meaningOut}\n`
+        } catch (err) {
+          console.error(`[simulateBidding] ${position} ${bid} 含义解析失败:`, err)
+          // 失败不注入含义行，打牌阶段该位置约束由规则库兜底
+          simRecords.push({ position, hand: hands?.[position] || null, result: { bid, meaning: '', full_output: {} }, timestamp: new Date().toLocaleString() })
+        }
+        prefix.push({ position, bid })
+      }
+    } finally {
+      setAiThinking(false)
+      setAiProgress(null)
+    }
+    // 沉淀到 aiBiddingHistory：右侧叫牌细节面板立即可见，随记录保存，下次导入复用
+    if (simRecords.length > 0) {
+      const next = [...(aiBiddingHistoryRef.current || []), ...simRecords]
+      aiBiddingHistoryRef.current = next
+      setAiBiddingHistory(next)
+    }
+    return simRecords
+  }
+
+  // 构建打牌初始化用的叫牌字符串：seqStr / meaningLines（含[约束:...]）/ biddingStr。
+  // 未经过叫牌过程（无任何含义记录，如截屏、人工输入、历史导入牌例）时，
+  // 自动模拟人类叫牌（新睿二盖一体系）生成含义+结构化约束，规则库仅在该叫品解析失败时兜底。
+  const buildBiddingInput = async (biddingSeq, aiHistory) => {
+    const result = { biddingStr: null, seqStr: '', meaningLines: '' }
+    if (!biddingSeq || biddingSeq.length === 0) return result
+    result.seqStr = biddingSeq.map(b => `(${b.position})${b.bid}`).join('-')
+    let history = aiHistory || []
+    const hasMeaningHistory = history.some(r => r.result?.meaning && r.result.meaning !== '获取叫牌含义失败')
+    if (!hasMeaningHistory) {
+      history = await simulateSequenceWithHumanBid(biddingSeq)
+    }
+    result.meaningLines = history.filter(r => r.result?.meaning).map(formatBidMeaningLine).join('\n')
+    result.biddingStr = result.meaningLines
+      ? `${result.seqStr}\n\n叫牌含义:\n${result.meaningLines}`
+      : result.seqStr
+    return result
+  }
+
   const doPlayInit = async (contract, biddingSeq, aiHistory) => {
     setPlayLoading(true)
     setError(null)
@@ -2023,14 +2061,10 @@ const handleReviewCompletedPlay = async () => {
     let meaningLines = ''
     let seqStr = ''
     if (biddingSeq.length > 0) {
-      seqStr = biddingSeq.map(b => `(${b.position})${b.bid}`).join('-')
-      meaningLines = aiHistory
-        .filter(r => r.result?.meaning)
-        .map(formatBidMeaningLine)
-        .join('\n')
-      biddingStr = meaningLines
-        ? `${seqStr}\n\n叫牌含义:\n${meaningLines}`
-        : seqStr
+      const input = await buildBiddingInput(biddingSeq, aiHistory)
+      biddingStr = input.biddingStr
+      seqStr = input.seqStr
+      meaningLines = input.meaningLines
     }
 
     const playRoles = { ...positionRoles }
@@ -2094,7 +2128,8 @@ const handleReviewCompletedPlay = async () => {
     // 保存用户确认的首攻信息，供 handleBeginPlay 使用
     setImageOpeningLead(openingLead || null)
     setContractDialogOpen(false)
-    // 传递截屏/识别得到的叫牌序列，确保后端能据此提取约束（避免DD显示"无约束随机采样"）
+    // 传递截屏/识别得到的叫牌序列，确保后端能据此提取约束（避免DD显示"无约束随机采样"）；
+    // 未经过叫牌流程时，doPlayInit 内部会自动模拟人类叫牌生成含义+结构化约束
     await doPlayInit(contract, biddingSequence, aiBiddingHistory)
   }
 
@@ -2237,7 +2272,7 @@ const handleReviewCompletedPlay = async () => {
     try {
       const pm = parseModelValue(playModel)
       const t0 = performance.now()
-      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, switchCards, useLlmReview, ddScoringMode, (msg) => setAiProgress(msg), ddSecurityFilter)
+      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, switchCards, useLlmReview, ddScoringMode, (msg) => setAiProgress(msg))
       if (controller.signal.aborted) return
       // 撤销序号守卫：AI 出牌在途期间用户点了撤销 → 丢弃本次响应，以后端撤销后的真实状态为准
       if (undoSeqRef.current !== seqAtStart) {
@@ -2885,7 +2920,6 @@ const handleReviewCompletedPlay = async () => {
         switchCards={switchCards} switchCardsRange={switchCardsRange}
         handleSwitchCardsChange={handleSwitchCardsChange}
         ddScoringMode={ddScoringMode} handleDdScoringModeChange={handleDdScoringModeChange}
-        ddSecurityFilter={ddSecurityFilter} handleDdSecurityFilterChange={handleDdSecurityFilterChange}
         dealSystem={dealSystem}
         setDealSystem={setDealSystem}
         bidSystem={bidSystem}

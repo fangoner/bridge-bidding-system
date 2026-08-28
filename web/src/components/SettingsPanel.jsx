@@ -110,8 +110,6 @@ function SettingsPanel({
   handleSwitchCardsChange,
   ddScoringMode,
   handleDdScoringModeChange,
-  ddSecurityFilter,
-  handleDdSecurityFilterChange,
   dealSystem,
   setDealSystem,
   bidSystem,
@@ -292,17 +290,6 @@ function SettingsPanel({
                 <MenuItem value="avg_tricks">平均赢墩</MenuItem>
               </Select>
             </FormControl>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={!!ddSecurityFilter}
-                  onChange={(e) => handleDdSecurityFilterChange(e.target.checked)}
-                  size="small"
-                />
-              }
-              label={<Typography variant="caption" sx={{ fontSize: '0.7rem' }}>临界过滤</Typography>}
-              sx={{ mr: 0, ml: 0.5, '& .MuiFormControlLabel-label': { fontSize: '0.7rem' } }}
-            />
             </>
           )}
 

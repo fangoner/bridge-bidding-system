@@ -2151,7 +2151,6 @@ class PlayAIRequest(BaseModel):
     dd_sample_count: Optional[int] = None  # DD 蒙地卡罗采样数
     dd_alphamu_switch_cards: Optional[int] = None  # DD-αμ-LLM 引擎中盘/残局切换分界
     dd_scoring_mode: Optional[str] = None  # DD 决策计分制: "imp" | "make_rate" | "avg_tricks"
-    dd_security_filter: Optional[bool] = None  # DD 决策计分制是否叠加临界分布过滤
     use_llm_review: bool = False  # DD-αμ-LLM 引擎是否启用 LLM 分组审查（默认关闭）
     session_id: str = "default"
 
@@ -2257,7 +2256,6 @@ async def _execute_ai_play(request: PlayAIRequest, progress_cb=None) -> PlayAIRe
                               if (use_dd or use_dd_alphamu_llm) else None)
                 dd_switch_cards = request.dd_alphamu_switch_cards if use_dd_alphamu_llm else None
                 dd_scoring_mode = request.dd_scoring_mode if (use_dd or use_dd_alphamu_llm) else None
-                dd_security_filter = request.dd_security_filter if (use_dd or use_dd_alphamu_llm) else None
                 t0 = time.time()
                 # 记录DD提示所需的出牌前状态
                 state_before = service.get_state()
@@ -2275,8 +2273,7 @@ async def _execute_ai_play(request: PlayAIRequest, progress_cb=None) -> PlayAIRe
                     enable_llm_review=enable_llm_review,
                     dd_samples=dd_samples,
                     dd_alphamu_switch_cards=dd_switch_cards,
-                    dd_scoring_mode=dd_scoring_mode,
-                    dd_security_filter=dd_security_filter)
+                    dd_scoring_mode=dd_scoring_mode)
                 elapsed_ms = int((time.time() - t0) * 1000)
 
                 if result.get("card"):

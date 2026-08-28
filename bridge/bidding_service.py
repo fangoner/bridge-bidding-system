@@ -636,14 +636,6 @@ class BiddingService:
             full_sequence = f"{bidding_sequence}({player_name}){bid}-"
             return {"选定叫品": bid, "叫品含义": "API Key未配置，无法获取叫品含义", "JF约定": jf_keyword, "完整叫牌序列": full_sequence}
 
-        has_subsequent = len(subsequent_bids) > 0
-
-        if has_subsequent:
-            if verbose:
-                print(f"[human_bid] 结构性JF片段，{bid} 不在备选叫品中，无需调用LLM")
-            full_sequence = f"{bidding_sequence}({player_name}){bid}-"
-            return {"选定叫品": bid, "叫品含义": f"叫品 {bid} 不在JF约定（{jf_keyword}）的备选叫品中", "JF约定": jf_keyword, "完整叫牌序列": full_sequence}
-
         jf_content = jf_result.get("original_content", "")
         actual_jf_keyword = jf_keyword
 
@@ -655,7 +647,7 @@ class BiddingService:
                 print(f"[human_bid] PATH: fallback - no jf_content, using 成局与满贯")
 
         if verbose:
-            print(f"[human_bid] 非结构性JF片段，注入原始内容调用AI推断")
+            print(f"[human_bid] 未在备选叫品中直接匹配 {bid}，注入 {actual_jf_keyword} 检索内容调用AI解释")
 
         prompt = HUMAN_BID_PROMPT.format(
             bidding=bidding_sequence if bidding_sequence else "空",

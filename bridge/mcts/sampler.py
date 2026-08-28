@@ -83,12 +83,7 @@ def _extract_known_info(state: "PlayState", perspective: str) -> dict:
         known_cards.add(card)
 
     # 2. 计算每家剩余张数
-    total_completed = state.declarer_tricks + state.defender_tricks
-    base_remaining = 13 - total_completed
-    remaining_counts = {}
-    for pos in POSITION_ORDER:
-        in_trick = sum(1 for p, _ in state.current_trick.cards if p == pos)
-        remaining_counts[pos] = base_remaining - in_trick
+    remaining_counts = compute_remaining_counts(state)
 
     # 3. 未知牌池
     unknown_pool = [c for c in ALL_CARDS if c not in known_cards]
@@ -134,6 +129,39 @@ def _extract_known_info(state: "PlayState", perspective: str) -> dict:
                     and (c.suit, c.rank) not in played_set]
 
     # 4.7 统计每家已出牌（中局约束扣减用：初始约束 = 已出部分 + 剩余部分）
+    played_stats = compute_played_stats(state)
+
+    # 5. 收集已知缺门
+    known_voids = collect_voids(state)
+
+    return {
+        "known_cards": known_cards,
+        "unknown_pool": unknown_pool,
+        "remaining_counts": remaining_counts,
+        "known_voids": known_voids,
+        "own_hand": own_hand,
+        "dummy_hand": cleaned_hands.get(dummy, []) if dummy else [],
+        "result": result,
+        "played": played_stats,
+    }
+
+
+def compute_remaining_counts(state: "PlayState") -> Dict[str, int]:
+    """计算每家剩余手牌张数（视角无关，供中局约束扣减/展示）。"""
+    total_completed = state.declarer_tricks + state.defender_tricks
+    base_remaining = 13 - total_completed
+    remaining_counts = {}
+    for pos in POSITION_ORDER:
+        in_trick = sum(1 for p, _ in state.current_trick.cards if p == pos)
+        remaining_counts[pos] = base_remaining - in_trick
+    return remaining_counts
+
+
+def compute_played_stats(state: "PlayState") -> Dict[str, dict]:
+    """统计每家已出牌汇总（HCP/控制/各花色张数），视角无关。
+
+    中局约束扣减用：初始约束 = 已出部分 + 剩余部分。
+    """
     played_stats = {
         p: {"hcp": 0, "controls": 0, "suit": {"♠": 0, "♥": 0, "♦": 0, "♣": 0}}
         for p in POSITION_ORDER
@@ -153,20 +181,7 @@ def _extract_known_info(state: "PlayState", perspective: str) -> dict:
         _st["hcp"] += HCP_MAP.get(c.rank, 0)
         _st["controls"] += CONTROL_MAP.get(c.rank, 0)
         _st["suit"][c.suit] = _st["suit"].get(c.suit, 0) + 1
-
-    # 5. 收集已知缺门
-    known_voids = collect_voids(state)
-
-    return {
-        "known_cards": known_cards,
-        "unknown_pool": unknown_pool,
-        "remaining_counts": remaining_counts,
-        "known_voids": known_voids,
-        "own_hand": own_hand,
-        "dummy_hand": cleaned_hands.get(dummy, []) if dummy else [],
-        "result": result,
-        "played": played_stats,
-    }
+    return played_stats
 
 
 def _sample_uniform(known_info: dict) -> Dict[str, List[Card]]:

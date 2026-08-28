@@ -462,7 +462,7 @@ export const undoPlay = async () => {
 };
 
 // AI出牌
-export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null, ddAlphamuSwitchCards = null, useLlmReview = false, ddScoringMode = null, onProgress = null, ddSecurityFilter = null) => {
+export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null, ddAlphamuSwitchCards = null, useLlmReview = false, ddScoringMode = null, onProgress = null) => {
   const requestData = {
     use_reasoning: useReasoning,
     use_llm_review: useLlmReview,
@@ -483,9 +483,6 @@ export const aiPlay = async (playModel = null, useReasoning = false, playEngine 
   }
   if (ddScoringMode) {
     requestData.dd_scoring_mode = ddScoringMode;
-  }
-  if (ddSecurityFilter != null) {
-    requestData.dd_security_filter = ddSecurityFilter;
   }
 
   try {

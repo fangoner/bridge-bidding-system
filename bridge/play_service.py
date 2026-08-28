@@ -13,6 +13,7 @@ from bridge.mcts.direct_dds import is_dds_available
 from bridge.mcts.constraints import BidConstraint, validate_sample
 from bridge.mcts.signals import format_partner_signals_for_prompt
 from bridge.mcts.bid_constraint_library import extract_constraints_from_bid_history, SYSTEM_NATURAL
+from bridge.mcts.sampler import compute_played_stats, compute_remaining_counts, _reduce_constraint_for_played
 from config import (
     MCTS_ITERATIONS, MCTS_TIME_LIMIT, MCTS_EXPLORATION_CONSTANT,
     ROLLOUT_GREEDY_PROB, MCTS_SEARCH_MODE, DD_NUM_SAMPLES, DD_MIN_SAMPLES, DD_TIME_LIMIT,
@@ -228,8 +229,7 @@ class PlayService:
                           enable_llm_review: bool = False,
                           dd_samples: int = None,
                           dd_alphamu_switch_cards: int = None,
-                          dd_scoring_mode: str = None,
-                          dd_security_filter: bool = None) -> Dict[str, Any]:
+                          dd_scoring_mode: str = None) -> Dict[str, Any]:
         state = self.engine.get_state()
         if not state:
             return {"error": "游戏未初始化"}
@@ -262,8 +262,7 @@ class PlayService:
 
         # === DD 引擎分支 ===
         if use_dd:
-            return await asyncio.to_thread(self._dd_play, state, dd_samples, dd_scoring_mode,
-                                           dd_security_filter)
+            return await asyncio.to_thread(self._dd_play, state, dd_samples, dd_scoring_mode)
 
         # === αμ 纯引擎分支（从开局到残局全覆盖） ===
         if use_alphamu:
@@ -273,7 +272,7 @@ class PlayService:
         if use_dd_alphamu_llm:
             return await asyncio.to_thread(
                 self._dd_alphamu_llm_play, state, use_reasoning, dd_samples,
-                dd_alphamu_switch_cards, enable_llm_review, dd_scoring_mode, dd_security_filter)
+                dd_alphamu_switch_cards, enable_llm_review, dd_scoring_mode)
 
         # === MCTS 引擎分支 ===
         if use_mcts:
@@ -551,6 +550,30 @@ class PlayService:
                 parts.append("[HCP守恒]")
             lines.append(" ".join(parts))
         return "\n".join(lines) if lines else "无约束（随机采样）"
+
+    def _format_latest_constraints_for_display(self, state: PlayState, constraints: Dict[str, BidConstraint]) -> str:
+        """按当前已出牌把初始约束折算为剩余部分约束，展示约束随出牌的变化。
+
+        与采样器共用同一扣减逻辑（初始约束 = 已出部分 + 剩余部分），
+        某家约束已无条件满足（不影响采样）时省略展示。
+        """
+        if not constraints:
+            return "无约束（随机采样）"
+        played_stats = compute_played_stats(state)
+        remaining_counts = compute_remaining_counts(state)
+        reduced: Dict[str, BidConstraint] = {}
+        for pos, c in constraints.items():
+            played = played_stats.get(pos, {})
+            if not any((played.get("suit") or {}).values()):
+                reduced[pos] = c
+                continue
+            rc = _reduce_constraint_for_played(c, played, remaining_counts.get(pos, 0))
+            if rc is not None:
+                rc.suit_min = {s: n for s, n in rc.suit_min.items() if n > 0}
+                reduced[pos] = rc
+        if not reduced:
+            return "约束已随出牌全部满足"
+        return self._format_constraints_for_display(reduced)
 
     def _format_missing_key_cards(self, state: PlayState) -> str:
         """列出两家手牌中都不出现的关键大牌，提醒LLM这些牌在对方手中。"""
@@ -969,6 +992,7 @@ class PlayService:
         if enum_worlds:
             full_output["引擎阶段"] = "endgame_enum_αμ"
         full_output["叫牌约束"] = self._format_constraints_for_display(constraints)
+        full_output["最新约束"] = self._format_latest_constraints_for_display(state, constraints)
         return {
             "card": card.to_dict() if hasattr(card, "to_dict") else None,
             "reasoning": result.get("reasoning", ""),
@@ -1103,8 +1127,7 @@ class PlayService:
                               dd_samples: int = None,
                               switch_cards: int = None,
                               enable_llm_review: bool = False,
-                              dd_scoring_mode: str = None,
-                              dd_security_filter: bool = None) -> Dict[str, Any]:
+                              dd_scoring_mode: str = None) -> Dict[str, Any]:
         """DD-αμ-LLM 主力引擎：中盘DD+LLM审查，残局αμ+LLM审查。
 
         分界点参数化：每手剩余牌数 ≤ switch_cards（默认 DD_ALPHAMU_SWITCH_CARDS）
@@ -1116,23 +1139,21 @@ class PlayService:
         cards = len(state.hands.get(perspective, []))
         if not enable_llm_review:
             if cards > threshold:
-                return self._dd_play(state, dd_samples, dd_scoring_mode, dd_security_filter)
+                return self._dd_play(state, dd_samples, dd_scoring_mode)
             return self._alpha_mu_play(state)
         if cards > threshold:
-            return self._dd_llm_play(state, use_reasoning, dd_samples, dd_scoring_mode,
-                                     dd_security_filter)
+            return self._dd_llm_play(state, use_reasoning, dd_samples, dd_scoring_mode)
         return self._alphamu_llm_play(state, use_reasoning)
 
     def _dd_llm_play(self, state: PlayState, use_reasoning: bool = False,
-                     dd_samples: int = None, dd_scoring_mode: str = None,
-                     dd_security_filter: bool = None) -> Dict[str, Any]:
+                     dd_samples: int = None, dd_scoring_mode: str = None) -> Dict[str, Any]:
         """中盘 DD 搜索 + LLM 分组审查。
 
         DD 候选没有 αμ 的 best_vector，改用各 world 赢墩数向量等价分组：
         scores 完全相同 → 各世界表现等价 → 一组；组内按花色+rank区间拆分。
         success_rate = scores 中 ≥ 定约所需墩数的占比（成约率，与 αμ 同义）。
         """
-        dd_result = self._dd_play(state, dd_samples, dd_scoring_mode, dd_security_filter)
+        dd_result = self._dd_play(state, dd_samples, dd_scoring_mode)
         full_output = dd_result.get("full_output", {})
         full_output["engine_phase"] = "midgame_dd"
         candidates = full_output.get("mcts_stats", {}).get("candidates", [])
@@ -2408,8 +2429,7 @@ class PlayService:
         lines.append('不要因为非第1组的成功率略高就选非第1组\u2014\u2014关键是战术差异，不是成功率。')
         return '\n'.join(lines)
 
-    def _dd_play(self, state: PlayState, dd_samples: int = None, dd_scoring_mode: str = None,
-                 dd_security_filter: bool = None) -> Dict[str, Any]:
+    def _dd_play(self, state: PlayState, dd_samples: int = None, dd_scoring_mode: str = None) -> Dict[str, Any]:
         """DD搜索打牌（纯蒙特卡洛 + 双明手评估，由asyncio.to_thread调用）"""
         constraints = self._get_bid_constraints()
         if constraints:
@@ -2427,10 +2447,6 @@ class PlayService:
         _saved_scoring_mode = self.dd_search.scoring_mode
         if dd_scoring_mode is not None:
             self.dd_search.scoring_mode = dd_scoring_mode
-        # 请求级 dd_security_filter 允许临时覆盖临界过滤开关（用完恢复）
-        _saved_security_filter = self.dd_search.security_filter
-        if dd_security_filter is not None:
-            self.dd_search.security_filter = dd_security_filter
 
         try:
             result = self.dd_search.search(state)
@@ -2461,8 +2477,6 @@ class PlayService:
                 self.dd_search.num_samples = _saved_num_samples
             if dd_scoring_mode is not None:
                 self.dd_search.scoring_mode = _saved_scoring_mode
-            if dd_security_filter is not None:
-                self.dd_search.security_filter = _saved_security_filter
 
     def _perfect_play(self, state: PlayState) -> Dict[str, Any]:
         """完美DD打牌（全知双明手，无采样，一次 solve_board 得所有候选精确分）"""
@@ -2475,6 +2489,7 @@ class PlayService:
                 card = self._select_best_card(playable, state)
             full_output = result.get("full_output", {})
             full_output["叫牌约束"] = self._format_constraints_for_display(constraints)
+            full_output["最新约束"] = self._format_latest_constraints_for_display(state, constraints)
             return {
                 "card": card.to_dict() if card else None,
                 "reasoning": result.get("reasoning", ""),
@@ -2508,6 +2523,7 @@ class PlayService:
                 card = self._select_best_card(playable, state)
             full_output = result.get("full_output", {})
             full_output["叫牌约束"] = self._format_constraints_for_display(constraints)
+            full_output["最新约束"] = self._format_latest_constraints_for_display(state, constraints)
             return {
                 "card": card.to_dict() if card else None,
                 "reasoning": result.get("reasoning", ""),

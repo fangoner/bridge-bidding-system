@@ -28,7 +28,8 @@ BIDDING_SCHEMA = {
         "叫牌历史": {"type": "string"},
         "叫品筛选过程": {"type": "string"},
         "选定叫品": {"type": "string"},
-        "叫品含义": {"type": "string"}
+        "叫品含义": {"type": "string"},
+        "叫品约束": {"type": "string"}
     },
     "required": [
         "叫牌位置",
@@ -36,7 +37,8 @@ BIDDING_SCHEMA = {
         "叫牌历史",
         "叫品筛选过程",
         "选定叫品",
-        "叫品含义"
+        "叫品含义",
+        "叫品约束"
     ]
 }
 
@@ -55,7 +57,8 @@ BIDDING_FALLBACK_SCHEMA = {
         "自己和队友关键张合计": {"type": "string"},
         "叫品筛选过程": {"type": "string"},
         "选定叫品": {"type": "string"},
-        "叫品含义": {"type": "string"}
+        "叫品含义": {"type": "string"},
+        "叫品约束": {"type": "string"}
     },
     "required": [
         "叫牌位置",
@@ -70,7 +73,8 @@ BIDDING_FALLBACK_SCHEMA = {
         "自己和队友关键张合计",
         "叫品筛选过程",
         "选定叫品",
-        "叫品含义"
+        "叫品含义",
+        "叫品约束"
     ]
 }
 
@@ -81,14 +85,16 @@ HUMAN_BID_SCHEMA = {
         "叫品筛选过程": {"type": "string"},
         "选定叫品": {"type": "string"},
         "叫品含义": {"type": "string"},
-        "完整叫牌序列": {"type": "string"}
+        "完整叫牌序列": {"type": "string"},
+        "叫品约束": {"type": "string"}
     },
     "required": [
         "当前叫牌序列",
         "叫品筛选过程",
         "选定叫品",
         "叫品含义",
-        "完整叫牌序列"
+        "完整叫牌序列",
+        "叫品约束"
     ]
 }
 
@@ -174,9 +180,9 @@ class DeepSeekClient:
         if max_tokens is None:
             max_tokens = 8192 if thinking else 2048
 
-        messages = [{"role": "system", "content": system_prompt}]
+        base_messages = [{"role": "system", "content": system_prompt}]
         if user_prompt:
-            messages.append({"role": "user", "content": user_prompt})
+            base_messages.append({"role": "user", "content": user_prompt})
         
         import time as time_module
         extra_kwargs = {}
@@ -193,10 +199,18 @@ class DeepSeekClient:
         _logger.info(log_msg)
 
         content = ""
+        missing_fields = []
         # P0-5 修复：去掉 chat() 回落链（不再 JSON 失败后再补一发非 JSON 调用）；
         # 超时/限流指数退避重试，业务错误不重试；失败直接返回 error dict（由上层决定报错或兜底）
         for attempt in range(max_attempts):
             try:
+                messages = list(base_messages)
+                # required 字段缺失：重试时附缺失键名提示，迫使模型补全输出
+                if missing_fields:
+                    messages[0] = {
+                        "role": "system",
+                        "content": system_prompt + f"\n\n【上一次输出缺少必填字段: {', '.join(missing_fields)}】请重新输出完整 JSON，必须包含以上所有必填字段。",
+                    }
                 response = self.client.chat.completions.create(
                     model=actual_model,
                     messages=messages,
@@ -215,7 +229,20 @@ class DeepSeekClient:
                     ok_msg = f"[DeepSeek] OK in {elapsed:.1f}s response_chars={len(content)} finish_reason={response.choices[0].finish_reason} (no usage)"
                 print(ok_msg)
                 _logger.info(ok_msg)
-                return json.loads(content)
+                parsed = json.loads(content)
+                # schema.required 字段校验：缺失则重试（最后一次尝试仍缺失时返回，交由上层规则库兜底）
+                missing_fields = []
+                if schema and schema.get("required"):
+                    missing_fields = [
+                        k for k in schema["required"]
+                        if k not in parsed or parsed.get(k) is None or parsed.get(k) == ""
+                    ]
+                if missing_fields and attempt < max_attempts - 1:
+                    warn_msg = f"[DeepSeek] 缺少必填字段: {missing_fields}，重试 (attempt {attempt + 1}/{max_attempts})"
+                    print(warn_msg)
+                    _logger.warning(warn_msg)
+                    continue
+                return parsed
             except json.JSONDecodeError:
                 # LLM 输出不合规 JSON：重试大概率同样失败，直接返回错误（含原文便于诊断）
                 fail_msg = f"[DeepSeek] JSON 解析失败 response_chars={len(content)}"

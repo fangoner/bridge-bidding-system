@@ -10,7 +10,6 @@ const MCTS_PARTICLES_KEY = 'bridge_mcts_particles'
 const ALPHA_MU_PARTICLES_KEY = 'bridge_alpha_mu_particles'
 const SWITCH_CARDS_KEY = 'bridge_dd_alphamu_switch_cards'
 const DD_SCORING_MODE_KEY = 'bridge_dd_scoring_mode'
-const DD_SECURITY_FILTER_KEY = 'bridge_dd_security_filter'
 const VISION_PROVIDER_KEY = 'bridge_vision_provider'
 
 // 解析组合模型值 "model::reasoning" → { model, reasoning }
@@ -129,15 +128,6 @@ export function useModelSettings() {
     const v = ['imp', 'make_rate', 'avg_tricks'].includes(value) ? value : 'imp'
     setDdScoringMode(v)
     try { localStorage.setItem(DD_SCORING_MODE_KEY, v) } catch {/* empty */}
-  }, [])
-
-  // 临界分布过滤开关（叠加在 ddScoringMode 之上；localStorage 持久化，随 aiPlay 请求下发）
-  const [ddSecurityFilter, setDdSecurityFilter] = useState(() => {
-    try { return localStorage.getItem(DD_SECURITY_FILTER_KEY) === 'true' } catch { return false }
-  })
-  const handleDdSecurityFilterChange = useCallback((checked) => {
-    setDdSecurityFilter(!!checked)
-    try { localStorage.setItem(DD_SECURITY_FILTER_KEY, checked ? 'true' : 'false') } catch {/* empty */}
   }, [])
 
   // 视觉识别模型 provider（截屏/图片识别）；localStorage 持久化 + 启动时同步到后端
@@ -260,9 +250,6 @@ export function useModelSettings() {
     // DD 决策计分制
     ddScoringMode,
     handleDdScoringModeChange,
-    // DD 决策计分制叠加临界分布过滤开关
-    ddSecurityFilter,
-    handleDdSecurityFilterChange,
     // 视觉识别模型 provider
     visionProvider,
     visionProviders,
