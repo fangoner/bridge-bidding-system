@@ -10,6 +10,7 @@ import time
 from typing import Dict, List, Optional
 
 from config import BASE_DIR
+import config as _dd_config
 from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER, PARTNERS
 from bridge.mcts.state_utils import (
     get_current_trick_state,
@@ -194,9 +195,63 @@ def _dds_result_to_score_map(solved, exclude_cards=None):
     return score_map
 
 
+# 类别 → 过滤统计短键（与 eval_stats / 展示代码保持一致）
+_dropped_keys = {"sure_win": "dropped_win", "sure_lose": "dropped_lose", "critical": "dropped_crit"}
+
+
+def _accumulate_world_totals(score_map, playable, state, curplayer_is_declarer,
+                             remaining_tricks, weight, card_scores, stats=None):
+    """累计一个世界的各候选总分到 card_scores，返回是否保留（True=保留）。
+
+    每世界按"所有候选出牌相对所需墩"分三类：全赢/全输/临界。
+    按 config 的 DD_KEEP_* 三开关决定该类别是否参与评分（默认全保留）；
+    取消某类别=把该类世界排除出期望聚合。stats 统计各类别计数。
+    """
+    decl_tricks = state.declarer_tricks
+    tricks_needed = state.contract.tricks_needed
+    totals = []
+    for card in playable:
+        key = (card.suit, card.rank)
+        target_tricks = score_map.get(key, 0)
+        if curplayer_is_declarer:
+            decl_side_tricks = target_tricks
+        else:
+            decl_side_tricks = remaining_tricks - target_tricks
+        totals.append(decl_tricks + decl_side_tricks)
+    all_win = all(t >= tricks_needed for t in totals)
+    all_lose = all(t < tricks_needed for t in totals)
+    if all_win:
+        cls = "sure_win"
+    elif all_lose:
+        cls = "sure_lose"
+    else:
+        cls = "critical"
+    if stats is not None:
+        stats[cls] += 1
+    keep = {
+        "sure_win": _dd_config.DD_KEEP_SURE_WIN,
+        "critical": _dd_config.DD_KEEP_CRITICAL,
+        "sure_lose": _dd_config.DD_KEEP_SURE_LOSE,
+    }.get(cls, True)
+    if not keep:
+        if stats is not None:
+            stats[_dropped_keys.get(cls, "dropped_" + cls)] += 1
+        return False
+    for total, card in zip(totals, playable):
+        card_stats = card_scores[str(card)]
+        card_stats["weighted_sum"] += total * weight
+        card_stats["total_weight"] += weight
+        card_stats["scores"].append(total)
+        card_stats["mn"] = min(card_stats["mn"], total)
+        card_stats["mx"] = max(card_stats["mx"], total)
+    if stats is not None:
+        stats["kept"] += 1
+    return True
+
+
 def _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
                        playable, state, perspective, actual_turn, declarer, dummy,
-                       trump, card_scores, weight, sample_idx):
+                       trump, card_scores, weight, sample_idx, stats=None):
     """Phase 0b: DirectDDS 单世界求解，累加加权分到 card_scores。"""
     _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
     try:
@@ -213,20 +268,8 @@ def _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
         remaining_tricks = 13 - total_played
         cur_p = (_DD_POS.get(first_p, 0) + len(tc)) % 4
         curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
-        for card in playable:
-            key = (card.suit, card.rank)
-            target_tricks = score_map.get(key, 0)
-            if curplayer_is_declarer:
-                decl_side_tricks = target_tricks
-            else:
-                decl_side_tricks = remaining_tricks - target_tricks
-            total = state.declarer_tricks + decl_side_tricks
-            stats = card_scores[str(card)]
-            stats["weighted_sum"] += total * weight
-            stats["total_weight"] += weight
-            stats["scores"].append(total)
-            stats["mn"] = min(stats["mn"], total)
-            stats["mx"] = max(stats["mx"], total)
+        _accumulate_world_totals(score_map, playable, state, curplayer_is_declarer,
+                                 remaining_tricks, weight, card_scores, stats)
     except Exception:
         pass
 
@@ -267,7 +310,7 @@ def _build_dds_data(world, all_played, trick_cards, trick_leader,
 
 def _solve_batch(samples, all_played, trick_cards, trick_leader,
                  playable, state, perspective, actual_turn, declarer, dummy,
-                 trump, card_scores, time_limit, start_time):
+                 trump, card_scores, time_limit, start_time, stats=None):
     """Phase 0b: DirectDDS 批量求解，ctypes 直调 DDS，无 PBN/Deal 转换。
 
     返回 (samples_done, solve_times_list, solve_total, solve_max)。
@@ -328,20 +371,8 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
                 cur_p = (_DD_POS.get(first_p, 0) + len(_tc)) % 4
                 curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
 
-                for card in playable:
-                    key = (card.suit, card.rank)
-                    target_tricks = score_map.get(key, 0)
-                    if curplayer_is_declarer:
-                        decl_side_tricks = target_tricks
-                    else:
-                        decl_side_tricks = remaining_tricks - target_tricks
-                    total = state.declarer_tricks + decl_side_tricks
-                    stats = card_scores[str(card)]
-                    stats["weighted_sum"] += total
-                    stats["total_weight"] += 1.0
-                    stats["scores"].append(total)
-                    stats["mn"] = min(stats["mn"], total)
-                    stats["mx"] = max(stats["mx"], total)
+                _accumulate_world_totals(score_map, playable, state, curplayer_is_declarer,
+                                                remaining_tricks, 1.0, card_scores, stats)
                 samples_done += 1
                 solve_times.append(_per_deal)
         else:
@@ -367,20 +398,8 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
                 score_map = _dds_result_to_score_map(solved)
                 cur_p = (_DD_POS.get(first_p, 0) + len(tc)) % 4
                 curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
-                for card in playable:
-                    key = (card.suit, card.rank)
-                    target_tricks = score_map.get(key, 0)
-                    if curplayer_is_declarer:
-                        decl_side_tricks = target_tricks
-                    else:
-                        decl_side_tricks = remaining_tricks - target_tricks
-                    total = state.declarer_tricks + decl_side_tricks
-                    stats = card_scores[str(card)]
-                    stats["weighted_sum"] += total
-                    stats["total_weight"] += 1.0
-                    stats["scores"].append(total)
-                    stats["mn"] = min(stats["mn"], total)
-                    stats["mx"] = max(stats["mx"], total)
+                _accumulate_world_totals(score_map, playable, state, curplayer_is_declarer,
+                                                remaining_tricks, 1.0, card_scores, stats)
                 samples_done += 1
                 solve_times.append(_dt_s)
 
@@ -489,6 +508,8 @@ class DDSearch:
                      f"remaining_tricks={remaining_tricks}\n")
 
         samples_done = 0
+        eval_stats = {"kept": 0, "sure_win": 0, "critical": 0, "sure_lose": 0,
+                      "dropped_win": 0, "dropped_crit": 0, "dropped_lose": 0}
         _solve_total = 0.0
         _solve_max = 0.0
         _solve_count = 0
@@ -503,7 +524,7 @@ class DDSearch:
             _bd, _bt, _bs_tot, _bs_max = _solve_batch(
                 samples, all_played, trick_cards, trick_leader,
                 playable, state, perspective, actual_turn, declarer, dummy,
-                trump, card_scores, self.time_limit, start_time)
+                trump, card_scores, self.time_limit, start_time, eval_stats)
             if _bd > 0:
                 # 批量成功
                 _batch_used = True
@@ -525,7 +546,7 @@ class DDSearch:
                     _t_s0 = time.time()
                     _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
                                        playable, state, perspective, actual_turn, declarer, dummy,
-                                       trump, card_scores, 1.0, samples_done)
+                                       trump, card_scores, 1.0, samples_done, eval_stats)
                     _dt_solve = time.time() - _t_s0
                     _solve_times.append(_dt_solve)
                     _solve_total += _dt_solve
@@ -630,8 +651,19 @@ class DDSearch:
             f"{s['card']}({_fmt_score(s)})"
             for s in child_stats[:5]
         )
+        _dropped_parts = []
+        if eval_stats["dropped_win"]:
+            _dropped_parts.append(f"全赢{eval_stats['dropped_win']}")
+        if eval_stats["dropped_crit"]:
+            _dropped_parts.append(f"临界{eval_stats['dropped_crit']}")
+        if eval_stats["dropped_lose"]:
+            _dropped_parts.append(f"全输{eval_stats['dropped_lose']}")
+        _dropped_note = f"（过滤{'·'.join(_dropped_parts)}）" if _dropped_parts else ""
+        _crit_pct = eval_stats["critical"] / samples_done * 100 if samples_done else 0.0
+        _lose_pct = eval_stats["sure_lose"] / samples_done * 100 if samples_done else 0.0
         reasoning = (
-            f"DDMC: {samples_done} samples in {elapsed:.1f}s. "
+            f"DDMC: 评分样本{eval_stats['kept']}/{samples_done} in {elapsed:.1f}s"
+            f"{_dropped_note}. "
             f"Top plays: {top_plays_str}"
         )
 
@@ -643,7 +675,9 @@ class DDSearch:
                 "核心逻辑": reasoning,
                 "候选对比": str(child_stats),
                 "局面评估": (
-                    f"DDMC searched {samples_done} samples in {elapsed:.1f}s"
+                    f"DDMC 总样本 {samples_done}（全赢{eval_stats['sure_win']}·临界{eval_stats['critical']}·全输{eval_stats['sure_lose']}"
+                    f"，其中临界占{_crit_pct:.0f}%、全输占{_lose_pct:.0f}%），评分样本 {eval_stats['kept']}"
+                    f"{'，过滤 ' + '、'.join(_dropped_parts) if _dropped_parts else ''}，耗时 {elapsed:.1f}s"
                 ),
                 "mcts_stats": {
                     "iterations": samples_done,

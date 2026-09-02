@@ -106,6 +106,30 @@ DD_TIME_LIMIT = 30.0  # seconds per DD play decision (30秒预算，允许首攻
 #   "make_rate"（做成率，类似αμ）| "avg_tricks"（平均赢墩，纯MP思路）
 DD_SCORING_MODE = "imp"
 
+# DD 样本类别保留开关（默认全保留=不对任何类别过滤，等同原行为）：
+#   每世界按"所有候选出牌相对所需墩的情形"分三类：
+#     全赢 sure_win  = 所有候选都 ≥ 所需墩
+#     全输 sure_lose = 所有候选都 < 所需墩
+#     临界 critical  = 有赢有输
+#   取消勾选某类 = 将该类世界排除出期望聚合（人工/未来程序根据局面选择组合）
+DD_KEEP_SURE_WIN = True
+DD_KEEP_CRITICAL = True
+DD_KEEP_SURE_LOSE = True
+
+# 飞牌延迟策略（识别到飞牌结构时，尽量先出无关牌拖延，观察分布后再飞）：
+#   识别：合并庄家+明手每花色，存在"可飞对象"（缺K/Q/J、有上方控制+下方≥T的飞张、合计≥4张）
+#   干预：候选牌按"结构相关"（飞牌花色/烧进手牌）与"无关牌"分类；
+#         榜首为结构相关牌且与次优无关牌差距 ≤ 阈值时，改选无关牌拖延。
+# 阈值用比值（相对成功率）统一跨计分制：次优/榜首 ≥ FINESSE_DEFER_RATIO 即视为"差距不大"。
+FINESSE_DEFER_ENABLE = True          # 总开关
+FINESSE_DEFER_RATIO = 0.90           # DD 引擎：次优无关牌相对成功率 ≥ 榜首的 90% 时允许拖延
+FINESSE_DEFER_RATIO_ALPHA = 0.80     # αμ 引擎：比值 ≥ 0.80 时允许拖延（≈用户指定的成功率差20%）
+
+# 8飞9砸（通用原则，不限将牌/有将定约）：飞牌花色被"被迫引发"时，
+# 联手张数 ≤8 → 出飞张（间张）；≥9 → 出顶张（A/K 砸）。用比值阈值保护，差距大不干预。
+FINESSE_EIGHT_NINE_ENABLE = True
+FINESSE_EIGHT_NINE_RATIO = 0.95      # 改选牌相对成功率 ≥ 榜首 95% 时才允许按原则改选
+
 # 首攻与信号方案："standard"（标准方案，源自新睿自然）| 预留扩展（如"reverse"反式信号）
 LEAD_SIGNAL_SCHEME = "standard"
 
