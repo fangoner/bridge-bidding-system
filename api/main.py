@@ -144,7 +144,7 @@ class BidRequest(BaseModel):
     fallback_model: Optional[str] = None
     ai_provider: Optional[str] = None
     use_reasoning: bool = False
-    bid_system: str = "jf"
+    bid_system: str = "xr"
 
 
 class FallbackModelRequest(BaseModel):
@@ -168,7 +168,7 @@ class AnalyzeRequest(BaseModel):
     bidding_sequence: str
     deal_system: str = DEFAULT_DEAL_SYSTEM
     position: Optional[str] = None
-    bid_system: str = "jf"
+    bid_system: str = "xr"
 
 
 class AnalyzeResponse(BaseModel):
@@ -182,7 +182,7 @@ class HumanBidRequest(BaseModel):
     user_input: str
     deal_system: str = DEFAULT_DEAL_SYSTEM
     bid_history: str = ""  # 已累积的叫牌含义文本，供 LLM 理解上下文
-    bid_system: str = "jf"
+    bid_system: str = "xr"
 
 
 class HumanBidResponse(BaseModel):
@@ -193,7 +193,7 @@ class HumanBidResponse(BaseModel):
 
 class ConstraintsRequest(BaseModel):
     bid_history: str = ""  # 完整叫牌含义文本（含pass，公开信息）
-    bid_system: str = "jf"
+    bid_system: str = "xr"
 
 
 class ConstraintsResponse(BaseModel):
@@ -1997,7 +1997,7 @@ class PlayInitRequest(BaseModel):
     constraints: Optional[Dict[str, dict]] = None  # 已生成的家约束payload（省略则进打牌时用含义文本LLM生成）
     vulnerability: Optional[str] = None  # 局况: "NV"/"NS"/"EW"/"All"
     session_id: str = "default"  # 打牌会话隔离标识
-    bid_system: str = "jf"  # 叫牌体系: jf / xr / natural
+    bid_system: str = "xr"  # 叫牌体系: jf / xr / natural
 
 
 class PlayInitResponse(BaseModel):
@@ -2053,7 +2053,7 @@ async def play_init(request: PlayInitRequest):
             bid_meanings=request.bid_meanings or "",
             constraints=request.constraints,
             vulnerability=_normalize_vulnerability(request.vulnerability) or "NV",
-            bid_system=request.bid_system or "jf",
+            bid_system=request.bid_system or "xr",
         )
 
         if state is None:

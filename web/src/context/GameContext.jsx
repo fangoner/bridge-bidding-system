@@ -7,6 +7,7 @@ export const GameContext = createContext(null)
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
 const PLAY_MODEL_KEY = 'bridge_play_model'
 const HUMAN_BID_INTERPRET_KEY = 'bridge_human_bid_interpret'
+const BID_SYSTEM_KEY = 'bridge_bid_system'
 
 export function useGame() {
   const ctx = useContext(GameContext)
@@ -44,7 +45,13 @@ export function GameProvider({ children }) {
   const [dealMode, setDealMode] = useState('free') // free/game/slam
   const [showSettings, setShowSettings] = useState(false)
   const [dealSystem, setDealSystem] = useState('2D/2H/2S：自然阻击')
-  const [bidSystem, setBidSystem] = useState('jf')
+  const [bidSystem, setBidSystem] = useState(() => {
+    try {
+      return localStorage.getItem(BID_SYSTEM_KEY) || 'xr'
+    } catch {
+      return 'xr'
+    }
+  })
   // 人类叫牌时是否调用AI解释该叫品含义（关闭可显著加快叫牌速度）
   const [humanBidInterpret, setHumanBidInterpret] = useState(() => {
     try {
@@ -87,6 +94,11 @@ export function GameProvider({ children }) {
   useEffect(() => {
     try { localStorage.setItem(HUMAN_BID_INTERPRET_KEY, String(humanBidInterpret)) } catch {/* empty */}
   }, [humanBidInterpret])
+
+  // 叫牌体系持久化（默认新睿，用户切换后记住选择）
+  useEffect(() => {
+    try { localStorage.setItem(BID_SYSTEM_KEY, bidSystem) } catch {/* empty */}
+  }, [bidSystem])
 
   const value = useMemo(
     () => ({

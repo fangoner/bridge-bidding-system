@@ -1,7 +1,7 @@
 from typing import Dict, Optional, Any, List, Tuple
 import json
 from bridge.bidding import extract_retrieval_keyword, get_partner_position, get_position_name, is_valid_bid, parse_bidding_sequence, parse_bidding_sequence_with_positions
-from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT
+from llm.prompts import BIDDING_SYSTEM_PROMPT, BIDDING_FALLBACK_PROMPT, HUMAN_BID_PROMPT, X_HUMAN_PROMPT
 from llm.xr_prompts import (
     XR_OPENING_CONVENTIONS, XR_FALLBACK_CONVENTIONS,
     XR_SYSTEM_PROMPT, XR_FALLBACK_PROMPT, XR_HUMAN_PROMPT,
@@ -39,10 +39,9 @@ def _fixup_human_bid_result(result: Dict, bid: str, full_sequence: str) -> Dict:
     result["选定叫品"] = bid
     result["完整叫牌序列"] = full_sequence
     if raw_selected is not None and _norm_bid_str(raw_selected) != _norm_bid_str(bid):
-        original_meaning = result.get("叫品含义", "").strip()
+        # AI 判定跑偏：丢弃其生成的含义（针对错误叫品的文本会误导），仅保留提示
         result["叫品含义"] = (
             f"（提示：AI 原判定叫品为 {raw_selected}，与你的输入 {bid} 不符，已按你的输入记录）"
-            f"{(' ' + original_meaning) if original_meaning else ''}"
         )
     return result
 
@@ -435,6 +434,7 @@ class BiddingService:
                 if violation is None:
                     # 合法，恢复 bid_meanings 并返回
                     self.bid_meanings = original_bid_meanings
+                    result["结构化约定"] = True
                     return result
 
                 last_violation = violation
@@ -547,6 +547,7 @@ class BiddingService:
                 result["叫品筛选过程"] = "[备用提示词] " + result.get("叫品筛选过程", "")
                 result["JF约定"] = actual_jf_keyword
                 result["阻击叫体系"] = deal_system
+                result["结构化约定"] = False
 
                 bid = result.get("选定叫品", "").strip()
                 if not bid or bid in ["jf无合格叫品", "无合格叫品", "没有合格叫品"]:
@@ -569,7 +570,7 @@ class BiddingService:
             except Exception as e:
                 self.bid_meanings = original_bid_meanings
                 # P0-4 修复：异常不再静默强制 pass，返回 error 由 /api/bid 转 502（前端提示重试）
-                return {"error": f"[备用提示词异常] {e}", "选定叫品": "pass", "叫品含义": f"[备用提示词异常] {e}", "叫品筛选过程": f"[备用提示词异常] {e}", "JF约定": actual_jf_keyword, "阻击叫体系": deal_system}
+                return {"error": f"[备用提示词异常] {e}", "选定叫品": "pass", "叫品含义": f"[备用提示词异常] {e}", "叫品筛选过程": f"[备用提示词异常] {e}", "JF约定": actual_jf_keyword, "阻击叫体系": deal_system, "结构化约定": False}
 
         # fallback 重试耗尽，报错并暂停叫牌
         self.bid_meanings = original_bid_meanings
@@ -585,6 +586,7 @@ class BiddingService:
             "JF约定": actual_jf_keyword,
             "阻击叫体系": deal_system,
             "暂停叫牌": True,
+            "结构化约定": False,
         }
     
     def human_bid(
@@ -612,9 +614,34 @@ class BiddingService:
 
         if bid.lower() == "pass":
             player_name = position
+            partner_name = get_partner_position(position)
             bidding_prefix = bidding_sequence if bidding_sequence else ""
             full_sequence = f"{bidding_prefix}({player_name})pass-"
-            return {"选定叫品": "pass", "叫品含义": "pass：不叫", "JF约定": "", "完整叫牌序列": full_sequence}
+            # 结构化约定中若有 pass 条目（含对应约束/含义），标为 JF 来源并带出条目文本
+            pass_lines = []
+            actual_jf_keyword = ""
+            try:
+                jf_keyword = extract_retrieval_keyword(bidding_sequence, deal_system, player_name)
+                actual_jf_keyword = jf_keyword
+                jf_result = self.jf_retriever.retrieve_with_preprocess(jf_keyword, bidding_sequence, partner_name)
+                for it in jf_result.get("subsequent_bids", []):
+                    if str(it.get("bid", "")).lower() == "pass":
+                        stripped = str(it.get("line", "")).strip()
+                        if stripped.startswith("pass：") or stripped.startswith("pass:"):
+                            stripped = stripped[5:].strip()
+                        if stripped:
+                            pass_lines.append(stripped)
+            except Exception:
+                pass
+            structured_hit = bool(pass_lines)
+            meaning = "pass：不叫" if not pass_lines else "pass：" + "；".join(pass_lines)
+            return {
+                "选定叫品": "pass",
+                "叫品含义": meaning,
+                "JF约定": actual_jf_keyword,
+                "完整叫牌序列": full_sequence,
+                "结构化约定": structured_hit,
+            }
 
         player_name = position
         partner_name = get_partner_position(position)
@@ -627,11 +654,13 @@ class BiddingService:
 
         jf_content = jf_result.get("original_content", "")
         actual_jf_keyword = jf_keyword
+        structured_hit = True
 
         if not jf_content:
             slam_result = self._get_slam_result(bidding_sequence, partner_name)
             jf_content = slam_result.get("original_content", "")
             actual_jf_keyword = "成局与满贯"
+            structured_hit = False
             if verbose:
                 print(f"[human_bid] PATH: fallback - no jf_content, using 成局与满贯")
 
@@ -643,14 +672,37 @@ class BiddingService:
             if matched_lines:
                 jf_content += "\n\n【本叫品在约定中的条目】\n" + next((ln for ln in matched_lines if ln), "")
 
-        prompt = HUMAN_BID_PROMPT.format(
-            bidding=bidding_sequence if bidding_sequence else "空",
-            player=player_name,
-            user_input=user_input,
-            jf_content=jf_content,
-            deal_system=deal_system,
-            bid_meaning=self.bid_meanings if self.bid_meanings else "（暂无）"
-        )
+        # X/XX：表格命中直接按表原文解释（与约定完全一致），未命中才走 LLM 解说
+        if bid in ("X", "XX"):
+            x_lines = [ln for ln in (it.get("line", "") for it in jf_result.get("subsequent_bids", []) if it.get("bid", "").upper() == bid.upper()) if ln]
+            if x_lines:
+                full_sequence = f"{bidding_sequence}({player_name}){bid}-"
+                return {
+                    "选定叫品": bid,
+                    "叫品含义": f"{bid}：{x_lines[0]}",
+                    "JF约定": actual_jf_keyword,
+                    "完整叫牌序列": full_sequence,
+                    "结构化约定": True,
+                }
+
+        # X/XX：用"解说员"专用提示词，避免 LLM 把既定加倍误判为其他叫品（未检索到条目时的兜底解释）
+        if bid in ("X", "XX"):
+            prompt = X_HUMAN_PROMPT.format(
+                bidding=bidding_sequence if bidding_sequence else "空",
+                player=player_name,
+                user_input=bid,
+                jf_content=jf_content or "（未检索到该序列的约定条目）",
+                system_tag="JF",
+            )
+        else:
+            prompt = HUMAN_BID_PROMPT.format(
+                bidding=bidding_sequence if bidding_sequence else "空",
+                player=player_name,
+                user_input=user_input,
+                jf_content=jf_content,
+                deal_system=deal_system,
+                bid_meaning=self.bid_meanings if self.bid_meanings else "（暂无）"
+            )
         self._last_prompt = prompt
 
         try:
@@ -658,6 +710,7 @@ class BiddingService:
             if result.get("error"):
                 return {"error": str(result.get("error")), "选定叫品": bid}
             result["JF约定"] = actual_jf_keyword
+            result["结构化约定"] = structured_hit
             full_sequence = f"{bidding_sequence}({player_name}){bid}-"
             return _fixup_human_bid_result(result, bid, full_sequence)
         except Exception as e:
@@ -781,6 +834,7 @@ class BiddingService:
                 violation = self._check_bid_validity(result, bidding_sequence, player_name)
                 if violation is None:
                     self.bid_meanings = original_bid_meanings
+                    result["结构化约定"] = True
                     return result
                 last_violation = violation
                 last_result = result
@@ -832,6 +886,7 @@ class BiddingService:
             result.setdefault("XR约定", result.get("新睿约定", ""))
         result.pop("阻击叫体系", None)
         result.pop("新睿约定", None)
+        result.setdefault("结构化约定", False)
         return result
 
     def _human_bid_xr(self, user_input, position, bidding_sequence, deal_system,
@@ -844,16 +899,43 @@ class BiddingService:
 
         if bid.lower() == "pass":
             full_sequence = f"{bidding_sequence}({player_name})pass-"
-            return {"选定叫品": "pass", "叫品含义": "pass：不叫", "新睿约定": "", "完整叫牌序列": full_sequence}
+            # 结构化约定表中若有 pass 条目（含对应约束/含义），标为 XR 来源并带出条目文本
+            pass_lines = []
+            actual_seq = ""
+            try:
+                seq = XrSeq.build(bidding_sequence, player_name)
+                actual_seq = seq or ""
+                if seq:
+                    xr_result = self.xr_retriever.retrieve_with_preprocess(seq, bidding_sequence, partner_name)
+                    for item in xr_result.get("subsequent_bids", []):
+                        if str(item.get("bid", "")).strip().upper() in ("PASS", "P"):
+                            stripped = str(item.get("line", "")).strip()
+                            if stripped:
+                                pass_lines.append(stripped)
+            except Exception:
+                pass
+            structured_hit = bool(pass_lines)
+            meaning = "pass：不叫" if not pass_lines else "pass：" + "；".join(pass_lines)
+            return {
+                "选定叫品": "pass",
+                "叫品含义": meaning,
+                "新睿约定": actual_seq,
+                "完整叫牌序列": full_sequence,
+                "结构化约定": structured_hit,
+            }
 
         seq = XrSeq.build(bidding_sequence, player_name)
         xr_table_hit = ""
+        # 开叫位（seq 为空）匹配开叫约定表；后续位严格用检索结果，检索无条目不得回退开叫表
         if seq:
             xr_result = self.xr_retriever.retrieve_with_preprocess(seq, bidding_sequence, partner_name)
-            for item in xr_result.get("subsequent_bids", []):
-                if item.get("bid", "").upper() == bid.upper():
-                    xr_table_hit = item.get("line", "")
-                    break
+            entries = xr_result.get("subsequent_bids", [])
+        else:
+            entries = list(self._XR_OPENING_BIDS)
+        for item in entries:
+            if bid.upper() in [b.strip().upper() for b in str(item.get("bid", "")).split("/")]:
+                xr_table_hit = item.get("line", "")
+                break
 
         if not self.llm_client.is_configured():
             return {"error": "API Key未配置"}
@@ -862,14 +944,35 @@ class BiddingService:
         if xr_table_hit:
             jf_content += "\n\n【本叫品在约定表中的条目】\n" + xr_table_hit
 
-        prompt = XR_HUMAN_PROMPT.format(
-            bidding=bidding_sequence if bidding_sequence else "空",
-            player=player_name,
-            user_input=user_input,
-            jf_content=jf_content,
-            deal_system=deal_system,
-            bid_meaning=self.bid_meanings if self.bid_meanings else "（暂无）"
-        )
+        # X/XX：表格命中直接按表原文解释（与约定完全一致），未命中才走 LLM 解说
+        if bid in ("X", "XX") and xr_table_hit:
+            full_sequence = f"{bidding_sequence}({player_name}){bid}-"
+            return {
+                "选定叫品": bid,
+                "叫品含义": f"{bid}：{xr_table_hit}",
+                "新睿约定": seq or "开叫",
+                "完整叫牌序列": full_sequence,
+                "结构化约定": True,
+            }
+
+        # X/XX：用"解说员"专用提示词，避免 LLM 把既定加倍误判为其他叫品（未检索到条目时的兜底解释）
+        if bid in ("X", "XX"):
+            prompt = X_HUMAN_PROMPT.format(
+                bidding=bidding_sequence if bidding_sequence else "空",
+                player=player_name,
+                user_input=bid,
+                jf_content=jf_content or "（未检索到该序列的约定条目）",
+                system_tag="新睿二盖一",
+            )
+        else:
+            prompt = XR_HUMAN_PROMPT.format(
+                bidding=bidding_sequence if bidding_sequence else "空",
+                player=player_name,
+                user_input=user_input,
+                jf_content=jf_content,
+                deal_system=deal_system,
+                bid_meaning=self.bid_meanings if self.bid_meanings else "（暂无）"
+            )
         self._last_prompt = prompt
 
         try:
@@ -877,6 +980,7 @@ class BiddingService:
             if result.get("error"):
                 return {"error": str(result.get("error")), "选定叫品": bid}
             result["新睿约定"] = seq or "开叫"
+            result["结构化约定"] = bool(xr_table_hit)
             full_sequence = f"{bidding_sequence}({player_name}){bid}-"
             if "完整叫牌序列" not in result:
                 result["完整叫牌序列"] = full_sequence

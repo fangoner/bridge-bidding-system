@@ -150,7 +150,7 @@ function PlayDetailPanel({
     const prompt = record.prompt || ''
 
     // 输出模式：显示 fullOutput 中所有有效字段（排除内部/已渲染的）
-    const SKIP_KEYS = ['mcts_stats', 'tiered_phase', 'tiered_dd_fallback', 'tiered_mcts_fallback', 'validation_warning', 'llm_review', 'engine_phase', 'llm_review_status']
+    const SKIP_KEYS = ['mcts_stats', 'tiered_phase', 'tiered_dd_fallback', 'tiered_mcts_fallback', 'validation_warning', 'llm_review', 'engine_phase', 'llm_review_status', '叫牌约束', '最新约束', '各家已出统计']
     const FIELD_COLORS = ['#e65100', 'text.primary', '#2e7d32', '#1976d2', '#37474f', '#1565c0']
     const fields = Object.keys(fullOutput)
       .filter(k => !SKIP_KEYS.includes(k) && fullOutput[k] != null && fullOutput[k] !== '')
@@ -280,6 +280,69 @@ function PlayDetailPanel({
         {viewMode === 'output' ? (
           // 输出模式：显示AI返回的字段
           <>
+            {(() => {
+              const initTxt = fullOutput['叫牌约束']
+              const latestTxt = fullOutput['最新约束']
+              const playedStats = fullOutput['各家已出统计']
+              if (!initTxt && !latestTxt && !playedStats) return null
+              const parseRows = (text) => {
+                const map = {}
+                for (const line of String(text || '').split('\n')) {
+                  const m = line.match(/^([东西南北]):\s*(.*)$/)
+                  if (m) map[m[1]] = m[2]
+                }
+                return map
+              }
+              const initRows = parseRows(initTxt)
+              const latestRows = parseRows(latestTxt)
+              const positions = ['南', '西', '北', '东']
+              const noInit = !initTxt || initTxt.includes('无约束')
+              const noLatest = !latestTxt || latestTxt.includes('无约束') || latestTxt.includes('全部满足')
+              const tdSx = { border: borderCode, p: 0.5, fontSize: '0.65rem', lineHeight: 1.3, verticalAlign: 'top' }
+              const thSx = { ...tdSx, fontWeight: 600, background: isDark ? 'rgba(255,255,255,0.06)' : '#f5f5f5', color: 'text.primary' }
+              return (
+                <Box key="constraint-table" sx={{ mt: 0.5 }}>
+                  <Typography variant="caption" sx={{ fontSize: '0.7rem', color: '#1976d2', fontWeight: 600, display: 'block', mb: 0.3 }}>
+                    约束与已出牌对照
+                  </Typography>
+                  <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <Box component="thead">
+                      <Box component="tr">
+                        <Box component="th" sx={{ ...thSx, whiteSpace: 'nowrap' }}>位置</Box>
+                        <Box component="th" sx={thSx}>初始约束</Box>
+                        <Box component="th" sx={thSx}>最新约束</Box>
+                        <Box component="th" sx={{ ...thSx, whiteSpace: 'nowrap' }}>已出点力</Box>
+                        {['♠', '♥', '♦', '♣'].map(s => (
+                          <Box component="th" key={s} sx={{ ...thSx, textAlign: 'center' }}>{s}</Box>
+                        ))}
+                      </Box>
+                    </Box>
+                    <Box component="tbody">
+                      {positions.map(pos => {
+                        const st = playedStats && playedStats[pos]
+                        return (
+                          <Box component="tr" key={pos}>
+                            <Box component="td" sx={{ ...tdSx, fontWeight: 600 }}>{pos}</Box>
+                            <Box component="td" sx={{ ...tdSx, color: colorMuted }}>{initRows[pos] || '—'}</Box>
+                            <Box component="td" sx={{ ...tdSx, color: colorMuted }}>{latestRows[pos] || '—'}</Box>
+                            <Box component="td" sx={{ ...tdSx, textAlign: 'center' }}>{st ? st.hcp : '—'}</Box>
+                            {['♠', '♥', '♦', '♣'].map(s => (
+                              <Box component="td" key={s} sx={{ ...tdSx, textAlign: 'center' }}>{st ? (st[s] ?? '—') : '—'}</Box>
+                            ))}
+                          </Box>
+                        )
+                      })}
+                    </Box>
+                  </Box>
+                  {(noInit || noLatest) && (
+                    <Typography variant="caption" sx={{ color: colorMuted, display: 'block', mt: 0.2 }}>
+                      {noInit ? '计入此项时初始无约束（随机采样），不参与推断。' : ''}
+                      {noLatest ? '最新约束为剩余部分约束（已随出牌扣减）。' : ''}
+                    </Typography>
+                  )}
+                </Box>
+              )
+            })()}
             {fields.map(({ key, label, color, multiline }) => {
               const value = getValue(key)
               if (!value) return null

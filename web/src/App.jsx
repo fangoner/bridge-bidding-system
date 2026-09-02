@@ -59,6 +59,14 @@ const formatBidMeaningLine = (r) => {
   return `(${r.position})${r.result?.bid || ''}: ${meaning}`
 }
 
+/** 叫牌来源标签：结构化约定命中（主提示词/检索到约定条目）→ 体系标签 jf→JF、xr→XR；
+ *  走备用提示词/人工叫牌未检索到结果/无体系来源 → AI */
+const BID_SYSTEM_LABELS = { jf: 'JF', xr: 'XR', natural: 'AI' }
+const bidSystemToLabel = (system, structured) => {
+  if (!structured) return 'AI'
+  return BID_SYSTEM_LABELS[String(system || '').toLowerCase()] || 'AI'
+}
+
 /** 确保手牌每门花色按 A→2 排序，并计算 HCP */
 const ensureSortedHands = (hands) => {
   if (!hands || typeof hands !== 'object') return hands
@@ -187,6 +195,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const [dialogConstraintsDisplay, setDialogConstraintsDisplay] = useState('')
   const [dialogConstraintsLoading, setDialogConstraintsLoading] = useState(false)
   const [dialogConstraintsError, setDialogConstraintsError] = useState('')
+  // 弹窗叫牌历史展示（含每家来源标记 JF/XR/AI，与约束对照用；不参与约束转译输入）
+  const [dialogBidHistory, setDialogBidHistory] = useState('')
   // 约束结果 ref 同步，供打牌中/打牌结束自动保存记录使用（避免 useCallback 闭包捕获旧值）
   const dialogConstraintsRef = useRef(null)
   const dialogConstraintsDisplayRef = useRef('')
@@ -818,7 +828,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       return
     }
     // P2 修复：切换模式会清空当前牌局（clearAllHands），有牌局时先确认，避免误触丢失进度
-    const hasActiveGame = hands && Object.values(hands).some(h => h && (
+    // 牌局已打完（phase=complete，已自动存盘）切换直接清空开新局，不弹确认
+    const isGameFinished = playState?.phase === 'complete'
+    const hasActiveGame = !isGameFinished && hands && Object.values(hands).some(h => h && (
       (h.spades?.length || 0) + (h.hearts?.length || 0) + (h.diamonds?.length || 0) + (h.clubs?.length || 0) > 0
     ))
     if (hasActiveGame && !window.confirm('切换模式将清空当前牌局（手牌与叫牌/打牌进度），确定继续吗？')) {
@@ -939,6 +951,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
             position: currentBidder,
             hand: hands[currentBidder],
             biddingSequence: biddingStr,
+            system: bidSystem,
+            structured: !!result.full_output?.['结构化约定'],
             result: { 
               bid: result.bid, 
               meaning: result.meaning,
@@ -1194,6 +1208,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           position: currentBidder,
           hand: currentHand,
           biddingSequence: biddingStr,
+          structured: !!result.full_output?.['结构化约定'],
           result: { ...result, bid: 'pass', meaning: result.meaning || '[合规性错误] 已暂停叫牌等待处理' },
           timestamp: makeBidTimestamp(aiCallElapsed)
         })
@@ -1206,6 +1221,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         position: currentBidder,
         hand: currentHand,
         biddingSequence: biddingStr,
+        system: bidSystem,
+        structured: !!result.full_output?.['结构化约定'],
         result: result,
         timestamp: makeBidTimestamp(aiCallElapsed)
       })
@@ -2012,18 +2029,21 @@ const handleReviewCompletedPlay = async () => {
           const res = await humanBid(prefix, position, bid, dealSystem, bidHistoryText, 'xr')
           const bidOut = res.bid || bid
           const meaningOut = res.meaning || ''
-          simRecords.push({ position, hand: hands?.[position] || null, result: { bid: bidOut, meaning: meaningOut, full_output: res.full_output || {} }, timestamp: new Date().toLocaleString() })
+          simRecords.push({ position, hand: hands?.[position] || null, system: 'xr', structured: !!res.full_output?.['结构化约定'], result: { bid: bidOut, meaning: meaningOut, full_output: res.full_output || {} }, timestamp: new Date().toLocaleString() })
           if (meaningOut) bidHistoryText += `(${position})${bidOut}：${meaningOut}\n`
         } catch (err) {
           console.error(`[simulateBidding] ${position} ${bid} 含义解析失败:`, err)
           // 失败不注入含义行，打牌阶段该位置约束由规则库兜底
-          simRecords.push({ position, hand: hands?.[position] || null, result: { bid, meaning: '', full_output: {} }, timestamp: new Date().toLocaleString() })
+          simRecords.push({ position, hand: hands?.[position] || null, system: 'xr', structured: false, result: { bid, meaning: '', full_output: {} }, timestamp: new Date().toLocaleString() })
         }
         prefix.push({ position, bid })
       }
     } finally {
       setAiThinking(false)
       setAiProgress(null)
+      // P0 修复：取消打牌确认弹窗时 doPlayInit 不会执行以复位 playLoading，
+      // 必须在此复位，否则"切换到打牌"按钮永久禁用（死循环）
+      setPlayLoading(false)
     }
     // 沉淀到 aiBiddingHistory：右侧叫牌细节面板立即可见，随记录保存，下次导入复用
     if (simRecords.length > 0) {
@@ -2038,7 +2058,7 @@ const handleReviewCompletedPlay = async () => {
   // 未经过叫牌过程（无任何含义记录，如截屏、人工输入、历史导入牌例）时，
   // 自动模拟人类叫牌（新睿二盖一体系）补全含义文本，供弹窗约束生成与打牌约束转换使用。
   const buildBiddingInput = async (biddingSeq, aiHistory) => {
-    const result = { biddingStr: null, seqStr: '', meaningLines: '' }
+    const result = { biddingStr: null, seqStr: '', meaningLines: '', historyRows: '', constraintLines: '' }
     if (!biddingSeq || biddingSeq.length === 0) return result
     result.seqStr = biddingSeq.map(b => `(${b.position})${b.bid}`).join('-')
     let history = aiHistory || []
@@ -2047,6 +2067,16 @@ const handleReviewCompletedPlay = async () => {
       history = await simulateSequenceWithHumanBid(biddingSeq)
     }
     result.meaningLines = history.filter(r => r.result?.meaning).map(formatBidMeaningLine).join('\n')
+    // 展示用行：完整叫牌序列逐条前置来源标签（[JF]/[XR]/[AI]），与约束对照；
+    // 无含义的步骤标注（无含义）展示；不参与约束转换LLM输入
+    result.historyRows = history.map(r => {
+      const m = r.result?.meaning
+      const body = `(${r.position})${r.result?.bid || ''}${m ? `: ${m}` : '（无含义）'}`
+      return `[${bidSystemToLabel(r.system, r.structured)}] ${body}`
+    }).join('\n')
+    // 约束转译输入：带来源标签的纯含义行；AI 来源行由后端按"约定叫才纳入"规则过滤
+    result.constraintLines = history.filter(r => r.result?.meaning)
+      .map(r => `[${bidSystemToLabel(r.system, r.structured)}] ${formatBidMeaningLine(r)}`).join('\n')
     result.biddingStr = result.meaningLines
       ? `${result.seqStr}\n\n叫牌含义:\n${result.meaningLines}`
       : result.seqStr
@@ -2059,6 +2089,7 @@ const handleReviewCompletedPlay = async () => {
     setDialogConstraints(null)
     setDialogConstraintsDisplay('')
     setDialogConstraintsError('')
+    setDialogBidHistory('')
     dialogConstraintsRef.current = null
     dialogConstraintsDisplayRef.current = ''
     if (!biddingSeq || biddingSeq.length === 0) {
@@ -2068,8 +2099,9 @@ const handleReviewCompletedPlay = async () => {
     setDialogConstraintsLoading(true)
     try {
       const input = await buildBiddingInput(biddingSeq, aiHistory)
+      if (input.historyRows) setDialogBidHistory(input.historyRows)
       if (input.meaningLines) {
-        const resp = await generateConstraints(input.meaningLines, bidSystem)
+        const resp = await generateConstraints(input.constraintLines || input.meaningLines, bidSystem)
         if (resp?.success) {
           setDialogConstraints(resp.constraints || null)
           dialogConstraintsRef.current = resp.constraints || null
@@ -2110,7 +2142,8 @@ const handleReviewCompletedPlay = async () => {
       const input = await buildBiddingInput(biddingSeq, aiHistory)
       biddingStr = input.biddingStr
       seqStr = input.seqStr
-      meaningLines = input.meaningLines
+      // 约束兜底输入：带来源标签（[JF]/[XR]/[AI]），后端仅对非AI来源行做约束转译
+      meaningLines = input.constraintLines || input.meaningLines
     }
 
     const playRoles = { ...positionRoles }
@@ -3467,6 +3500,22 @@ const handleReviewCompletedPlay = async () => {
             />
             <Box>
               <Typography variant="subtitle2" gutterBottom>
+                叫牌历史
+              </Typography>
+              {dialogBidHistory ? (
+                <Typography
+                  variant="caption"
+                  component="pre"
+                  sx={{ whiteSpace: 'pre-wrap', m: 0, maxHeight: 160, overflowY: 'auto', color: 'text.secondary', fontFamily: 'monospace' }}
+                >
+                  {dialogBidHistory}
+                </Typography>
+              ) : (
+                <Typography variant="caption" color="text.secondary">（无含义历史）</Typography>
+              )}
+            </Box>
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>
                 叫牌约束
               </Typography>
               {dialogConstraintsLoading ? (
@@ -3493,7 +3542,7 @@ const handleReviewCompletedPlay = async () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setContractDialogOpen(false); setDialogConstraints(null); dialogConstraintsRef.current = null; setDialogConstraintsDisplay(''); dialogConstraintsDisplayRef.current = ''; setDialogConstraintsError('') }}>取消</Button>
+          <Button onClick={() => { setContractDialogOpen(false); setDialogConstraints(null); dialogConstraintsRef.current = null; setDialogConstraintsDisplay(''); dialogConstraintsDisplayRef.current = ''; setDialogConstraintsError(''); setDialogBidHistory('') }}>取消</Button>
           <Button onClick={handleContractDialogConfirm} variant="contained" disabled={dialogConstraintsLoading}>确认</Button>
         </DialogActions>
       </Dialog>
