@@ -70,9 +70,9 @@ function useBridgeRecords() {
           tryMigrateOldFormat()
         }
       })
-      .catch(() => {
-        // 服务器不可用，尝试迁移旧本地格式作为兜底
-        tryMigrateOldFormat()
+      .catch((err) => {
+        // 服务器不可用：保留现有记录，不清空（避免"后端重启导致历史消失"的假象）
+        console.warn('[记录] 服务器不可用，保留现有显示:', err && err.message ? err.message : err)
       })
 
       // 辅助：迁移旧格式
