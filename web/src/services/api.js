@@ -619,6 +619,28 @@ export const setParticleSettings = async (settings) => {
   }
 };
 
+// 获取 DD 样本类别保留开关（全赢/临界/全输）
+export const getDdWorldFilter = async () => {
+  try {
+    const response = await api.get('/api/play/dd-world-filter', { params: { session_id: PLAY_SESSION_ID } });
+    return response.data;
+  } catch (error) {
+    console.error('获取DD样本类别开关失败:', error);
+    throw error;
+  }
+};
+
+// 设置 DD 样本类别保留开关（运行时即时生效，只更新传入字段）
+export const setDdWorldFilter = async (filter) => {
+  try {
+    const response = await api.post('/api/play/dd-world-filter', { ...filter, session_id: PLAY_SESSION_ID });
+    return response.data;
+  } catch (error) {
+    console.error('设置DD样本类别开关失败:', error);
+    throw error;
+  }
+};
+
 // 获取当前视觉识别模型 provider
 export const getVisionProvider = async () => {
   try {

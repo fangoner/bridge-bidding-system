@@ -380,6 +380,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     switchCards, switchCardsRange,
     handleSwitchCardsChange,
     ddScoringMode, handleDdScoringModeChange,
+    keepSureWin, keepCritical, keepSureLose,
+    handleKeepClassChange,
     handleFallbackModelChange,
     handlePlayModelChange,
     checkApiStatus,
@@ -3002,6 +3004,8 @@ const handleReviewCompletedPlay = async () => {
         switchCards={switchCards} switchCardsRange={switchCardsRange}
         handleSwitchCardsChange={handleSwitchCardsChange}
         ddScoringMode={ddScoringMode} handleDdScoringModeChange={handleDdScoringModeChange}
+        keepSureWin={keepSureWin} keepCritical={keepCritical} keepSureLose={keepSureLose}
+        handleKeepClassChange={handleKeepClassChange}
         dealSystem={dealSystem}
         setDealSystem={setDealSystem}
         bidSystem={bidSystem}

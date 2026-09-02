@@ -64,6 +64,7 @@ from config import (
     VISION_PROVIDER, DEEPSEEK_VISION_MODEL,
 )
 from bridge.bidding_service import MAIN_PROMPT_MAX_RETRIES, FALLBACK_PROMPT_MAX_RETRIES
+import config
 
 try:
     from dd_analysis import analyze_all_contracts, DDS_AVAILABLE
@@ -2886,6 +2887,42 @@ async def set_particle_settings(request: ParticleSettingsRequest):
             service.alpha_mu_search.num_worlds = val
         updates["alpha_mu_particles"] = val
     return {"success": True, "updates": updates}
+
+
+# ── DD 样本类别保留开关：全赢/临界/全输 三类可独立保留（取消=过滤该类） ──
+
+class DdWorldFilterRequest(BaseModel):
+    keep_sure_win: Optional[bool] = None
+    keep_critical: Optional[bool] = None
+    keep_sure_lose: Optional[bool] = None
+    session_id: str = "default"
+
+
+@app.get("/api/play/dd-world-filter")
+async def get_dd_world_filter(session_id: str = Query("default")):
+    """获取 DD 样本类别保留开关（运行时动态，无需重启后端）"""
+    return {
+        "keep_sure_win": bool(config.DD_KEEP_SURE_WIN),
+        "keep_critical": bool(config.DD_KEEP_CRITICAL),
+        "keep_sure_lose": bool(config.DD_KEEP_SURE_LOSE),
+    }
+
+
+@app.post("/api/play/dd-world-filter")
+async def set_dd_world_filter(request: DdWorldFilterRequest):
+    """设置 DD 样本类别保留开关（运行时即时生效；仅更新传入的字段）"""
+    if request.keep_sure_win is not None:
+        config.DD_KEEP_SURE_WIN = bool(request.keep_sure_win)
+    if request.keep_critical is not None:
+        config.DD_KEEP_CRITICAL = bool(request.keep_critical)
+    if request.keep_sure_lose is not None:
+        config.DD_KEEP_SURE_LOSE = bool(request.keep_sure_lose)
+    return {
+        "success": True,
+        "keep_sure_win": config.DD_KEEP_SURE_WIN,
+        "keep_critical": config.DD_KEEP_CRITICAL,
+        "keep_sure_lose": config.DD_KEEP_SURE_LOSE,
+    }
 
 
 # ── 记录自动备份 ──

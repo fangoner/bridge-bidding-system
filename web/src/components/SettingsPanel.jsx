@@ -110,6 +110,8 @@ function SettingsPanel({
   handleSwitchCardsChange,
   ddScoringMode,
   handleDdScoringModeChange,
+  keepSureWin, keepCritical, keepSureLose,
+  handleKeepClassChange,
   dealSystem,
   setDealSystem,
   bidSystem,
@@ -290,6 +292,45 @@ function SettingsPanel({
                 <MenuItem value="avg_tricks">平均赢墩</MenuItem>
               </Select>
             </FormControl>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={!!keepSureWin}
+                  onChange={(e) => handleKeepClassChange('win', e.target.checked)}
+                  size="small"
+                  sx={{ p: 0.4 }}
+                />
+              }
+              label="全赢保留"
+              title="保留：所有候选出牌都能做成定约的样本；取消勾选=过滤该类世界"
+              sx={{ fontSize: '0.65rem' }}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={!!keepCritical}
+                  onChange={(e) => handleKeepClassChange('critical', e.target.checked)}
+                  size="small"
+                  sx={{ p: 0.4 }}
+                />
+              }
+              label="临界保留"
+              title="保留：有赢有输的样本；取消勾选=过滤该类世界"
+              sx={{ fontSize: '0.65rem' }}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={!!keepSureLose}
+                  onChange={(e) => handleKeepClassChange('lose', e.target.checked)}
+                  size="small"
+                  sx={{ p: 0.4 }}
+                />
+              }
+              label="全输保留"
+              title="保留：所有候选出牌都打不成定约的样本；取消勾选=过滤该类世界"
+              sx={{ fontSize: '0.65rem' }}
+            />
             </>
           )}
 

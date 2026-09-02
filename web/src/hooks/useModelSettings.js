@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { setFallbackModel, getFallbackModel, healthCheck, reloadJF, getParticleSettings, setParticleSettings, getVisionProvider, setVisionProvider } from '../services/api'
+import { setFallbackModel, getFallbackModel, healthCheck, reloadJF, getParticleSettings, setParticleSettings, getVisionProvider, setVisionProvider, setDdWorldFilter } from '../services/api'
 import { useGame } from '../context/GameContext'
 
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
@@ -10,6 +10,9 @@ const MCTS_PARTICLES_KEY = 'bridge_mcts_particles'
 const ALPHA_MU_PARTICLES_KEY = 'bridge_alpha_mu_particles'
 const SWITCH_CARDS_KEY = 'bridge_dd_alphamu_switch_cards'
 const DD_SCORING_MODE_KEY = 'bridge_dd_scoring_mode'
+const DD_KEEP_WIN_KEY = 'bridge_dd_keep_sure_win'
+const DD_KEEP_CRIT_KEY = 'bridge_dd_keep_critical'
+const DD_KEEP_LOSE_KEY = 'bridge_dd_keep_sure_lose'
 const VISION_PROVIDER_KEY = 'bridge_vision_provider'
 
 // 解析组合模型值 "model::reasoning" → { model, reasoning }
@@ -130,6 +133,41 @@ export function useModelSettings() {
     try { localStorage.setItem(DD_SCORING_MODE_KEY, v) } catch {/* empty */}
   }, [])
 
+  // DD 样本类别保留开关（全赢/临界/全输，独立可多选；localStorage 缓存 + 启动时推送后端）
+  const loadKeep = (key) => {
+    try { return localStorage.getItem(key) !== 'false' } catch { return true }
+  }
+  const [keepSureWin, setKeepSureWin] = useState(() => loadKeep(DD_KEEP_WIN_KEY))
+  const [keepCritical, setKeepCritical] = useState(() => loadKeep(DD_KEEP_CRIT_KEY))
+  const [keepSureLose, setKeepSureLose] = useState(() => loadKeep(DD_KEEP_LOSE_KEY))
+  const syncDdWorldFilter = useCallback(async () => {
+    const payload = {
+      keep_sure_win: loadKeep(DD_KEEP_WIN_KEY),
+      keep_critical: loadKeep(DD_KEEP_CRIT_KEY),
+      keep_sure_lose: loadKeep(DD_KEEP_LOSE_KEY),
+    }
+    try { await setDdWorldFilter(payload) } catch {/* empty */}
+  }, [])
+  const handleKeepClassChange = useCallback(async (cls, enabled) => {
+    const setters = {
+      win: [setKeepSureWin, DD_KEEP_WIN_KEY],
+      critical: [setKeepCritical, DD_KEEP_CRIT_KEY],
+      lose: [setKeepSureLose, DD_KEEP_LOSE_KEY],
+    }
+    const [setter, key] = setters[cls]
+    setter(enabled)
+    try { localStorage.setItem(key, enabled ? 'true' : 'false') } catch {/* empty */}
+    try {
+      await setDdWorldFilter({
+        keep_sure_win: cls === 'win' ? enabled : undefined,
+        keep_critical: cls === 'critical' ? enabled : undefined,
+        keep_sure_lose: cls === 'lose' ? enabled : undefined,
+      })
+    } catch (err) {
+      console.error('设置DD样本类别开关失败:', err)
+    }
+  }, [])
+
   // 视觉识别模型 provider（截屏/图片识别）；localStorage 持久化 + 启动时同步到后端
   const [visionProvider, setVisionProviderState] = useState(() => {
     try { return localStorage.getItem(VISION_PROVIDER_KEY) || 'deepseek' } catch { return 'deepseek' }
@@ -189,7 +227,9 @@ export function useModelSettings() {
       mcts_particles: parseInt(localStorage.getItem(MCTS_PARTICLES_KEY)) || undefined,
       alpha_mu_particles: parseInt(localStorage.getItem(ALPHA_MU_PARTICLES_KEY)) || undefined,
     }).catch(() => {})
-  }, [])
+    // 以前端 localStorage 为准推送样本类别开关到后端
+    syncDdWorldFilter()
+  }, [syncDdWorldFilter])
 
   const checkApiStatus = useCallback(async () => {
     try {
@@ -250,6 +290,9 @@ export function useModelSettings() {
     // DD 决策计分制
     ddScoringMode,
     handleDdScoringModeChange,
+    // DD 样本类别保留开关（全赢/临界/全输）
+    keepSureWin, keepCritical, keepSureLose,
+    handleKeepClassChange,
     // 视觉识别模型 provider
     visionProvider,
     visionProviders,
