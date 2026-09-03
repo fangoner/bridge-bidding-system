@@ -116,19 +116,13 @@ DD_KEEP_SURE_WIN = True
 DD_KEEP_CRITICAL = True
 DD_KEEP_SURE_LOSE = True
 
-# 飞牌延迟策略（识别到飞牌结构时，尽量先出无关牌拖延，观察分布后再飞）：
-#   识别：合并庄家+明手每花色，存在"可飞对象"（缺K/Q/J、有上方控制+下方≥T的飞张、合计≥4张）
-#   干预：候选牌按"结构相关"（飞牌花色/烧进手牌）与"无关牌"分类；
-#         榜首为结构相关牌且与次优无关牌差距 ≤ 阈值时，改选无关牌拖延。
-# 阈值用比值（相对成功率）统一跨计分制：次优/榜首 ≥ FINESSE_DEFER_RATIO 即视为"差距不大"。
-FINESSE_DEFER_ENABLE = True          # 总开关
-FINESSE_DEFER_RATIO = 0.95           # DD 引擎（含三种计分制，统一比值）：次优无关牌相对成功率 ≥ 榜首的 95% 时允许拖延
-FINESSE_DEFER_RATIO_ALPHA = 0.95     # αμ 引擎：比值 ≥ 0.95 时允许拖延（与 DD 统一）
-
-# 8飞9砸（通用原则，不限将牌/有将定约）：飞牌花色被"被迫引发"时，
-# 联手张数 ≤8 → 出飞张（间张）；≥9 → 出顶张（A/K 砸）。用比值阈值保护，差距大不干预。
-FINESSE_EIGHT_NINE_ENABLE = True
-FINESSE_EIGHT_NINE_RATIO = 0.95      # 改选牌相对成功率 ≥ 榜首 95% 时才允许按原则改选
+# 飞牌干预统一比值（按引擎分隔，同引擎内"延迟/8飞9砸/9砸后续"共用同一阈值，
+# 修改时只需改对应引擎的一个常量，不会漏改某条策略）：
+# 以比值（相对成功率）统一跨计分制：改选牌/榜首 ≥ 该值 即视为"差距不大"才干预。
+FINESSE_DEFER_ENABLE = True          # 飞牌干预总开关（延迟/接应）
+FINESSE_EIGHT_NINE_ENABLE = True     # 8飞9砸 总开关
+FINESSE_DD_RATIO = 0.95              # DD 引擎（含三种计分制 imp/make_rate/avg_tricks）统一比值
+FINESSE_ALPHA_RATIO = 0.95           # αμ 引擎统一比值
 
 # 首攻与信号方案："standard"（标准方案，源自新睿自然）| 预留扩展（如"reverse"反式信号）
 LEAD_SIGNAL_SCHEME = "standard"

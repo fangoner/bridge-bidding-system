@@ -21,8 +21,8 @@ from config import (
     ALPHA_MU_ENABLE, ALPHA_MU_ENDGAME_CARDS, ALPHA_MU_NUM_WORLDS,
     ALPHA_MU_MAX_DEPTH, ALPHA_MU_TIME_LIMIT, ALPHA_MU_M,
     ALPHAMU_LLM_GAP_CAP,
-    FINESSE_DEFER_ENABLE, FINESSE_DEFER_RATIO, FINESSE_DEFER_RATIO_ALPHA,
-    FINESSE_EIGHT_NINE_ENABLE, FINESSE_EIGHT_NINE_RATIO,
+    FINESSE_DEFER_ENABLE, FINESSE_EIGHT_NINE_ENABLE,
+    FINESSE_DD_RATIO, FINESSE_ALPHA_RATIO,
 )
 
 
@@ -1093,9 +1093,9 @@ class PlayService:
         if state.current_player in (declarer, dummy) and FINESSE_DEFER_ENABLE:
             result, committed = self._apply_finesse_commit(state, result)
             if not committed:
-                result = self._apply_finesse_defer(state, result, FINESSE_DEFER_RATIO_ALPHA)
-            result = self._apply_eight_nine_rule(state, result, FINESSE_EIGHT_NINE_RATIO)
-            result = self._apply_nine_cash_followup(state, result, FINESSE_EIGHT_NINE_RATIO)
+                result = self._apply_finesse_defer(state, result, FINESSE_ALPHA_RATIO)
+            result = self._apply_eight_nine_rule(state, result, FINESSE_ALPHA_RATIO)
+            result = self._apply_nine_cash_followup(state, result, FINESSE_ALPHA_RATIO)
             card = result.get("card")
         return {
             "card": card.to_dict() if hasattr(card, "to_dict") else None,
@@ -2705,7 +2705,7 @@ class PlayService:
           - 联手张数 ≥9 且 AK（14/13）都在我方庄家/明手 → 应砸（出顶张：高于对象的 A/K）
           - 9 张缺K 但持 A+Q → 先砸后飞（拔A砸，K未落再飞Q）
           - 9 张但顶张不足（缺Q/J 且 A/K 缺一）→ 砸不动对象，仍应飞
-        用比值阈值保护（FINESSE_EIGHT_NINE_RATIO）：改选牌相对成功率 ≥ 榜首才改选。
+        用比值阈值保护（FINESSE_DD_RATIO / FINESSE_ALPHA_RATIO）：改选牌相对成功率 ≥ 榜首才改选。
         仅当榜首是飞牌花色牌时介入；榜首为无关牌（已拖延/非该花色）不干预。
         """
         if not FINESSE_EIGHT_NINE_ENABLE:
@@ -3034,9 +3034,9 @@ class PlayService:
             if state.current_player in (declarer, dummy) and FINESSE_DEFER_ENABLE:
                 result, committed = self._apply_finesse_commit(state, result)
                 if not committed:
-                    result = self._apply_finesse_defer(state, result, FINESSE_DEFER_RATIO)
-                result = self._apply_eight_nine_rule(state, result, FINESSE_EIGHT_NINE_RATIO)
-                result = self._apply_nine_cash_followup(state, result, FINESSE_EIGHT_NINE_RATIO)
+                    result = self._apply_finesse_defer(state, result, FINESSE_DD_RATIO)
+                result = self._apply_eight_nine_rule(state, result, FINESSE_DD_RATIO)
+                result = self._apply_nine_cash_followup(state, result, FINESSE_DD_RATIO)
                 card = result.get("card")
             return {
                 "card": card.to_dict() if card else None,
