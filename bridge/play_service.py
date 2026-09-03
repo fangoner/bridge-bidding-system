@@ -2730,7 +2730,17 @@ class PlayService:
         dummy = state.dummy
         own_cards = [c for pos in (declarer, dummy)
                      for c in state.hands.get(pos, []) if c.suit == suit]
-        trump_cnt = len(own_cards)
+        # 联手张数计入我方已打出的该花色牌：同伙已领出一张后，
+        # 在手数会减1，若按在手数算 9张 会被误判为 8飞（9砸判据失效）
+        own_played = 0
+        for t in state.tricks:
+            for p, c in t.cards:
+                if c and p in (declarer, dummy) and c.suit == suit:
+                    own_played += 1
+        for p, c in state.current_trick.cards:
+            if c and p in (declarer, dummy) and c.suit == suit:
+                own_played += 1
+        trump_cnt = len(own_cards) + own_played
         own_ranks = {self._FINESSE_R2V.get(c.rank) for c in own_cards}
         has_a = 14 in own_ranks
         has_k = 13 in own_ranks
