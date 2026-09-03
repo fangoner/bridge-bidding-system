@@ -122,8 +122,8 @@ DD_KEEP_SURE_LOSE = True
 #         榜首为结构相关牌且与次优无关牌差距 ≤ 阈值时，改选无关牌拖延。
 # 阈值用比值（相对成功率）统一跨计分制：次优/榜首 ≥ FINESSE_DEFER_RATIO 即视为"差距不大"。
 FINESSE_DEFER_ENABLE = True          # 总开关
-FINESSE_DEFER_RATIO = 0.90           # DD 引擎：次优无关牌相对成功率 ≥ 榜首的 90% 时允许拖延
-FINESSE_DEFER_RATIO_ALPHA = 0.80     # αμ 引擎：比值 ≥ 0.80 时允许拖延（≈用户指定的成功率差20%）
+FINESSE_DEFER_RATIO = 0.95           # DD 引擎（含三种计分制，统一比值）：次优无关牌相对成功率 ≥ 榜首的 95% 时允许拖延
+FINESSE_DEFER_RATIO_ALPHA = 0.95     # αμ 引擎：比值 ≥ 0.95 时允许拖延（与 DD 统一）
 
 # 8飞9砸（通用原则，不限将牌/有将定约）：飞牌花色被"被迫引发"时，
 # 联手张数 ≤8 → 出飞张（间张）；≥9 → 出顶张（A/K 砸）。用比值阈值保护，差距大不干预。
@@ -161,5 +161,7 @@ ALPHA_MU_ENABLE = True            # 是否启用 αμ 搜索
 ALPHA_MU_ENDGAME_CARDS = 8        # 每手剩余牌数≤此值时启用 αμ（残局）
 ALPHA_MU_NUM_WORLDS = 20          # possible worlds 数量
 ALPHA_MU_M = 2                    # 论文 M 参数：Max 递归层数（M=1 退化为 PIMC，Min 不减 M）
+ALPHA_MU_M_MIN = 1                # αμ 层数 M 下限（设置面板可调）
+ALPHA_MU_M_MAX = 3                # αμ 层数 M 上限（M≥2 为 αμ 多步前瞻，M 越大越慢）
 ALPHA_MU_MAX_DEPTH = ALPHA_MU_M   # 兼容旧引用
 ALPHA_MU_TIME_LIMIT = 60.0        # 时间限制（秒）
