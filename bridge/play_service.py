@@ -1036,7 +1036,11 @@ class PlayService:
             n_worlds = min(int(30 * _world_cap_m), base_worlds * 2)
         else:
             n_worlds = min(int(20 * _world_cap_m), base_worlds)
-        M_value = ALPHA_MU_M
+        # 层数 M 优先读取设置面板配置的值（与 num_worlds 同模式：面板修改全局生效，
+        # 含 DD-αμ-LLM 残局阶段；未初始化时用 config 默认）
+        M_value = (self.alpha_mu_search.M
+                   if self.alpha_mu_search and getattr(self.alpha_mu_search, 'M', None)
+                   else ALPHA_MU_M)
 
         if cards <= 4:
             time_lim, dds_budget = 8.0, 5000
@@ -1091,6 +1095,7 @@ class PlayService:
             if not committed:
                 result = self._apply_finesse_defer(state, result, FINESSE_DEFER_RATIO_ALPHA)
             result = self._apply_eight_nine_rule(state, result, FINESSE_EIGHT_NINE_RATIO)
+            result = self._apply_nine_cash_followup(state, result, FINESSE_EIGHT_NINE_RATIO)
             card = result.get("card")
         return {
             "card": card.to_dict() if hasattr(card, "to_dict") else None,
@@ -2582,8 +2587,10 @@ class PlayService:
             for m in sorted(missing, reverse=True):
                 if m == 14:
                     continue  # 缺A无控制
-                above = [r for r in ranks if r > m]
-                below = [r for r in ranks if r < m and r >= 10]
+                # 控制张/飞张基于 present（手牌 ∪ 已出）：A 已兑现（先砸后飞）
+                # 时仍是上方控制，K 未现则缺 K 结构继续成立，供 9砸后续保护间张
+                above = [r for r in present if r > m]
+                below = [r for r in present if r < m and r >= 10]
                 if above and below:
                     result[s] = {"对象": m, "说明": f"缺上方{len(above)}/飞张{len(below)}"}
                     break
@@ -2696,7 +2703,8 @@ class PlayService:
         飞牌花色"被迫引发"（榜首为该花色牌）时的出牌原则：
           - 联手该花色张数 ≤8 → 应飞（出飞张：低于对象、≥10 的间张牌）
           - 联手张数 ≥9 且 AK（14/13）都在我方庄家/明手 → 应砸（出顶张：高于对象的 A/K）
-          - 9 张但 A/K 缺一 → 砸不动 Q，仍应飞
+          - 9 张缺K 但持 A+Q → 先砸后飞（拔A砸，K未落再飞Q）
+          - 9 张但顶张不足（缺Q/J 且 A/K 缺一）→ 砸不动对象，仍应飞
         用比值阈值保护（FINESSE_EIGHT_NINE_RATIO）：改选牌相对成功率 ≥ 榜首才改选。
         仅当榜首是飞牌花色牌时介入；榜首为无关牌（已拖延/非该花色）不干预。
         """
@@ -2724,8 +2732,17 @@ class PlayService:
                      for c in state.hands.get(pos, []) if c.suit == suit]
         trump_cnt = len(own_cards)
         own_ranks = {self._FINESSE_R2V.get(c.rank) for c in own_cards}
-        ak_ok = 14 in own_ranks and 13 in own_ranks  # A+K 都在我方（庄家/明手）才能"砸"
-        should_garrison = trump_cnt >= 9 and ak_ok
+        has_a = 14 in own_ranks
+        has_k = 13 in own_ranks
+        has_q = 12 in own_ranks
+        ak_ok = has_a and has_k  # A+K 都在我方（庄家/明手）才算"双顶张齐"
+        # 9砸判据（联手 ≥9 张）：
+        #  缺K（对象=K）：持 A+Q → "先砸后飞"（拔A砸，K未落再飞Q），无需K
+        #  缺Q/J：需 A+K 全顶张才砸；AK缺一砸不动对象，仍应飞
+        if obj == 13:
+            should_garrison = trump_cnt >= 9 and has_a and has_q
+        else:
+            should_garrison = trump_cnt >= 9 and ak_ok
         top_val = top.get("scoring_val")
         if top_val is None:
             top_val = top.get("avg_tricks", 0.0)
@@ -2748,7 +2765,9 @@ class PlayService:
             if should_garrison:
                 # 9砸：候选里"顶张"（>对象）取代榜首"飞张"（低于对象、≥10）
                 if rv > obj and 10 <= top_rv < obj and val > targets["val"]:
-                    targets = {"card": cs, "val": val, "why": "9砸", "ak": ak_ok}
+                    # 缺K持AQ（AK不齐）：先砸A再飞Q（先砸后飞）
+                    why = "9砸先飞" if (obj == 13 and not ak_ok) else "9砸"
+                    targets = {"card": cs, "val": val, "why": why, "ak": ak_ok}
             else:
                 # 8飞：候选里"飞张"（低于对象、≥10）取代榜首"砸张"（>对象）
                 if 10 <= rv < obj and top_rv > obj and val > targets["val"]:
@@ -2757,7 +2776,10 @@ class PlayService:
             return result
         pick = Card(targets["card"][0], targets["card"][1:])
         obj_name = self._finesse_obj_name(obj)
-        ak_note = "" if ak_ok else "（AK不齐，只能飞）"
+        if targets["why"] == "9砸先飞":
+            ak_note = "（缺K持AQ：先砸A再飞Q）"
+        else:
+            ak_note = "" if ak_ok else "（AK不齐，只能飞）"
         hint = (f"[8飞9砸] {suit}缺{obj_name} 联手{trump_cnt}张应{targets['why']}{ak_note}: "
                 f"榜首{top_card}({top_val:.3f}) → 改选{targets['card']}({targets['val']:.3f})，比值{targets['val']/top_val:.3f}≥{ratio}")
         print(hint)
@@ -2769,6 +2791,102 @@ class PlayService:
         full_output["八九原则"] = {"花色": suit, "缺": obj_name, "联手张数": trump_cnt,
                                     "AK齐全": ak_ok, "原则": targets["why"],
                                     "榜首": top_card, "改选": targets["card"]}
+        return result
+
+    def _apply_nine_cash_followup(self, state: PlayState, result: Dict[str, Any],
+                                  ratio: float) -> Dict[str, Any]:
+        """9砸先飞的后续：A 已砸、K 未现时，保护间张飞张。
+
+        先拔 A 砸后若 K 未跌落，明手/庄家再领该花色时，引擎常把间张（Q/T）
+        当榜首送出，被敌方 K 白吃（东 KJ 藏 K 后再吃 Q）。此时应改为出该花色
+        最小牌喂 K，保留下方间张继续作飞张。
+
+        条件（全部满足才介入）：
+          ① 飞牌结构对象为 K（obj==13）——即"先砸后飞"场景
+          ② 我方 A(14) 已打出，且 K(13) 未出现
+          ③ 当前出牌方 ∈（庄家, 明手）
+          ④ 榜首为该花色牌且是间张（10 ≤ top_rv < obj）
+        动作：候选里选该花色最小且不高于榜首的牌；比值 ≥ ratio 才改选。
+        """
+        if not FINESSE_EIGHT_NINE_ENABLE:
+            return result
+        finesse_struct = self._detect_finesse_struct(state)
+        if not finesse_struct:
+            return result
+        full_output = result.get("full_output", {})
+        mcts_stats = full_output.get("mcts_stats") or {}
+        candidates = mcts_stats.get("candidates") or []
+        if len(candidates) < 2:
+            return result
+        top = candidates[0]
+        top_card = top.get("card", "")
+        if not top_card:
+            return result
+        suit = top_card[0]
+        if suit not in finesse_struct:
+            return result  # 榜首非该花色
+        obj = finesse_struct[suit]["对象"]
+        if obj != 13:
+            return result  # 仅"先砸后飞"（缺K持AQ）场景
+        top_rv = self._FINESSE_R2V.get(top_card[1:], 0)
+        if not (10 <= top_rv < obj):
+            return result  # 榜首非间张（已领 A 或非该花色）
+
+        # 收集已出牌：确认 A 已砸、K 未现
+        played = []
+        for t in state.tricks:
+            for _, c in t.cards:
+                if c:
+                    played.append(c)
+        for _, c in state.current_trick.cards:
+            if c:
+                played.append(c)
+        a_played = any(c.suit == suit and self._FINESSE_R2V.get(c.rank) == 14 for c in played)
+        k_played = any(c.suit == suit and self._FINESSE_R2V.get(c.rank) == 13 for c in played)
+        if not a_played or k_played:
+            return result
+
+        declarer = state.contract.declarer
+        dummy = state.dummy
+        if state.current_player not in (declarer, dummy):
+            return result
+
+        top_val = top.get("scoring_val")
+        if top_val is None:
+            top_val = top.get("avg_tricks", 0.0)
+        if top_val <= 0:
+            return result
+
+        # 候选里选该花色最小牌（不高于榜首）
+        best = None
+        for c in candidates:
+            cs = c.get("card", "")
+            if not cs or cs[0] != suit:
+                continue
+            rv = self._FINESSE_R2V.get(cs[1:], 0)
+            if rv == 0 or rv > top_rv:
+                continue
+            val = c.get("scoring_val")
+            if val is None:
+                val = c.get("avg_tricks", 0.0)
+            if val <= 0 or (val / top_val) < ratio:
+                continue
+            if best is None or rv < best[0]:
+                best = (rv, cs, val)
+        if not best:
+            return result
+        _, pick_card, pick_val = best
+        pick = Card(pick_card[0], pick_card[1:])
+        hint = (f"[9砸后续] {suit}已砸A、K未现：榜首{top_card}({top_val:.3f})是间张，"
+                f"改出最小牌{pick_card}({pick_val:.3f})保留飞张，避免Q/T被K白吃")
+        print(hint)
+        reasoning = result.get("reasoning", "")
+        result["card"] = pick
+        result["reasoning"] = f"{hint}\n{reasoning}"
+        full_output["推荐出牌"] = pick_card
+        full_output["核心逻辑"] = hint + "\n" + full_output.get("核心逻辑", "")
+        full_output["九砸后续"] = {"花色": suit, "已砸A": True, "K未现": True,
+                                    "榜首": top_card, "改选": pick_card}
         return result
 
     def _finesse_commit_check(self, state: PlayState,
@@ -2904,6 +3022,7 @@ class PlayService:
                 if not committed:
                     result = self._apply_finesse_defer(state, result, FINESSE_DEFER_RATIO)
                 result = self._apply_eight_nine_rule(state, result, FINESSE_EIGHT_NINE_RATIO)
+                result = self._apply_nine_cash_followup(state, result, FINESSE_EIGHT_NINE_RATIO)
                 card = result.get("card")
             return {
                 "card": card.to_dict() if card else None,
