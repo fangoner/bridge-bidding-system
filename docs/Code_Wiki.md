@@ -314,7 +314,102 @@ python main.py
 
 ---
 
-## 10. 关键技术备忘（易踩坑点）
+## 10. 核心算法与关键流程深讲
+
+### 10.1 主力引擎 DD-αμ-LLM 的决策流程
+
+入口 `PlayService.get_ai_play()`（[bridge/play_service.py](file:///workspace/bridge/play_service.py)）按 `use_*` 布尔参数分发：
+
+```
+get_ai_play(use_* 参数)
+ ├─ playable 为空 → error
+ ├─ 仅 1 张可出 → 直接返回（不调引擎）
+ ├─ 依赖 DDS 的引擎且 is_dds_available()=False → _dds_unavailable_fallback（规则选牌 + 明确提示）
+ ├─ perfect → _perfect_play（全知双明手，单次 solve_all_boards）
+ ├─ dd      → _dd_play（蒙特卡洛 + DirectDDS 批量）
+ ├─ alphamu → _alpha_mu_play
+ ├─ dd_alphamu_llm → _dd_alphamu_llm_play   ★主力
+ ├─ mcts    → _mcts_play
+ └─ 默认    → _llm_play（纯 LLM）
+```
+
+`_dd_alphamu_llm_play` 由 `DD_ALPHAMU_SWITCH_CARDS`（默认 8）分界：
+- **剩余每手牌数 > 8（中盘）** → `_dd_play` + LLM 分组审查。
+- **剩余每手牌数 ≤ 8（残局）** → `_alpha_mu_play` + LLM 分组审查。
+- LLM 审查：按"花色 + 级别"分组候选牌，仅当分组间成功率差距 < `ALPHAMU_LLM_GAP_CAP`（0.35，即非"一边倒"）时才调用 LLM 复核并制定打牌计划。
+
+所有引擎都通过 `asyncio.to_thread` 在线程中执行，避免阻塞 FastAPI 事件循环。
+
+### 10.2 αμ（AlphaMuSearch）搜索机制
+
+基于 Cazenave & Ventos 2019 + 2021 论文，`bridge/mcts/alpha_mu.py`：
+
+- **`OutcomeVector`**：`values / useful_mask / tricks_list` 三态结构。
+  - 三态定义：`useful`=1/0，`impossible` 计为 1，`useless` 计为 0。
+  - **`success_rate = sum(effective_value) / n`**，n 为**全部可能世界**（不只是 useful 世界）——旧实现跳过 impossible、以 useful_count 作分母是错的，会导致 alpha cut 过早触发。
+  - `dominates()` 要求相同 useful 世界集，且所有 useful 世界值不小于、至少一个严格大于。
+- **`ParetoFront`**：维护**非支配**向量集合；`add()` 丢弃被支配者。
+- **搜索主循环**：生成/接收 possible worlds → 迭代加深 `M=1..M`（默认 2，M=1 退化为 PIMC，>8 张时强制 M=1）→ 对每个候选 move 递归 Max/Min 搜索 → 维护 ParetoFront → 根节点按 `best_score()` 选牌。
+- **5 项优化**：
+  - *Cut on Win*：`is_all_won()` 触发 Max 子节点全赢截断。
+  - *Maintaining Useful Worlds*：`_update_useful_worlds()` 移除 Min 节点下恒为 0 的 world。
+  - *World Cuts*：`_evaluate_state()` 中 `useful_count == 0/1` 即截断。
+  - *Deep Alpha Cut / Early Cut*：`_front_dominated_by()` 与 `_vec_geq()`，Min 节点同时检查父 front 与全部祖先 Max front。
+  - *Leaf Parallelization + 置换表 + DirectDDS 位图残局评估*。
+- **`_time_up()` 必须开启**（`time > time_limit`），否则三态逻辑使 alpha cut 更难触发、搜索可能无限运行。
+- **Min 节点赢墩计数更新时机**：Min 下完第 4 张牌完成一墩时，**必须先**用 `apply_play_to_state_bits()` 更新 `decl_tricks/def_tricks` 再 `solve_board`。因为 `solve_board` 只评估剩余墩，`remaining = 13 - (decl+def)` 否则会多计 1，导致 αμ 系统性偏好输墩。
+- 世界数：优先读 `alpha_mu_search.num_worlds`（`ALPHA_MU_NUM_WORLDS` 默认 20），上限随 base 成比例缩放，勿改回硬编码常量。
+
+### 10.3 DD（DDSearch）搜索机制
+
+`bridge/mcts/dd_search.py`：
+
+- **DDMC 采样**：`sampler.sample()` 生成均匀样本 → `_solve_batch()` 调 `direct_dds.solve_all_boards_raw()` 批量求解；批量失败降级串行。
+- **计分制** `DD_SCORING_MODE`：`imp`（期望 IMP，含宕分/超墩/局况，默认）/ `make_rate`（做成率，类 αμ）/ `avg_tricks`（平均赢墩，纯 MP 思路）。
+- **打破平局**：`_compare_candidates()` 按决策方向的 `val` 比较；`rank_val` 仅作排序辅助。
+- **残局精确枚举**：`search()` 中 `remaining_tricks <= endgame_card_threshold`（默认 4）时调用 `_enumerate_endgame()` 枚举所有分布（总数 > `DD_ENDGAME_MAX_ENUMERATIONS`=5000 回退采样）。
+- **`search_perfect()`**（全知）：直接用四家手牌 `solve_all_boards_raw()`，按当前玩家阵营转换目标赢墩后选择最优。
+- **DD 出牌显著性阈值**用配对样本的差值 std：`Z × std_diff / √N`（同一世界不同出牌的**配对差异**，非独立样本 σ_diff=√2σ）——旧公式虚高 2-4x，把真实差异误判为平局。
+
+### 10.4 MCTS（MctsSearch）搜索机制
+
+`bridge/mcts/search.py`：
+
+- 单明手 MCTS：每次迭代 `sampler.sample()` 确定化未知手牌 → `_select_and_expand()` 扩展树 → `rollout.rollout()` 打满估分 → Backpropagation。
+- **迭代自适应缩放**：按剩余未知牌比例在 `MCTS_MIN_ITERATIONS`（500）与 `MCTS_ITERATIONS`（5000）间线性缩放。
+- **UCT 选择**：`exploitation = avg_declarer`（庄家方）或 `13 - avg_declarer`（防守方）＋ `exploration × sqrt(log(parent_visits+1) / child.visits)`。
+- **_select_and_expand**：沿合法出牌树扩展未尝试出牌；已全扩展则按 UCT 选子节点并应用出牌。
+- **选牌方向**：庄家方取 `avg_value` 最大，防守方取 `-avg_value` 最大（即希望庄家赢墩少）。
+
+### 10.5 DealSampler 采样与约束回退链
+
+`bridge/mcts/sampler.py`：
+
+- **`_sample_uniform()`**：均匀随机分配未知牌，优先避开已知 void 花色；残留补缺；上层验证链过滤。
+- 约束回退链（逐级放宽，级数顺序自上而下）：
+  - **L0 MH 修复**：引导式交换 + Metropolis 接受率逼近硬约束（快速修复双未知位置约束）。
+  - **L1 master_soft**：多未知位置各有硬约束时，选最紧者为 `master` 单独 MH 修复，其余较松者为 `slave` 吃剩余牌，避免互相拉扯。
+  - **L2 relaxed**：放宽约束重复均匀采样直到 `validate_relaxed()` 通过。
+  - **L3 voids-only**：仅验证已知缺门花色。
+  - **L4 fallback（least-violating）**：生成多个均匀候选，选违反分数最少者兜底。
+- 约束定义见 `constraints.py`（`BidConstraint`，按来源分 hard/ignored）与 `bid_constraint_library.py`（叫牌序列→点力/牌型/控制约束映射）。
+
+### 10.6 API 关键处理器流程
+
+**叫牌** `POST /api/bid`（[api/main.py](file:///workspace/api/main.py)）
+`_execute_bid()`：组装叫牌序列字符串 → 整理手牌（新旧两种格式）→ 依据 fallback_model 选定客户端（DeepSeek 浅拷贝 / 豆包 set_model）→ 实例化 `BiddingService` → `asyncio.to_thread(bidding_service.ai_bid, ...)`（14-90s，思考模式最坏 360s，卸载线程防阻塞）。错误语义：LLM 超时/网络/Key 未配置 → **502 + detail**；合规性重试耗尽 → 保持 200 + "暂停叫牌"标记（前端专门处理）。返回附带 `_prompt`（发给 LLM 的完整提示词）。
+
+**打牌 init** `POST /api/play/init`：定约预校验（Pass Out / 非法阶数/花色返回友好中文错误）→ `get_play_service(session_id)` → `service.initialize(...)`。
+
+**出牌** `POST /api/play/card`：取状态快照（供异步 DD 提示）→ `service.play_card` → 检测墩完成 → 后台 `_submit_dd_hint`（不阻塞响应）→ 返回状态/墩/结果。
+
+**AI 出牌** `POST /api/play/ai-play-async`：`_spawn_task` 立即返回 task_id，前端轮询 `/api/tasks/{task_id}`（前端主路径）；`/api/play/ai-play` 为同步兼容。`_execute_ai_play`：临时切换打牌模型（`finally` 恢复会话原客户端，防污染）→ 校验引擎名（未知引擎显式报错）→ 分发到对应引擎 → 出牌 + `_submit_dd_hint`。每个 play 决策记录引擎耗时（engine/play_card/serialize/total ms）。
+
+**DD 提示异步管线**：`_submit_dd_hint` → `_dd_hint_worker` → `_record_dd_hint_async`；`_record_dd_hint_async` 在 `target_trick.dd_hints.append(hints)` 前检查 `len(dd_hints) >= len(cards)`，撤销后迟到的 hint 被丢弃，保持 hints 与牌张 **1:1**（前端按序号取 `dd_hints[cardIdx]`）。修改异步提示管线需保留该不变量。
+
+---
+
+## 11. 关键技术备忘（易踩坑点）
 
 - **DeepSeek 思考模式默认关闭**：`thinking` 参数默认 `False`，仅 αμ+LLM"思考模式"显式开启；勿改默认值（思考模式慢 3-5x）。
 - **后端勿用 `--reload`**（v1.48+），多文件连续编辑会导致崩溃。
