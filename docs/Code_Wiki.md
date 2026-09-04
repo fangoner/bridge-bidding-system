@@ -409,7 +409,88 @@ get_ai_play(use_* 参数)
 
 ---
 
-## 11. 关键技术备忘（易踩坑点）
+## 11. 叫牌约束子系统
+
+### 11.1 概述与作用
+
+叫牌约束用于**打牌搜索阶段的手牌采样过滤**：从叫牌历史推断各未亮明牌手（尤其是防家）的**点力（HCP）/ 牌型 / 控制数**区间，使探测（MCTS/DD/αμ）采样的"可能世界"更接近真实叫牌承诺，提升对手牌分布推断的准确度。
+
+数据流：
+
+```
+叫牌历史(bid_history) + 体系(bid_system)
+   → play_service._get_bid_constraints()          # 三级获取（缓存）
+        ├─ Step1 硬编码约束库（确定性、优先）
+        ├─ Step2 叫牌含义文本 LLM 结构化解析（补充，结构化家为权威）
+        └─ Step3 LLM 直接提取（仅当前两层无约束时兜底）
+   → { position: BidConstraint }
+   → sampler（filter_hard_constraints → L0-L4 回退链逐级用 validate_* 过滤）
+```
+
+### 11.2 核心数据结构 `BidConstraint`
+
+`bridge/mcts/constraints.py` 中的 dataclass，描述**一个牌手**在叫牌中暴露的限制：
+
+| 字段 | 含义 | 说明 |
+|------|------|------|
+| `position` | 位置 | 南/西/北/东 |
+| `min_hcp / max_hcp` | 点力区间 | 如 12-17 |
+| `min_controls` | 控制数下限 | A=2，K=1（`CONTROL_MAP`） |
+| `suit_min / suit_max / exact_suit` | 各花色张数下界/上界/精确 | 如~~开叫人♠≥5~~ |
+| `balanced` | 是否均型 | 55双套/单张/6+张非均型 |
+| `specific_cards` | 指定大牌 | 如承诺某张 A/K |
+| `inference_source` | 约束来源标签 | 决定采样时是否强制 |
+
+### 11.3 约束来源分类（关键语义）
+
+`inference_source` 决定约束**是否强制**（constraints.py 顶部的设计原则）：
+
+- **硬约束**（采样必须满足，前缀如 `hard_coded_*` / `meaning_parsed` / `convention_*` / `cue_bid` / `overcall_*` / `unusual_nt`）：叫牌**明确承诺**，`is_hard_source()` 判定。
+- **忽略**（`negative_inference` 否定推断、`hcp_conservation` 点力守恒链）：是**推理猜测而非事实**，不参与采样验证（-`is_hard_source()` 返回 False）。
+
+`validate_hard()` 只检查硬来源；`filter_hard_constraints()` 筛出硬约束供采样。
+
+### 11.4 硬编码约束库（bid_constraint_library.py）
+
+`bridge/mcts/bid_constraint_library.py` 基于《JF实战 Rev3.2》把常见叫品**直接映射**为 `BidConstraint`，避免 LLM 提取的不稳定与延迟；优先级 `硬编码精确 > LLM补充`。
+
+- **`SYSTEM_CONFIGS`**：三套体系（`natural` / `jf` / `xr`）的阈值参数——开叫 12、1NT 15-17、弱二 6-10、2♣强开 22、应叫/争叫/pass 上限等。`jf` 与 `natural` 差异：应叫起点 5（vs 6）、pass≤4 等。
+- **一系列 `get_*_constraint()`** 工厂函数，每类叫品返回一个 `BidConstraint`（返回 None 表示不适用）：
+  - 开叫/应叫/再叫：`get_opening_bid_constraint` / `get_response_constraint` / `get_rebid_constraint`
+  - 争叫：`get_overcall_constraint`、`get_landy_overcall_constraint`（对抗 1NT）
+  - 约定叫：`get_stayman_constraint` / `get_puppet_stayman_constraint` / `get_jacoby_transfer_constraint` / `get_nt_rebid_constraint` / `get_transfer_responder_rebid_constraint` / `get_blackwood_constraint`
+  - 加倍：`get_takeout_double_constraint`（第二家技术加倍）、`get_takeout_double_response_constraint`
+  - 辅助：`_normalize_bid`（叫品文本→(level,suit)/pass/X/XX）、`_is_reverse`（逆叫判定）
+- **主入口 `extract_constraints_from_bid_history(bid_history, system)`**：解析 `(位置)叫品：描述` 序列，逐轮：
+  1. 正则提取有序叫品序列，记录开叫人 / 首个实质性叫品 / 各位置历史 / 已叫花色集 / 是否第二家加倍。
+  2. **跨序列约定叫状态跟踪优先**：1NT 接受雅各比转移、转移后再叫、傀儡斯台曼（NT 开叫后 3♣）、黑木 4NT。
+  3. **常规叫品分派**：判定是否开叫 → 再叫（含**扣叫识别**：叫出对方已叫花色，只限点力不限张数）→ 应叫/争叫；内部再细分跳叫、逆叫、加叫（含斯台曼后进局加叫特例 8-14 /4 张）、竞争性抢叫（不再套强牌跳叫约束）、第三次+实质叫牌（不再收紧）。
+  4. 每位置已有约束时 `_merge_constraints` **取严格者**。
+  5. 尾部应用动态推断：`_apply_negative_inference`（从 Pass 推上限，用体系阈值）与 `_apply_hcp_conservation`（总 40 点守恒），来源标记为 ignored。
+  6. 将 `hard_coded` 来源统一改写为 `hard_coded_{system}`。
+
+### 11.5 三级获取管线（play_service._get_bid_constraints）
+
+`bridge/play_service.py`，带 `self.bid_constraints` 缓存：
+
+1. **硬编码库里求确定性约束**：`extract_constraints_from_bid_history(self.bid_history, self.bid_system)`。
+2. **复用叫牌阶段 LLM 已分析的含义文本**：`_parse_constraints_from_meanings(bid_meanings)`；对"结构化家（通道A）"直接采用结构化累计约束（不与规则库取交集，避免规则库误判污染）；其余与硬约束合并取严格。
+3. **LLM 直接补充**：仅当前两层无任何约束时调用 `BID_CONSTRAINT_PROMPT` + `chat_json`，映射方位名后合并。
+
+### 11.6 验证函数与采样回退链衔接
+
+`bridge/mcts/constraints.py` 的三个验证函数，与 `sampler.py` 的 L0-L4 系统一一对应：
+
+| 验证函数 | 校验内容 | 对应的采样层级 |
+|---------|---------|--------------|
+| `validate_hard` | 仅硬来源约束（HCP/控制/张数/均型/指定牌） | L0 MH 修复、L1 master_soft 达成目标 |
+| `validate_relaxed` | 硬约束放宽版：HCP ±2、`suit_min` 减半（`relax_constraint`） | L2 relaxed |
+| `validate_voids_only` | 仅检查已知缺门（`known_voids`，含 `collect_voids`） | L3 voids-only |
+| L4 fallback | 违反约束分数最少（`compute_sample_violation_score` 辅助） | least-violating 兜底 |
+
+---
+
+## 12. 关键技术备忘（易踩坑点）
 
 - **DeepSeek 思考模式默认关闭**：`thinking` 参数默认 `False`，仅 αμ+LLM"思考模式"显式开启；勿改默认值（思考模式慢 3-5x）。
 - **后端勿用 `--reload`**（v1.48+），多文件连续编辑会导致崩溃。
