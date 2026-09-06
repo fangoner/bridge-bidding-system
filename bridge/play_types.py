@@ -239,6 +239,7 @@ class PlayState:
     phase: PlayPhase = PlayPhase.LEAD
     bidding_sequence: str = "未提供"
     vulnerability: str = "NV"
+    finesse_flow: Dict[str, str] = field(default_factory=dict)
     
     def copy_hands(self) -> Dict[str, List[Card]]:
         """返回手牌的深拷贝"""

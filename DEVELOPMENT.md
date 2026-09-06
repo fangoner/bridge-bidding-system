@@ -580,6 +580,32 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### 2026-09-06（研究复盘：否决清将干预，无源码改动）
+- **6♠ 失败局归因反转**（详见 `docs/6S清将干预研究_局部vs全局口径.md`）
+  - 初判"DDMC 未连续清将导致超将吃"为引擎缺陷 → 全局研究后确认是**口径错误伪命题**，引擎决策正确，**清将启发层方案正式作废**（`.trae/documents/trump-control-heuristic.md`）
+  - 全局双明手做成率 ≈ 60.75%（4000副）：将牌3-2+草花OK = 99.9% 可成；将牌 4-1/5-0（32%）无论草花基本不可成
+  - 整副模拟（庄家=DDMC、防守=双明手最佳、同种子对照）：可成子集无干预 97.5% vs 清将干预 **87.5%**；全分布 50.0% vs 47.5% → 干预净损害
+  - 口径纪律（纳入后续评审）：局部单步低做成率≠全局策略无效；`avg_tricks` 非决策口径（系统用 `scoring_val` imp/make_rate）；"可成的存在性"≠"当前步该清将"
+  - 验证脚本保留在 `scripts/_verify_*.py`（5个：dd_make/dd_global/make_rate/trump32_subset/global_intervention）
+
+### v1.69
+- **飞牌策略体系：识别/接应/拖延/8飞9砸/9砸后续 + DD世界过滤**（方案见 `docs/单套结构飞牌总谱.md`、`docs/飞牌优化讨论与修改记录_20260830.md`）
+  - `_detect_finesse_struct`（方法B·静态间张）：合并庄家+明手各花色找可飞对象 M（K/Q/J），有上方控制张+下方≥T飞张+合计≥4张 → 可飞；仅当前出牌方 ∈ (庄家,明手) 触发，防守方不干预
+  - `_apply_finesse_tactics` 统一干预管线（DD/αμ 共用）：领出判引发飞牌+可拖延换花色；跟牌强制接应+8飞9砸；垫牌不处理
+  - 8飞9砸（含将牌普遍适用）：≤8张 → 榜首砸张且候选飞张比值≥0.95 → 改飞；≥9张 → 榜首飞张且候选顶张≥0.95 → 改砸；比值<0.95 尊重引擎
+  - 9砸后续：砸A后顶张方领出不得自出该花色，强制回队友手再飞 K；9张缺K持AQ先砸后飞 + 砸A后保护间张
+  - `state.finesse_flow` 跨墩续飞标记：进行中强制续飞（非顶张方领出→最小飞张小牌、顶张方领出→回手），对象现身清除；无进手/无飞张小牌交还引擎
+  - 拖延时机：全赢≥80% 稳成禁拖；<80% 允许拖延；护张保护排除危险花色；接应融合度比值 0.95 保护（非融合尊重引擎）
+  - 8飞9砸联手张数按墩结算：首墩按在手+本墩已出计 9 张，非首墩扣已出
+  - 比值统一：`FINESSE_RATIO=0.95` 全局同源（延迟/8飞9砸/9砸/接应），撤销 09-03 临时 FINESSE_DD_RATIO/FINESSE_ALPHA_RATIO
+  - dd_search.py 支持按世界类别（全赢/临界/全输）过滤聚合
+- **叫牌来源标注与默认体系**
+  - `_fixup_human_bid_result`/`process_bid` 标注每叫品来源 JF/XR/AI，前端含义面板按来源标记；X/XX 补约定解说；默认打牌体系改新睿（XR）
+  - 投递：api/main.py, bridge/bidding_service.py, llm/prompts.py, web/src/App.jsx, web/src/components/PlayDetailPanel.jsx, web/src/context/GameContext.jsx
+- **DD 样本类别开关前后端接通**：全赢/临界/全输保留开关（`DD_KEEP_*`）接入设置面板，`/api/play/config` 读写持久化（SettingsPanel.jsx / useModelSettings.js / api.js）
+- **历史记录保留修复**：后端不可用时 `useBridgeRecords.js` 保留现有记录不再清空
+- **新睿校对配套记录**：docs/ 新增全书校对总结报告、人工校对清单与警告文件
+
 ### v1.68
 - **约束生成重构：回归叫牌真实产物**（方案见 `docs/约束生成优化.md`）
   - 约束生成唯一入口移至"确认定约与首攻"弹窗：`buildBiddingInput` 保证含义历史完整（无 → 新睿模拟补全）→ `/api/constraints`（约束转换 LLM：完整含义文本 → 每叫品约束，负面推断/扣叫→suit_controls/4NT答叫→min_keycards）→ 展示并随确认传入 `_seed_constraints`；`_get_bid_constraints` 优先种子 payload，否则 `bid_meanings` 走同一 LLM 转译

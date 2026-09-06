@@ -116,13 +116,20 @@ DD_KEEP_SURE_WIN = True
 DD_KEEP_CRITICAL = True
 DD_KEEP_SURE_LOSE = True
 
-# 飞牌干预统一比值（按引擎分隔，同引擎内"延迟/8飞9砸/9砸后续"共用同一阈值，
-# 修改时只需改对应引擎的一个常量，不会漏改某条策略）：
+# 飞牌干预统一比值（所有引擎共用同一常量，延迟/8飞9砸/9砸后续同源，
+# 修改时只需改一个常量即可全局生效）：
 # 以比值（相对成功率）统一跨计分制：改选牌/榜首 ≥ 该值 即视为"差距不大"才干预。
 FINESSE_DEFER_ENABLE = True          # 飞牌干预总开关（延迟/接应）
 FINESSE_EIGHT_NINE_ENABLE = True     # 8飞9砸 总开关
-FINESSE_DD_RATIO = 0.95              # DD 引擎（含三种计分制 imp/make_rate/avg_tricks）统一比值
-FINESSE_ALPHA_RATIO = 0.95           # αμ 引擎统一比值
+FINESSE_RATIO = 0.95                 # 飞牌干预统一比值（DD 三种计分制 / αμ 引擎共用），
+                                     # 以比值（相对成功率）统一跨计分制：改选牌/榜首 ≥ 该值才干预
+FINESSE_RATIO_RISK = 0.90            # 结构牌"全输占比"高（无望花色）时放宽的干预比值
+FINESSE_LOSE_TRIGGER = 0.8           # 结构牌全输样本占比 ≥ 此值视为"无望花色"，触发比值放宽
+FINESSE_DEFER_WIN_MIN = 0.8          # 拖延时机·稳成判定：飞牌花色联手≤8张时，
+                                     # 结构牌"全赢占比"（该出牌在所有样本中都≥所需墩的比例）≥ 此值
+                                     # 才视为基本稳成、早飞禁拖（无谓拖延纯损）；
+                                     # 全赢占比低于此值（如本例48%、临界52%占了近半）→
+                                     # 出牌存在显著风险，应拖延搜集信息、避免提前决断
 
 # 首攻与信号方案："standard"（标准方案，源自新睿自然）| 预留扩展（如"reverse"反式信号）
 LEAD_SIGNAL_SCHEME = "standard"

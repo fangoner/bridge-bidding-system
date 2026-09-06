@@ -8,6 +8,7 @@ const DD_SAMPLE_COUNT_KEY = 'bridge_dd_sample_count'
 const DD_PARTICLES_KEY = 'bridge_dd_particles'
 const MCTS_PARTICLES_KEY = 'bridge_mcts_particles'
 const ALPHA_MU_PARTICLES_KEY = 'bridge_alpha_mu_particles'
+const ALPHA_MU_M_KEY = 'bridge_alpha_mu_m'
 const SWITCH_CARDS_KEY = 'bridge_dd_alphamu_switch_cards'
 const DD_SCORING_MODE_KEY = 'bridge_dd_scoring_mode'
 const DD_KEEP_WIN_KEY = 'bridge_dd_keep_sure_win'
@@ -212,6 +213,23 @@ export function useModelSettings() {
     scheduleParticleSync(payload)
   }, [scheduleParticleSync])
 
+  // αμ 层数 M（Max 递归层数，M=1 退化为 PIMC；localStorage 持久化 + 后端实时生效）
+  const [alphaMuM, setAlphaMuM] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem(ALPHA_MU_M_KEY), 10)
+      return Number.isNaN(v) ? 2 : v
+    } catch { return 2 }
+  })
+  const [alphaMuMRange, setAlphaMuMRange] = useState({ min: 1, max: 3 })
+
+  const handleAlphaMuMChange = useCallback((value) => {
+    const v = parseInt(value, 10)
+    const num = Number.isNaN(v) ? 2 : v
+    setAlphaMuM(num)
+    try { localStorage.setItem(ALPHA_MU_M_KEY, num) } catch {/* empty */}
+    scheduleParticleSync({ alpha_mu_m: num })
+  }, [scheduleParticleSync])
+
   // 启动时同步粒子数范围和当前值到后端
   useEffect(() => {
     getParticleSettings().then(data => {
@@ -219,6 +237,7 @@ export function useModelSettings() {
         if (data.dd_min) setDDParticlesRange({ min: data.dd_min, max: data.dd_max })
         if (data.mcts_min) setMCTSParticlesRange({ min: data.mcts_min, max: data.mcts_max })
         if (data.alpha_mu_min) setAlphaMuParticlesRange({ min: data.alpha_mu_min, max: data.alpha_mu_max })
+        if (data.alpha_mu_m_min) setAlphaMuMRange({ min: data.alpha_mu_m_min, max: data.alpha_mu_m_max })
       }
     }).catch(() => {})
     // 同步 localStorage 保存的值到后端
@@ -226,6 +245,7 @@ export function useModelSettings() {
       dd_particles: parseInt(localStorage.getItem(DD_SAMPLE_COUNT_KEY)) || undefined,
       mcts_particles: parseInt(localStorage.getItem(MCTS_PARTICLES_KEY)) || undefined,
       alpha_mu_particles: parseInt(localStorage.getItem(ALPHA_MU_PARTICLES_KEY)) || undefined,
+      alpha_mu_m: parseInt(localStorage.getItem(ALPHA_MU_M_KEY)) || undefined,
     }).catch(() => {})
     // 以前端 localStorage 为准推送样本类别开关到后端
     syncDdWorldFilter()
@@ -284,6 +304,9 @@ export function useModelSettings() {
     mctsParticles, mctsParticlesRange,
     alphaMuParticles, alphaMuParticlesRange,
     handleParticleChange,
+    // αμ 层数 M
+    alphaMuM, alphaMuMRange,
+    handleAlphaMuMChange,
     // DD-αμ-LLM 分界
     switchCards, switchCardsRange,
     handleSwitchCardsChange,

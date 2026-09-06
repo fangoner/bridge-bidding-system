@@ -106,6 +106,8 @@ function SettingsPanel({
   mctsParticles, mctsParticlesRange,
   alphaMuParticles, alphaMuParticlesRange,
   handleParticleChange,
+  alphaMuM, alphaMuMRange,
+  handleAlphaMuMChange,
   switchCards, switchCardsRange,
   handleSwitchCardsChange,
   ddScoringMode,
@@ -359,9 +361,14 @@ function SettingsPanel({
             </>
           )}
           {playEngine === 'alphamu' && (
-            <RangeSlider label="世界数" value={alphaMuParticles}
-              min={alphaMuParticlesRange.min} max={alphaMuParticlesRange.max} step={5} width={72}
-              onCommit={(v) => handleParticleChange('alphaMu', v)} />
+            <>
+              <RangeSlider label="世界数" value={alphaMuParticles}
+                min={alphaMuParticlesRange.min} max={alphaMuParticlesRange.max} step={5} width={72}
+                onCommit={(v) => handleParticleChange('alphaMu', v)} />
+              <RangeSlider label="层数M" value={alphaMuM}
+                min={alphaMuMRange.min} max={alphaMuMRange.max} step={1} width={48}
+                onCommit={handleAlphaMuMChange} />
+            </>
           )}
           {playEngine === 'mcts' && (
             <RangeSlider label="样本数" value={mctsParticles}

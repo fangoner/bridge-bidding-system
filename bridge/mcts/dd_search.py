@@ -679,6 +679,16 @@ class DDSearch:
                     f"，其中临界占{_crit_pct:.0f}%、全输占{_lose_pct:.0f}%），评分样本 {eval_stats['kept']}"
                     f"{'，过滤 ' + '、'.join(_dropped_parts) if _dropped_parts else ''}，耗时 {elapsed:.1f}s"
                 ),
+                # 结构化统计（供飞牌拖延等策略读取，避免解析文本）：
+                # sure_win = 该候选出牌在所有样本中都 ≥ 所需墩的样本数（全赢）
+                # critical = 成约与否依赖出牌的样本数（临界）
+                # sure_lose = 所有出牌都 < 所需墩的样本数（全输）
+                "dd_stats": {
+                    "samples": samples_done,
+                    "sure_win": eval_stats["sure_win"],
+                    "critical": eval_stats["critical"],
+                    "sure_lose": eval_stats["sure_lose"],
+                },
                 "mcts_stats": {
                     "iterations": samples_done,
                     "time_sec": round(elapsed, 2),

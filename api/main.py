@@ -60,6 +60,7 @@ from config import (
     DD_PARTICLES_MIN, DD_PARTICLES_MAX,
     MCTS_PARTICLES_MIN, MCTS_PARTICLES_MAX,
     ALPHA_MU_WORLDS_MIN, ALPHA_MU_WORLDS_MAX,
+    ALPHA_MU_M, ALPHA_MU_M_MIN, ALPHA_MU_M_MAX,
     MCTS_TIME_LIMIT, DD_TIME_LIMIT, ALPHA_MU_TIME_LIMIT,
     VISION_PROVIDER, DEEPSEEK_VISION_MODEL,
 )
@@ -2845,6 +2846,7 @@ class ParticleSettingsRequest(BaseModel):
     dd_particles: Optional[int] = None       # DD 样本数
     mcts_particles: Optional[int] = None     # MCTS 迭代数
     alpha_mu_particles: Optional[int] = None # αμ world数
+    alpha_mu_m: Optional[int] = None         # αμ 层数 M（Max 递归层数，M=1 退化为 PIMC）
     session_id: str = "default"
 
 
@@ -2855,6 +2857,7 @@ async def get_particle_settings(session_id: str = Query("default")):
     dd_val = service.dd_search.num_samples
     mcts_val = service.mcts.iterations
     amu_val = service.alpha_mu_search.num_worlds if service.alpha_mu_search else ALPHA_MU_NUM_WORLDS
+    amu_m = service.alpha_mu_search.M if service.alpha_mu_search else ALPHA_MU_M
     return {
         "dd_particles": dd_val,
         "dd_min": DD_PARTICLES_MIN,
@@ -2865,12 +2868,15 @@ async def get_particle_settings(session_id: str = Query("default")):
         "alpha_mu_particles": amu_val,
         "alpha_mu_min": ALPHA_MU_WORLDS_MIN,
         "alpha_mu_max": ALPHA_MU_WORLDS_MAX,
+        "alpha_mu_m": amu_m,
+        "alpha_mu_m_min": ALPHA_MU_M_MIN,
+        "alpha_mu_m_max": ALPHA_MU_M_MAX,
     }
 
 
 @app.post("/api/play/particle-settings")
 async def set_particle_settings(request: ParticleSettingsRequest):
-    """设置 DD样本数 / αμ world数（实时生效）"""
+    """设置 DD样本数 / αμ world数 / αμ层数M（实时生效）"""
     service = get_play_service(request.session_id)
     updates = {}
     if request.dd_particles is not None:
@@ -2886,6 +2892,12 @@ async def set_particle_settings(request: ParticleSettingsRequest):
         if service.alpha_mu_search is not None:
             service.alpha_mu_search.num_worlds = val
         updates["alpha_mu_particles"] = val
+    if request.alpha_mu_m is not None:
+        val = max(ALPHA_MU_M_MIN, min(ALPHA_MU_M_MAX, request.alpha_mu_m))
+        if service.alpha_mu_search is not None:
+            service.alpha_mu_search.M = val
+            service.alpha_mu_search.max_depth = val  # 兼容旧引用同步
+        updates["alpha_mu_m"] = val
     return {"success": True, "updates": updates}
 
 

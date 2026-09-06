@@ -377,6 +377,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     mctsParticles, mctsParticlesRange,
     alphaMuParticles, alphaMuParticlesRange,
     handleParticleChange,
+    alphaMuM, alphaMuMRange,
+    handleAlphaMuMChange,
     switchCards, switchCardsRange,
     handleSwitchCardsChange,
     ddScoringMode, handleDdScoringModeChange,
@@ -3001,6 +3003,8 @@ const handleReviewCompletedPlay = async () => {
         mctsParticles={mctsParticles} mctsParticlesRange={mctsParticlesRange}
         alphaMuParticles={alphaMuParticles} alphaMuParticlesRange={alphaMuParticlesRange}
         handleParticleChange={handleParticleChange}
+        alphaMuM={alphaMuM} alphaMuMRange={alphaMuMRange}
+        handleAlphaMuMChange={handleAlphaMuMChange}
         switchCards={switchCards} switchCardsRange={switchCardsRange}
         handleSwitchCardsChange={handleSwitchCardsChange}
         ddScoringMode={ddScoringMode} handleDdScoringModeChange={handleDdScoringModeChange}
