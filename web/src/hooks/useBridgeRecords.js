@@ -65,8 +65,17 @@ function useBridgeRecords() {
         if (data.success && data.records && data.records.length > 0) {
           console.log('[记录] 从服务器加载', data.records.length, '条记录')
           setRecords(data.records)
+        } else if (data.success && data.records) {
+          // 服务器成功但记录为空：不清空现有显示——后端重启/文件暂空的
+          // 窗口期不应让历史列表"整条消失"；仅在本地也无数据时才迁移旧格式
+          console.warn('[记录] 服务器返回空记录，保留现有显示避免假丢失')
+          setRecords(prev => {
+            if (prev && prev.length > 0) return prev
+            tryMigrateOldFormat()
+            return prev
+          })
         } else {
-          // 服务端无记录，尝试迁移旧本地格式作为首次兜底
+          // 请求失败：尝试迁移旧本地格式作为兜底
           tryMigrateOldFormat()
         }
       })
@@ -79,7 +88,6 @@ function useBridgeRecords() {
       const tryMigrateOldFormat = () => {
         const oldBidding = localStorage.getItem('bridge_bidding_records')
         if (!oldBidding) {
-          setRecords([])
           return
         }
         const oldRecords = JSON.parse(oldBidding)
@@ -177,17 +185,23 @@ function useBridgeRecords() {
     // 完整记录只落盘到后端（按 id upsert），前端仅保留轻量摘要。
     // 请求串行化（Promise 链）：同一副牌叫牌/打牌推进的多个保存按序到达后端，
     // 配合后端锁，避免并发写文件互相覆盖导致历史记录丢失。
-    upsertChainRef.current = upsertChainRef.current
-      .catch(() => {})
-      .then(() => fetch(`${API_BASE}/api/records/upsert`, {
+    // 失败重试：后端重启空窗期的保存不能静默丢失——首败 5s 后重试一次，
+    // 仍失败则 console.error 显式告警（历史列表可能缺失此条）。
+    const tryUpsert = () =>
+      fetch(`${API_BASE}/api/records/upsert`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ record }),
-      }))
-      .then(res => res.ok ? res.json() : null)
-      .catch(err => {
-        console.warn('[保存] 同步失败（后端可能未启动）:', err.message)
-        return null
+      }).then(res => res.ok ? res.json() : null).then(d => !!(d && d.success))
+        .catch(() => false)
+    const retryUpsert = () =>
+      tryUpsert().then(ok => ok || new Promise(resolve => setTimeout(resolve, 5000)).then(tryUpsert))
+    upsertChainRef.current = upsertChainRef.current
+      .catch(() => {})
+      .then(retryUpsert)
+      .then(ok => {
+        if (!ok) console.error('[保存] 记录未同步到服务器（首败+重试均失败），历史列表可能缺失此条:', record.type, record.id)
       })
+      .catch(() => {})
 
     const summary = indexify(record)
     setRecords(prev => {
@@ -199,8 +213,17 @@ function useBridgeRecords() {
         }
         let next
         if (existingIndex >= 0) {
+          // 完整度保护：已有记录含 play 数据，而本次更新无 play（重新叫牌/载入重叫）
+          // → 保留原有摘要的 play 字段与 type，避免历史列表把打牌记录降级显示
+          const existing = prev[existingIndex]
+          const mergedSummary = (!existing.play && summary.play) || (existing.play && !summary.play)
+            ? { ...summary, play: existing.play || summary.play, type: existing.play ? existing.type : summary.type }
+            : summary
+          if (existing.note && !mergedSummary.note) {
+            mergedSummary.note = existing.note
+          }
           next = [...prev]
-          next[existingIndex] = { ...summary, id: prev[existingIndex].id }
+          next[existingIndex] = { ...mergedSummary, id: existing.id || summary.id }
         } else {
           next = [summary, ...prev.filter(r => String(r.id) !== String(record.id))]
         }

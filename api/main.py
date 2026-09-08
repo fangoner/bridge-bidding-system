@@ -2967,21 +2967,34 @@ async def get_records_backup():
 
 @app.post("/api/records/backup")
 async def save_records_backup(request: RecordsBackupRequest):
-    """保存记录到服务器端备份文件"""
+    """合并保存记录到服务器端备份文件（不再整体覆盖）。
+
+    与单条 upsert 同口径的完整度保护：已有 play 数据的记录，不会被
+    后到的无 play 摘要/记录降级覆盖；未冲突的新记录追加。防止
+    "前端全量上传摘要 → 覆盖掉服务器上完整打牌记录"类丢失。
+    """
     try:
         records = request.records
         async with _RECORDS_LOCK:
-            # 去重：基于 id
-            seen = set()
-            unique = []
+            existing = _read_backup_records()
+            by_id = {}
+            for r in existing:
+                by_id.setdefault(str(r.get("id")), r)
             for r in records:
-                rid = r.get("id", "")
-                if rid and rid not in seen:
-                    seen.add(rid)
-                    unique.append(r)
-            unique = unique[:RECORDS_BACKUP_MAX]
-            _write_backup_records(unique)
-        return {"success": True, "count": len(unique)}
+                rid = str(r.get("id", ""))
+                if not rid:
+                    continue
+                prev = by_id.get(rid)
+                if prev is not None:
+                    if prev.get("play") and not r.get("play"):
+                        continue  # 已有完整打牌数据，不上传的摘要覆盖
+                    by_id[rid] = r
+                else:
+                    by_id[rid] = r
+            merged = list(by_id.values())
+            merged = merged[:RECORDS_BACKUP_MAX]  # 保新弃旧：保留最近 RECORDS_BACKUP_MAX 条
+            _write_backup_records(merged)
+        return {"success": True, "count": len(merged)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"备份失败: {e}")
 
@@ -3084,14 +3097,43 @@ async def upsert_record_single(request: Request):
             replaced = False
             for i, r in enumerate(records):
                 if str(r.get("id")) == rid:
-                    records[i] = record
+                    # 完整度保护（与 sourceRecordId 分支同口径）：已有 play 数据，
+                    # 而后到的无 play 记录（重新叫牌/载入重叫）→ 不得降级覆盖，
+                    # 保留原有完整记录，避免打牌记录丢失。
+                    if r.get("play") and not record.get("play"):
+                        merged = dict(r)
+                        if sid:
+                            merged["sourceRecordId"] = sid
+                        records[i] = merged
+                        replaced = True
+                        break
+                    incoming = dict(record)
+                    if r.get("note") and not incoming.get("note"):
+                        incoming["note"] = r["note"]
+                    records[i] = incoming
                     replaced = True
                     break
             if not replaced and sid:
                 for i, r in enumerate(records):
                     if str(r.get("id")) == str(sid) or str(r.get("sourceRecordId")) == str(sid):
+                        if r.get("play") and record.get("play"):
+                            # 双方都有完整打牌数据：incoming 是另一局打牌会话
+                            # （currentRecordId 过期时 sid 误指旧局），按新记录插入，
+                            # 严禁原地覆盖旧局记录——否则旧局打牌数据被销毁
+                            break
+                        # 完整度保护：已有 play_complete（含打牌数据），而后来的是
+                        # 无 play 的 bidding 记录（重新叫牌/载入重叫）→ 不得降级覆盖，
+                        # 保留原有完整记录（仅对齐 sourceRecordId），避免打牌记录丢失。
+                        if r.get("play") and not record.get("play"):
+                            merged = dict(r)
+                            merged["sourceRecordId"] = sid
+                            records[i] = merged
+                            replaced = True
+                            break
                         merged = dict(record)
                         merged["id"] = r.get("id")
+                        if r.get("note") and not merged.get("note"):
+                            merged["note"] = r["note"]
                         records[i] = merged
                         replaced = True
                         break

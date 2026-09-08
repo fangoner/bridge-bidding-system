@@ -796,6 +796,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       setBiddingTotalTime(null)
       setError(null)
       lastBidTimeRef.current = null
+      // 新叫牌会话必须与上一局记录脱钩：currentRecordId 残留会让本局保存
+      // 带着旧局 sourceRecordId 提交，后端 sid 合并会覆盖/吞并旧局记录
+      setCurrentRecordId(null)
       // 重置回退历史并保存初始快照
       const initialSnapshot = {
         biddingSequence: [],
@@ -842,6 +845,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     }
     setMode(newMode)
     clearAllHands()
+    setCurrentRecordId(null)
     // 切到发牌练习：全部AI；切到模拟实战：默认3人+1AI
     if (newMode === 'practice') {
       setPositionRoles({ '南': 'ai', '北': 'ai', '东': 'ai', '西': 'ai' })
