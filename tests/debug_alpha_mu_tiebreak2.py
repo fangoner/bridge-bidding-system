@@ -274,7 +274,7 @@ def test_slam_down_scenario():
 
     print(f"\n🚀 运行 αμ 搜索...")
     am = AlphaMuSearch(
-        sampler=service.mcts.sampler,
+        sampler=service.dd_search.sampler,
         num_worlds=20,
         max_depth=4,
         time_limit=15.0,

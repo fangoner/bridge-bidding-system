@@ -6,7 +6,6 @@ const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
 const PLAY_MODEL_KEY = 'bridge_play_model'
 const DD_SAMPLE_COUNT_KEY = 'bridge_dd_sample_count'
 const DD_PARTICLES_KEY = 'bridge_dd_particles'
-const MCTS_PARTICLES_KEY = 'bridge_mcts_particles'
 const ALPHA_MU_PARTICLES_KEY = 'bridge_alpha_mu_particles'
 const ALPHA_MU_M_KEY = 'bridge_alpha_mu_m'
 const SWITCH_CARDS_KEY = 'bridge_dd_alphamu_switch_cards'
@@ -98,10 +97,6 @@ export function useModelSettings() {
     try { return parseInt(localStorage.getItem(DD_PARTICLES_KEY)) || 200 } catch { return 200 }
   })
   const [ddParticlesRange, setDDParticlesRange] = useState({ min: 100, max: 500 })
-  const [mctsParticles, setMCTSParticles] = useState(() => {
-    try { return parseInt(localStorage.getItem(MCTS_PARTICLES_KEY)) || 500 } catch { return 500 }
-  })
-  const [mctsParticlesRange, setMCTSParticlesRange] = useState({ min: 300, max: 1000 })
   const [alphaMuParticles, setAlphaMuParticles] = useState(() => {
     try { return parseInt(localStorage.getItem(ALPHA_MU_PARTICLES_KEY)) || 100 } catch { return 100 }
   }, [])
@@ -197,7 +192,6 @@ export function useModelSettings() {
   const handleParticleChange = useCallback((engine, value) => {
     const setters = {
       dd: [setDDParticles, DD_PARTICLES_KEY],
-      mcts: [setMCTSParticles, MCTS_PARTICLES_KEY],
       alphaMu: [setAlphaMuParticles, ALPHA_MU_PARTICLES_KEY],
     }
     const [setter, key] = setters[engine]
@@ -208,7 +202,6 @@ export function useModelSettings() {
     // 同步到后端（debounce）
     const payload = {}
     if (engine === 'dd') payload.dd_particles = value
-    if (engine === 'mcts') payload.mcts_particles = value
     if (engine === 'alphaMu') payload.alpha_mu_particles = value
     scheduleParticleSync(payload)
   }, [scheduleParticleSync])
@@ -235,7 +228,6 @@ export function useModelSettings() {
     getParticleSettings().then(data => {
       if (data) {
         if (data.dd_min) setDDParticlesRange({ min: data.dd_min, max: data.dd_max })
-        if (data.mcts_min) setMCTSParticlesRange({ min: data.mcts_min, max: data.mcts_max })
         if (data.alpha_mu_min) setAlphaMuParticlesRange({ min: data.alpha_mu_min, max: data.alpha_mu_max })
         if (data.alpha_mu_m_min) setAlphaMuMRange({ min: data.alpha_mu_m_min, max: data.alpha_mu_m_max })
       }
@@ -243,7 +235,6 @@ export function useModelSettings() {
     // 同步 localStorage 保存的值到后端
     setParticleSettings({
       dd_particles: parseInt(localStorage.getItem(DD_SAMPLE_COUNT_KEY)) || undefined,
-      mcts_particles: parseInt(localStorage.getItem(MCTS_PARTICLES_KEY)) || undefined,
       alpha_mu_particles: parseInt(localStorage.getItem(ALPHA_MU_PARTICLES_KEY)) || undefined,
       alpha_mu_m: parseInt(localStorage.getItem(ALPHA_MU_M_KEY)) || undefined,
     }).catch(() => {})
@@ -301,7 +292,6 @@ export function useModelSettings() {
     fetchAvailableModels,
     // 粒子数
     ddParticles, ddParticlesRange,
-    mctsParticles, mctsParticlesRange,
     alphaMuParticles, alphaMuParticlesRange,
     handleParticleChange,
     // αμ 层数 M

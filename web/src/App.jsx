@@ -374,7 +374,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     ddSampleCount,
     handleDDSampleCountChange,
     ddParticles, ddParticlesRange,
-    mctsParticles, mctsParticlesRange,
     alphaMuParticles, alphaMuParticlesRange,
     handleParticleChange,
     alphaMuM, alphaMuMRange,
@@ -3004,7 +3003,6 @@ const handleReviewCompletedPlay = async () => {
         ddSampleCount={ddSampleCount}
         handleDDSampleCountChange={handleDDSampleCountChange}
         ddParticles={ddParticles} ddParticlesRange={ddParticlesRange}
-        mctsParticles={mctsParticles} mctsParticlesRange={mctsParticlesRange}
         alphaMuParticles={alphaMuParticles} alphaMuParticlesRange={alphaMuParticlesRange}
         handleParticleChange={handleParticleChange}
         alphaMuM={alphaMuM} alphaMuMRange={alphaMuMRange}

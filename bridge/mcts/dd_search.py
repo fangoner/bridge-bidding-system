@@ -249,9 +249,127 @@ def _accumulate_world_totals(score_map, playable, state, curplayer_is_declarer,
     return True
 
 
+# ── 飞牌后果敏感性探针（分桶统计，零额外 DDS）────────────────────────
+# 复用 search() 现有采样世界：每个世界已知四家手牌，因此对每个"缺失大牌
+# M"（庄家+明手+已打出未现的 A/K/Q/J/T），可确定 M 落在东家还是西家。
+# 按此分桶累计"候选出牌在该花色"的整手赢墩均值的桶间差 Δ；
+# 探针监控窗口（2026-09-08 修正）：不是固定 AKQJT 五张集，而是 3 张滑动窗口。
+# 默认 AKQ；仅对"飞牌花色"（state.finesse_flow 中活动流程的花色）在窗口内
+# 大牌被打出后向下滑动补齐三张（如 K 出 → AQJ，A 再出 → QJT），残局阶段
+# 飞 J/T 才能被识别。非飞牌花色固定 AKQ，不往下移——避免"J/T 位置敏感"
+# 的假阳性（如 ♠AK+xx 缺 T 被误报成可飞结构）。
+_FINESSE_WINDOW_BASE = ["A", "K", "Q", "J", "T"]
+
+
+def _honor_missing_of_state(state):
+    """返回 {花色: [缺失大牌...]}：庄家方现手未持有的监控窗口大牌。
+
+    滑动窗口规则：非飞牌花色窗口固定 [A,K,Q]（打出即排除、不补位）；
+    飞牌花色窗口取 AKQJT 中前 3 张未打出者（出掉一张、下移补一张）。
+    缺失大牌必然在防守方（东/西）某家手中（未打出），分桶依据。
+    """
+    known = set()
+    for pos in (state.contract.declarer, state.dummy):
+        if pos:
+            for c in state.hands.get(pos, []):
+                known.add((c.suit, c.rank))
+    played = set()
+    for t in state.tricks:
+        for _, c in t.cards:
+            if c:
+                known.add((c.suit, c.rank))
+                played.add((c.suit, c.rank))
+    for _, c in state.current_trick.cards:
+        if c:
+            known.add((c.suit, c.rank))
+            played.add((c.suit, c.rank))
+    flow = getattr(state, "finesse_flow", None) or {}
+    missing = {}
+    for suit in ("♠", "♥", "♦", "♣"):
+        if suit in flow:
+            unplayed = [h for h in _FINESSE_WINDOW_BASE if (suit, h) not in played]
+            window = unplayed[:3]
+        else:
+            window = ["A", "K", "Q"]
+        miss = [m for m in window if (suit, m) not in known]
+        if miss:
+            missing[suit] = miss
+    return missing
+
+
+def _accumulate_finesse_probe(score_map, playable, state, hands,
+                              probe, remaining_tricks, curplayer_is_declarer):
+    """把一个世界的候选赢墩按缺失大牌 M 的位置分桶累加进 probe。
+
+    probe: {花色: {M: {"东": {card_str: [tricks]}, "西": {...}}}}。
+    score_map: {(suit, rank_char): 该候选打出后出牌方阵营的剩余赢墩}。
+    """
+    try:
+        missing = _honor_missing_of_state(state)
+        if not missing:
+            return
+        east_has = {c.suit: set() for c in hands.get("东", [])}
+        for c in hands.get("东", []):
+            east_has.setdefault(c.suit, set()).add(c.rank)
+        west_has = {c.suit: set() for c in hands.get("西", [])}
+        for c in hands.get("西", []):
+            west_has.setdefault(c.suit, set()).add(c.rank)
+        decl_tricks = state.declarer_tricks
+        for suit, miss_list in missing.items():
+            side_of = {}
+            for m in miss_list:
+                if m in east_has.get(suit, set()):
+                    side_of[m] = "东"
+                elif m in west_has.get(suit, set()):
+                    side_of[m] = "西"
+                else:
+                    continue  # 此世界 M 不在东西（不该发生，防御）
+            if not side_of:
+                continue
+            for card in playable:
+                if card.suit != suit:
+                    continue
+                target = score_map.get((card.suit, card.rank))
+                if target is None:
+                    continue
+                total = decl_tricks + (target if curplayer_is_declarer
+                                       else remaining_tricks - target)
+                for m, side in side_of.items():
+                    probe.setdefault(suit, {}).setdefault(m, {}).setdefault(
+                        side, {}).setdefault(str(card), []).append(total)
+    except Exception:
+        pass
+
+
+def _finalize_finesse_probe(probe):
+    """把分桶原始计数转成 play_service 可消费的结构。
+
+    返回 {花色: {"对象": M, "Δ": 最大桶间差, "引牌": card_str}}；
+    无有效分桶数据时返回 {}。
+    """
+    out = {}
+    for suit, by_m in probe.items():
+        best = None  # (Δ, M, card_str)
+        for m, sides in by_m.items():
+            east = sides.get("东") or {}
+            west = sides.get("西") or {}
+            for card_str in set(list(east.keys()) + list(west.keys())):
+                ev = east.get(card_str) or []
+                wv = west.get(card_str) or []
+                if not ev or not wv:
+                    continue
+                delta = abs(sum(ev) / len(ev) - sum(wv) / len(wv))
+                if best is None or delta > best[0]:
+                    best = (delta, m, card_str)
+        if best and best[0] >= _dd_config.FINESSE_PROBE_DELTA:
+            out[suit] = {"对象": best[1], "Δ": round(best[0], 2), "引牌": best[2]}
+    return out
+
+
 def _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
                        playable, state, perspective, actual_turn, declarer, dummy,
-                       trump, card_scores, weight, sample_idx, stats=None):
+                       trump, card_scores, weight, sample_idx, stats=None,
+                       finesse_probe=None):
     """Phase 0b: DirectDDS 单世界求解，累加加权分到 card_scores。"""
     _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
     try:
@@ -270,6 +388,10 @@ def _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
         curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
         _accumulate_world_totals(score_map, playable, state, curplayer_is_declarer,
                                  remaining_tricks, weight, card_scores, stats)
+        if finesse_probe is not None:
+            _accumulate_finesse_probe(score_map, playable, state, hands,
+                                      finesse_probe, remaining_tricks,
+                                      curplayer_is_declarer)
     except Exception:
         pass
 
@@ -310,7 +432,8 @@ def _build_dds_data(world, all_played, trick_cards, trick_leader,
 
 def _solve_batch(samples, all_played, trick_cards, trick_leader,
                  playable, state, perspective, actual_turn, declarer, dummy,
-                 trump, card_scores, time_limit, start_time, stats=None):
+                 trump, card_scores, time_limit, start_time, stats=None,
+                 finesse_probe=None):
     """Phase 0b: DirectDDS 批量求解，ctypes 直调 DDS，无 PBN/Deal 转换。
 
     返回 (samples_done, solve_times_list, solve_total, solve_max)。
@@ -373,6 +496,10 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
 
                 _accumulate_world_totals(score_map, playable, state, curplayer_is_declarer,
                                                 remaining_tricks, 1.0, card_scores, stats)
+                if finesse_probe is not None:
+                    _accumulate_finesse_probe(score_map, playable, state, _hands,
+                                              finesse_probe, remaining_tricks,
+                                              curplayer_is_declarer)
                 samples_done += 1
                 solve_times.append(_per_deal)
         else:
@@ -400,6 +527,10 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
                 curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
                 _accumulate_world_totals(score_map, playable, state, curplayer_is_declarer,
                                                 remaining_tricks, 1.0, card_scores, stats)
+                if finesse_probe is not None:
+                    _accumulate_finesse_probe(score_map, playable, state, hands,
+                                              finesse_probe, remaining_tricks,
+                                              curplayer_is_declarer)
                 samples_done += 1
                 solve_times.append(_dt_s)
 
@@ -438,9 +569,12 @@ class DDSearch:
             return sum(scores) / len(scores) if scores else 0.0
         return None
 
-    def search(self, state: PlayState) -> dict:
-        perspective = state.current_player
-        actual_turn = state.current_player
+    def search(self, state: PlayState, perspective: str = None,
+               actual_turn: str = None) -> dict:
+        # perspective/actual_turn 可覆盖（顶张侧过手探测用队友侧视角，
+        # 见 play_service._apply_lead_transfer）；默认取当前出牌方。
+        perspective = perspective or state.current_player
+        actual_turn = actual_turn or state.current_player
         declarer = state.contract.declarer
         dummy = state.dummy
         # 明手不做决策：搜索视角改为庄家
@@ -516,6 +650,8 @@ class DDSearch:
 
         # 批量求解优先：solve_all_boards 内部用线程池加速，dds C 库自管理线程安全
         # 失败时降级到串行 DDS
+        # 飞牌后果敏感性探针：按缺失大牌位置分桶，零额外 DDS
+        finesse_probe = {}
         _solve_times = []  # 所有粒子耗时，用于统计分布
         _batch_used = False
         if samples:
@@ -524,7 +660,8 @@ class DDSearch:
             _bd, _bt, _bs_tot, _bs_max = _solve_batch(
                 samples, all_played, trick_cards, trick_leader,
                 playable, state, perspective, actual_turn, declarer, dummy,
-                trump, card_scores, self.time_limit, start_time, eval_stats)
+                trump, card_scores, self.time_limit, start_time, eval_stats,
+                finesse_probe=finesse_probe)
             if _bd > 0:
                 # 批量成功
                 _batch_used = True
@@ -546,7 +683,8 @@ class DDSearch:
                     _t_s0 = time.time()
                     _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
                                        playable, state, perspective, actual_turn, declarer, dummy,
-                                       trump, card_scores, 1.0, samples_done, eval_stats)
+                                       trump, card_scores, 1.0, samples_done, eval_stats,
+                                       finesse_probe=finesse_probe)
                     _dt_solve = time.time() - _t_s0
                     _solve_times.append(_dt_solve)
                     _solve_total += _dt_solve
@@ -689,6 +827,9 @@ class DDSearch:
                     "critical": eval_stats["critical"],
                     "sure_lose": eval_stats["sure_lose"],
                 },
+                # 飞牌后果敏感性探针：{花色: {对象, Δ, 引牌}}，缺失大牌位置
+                # 分桶的赢墩均值差；play_service 依此判定飞牌结构。
+                "finesse_probe": _finalize_finesse_probe(finesse_probe),
                 "mcts_stats": {
                     "iterations": samples_done,
                     "time_sec": round(elapsed, 2),
@@ -832,6 +973,12 @@ class DDSearch:
         remaining_tricks = 13 - total_played_tricks
 
         card_scores = {str(c): [] for c in playable}
+        # 与 search() 同口径的三分类统计（全赢/临界/全输），供页面与策略读取
+        eval_stats = {"kept": 0, "sure_win": 0, "critical": 0, "sure_lose": 0,
+                      "dropped_win": 0, "dropped_crit": 0, "dropped_lose": 0}
+        # 飞牌后果敏感性探针（与 search() 主路径同口径）：枚举世界四家手牌已知，
+        # 同样可按缺失大牌位置分桶——补齐残局枚举路径的 finesse_probe 缺口
+        finesse_probe = {}
 
         # ── 逐世界 DDS 求解 ──
         for hands in worlds:
@@ -854,6 +1001,7 @@ class DDSearch:
                 cur_p = (_DD_POS.get(first_p, 0) + len(trick_cards)) % 4
                 curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
 
+                total_map = {}
                 for card in playable:
                     key = (card.suit, card.rank)
                     target_tricks = score_map.get(key, 0)
@@ -862,7 +1010,21 @@ class DDSearch:
                     else:
                         decl_side_tricks = remaining_tricks - target_tricks
                     total = state.declarer_tricks + decl_side_tricks
+                    total_map[str(card)] = total
                     card_scores[str(card)].append(total)
+                # 三分类（全赢/临界/全输）按整手赢墩相对所需墩判定，与 search() 同口径
+                totals = list(total_map.values())
+                tricks_needed = state.contract.tricks_needed
+                if all(t >= tricks_needed for t in totals):
+                    eval_stats["sure_win"] += 1
+                elif all(t < tricks_needed for t in totals):
+                    eval_stats["sure_lose"] += 1
+                else:
+                    eval_stats["critical"] += 1
+                # 飞牌后果敏感性探针：按缺失大牌（东/西）分桶累加（与 search() 主路径同口径）
+                _accumulate_finesse_probe(score_map, playable, state, hands,
+                                          finesse_probe, remaining_tricks,
+                                          curplayer_is_declarer)
 
             except Exception:
                 continue  # 跳过无效分布
@@ -939,6 +1101,15 @@ class DDSearch:
                     f"DD-endgame enumerated {enum_count} distributions "
                     f"({valid_count} valid) in {elapsed:.1f}s"
                 ),
+                # 与 search() 同口径的结构化三分类统计（供页面与飞牌拖延策略读取）
+                "dd_stats": {
+                    "samples": valid_count,
+                    "sure_win": eval_stats["sure_win"],
+                    "critical": eval_stats["critical"],
+                    "sure_lose": eval_stats["sure_lose"],
+                },
+                # 飞牌后果敏感性探针（与 search() 主路径同口径）：{花色: {对象, Δ, 引牌}}
+                "finesse_probe": _finalize_finesse_probe(finesse_probe),
                 "mcts_stats": {
                     "iterations": enum_count,
                     "valid_distributions": valid_count,

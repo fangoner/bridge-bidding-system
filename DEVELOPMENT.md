@@ -580,6 +580,18 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.70（2026-09-08）
+- **飞牌启动重构：拖延废弃 + 窗口期主动启动 + 顶张侧过手 + 探针滑动窗口与可飞性校验**（详见 `docs/飞牌优化讨论与修改记录_20260830.md`、`docs/飞牌策略总整理.md`）
+  - **拖延策略整体废弃**：单步贪心不会因拖延换花色获得信息改判，拖延只有代价无收益；删除 `_defer_candidates`/`_is_danger_suit`/`_is_finesse_struct_card` 及入口领出拖延分支与配置（`FINESSE_RATIO_RISK`/`FINESSE_LOSE_TRIGGER`/`FINESSE_DEFER_WIN_MIN`）
+  - **窗口期主动启动**（`_probe_lead_finesse_prefer`）：探针识别出结构（Δ≥0.4）即窗口期，领出方为庄/明手且引擎榜首是其他花色时主动改出该花色启动；门槛用探针结构本身（跨墩度量），不走 0.95 单步比值（单步贪心看不到跨墩飞牌收益）；9张以上砸/飞分流，<9张只飞不砸，顶张方无稳赢回手不强制
+  - **顶张侧过手启动**（`_apply_lead_transfer`）：当前侧探针无结构时以队友为领出方真跑 DD 评估（`dd_search.search` 新增 `perspective`/`actual_turn` 覆盖），队友侧探针同一 Δ≥0.4 门槛；当前方是顶张方 → `_cash_reentry` 过手给队友首引飞，写 finesse_flow
+  - **流程标记对象化**：`finesse_flow` 存对象 int，清理只按"对象现身/花色已死"，不再被当墩探针判空误清
+  - **DD 引擎识别只用探针法**（probe 存在即采纳、判空即无结构，不回退模板法；αμ 仍模板法）；**探针 Δ 阈值 0.5→0.4**（真实触发时点实测：8张平均 0.76、9张平均 0.86）
+  - **可飞性校验**（`_probe_struct_playable`）：Δ 高只说明位置敏感，须有 <对象 且 ≥10 间张 + >对象 上方控制才可飞；主路径与过手路径同口径共用
+  - **探针 3 张滑动窗口**：默认 AKQ；仅飞牌花色（finesse_flow）在窗口内大牌打出后下滑补齐三张（K出→AQJ、A出→QJT）；非飞牌花色固定 AKQ 不往下移——消除 ♠AK+xx 缺 T 类 J/T 位置敏感假阳性
+  - 6NT ♠(T) 误判修复（南♠AK32♥K32♦432♣KQJ/北♠54♥AQJ♦AQT987♣A2 不再误改 ♠2，只识别真实 ♦(K) 结构）
+- 投递：bridge/play_service.py, bridge/mcts/dd_search.py, bridge/play_types.py, config.py
+
 ### 2026-09-06（研究复盘：否决清将干预，无源码改动）
 - **6♠ 失败局归因反转**（详见 `docs/6S清将干预研究_局部vs全局口径.md`）
   - 初判"DDMC 未连续清将导致超将吃"为引擎缺陷 → 全局研究后确认是**口径错误伪命题**，引擎决策正确，**清将启发层方案正式作废**（`.trae/documents/trump-control-heuristic.md`）

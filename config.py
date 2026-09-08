@@ -91,14 +91,9 @@ def expand_model_list(base_models: list) -> list:
 
 ALL_MODELS = expand_model_list(ALL_BASE_MODELS)
 
-# MCTS / DD play engine settings
-DEFAULT_PLAY_ENGINE = "dd_alphamu_llm"  # 主力引擎；可选 "llm" | "mcts" | "dd" | "perfect" | "alphamu" | "dd_alphamu_llm"
-MCTS_SEARCH_MODE = "mcts"  # "mcts" (tree+rollout) | "dd" (pure Monte Carlo + double-dummy)
-MCTS_ITERATIONS = 5000
-MCTS_TIME_LIMIT = 10.0  # seconds per play decision
-MCTS_EXPLORATION_CONSTANT = 1.414
-MCTS_MIN_ITERATIONS = 500  # floor for adaptive iteration scaling
-ROLLOUT_GREEDY_PROB = 0.80  # probability of heuristic vs random in rollout
+# DD play engine settings
+# 2026-09-07：MCTS 引擎已移除（能力弱，代码不再保留）
+DEFAULT_PLAY_ENGINE = "dd_alphamu_llm"  # 主力引擎；可选 "llm" | "dd" | "perfect" | "alphamu" | "dd_alphamu_llm"
 DD_NUM_SAMPLES = 200  # DD 引擎默认采样数
 DD_MIN_SAMPLES = 15   # floor for adaptive sample scaling
 DD_TIME_LIMIT = 30.0  # seconds per DD play decision (30秒预算，允许首攻冷启动)
@@ -119,17 +114,15 @@ DD_KEEP_SURE_LOSE = True
 # 飞牌干预统一比值（所有引擎共用同一常量，延迟/8飞9砸/9砸后续同源，
 # 修改时只需改一个常量即可全局生效）：
 # 以比值（相对成功率）统一跨计分制：改选牌/榜首 ≥ 该值 即视为"差距不大"才干预。
-FINESSE_DEFER_ENABLE = True          # 飞牌干预总开关（延迟/接应）
+FINESSE_DEFER_ENABLE = True          # 飞牌干预总开关（窗口期启动/接应/流程；2026-09-08 拖延已废弃）
 FINESSE_EIGHT_NINE_ENABLE = True     # 8飞9砸 总开关
 FINESSE_RATIO = 0.95                 # 飞牌干预统一比值（DD 三种计分制 / αμ 引擎共用），
                                      # 以比值（相对成功率）统一跨计分制：改选牌/榜首 ≥ 该值才干预
-FINESSE_RATIO_RISK = 0.90            # 结构牌"全输占比"高（无望花色）时放宽的干预比值
-FINESSE_LOSE_TRIGGER = 0.8           # 结构牌全输样本占比 ≥ 此值视为"无望花色"，触发比值放宽
-FINESSE_DEFER_WIN_MIN = 0.8          # 拖延时机·稳成判定：飞牌花色联手≤8张时，
-                                     # 结构牌"全赢占比"（该出牌在所有样本中都≥所需墩的比例）≥ 此值
-                                     # 才视为基本稳成、早飞禁拖（无谓拖延纯损）；
-                                     # 全赢占比低于此值（如本例48%、临界52%占了近半）→
-                                     # 出牌存在显著风险，应拖延搜集信息、避免提前决断
+FINESSE_PROBE_DELTA = 0.4            # 飞牌后果敏感性探针阈值：缺失大牌在东/西两桶的
+                                     # 整手赢墩均值差 ≥ 此值才判该花色为飞牌结构
+                                     # （0.5→0.4：真实触发时点下 8/9 张 Δ 分布
+                                     #  平均 0.76/0.86、P50≈0.5，0.4 可多抓灰色地带，
+                                     #  由现有比值门控兜底）
 
 # 首攻与信号方案："standard"（标准方案，源自新睿自然）| 预留扩展（如"reverse"反式信号）
 LEAD_SIGNAL_SCHEME = "standard"
@@ -147,8 +140,6 @@ ALPHAMU_LLM_GAP_CAP = 0.35
 # 引擎粒子数/采样数范围（供 API 配置端点校验用）
 DD_PARTICLES_MIN = 100
 DD_PARTICLES_MAX = 2000
-MCTS_PARTICLES_MIN = 300
-MCTS_PARTICLES_MAX = 1000
 ALPHA_MU_WORLDS_MIN = 10
 ALPHA_MU_WORLDS_MAX = 100
 

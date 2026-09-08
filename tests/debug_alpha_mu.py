@@ -132,7 +132,7 @@ def debug_alpha_mu_scenario():
 
     # 获取 αμ 搜索器
     am = AlphaMuSearch(
-        sampler=service.mcts.sampler,
+        sampler=service.dd_search.sampler,
         num_worlds=20,  # 少一点方便调试
         max_depth=4,
         time_limit=10.0,
@@ -165,13 +165,13 @@ def debug_alpha_mu_scenario():
     print(f"  还需赢: {goal - (state.declarer_tricks if is_our_declarer else state.defender_tricks)} 墩")
 
     # 生成 worlds
-    if service.mcts.sampler.belief_tracker is not None:
-        service.mcts.sampler.belief_tracker.prepare(state, perspective)
+    if service.dd_search.sampler.belief_tracker is not None:
+        service.dd_search.sampler.belief_tracker.prepare(state, perspective)
 
     worlds = []
     for i in range(20):
         try:
-            w = service.mcts.sampler.sample(state, perspective)
+            w = service.dd_search.sampler.sample(state, perspective)
             if w is not None:
                 worlds.append(w)
         except Exception as e:

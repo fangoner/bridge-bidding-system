@@ -17,7 +17,6 @@ const BUDGET_FALLBACK = {
   bid: { chat: 310, reasoning: 1210 },
   play: {
     llm: { chat: 35, reasoning: 125 },
-    mcts: { chat: 15, reasoning: 15 },
     dd: { chat: 35, reasoning: 35 },
     perfect: { chat: 5, reasoning: 5 },
     alphamu: { chat: 126, reasoning: 306 },

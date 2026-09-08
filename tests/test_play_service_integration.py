@@ -341,32 +341,6 @@ def test_6_dd_engine():
     print("  测试通过!\n")
 
 
-def test_7_mcts_engine():
-    """测试 7: MCTS 引擎返回合法出牌。"""
-    print("=" * 60)
-    print("测试 7: MCTS 引擎")
-    print("=" * 60)
-
-    service = _make_service()
-    _init_standard_game(service)
-
-    loop = asyncio.new_event_loop()
-    try:
-        result = loop.run_until_complete(service.get_ai_play(use_mcts=True))
-    finally:
-        loop.close()
-
-    card = result.get("card")
-    assert card is not None, f"MCTS 应返回出牌, 实际: {result}"
-    card_obj = Card(suit=card["suit"], rank=card["rank"])
-    playable = service.get_playable_cards()
-    assert card_obj in playable, f"MCTS 推荐 {card_obj} 不在合法出牌中"
-    print(f"  ✓ MCTS 推荐: {card_obj}")
-    print(f"  ✓ 推理: {result.get('reasoning', '')[:100]}")
-
-    print("  测试通过!\n")
-
-
 def test_8_dd_alphamu_llm_midgame():
     """测试 8: DD-αμ-LLM 引擎中盘（DD+LLM审查）。"""
     print("=" * 60)
@@ -472,7 +446,6 @@ def test_11_engine_consistency():
 
     engines_to_test = [
         ("DD", {"use_dd": True, "dd_samples": 8}),
-        ("MCTS", {"use_mcts": True}),
         ("DD-αμ-LLM", {"use_dd_alphamu_llm": True, "dd_samples": 8}),
         ("Perfect", {"use_perfect": True}),
     ]
@@ -630,7 +603,6 @@ ALL_TESTS = [
     test_4_follow_suit_rule,
     test_5_undo_last_card,
     test_6_dd_engine,
-    test_7_mcts_engine,
     test_8_dd_alphamu_llm_midgame,
     test_9_dd_alphamu_llm_endgame_alpha_mu,
     test_10_perfect_dd_engine,

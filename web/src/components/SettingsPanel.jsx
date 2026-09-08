@@ -103,7 +103,6 @@ function SettingsPanel({
   ddSampleCount,
   handleDDSampleCountChange,
   ddParticlesRange,
-  mctsParticles, mctsParticlesRange,
   alphaMuParticles, alphaMuParticlesRange,
   handleParticleChange,
   alphaMuM, alphaMuMRange,
@@ -273,7 +272,6 @@ function SettingsPanel({
             >
               <MenuItem value="dd_alphamu_llm">DD-αμ-LLM</MenuItem>
               <MenuItem value="llm">LLM</MenuItem>
-              <MenuItem value="mcts">MCTS</MenuItem>
               <MenuItem value="dd">DD</MenuItem>
               <MenuItem value="perfect" disabled={mode !== 'practice' && !allHandsComplete} title={mode !== 'practice' && !allHandsComplete ? '完美DD需要四家完整手牌，暂不可用' : ''}>完美DD</MenuItem>
               <MenuItem value="alphamu">αμ</MenuItem>
@@ -369,11 +367,6 @@ function SettingsPanel({
                 min={alphaMuMRange.min} max={alphaMuMRange.max} step={1} width={48}
                 onCommit={handleAlphaMuMChange} />
             </>
-          )}
-          {playEngine === 'mcts' && (
-            <RangeSlider label="样本数" value={mctsParticles}
-              min={mctsParticlesRange.min} max={mctsParticlesRange.max} step={10} width={72}
-              onCommit={(v) => handleParticleChange('mcts', v)} />
           )}
         </Box>
       )}

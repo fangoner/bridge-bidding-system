@@ -44,9 +44,13 @@ export function PlayProvider({ children }) {
   const [directPlayContractInfo, setDirectPlayContractInfo] = useState(null)
 
   // ── 打牌引擎 ──
+  // 2026-09-07：MCTS 引擎已从系统中移除，旧 localStorage 残留的 "mcts" 一律回退默认（旧值作废），
+  // 避免后端拒绝报错。
+  const PLAYABLE_ENGINES = ['llm', 'dd', 'perfect', 'alphamu', 'dd_alphamu_llm']
   const [playEngine, setPlayEngineState] = useState(() => {
     try {
-      return localStorage.getItem(PLAY_ENGINE_KEY) || 'dd_alphamu_llm'
+      const saved = localStorage.getItem(PLAY_ENGINE_KEY)
+      return PLAYABLE_ENGINES.includes(saved) ? saved : 'dd_alphamu_llm'
     } catch {
       return 'dd_alphamu_llm'
     }

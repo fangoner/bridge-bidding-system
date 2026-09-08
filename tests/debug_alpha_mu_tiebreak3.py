@@ -187,7 +187,7 @@ def test_all_down_scenario():
 
     print(f"\n🚀 运行 αμ 搜索（20 worlds）...")
     am = AlphaMuSearch(
-        sampler=service.mcts.sampler,
+        sampler=service.dd_search.sampler,
         num_worlds=20,
         max_depth=4,
         time_limit=15.0,

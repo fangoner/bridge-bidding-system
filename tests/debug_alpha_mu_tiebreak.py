@@ -70,7 +70,7 @@ def debug_tiebreak():
     # 看看 αμ 对首攻的评估
     print(f"\n🚀 首攻时 αμ 评估（西家首攻）：")
     am = AlphaMuSearch(
-        sampler=service.mcts.sampler,
+        sampler=service.dd_search.sampler,
         num_worlds=10,
         max_depth=3,
         time_limit=10.0,

@@ -70,7 +70,6 @@ function PlayDetailPanel({
     if (useLlmReview && (playEngine === 'dd_alphamu_llm' || playEngine === 'alphamu_llm')) return [10, 90]
     switch (playEngine) {
       case 'llm': return [10, 40]
-      case 'mcts': return [5, 20]
       case 'dd': return [5, 25]
       case 'perfect': return [1, 5]
       case 'alphamu': return [5, 25]
@@ -150,7 +149,7 @@ function PlayDetailPanel({
     const prompt = record.prompt || ''
 
     // 输出模式：显示 fullOutput 中所有有效字段（排除内部/已渲染的）
-    const SKIP_KEYS = ['mcts_stats', 'tiered_phase', 'tiered_dd_fallback', 'tiered_mcts_fallback', 'validation_warning', 'llm_review', 'engine_phase', 'llm_review_status', '叫牌约束', '最新约束', '各家已出统计']
+    const SKIP_KEYS = ['mcts_stats', 'tiered_phase', 'tiered_dd_fallback', 'validation_warning', 'llm_review', 'engine_phase', 'llm_review_status', '叫牌约束', '最新约束', '各家已出统计']
     const FIELD_COLORS = ['#e65100', 'text.primary', '#2e7d32', '#1976d2', '#37474f', '#1565c0']
     const fields = Object.keys(fullOutput)
       .filter(k => !SKIP_KEYS.includes(k) && fullOutput[k] != null && fullOutput[k] !== '')
@@ -189,10 +188,6 @@ function PlayDetailPanel({
           ) : (record.used_engine || '') === 'dd' ? (
             <Typography variant="caption" sx={{ color: '#1565c0', fontSize: '0.7rem', fontWeight: 500 }}>
               DD
-            </Typography>
-          ) : record.used_engine === 'mcts' ? (
-            <Typography variant="caption" sx={{ color: '#2e7d32', fontSize: '0.7rem', fontWeight: 500 }}>
-              MCTS
             </Typography>
           ) : record.used_engine === 'alphamu' ? (
             <Typography variant="caption" sx={{ color: '#7b1fa2', fontSize: '0.7rem', fontWeight: 500 }}>
@@ -371,7 +366,7 @@ function PlayDetailPanel({
                 </Box>
               )
             })}
-            {(record.used_engine === 'mcts' || (record.used_engine || '') === 'dd' || record.used_engine === 'tiered' || record.used_engine === 'perfect' || record.used_engine === 'alphamu' || record.used_engine === 'alphamu_llm' || record.used_engine === 'dd_alphamu_llm') && (() => {
+            {(record.used_engine === 'dd' || record.used_engine === 'tiered' || record.used_engine === 'perfect' || record.used_engine === 'alphamu' || record.used_engine === 'alphamu_llm' || record.used_engine === 'dd_alphamu_llm') && (() => {
               try {
                 const mctsRaw = fullOutput.mcts_stats
                 if (!mctsRaw) { console.log('[Stats] no mcts_stats'); return null }
@@ -383,7 +378,7 @@ function PlayDetailPanel({
                 const isDD = (record.used_engine || '') === 'dd' || (!isAlphaMu && candidates[0].samples !== undefined)
                 const ddScoringMode = isDD && candidates[0] ? (candidates[0].scoring_mode || 'avg_tricks') : null
 
-                // αμ: bar = success_rate (成功率 0-1); DD: bar = scoring_val/avg_tricks; MCTS: bar = visits
+                // αμ: bar = success_rate (成功率 0-1); DD: bar = scoring_val/avg_tricks
                 const barValues = candidates.map(c => {
                   if (isAlphaMu) return (c.success_rate || 0) * 100
                   if (isDD) {
@@ -391,7 +386,7 @@ function PlayDetailPanel({
                     if (ddScoringMode === 'make_rate') return (c.scoring_val || 0) * 100
                     return c.avg_tricks || 0
                   }
-                  return c.visits || 0
+                  return c.avg_tricks || 0
                 })
                 const maxVal = Math.max(...barValues.map(v => Math.abs(v)), 0.01)
                 const barColors = isAlphaMu
@@ -404,7 +399,7 @@ function PlayDetailPanel({
                         ? `αμ: ${mctsData.num_worlds || '?'} worlds · depth≤4 · ${mctsData.nodes_searched || '?'} nodes · ${mctsData.iterations || '?'} DDS · ${mctsData.time_sec || '?'}s`
                         : isDD
                           ? `DDMC: ${mctsData.iterations}次搜索 · ${mctsData.time_sec}s · ${mctsData.iters_per_sec}it/s · 剩${mctsData.remaining_cards}张 · ${ddScoringMode === 'imp' ? 'IMP制' : ddScoringMode === 'make_rate' ? '成约率制' : '赢墩制'}`
-                          : `MCTS: ${mctsData.iterations}次搜索 · ${mctsData.time_sec}s · ${mctsData.iters_per_sec}it/s · 剩${mctsData.remaining_cards}张`
+                          : ''
                       }
                     </Typography>
                     {candidates.map((c, i) => {
@@ -433,7 +428,7 @@ function PlayDetailPanel({
                                 : ddScoringMode === 'make_rate'
                                   ? `${(c.scoring_val * 100).toFixed(1)}%`
                                   : `${c.avg_tricks}墩 [${c.min_tricks}-${c.max_tricks}]`}`
-                              : `${c.visits}次 · ${c.avg_tricks}墩`
+                              : ''
                           }
                         </Typography>
                       </Box>

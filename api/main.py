@@ -58,10 +58,9 @@ from config import (
     is_doubao_model, is_reasoning_model, get_base_model,
     DOUBAO_MODEL_2_1_PRO, DOUBAO_MODEL_2_1_TURBO,
     DD_PARTICLES_MIN, DD_PARTICLES_MAX,
-    MCTS_PARTICLES_MIN, MCTS_PARTICLES_MAX,
     ALPHA_MU_WORLDS_MIN, ALPHA_MU_WORLDS_MAX,
     ALPHA_MU_M, ALPHA_MU_M_MIN, ALPHA_MU_M_MAX,
-    MCTS_TIME_LIMIT, DD_TIME_LIMIT, ALPHA_MU_TIME_LIMIT,
+    DD_TIME_LIMIT, ALPHA_MU_TIME_LIMIT,
     VISION_PROVIDER, DEEPSEEK_VISION_MODEL,
 )
 from bridge.bidding_service import MAIN_PROMPT_MAX_RETRIES, FALLBACK_PROMPT_MAX_RETRIES
@@ -793,7 +792,6 @@ def _play_budget(engine: str, reasoning: bool) -> float:
     """ /api/play/ai-play 各引擎最坏耗时：引擎时间预算 + LLM 调用链（如有）。"""
     engine_budgets = {
         "llm": PLAY_BUDGET_MARGIN,
-        "mcts": MCTS_TIME_LIMIT + PLAY_BUDGET_MARGIN,
         "dd": DD_TIME_LIMIT + PLAY_BUDGET_MARGIN,
         "perfect": PLAY_BUDGET_MARGIN,
         "alphamu": ALPHA_MU_TIME_LIMIT + PLAY_BUDGET_MARGIN,
@@ -818,7 +816,7 @@ async def get_time_budgets():
     前端以「预算 + 10s 网络余量」作为请求超时，保证后端仍在合法
     重试/计算时前端不会提前 abort（P1-1 前端对齐）。
     """
-    engines = ["llm", "mcts", "dd", "perfect", "alphamu", "dd_alphamu_llm"]
+    engines = ["llm", "dd", "perfect", "alphamu", "dd_alphamu_llm"]
     return {
         "bid": {"chat": _bid_budget(False), "reasoning": _bid_budget(True)},
         "play": {
@@ -2197,7 +2195,7 @@ async def undo_play(session_id: str = Query("default")):
 class PlayAIRequest(BaseModel):
     use_reasoning: bool = False
     play_model: Optional[str] = None
-    play_engine: Optional[str] = None  # "llm" | "mcts" | "dd" | "perfect" | "alphamu" | "dd_alphamu_llm"
+    play_engine: Optional[str] = None  # "llm" | "dd" | "perfect" | "alphamu" | "dd_alphamu_llm"
     dd_sample_count: Optional[int] = None  # DD 蒙地卡罗采样数
     dd_alphamu_switch_cards: Optional[int] = None  # DD-αμ-LLM 引擎中盘/残局切换分界
     dd_scoring_mode: Optional[str] = None  # DD 决策计分制: "imp" | "make_rate" | "avg_tricks"
@@ -2289,14 +2287,13 @@ async def _execute_ai_play(request: PlayAIRequest, progress_cb=None) -> PlayAIRe
             if not service.is_human_turn():
                 engine = request.play_engine or DEFAULT_PLAY_ENGINE
                 # P2 修复：未识别引擎显式报错，避免静默落到 LLM 引擎（tiered/alphamu_llm 旧名已下线）
-                KNOWN_PLAY_ENGINES = {"llm", "mcts", "dd", "perfect", "alphamu", "dd_alphamu_llm"}
+                KNOWN_PLAY_ENGINES = {"llm", "dd", "perfect", "alphamu", "dd_alphamu_llm"}
                 if request.play_engine and engine not in KNOWN_PLAY_ENGINES:
                     return PlayAIResponse(
                         success=False,
                         used_engine=engine,
                         error=f"未知引擎: {engine}（可选: {', '.join(sorted(KNOWN_PLAY_ENGINES))}）"
                     )
-                use_mcts = engine == "mcts"
                 use_dd = engine == "dd"
                 use_perfect = engine == "perfect"
                 use_alphamu = engine == "alphamu"
@@ -2315,7 +2312,6 @@ async def _execute_ai_play(request: PlayAIRequest, progress_cb=None) -> PlayAIRe
                     progress_cb(f"引擎决策中（{engine}）")
                 result = await service.get_ai_play(
                     use_reasoning=use_reasoning,
-                    use_mcts=use_mcts,
                     use_dd=use_dd,
                     use_perfect=use_perfect,
                     use_alphamu=use_alphamu,
@@ -2844,7 +2840,6 @@ def _compute_dd_hints_for_state_from_state(state) -> dict:
 # ── 样本数 / world数设置（原"粒子数"，Phase 0a 后改为直接控制引擎参数）──
 class ParticleSettingsRequest(BaseModel):
     dd_particles: Optional[int] = None       # DD 样本数
-    mcts_particles: Optional[int] = None     # MCTS 迭代数
     alpha_mu_particles: Optional[int] = None # αμ world数
     alpha_mu_m: Optional[int] = None         # αμ 层数 M（Max 递归层数，M=1 退化为 PIMC）
     session_id: str = "default"
@@ -2855,16 +2850,12 @@ async def get_particle_settings(session_id: str = Query("default")):
     """获取当前采样/W数设置"""
     service = get_play_service(session_id)
     dd_val = service.dd_search.num_samples
-    mcts_val = service.mcts.iterations
     amu_val = service.alpha_mu_search.num_worlds if service.alpha_mu_search else ALPHA_MU_NUM_WORLDS
     amu_m = service.alpha_mu_search.M if service.alpha_mu_search else ALPHA_MU_M
     return {
         "dd_particles": dd_val,
         "dd_min": DD_PARTICLES_MIN,
         "dd_max": DD_PARTICLES_MAX,
-        "mcts_particles": mcts_val,
-        "mcts_min": MCTS_PARTICLES_MIN,
-        "mcts_max": MCTS_PARTICLES_MAX,
         "alpha_mu_particles": amu_val,
         "alpha_mu_min": ALPHA_MU_WORLDS_MIN,
         "alpha_mu_max": ALPHA_MU_WORLDS_MAX,
@@ -2883,10 +2874,6 @@ async def set_particle_settings(request: ParticleSettingsRequest):
         val = max(DD_PARTICLES_MIN, min(DD_PARTICLES_MAX, request.dd_particles))
         service.dd_search.num_samples = val
         updates["dd_particles"] = val
-    if request.mcts_particles is not None:
-        val = max(MCTS_PARTICLES_MIN, min(MCTS_PARTICLES_MAX, request.mcts_particles))
-        service.mcts.iterations = val
-        updates["mcts_particles"] = val
     if request.alpha_mu_particles is not None:
         val = max(ALPHA_MU_WORLDS_MIN, min(ALPHA_MU_WORLDS_MAX, request.alpha_mu_particles))
         if service.alpha_mu_search is not None:
