@@ -2924,6 +2924,52 @@ async def set_dd_world_filter(request: DdWorldFilterRequest):
     }
 
 
+# ── DD 引擎飞牌管理开关（运行时动态，无需重启后端）──
+
+class DdFinesseEnableRequest(BaseModel):
+    enable: Optional[bool] = None
+    session_id: str = "default"
+
+
+@app.get("/api/play/dd-finesse")
+async def get_dd_finesse_enable(session_id: str = Query("default")):
+    """获取 DD 引擎飞牌管理开关（true=DD 引入窗口期启动/接应/流程/8飞9砸）"""
+    return {"enable": bool(config.DD_FINESSE_ENABLE)}
+
+
+@app.post("/api/play/dd-finesse")
+async def set_dd_finesse_enable(request: DdFinesseEnableRequest):
+    """设置 DD 引擎飞牌管理开关（运行时即时生效；αμ 引擎不受影响）"""
+    if request.enable is not None:
+        config.DD_FINESSE_ENABLE = bool(request.enable)
+    return {"success": True, "enable": bool(config.DD_FINESSE_ENABLE)}
+
+
+# ── DD 探针 Δ 阈值（运行时动态，无需重启后端）──
+
+FINESSE_DELTA_MIN = 0.2
+FINESSE_DELTA_MAX = 0.5
+
+
+class DdFinesseDeltaRequest(BaseModel):
+    delta: Optional[float] = None
+    session_id: str = "default"
+
+
+@app.get("/api/play/dd-finesse-delta")
+async def get_dd_finesse_delta(session_id: str = Query("default")):
+    """获取 DD 探针 Δ 阈值（Δ≥该值判为飞牌结构，默认 0.4）"""
+    return {"delta": float(config.FINESSE_PROBE_DELTA)}
+
+
+@app.post("/api/play/dd-finesse-delta")
+async def set_dd_finesse_delta(request: DdFinesseDeltaRequest):
+    """设置 DD 探针 Δ 阈值（运行时即时生效，钳制在 0.2~0.5）"""
+    if request.delta is not None:
+        config.FINESSE_PROBE_DELTA = max(FINESSE_DELTA_MIN, min(FINESSE_DELTA_MAX, float(request.delta)))
+    return {"success": True, "delta": float(config.FINESSE_PROBE_DELTA)}
+
+
 # ── 记录自动备份 ──
 
 RECORDS_BACKUP_FILE = Path(__file__).parent.parent / "bridge_records_backup.json"

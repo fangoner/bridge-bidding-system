@@ -640,6 +640,50 @@ export const setDdWorldFilter = async (filter) => {
   }
 };
 
+// 获取 DD 引擎飞牌管理开关
+export const getDdFinesseEnable = async () => {
+  try {
+    const response = await api.get('/api/play/dd-finesse', { params: { session_id: PLAY_SESSION_ID } });
+    return response.data;
+  } catch (error) {
+    console.error('获取DD飞牌管理开关失败:', error);
+    throw error;
+  }
+};
+
+// 设置 DD 引擎飞牌管理开关（运行时即时生效，αμ 不受影响）
+export const setDdFinesseEnable = async (enable) => {
+  try {
+    const response = await api.post('/api/play/dd-finesse', { enable, session_id: PLAY_SESSION_ID });
+    return response.data;
+  } catch (error) {
+    console.error('设置DD飞牌管理开关失败:', error);
+    throw error;
+  }
+};
+
+// 获取 DD 探针 Δ 阈值（Δ≥该值判为飞牌结构，默认 0.4）
+export const getDdFinesseDelta = async () => {
+  try {
+    const response = await api.get('/api/play/dd-finesse-delta', { params: { session_id: PLAY_SESSION_ID } });
+    return response.data;
+  } catch (error) {
+    console.error('获取DD探针Δ阈值失败:', error);
+    throw error;
+  }
+};
+
+// 设置 DD 探针 Δ 阈值（运行时即时生效，范围 0.2~0.5）
+export const setDdFinesseDelta = async (delta) => {
+  try {
+    const response = await api.post('/api/play/dd-finesse-delta', { delta, session_id: PLAY_SESSION_ID });
+    return response.data;
+  } catch (error) {
+    console.error('设置DD探针Δ阈值失败:', error);
+    throw error;
+  }
+};
+
 // 获取当前视觉识别模型 provider
 export const getVisionProvider = async () => {
   try {

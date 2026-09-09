@@ -113,6 +113,10 @@ function SettingsPanel({
   handleDdScoringModeChange,
   keepSureWin, keepCritical, keepSureLose,
   handleKeepClassChange,
+  ddFinesseEnable,
+  handleDdFinesseChange,
+  ddFinesseDelta,
+  handleDdFinesseDeltaChange,
   dealSystem,
   setDealSystem,
   bidSystem,
@@ -331,6 +335,22 @@ function SettingsPanel({
               title="保留：所有候选出牌都打不成定约的样本；取消勾选=过滤该类世界"
               sx={{ fontSize: '0.65rem' }}
             />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={!!ddFinesseEnable}
+                  onChange={(e) => handleDdFinesseChange(e.target.checked)}
+                  size="small"
+                  sx={{ p: 0.4 }}
+                />
+              }
+              label="DD飞牌管理"
+              title="DD引擎是否引入飞牌管理（窗口期启动/接应/流程/8飞9砸）；关闭后DD仅按引擎得分选牌，αμ引擎不受影响。运行时即时生效"
+              sx={{ fontSize: '0.65rem' }}
+            />
+            <RangeSlider label="Δ阈值" value={ddFinesseDelta}
+              min={0.2} max={0.5} step={0.05} width={64}
+              onCommit={handleDdFinesseDeltaChange} />
             </>
           )}
 

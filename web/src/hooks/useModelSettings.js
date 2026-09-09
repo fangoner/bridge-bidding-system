@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { setFallbackModel, getFallbackModel, healthCheck, reloadJF, getParticleSettings, setParticleSettings, getVisionProvider, setVisionProvider, setDdWorldFilter } from '../services/api'
+import { setFallbackModel, getFallbackModel, healthCheck, reloadJF, getParticleSettings, setParticleSettings, getVisionProvider, setVisionProvider, setDdWorldFilter, setDdFinesseEnable, getDdFinesseDelta, setDdFinesseDelta } from '../services/api'
 import { useGame } from '../context/GameContext'
 
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
@@ -13,6 +13,9 @@ const DD_SCORING_MODE_KEY = 'bridge_dd_scoring_mode'
 const DD_KEEP_WIN_KEY = 'bridge_dd_keep_sure_win'
 const DD_KEEP_CRIT_KEY = 'bridge_dd_keep_critical'
 const DD_KEEP_LOSE_KEY = 'bridge_dd_keep_sure_lose'
+const DD_FINESSE_ENABLE_KEY = 'bridge_dd_finesse_enable'
+const DD_FINESSE_DELTA_KEY = 'bridge_dd_finesse_delta'
+const DD_FINESSE_DELTA_DEFAULT = 0.4
 const VISION_PROVIDER_KEY = 'bridge_vision_provider'
 
 // 解析组合模型值 "model::reasoning" → { model, reasoning }
@@ -164,6 +167,37 @@ export function useModelSettings() {
     }
   }, [])
 
+  // DD 引擎飞牌管理开关（localStorage 持久化 + 启动时推送后端；运行时即时生效）
+  const [ddFinesseEnable, setDdFinesseEnableState] = useState(() => loadKeep(DD_FINESSE_ENABLE_KEY))
+  const handleDdFinesseChange = useCallback(async (enabled) => {
+    setDdFinesseEnableState(enabled)
+    try { localStorage.setItem(DD_FINESSE_ENABLE_KEY, enabled ? 'true' : 'false') } catch {/* empty */}
+    try {
+      await setDdFinesseEnable(enabled)
+    } catch (err) {
+      console.error('设置DD飞牌管理开关失败:', err)
+    }
+  }, [])
+
+  // DD 探针 Δ 阈值（localStorage 持久化 + 启动时同步后端；运行时即时生效）
+  const [ddFinesseDelta, setDdFinesseDeltaState] = useState(() => {
+    try {
+      const v = Number(localStorage.getItem(DD_FINESSE_DELTA_KEY))
+      if (!Number.isNaN(v) && v >= 0.2 && v <= 0.5) return v
+    } catch {/* empty */}
+    return DD_FINESSE_DELTA_DEFAULT
+  })
+  const handleDdFinesseDeltaChange = useCallback(async (delta) => {
+    const clamped = Math.min(0.5, Math.max(0.2, Math.round(delta * 100) / 100))
+    setDdFinesseDeltaState(clamped)
+    try { localStorage.setItem(DD_FINESSE_DELTA_KEY, String(clamped)) } catch {/* empty */}
+    try {
+      await setDdFinesseDelta(clamped)
+    } catch (err) {
+      console.error('设置DD探针Δ阈值失败:', err)
+    }
+  }, [])
+
   // 视觉识别模型 provider（截屏/图片识别）；localStorage 持久化 + 启动时同步到后端
   const [visionProvider, setVisionProviderState] = useState(() => {
     try { return localStorage.getItem(VISION_PROVIDER_KEY) || 'deepseek' } catch { return 'deepseek' }
@@ -240,6 +274,17 @@ export function useModelSettings() {
     }).catch(() => {})
     // 以前端 localStorage 为准推送样本类别开关到后端
     syncDdWorldFilter()
+    // 同步 DD 飞牌管理开关到后端
+    setDdFinesseEnable(loadKeep(DD_FINESSE_ENABLE_KEY)).catch(() => {})
+    // 同步 DD 探针 Δ 阈值到后端（前端 localStorage 为准）
+    const storedDelta = (() => {
+      try {
+        const v = Number(localStorage.getItem(DD_FINESSE_DELTA_KEY))
+        if (!Number.isNaN(v) && v >= 0.2 && v <= 0.5) return v
+      } catch {/* empty */}
+      return DD_FINESSE_DELTA_DEFAULT
+    })()
+    setDdFinesseDelta(storedDelta).catch(() => {})
   }, [syncDdWorldFilter])
 
   const checkApiStatus = useCallback(async () => {
@@ -306,6 +351,12 @@ export function useModelSettings() {
     // DD 样本类别保留开关（全赢/临界/全输）
     keepSureWin, keepCritical, keepSureLose,
     handleKeepClassChange,
+    // DD 引擎飞牌管理开关
+    ddFinesseEnable,
+    handleDdFinesseChange,
+    // DD 探针 Δ 阈值
+    ddFinesseDelta,
+    handleDdFinesseDeltaChange,
     // 视觉识别模型 provider
     visionProvider,
     visionProviders,

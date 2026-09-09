@@ -650,8 +650,13 @@ class DDSearch:
 
         # 批量求解优先：solve_all_boards 内部用线程池加速，dds C 库自管理线程安全
         # 失败时降级到串行 DDS
-        # 飞牌后果敏感性探针：按缺失大牌位置分桶，零额外 DDS
-        finesse_probe = {}
+        # 飞牌后果敏感性探针：按缺失大牌位置分桶，零额外 DDS。
+        # 门控（2026-09-09 修正）：仅"本家正在领出"才探测——跟牌/垫牌时探针
+        # 会因滑动窗口下移发明新对象（如飞Q时Q刚出，探针滑到"飞T"），把本应
+        # 放小的接应误判成必须盖T。领出方为庄/明手才探测（对方领出不探测）。
+        # DD 飞牌管理开关（DD_FINESSE_ENABLE=False）时探测一并关闭，输出空。
+        _probe_ok = (not trick_cards) and (actual_turn in (declarer, dummy))
+        finesse_probe = {} if (_probe_ok and _dd_config.DD_FINESSE_ENABLE) else None
         _solve_times = []  # 所有粒子耗时，用于统计分布
         _batch_used = False
         if samples:
@@ -829,7 +834,7 @@ class DDSearch:
                 },
                 # 飞牌后果敏感性探针：{花色: {对象, Δ, 引牌}}，缺失大牌位置
                 # 分桶的赢墩均值差；play_service 依此判定飞牌结构。
-                "finesse_probe": _finalize_finesse_probe(finesse_probe),
+                "finesse_probe": _finalize_finesse_probe(finesse_probe or {}),
                 "mcts_stats": {
                     "iterations": samples_done,
                     "time_sec": round(elapsed, 2),
@@ -977,8 +982,13 @@ class DDSearch:
         eval_stats = {"kept": 0, "sure_win": 0, "critical": 0, "sure_lose": 0,
                       "dropped_win": 0, "dropped_crit": 0, "dropped_lose": 0}
         # 飞牌后果敏感性探针（与 search() 主路径同口径）：枚举世界四家手牌已知，
-        # 同样可按缺失大牌位置分桶——补齐残局枚举路径的 finesse_probe 缺口
-        finesse_probe = {}
+        # 同样可按缺失大牌位置分桶——补齐残局枚举路径的 finesse_probe 缺口。
+        # 门控与 search() 一致（2026-09-09 统一）：仅"本家正在领出"才探测——
+        # 跟牌/垫牌时探针会因滑动窗口下移发明新对象（如飞Q时Q刚出，探针滑到
+        # "飞T"），把本应放小的接应误判成必须盖T。跟牌时无论谁领出都不探测；
+        # 受 DD 飞牌管理开关（DD_FINESSE_ENABLE）控制，关闭时输出空。
+        _probe_ok = (not trick_cards) and (actual_turn in (declarer, dummy))
+        finesse_probe = {} if (_probe_ok and _dd_config.DD_FINESSE_ENABLE) else None
 
         # ── 逐世界 DDS 求解 ──
         for hands in worlds:
@@ -1109,7 +1119,7 @@ class DDSearch:
                     "sure_lose": eval_stats["sure_lose"],
                 },
                 # 飞牌后果敏感性探针（与 search() 主路径同口径）：{花色: {对象, Δ, 引牌}}
-                "finesse_probe": _finalize_finesse_probe(finesse_probe),
+                "finesse_probe": _finalize_finesse_probe(finesse_probe or {}),
                 "mcts_stats": {
                     "iterations": enum_count,
                     "valid_distributions": valid_count,

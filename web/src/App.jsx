@@ -383,6 +383,8 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     ddScoringMode, handleDdScoringModeChange,
     keepSureWin, keepCritical, keepSureLose,
     handleKeepClassChange,
+    ddFinesseEnable, handleDdFinesseChange,
+    ddFinesseDelta, handleDdFinesseDeltaChange,
     handleFallbackModelChange,
     handlePlayModelChange,
     checkApiStatus,
@@ -3012,6 +3014,10 @@ const handleReviewCompletedPlay = async () => {
         ddScoringMode={ddScoringMode} handleDdScoringModeChange={handleDdScoringModeChange}
         keepSureWin={keepSureWin} keepCritical={keepCritical} keepSureLose={keepSureLose}
         handleKeepClassChange={handleKeepClassChange}
+        ddFinesseEnable={ddFinesseEnable}
+        handleDdFinesseChange={handleDdFinesseChange}
+        ddFinesseDelta={ddFinesseDelta}
+        handleDdFinesseDeltaChange={handleDdFinesseDeltaChange}
         dealSystem={dealSystem}
         setDealSystem={setDealSystem}
         bidSystem={bidSystem}

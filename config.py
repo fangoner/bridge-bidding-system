@@ -116,6 +116,8 @@ DD_KEEP_SURE_LOSE = True
 # 以比值（相对成功率）统一跨计分制：改选牌/榜首 ≥ 该值 即视为"差距不大"才干预。
 FINESSE_DEFER_ENABLE = True          # 飞牌干预总开关（窗口期启动/接应/流程；2026-09-08 拖延已废弃）
 FINESSE_EIGHT_NINE_ENABLE = True     # 8飞9砸 总开关
+DD_FINESSE_ENABLE = True             # DD 引擎飞牌管理开关（窗口期启动/接应/流程/8飞9砸；
+                                     # 关闭后 DD 仅按引擎得分选牌，αμ 不受影响；运行时切换）
 FINESSE_RATIO = 0.95                 # 飞牌干预统一比值（DD 三种计分制 / αμ 引擎共用），
                                      # 以比值（相对成功率）统一跨计分制：改选牌/榜首 ≥ 该值才干预
 FINESSE_PROBE_DELTA = 0.4            # 飞牌后果敏感性探针阈值：缺失大牌在东/西两桶的

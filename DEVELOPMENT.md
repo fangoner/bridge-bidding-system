@@ -580,6 +580,17 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.71（2026-09-09~10）
+- **接应判据收敛 + 探针门控修正 + DD 飞牌开关与 Δ 滑块**（详见 `docs/飞牌优化讨论与修改记录_20260830.md`；3NT 坐庄让过问题另见 `docs/坐庄决策_双明手全知偏差与单明手精修方案.md`）
+  - **可飞性校验删除**（`_probe_struct_playable` 整体移除）：探针 Δ≥0.4 即采纳为结构；误出防护由执行层承接（接应威胁比较制"选不出牌就尊重引擎"）
+  - **接应尊重引擎唯一判据**：`_finesse_commit_check` 返回 None（本家无牌可压威胁/对象已现身/同伙未引飞）才尊重引擎；比值退让删除（采样口径不能否决结构动作）、AK 双顶张判据维持删除
+  - **跟牌接应 flow 补构撤销**：严格只信当墩探针，判空即无结构不接应；流程延续（finesse_flow）只管下一墩领出，不与接应判据混层
+  - **接应结构来源与执行层共用**：`_apply_finesse_commit` 与 `_finesse_commit_check` 共用同一传入 finesse_struct，不再内部二次检测（6♠ 例 ♠8 接应被吞的根因）
+  - **探针门控修正**（主 search + 残局枚举统一）：仅"本家正在领出"才探测（`_probe_ok = (not trick_cards) and (actual_turn in (declarer, dummy))`）；跟牌/垫牌不探测——避免滑动窗口下移发明"飞T"对象导致误盖
+  - **DD 飞牌管理开关**（`DD_FINESSE_ENABLE`）：config + `/api/play/dd-finesse` 运行时切换；关闭后 DD 仅按引擎得分选牌（探针一并关闭），αμ 不受影响；前端 checkbox + localStorage
+  - **探针 Δ 阈值运行时滑块**：`FINESSE_PROBE_DELTA` 0.2~0.5（默认 0.4）`/api/play/dd-finesse-delta` 即时生效；前端 RangeSlider
+- 投递：bridge/play_service.py, bridge/mcts/dd_search.py, config.py, api/main.py, web/src/App.jsx, web/src/components/SettingsPanel.jsx, web/src/hooks/useModelSettings.js, web/src/services/api.js, tests/_tmp_follow_probe_gate.py（新增）
+
 ### v1.70（2026-09-08）
 - **飞牌启动重构：拖延废弃 + 窗口期主动启动 + 顶张侧过手 + 探针滑动窗口与可飞性校验**（详见 `docs/飞牌优化讨论与修改记录_20260830.md`、`docs/飞牌策略总整理.md`）
   - **拖延策略整体废弃**：单步贪心不会因拖延换花色获得信息改判，拖延只有代价无收益；删除 `_defer_candidates`/`_is_danger_suit`/`_is_finesse_struct_card` 及入口领出拖延分支与配置（`FINESSE_RATIO_RISK`/`FINESSE_LOSE_TRIGGER`/`FINESSE_DEFER_WIN_MIN`）
@@ -590,7 +601,10 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
   - **可飞性校验**（`_probe_struct_playable`）：Δ 高只说明位置敏感，须有 <对象 且 ≥10 间张 + >对象 上方控制才可飞；主路径与过手路径同口径共用
   - **探针 3 张滑动窗口**：默认 AKQ；仅飞牌花色（finesse_flow）在窗口内大牌打出后下滑补齐三张（K出→AQJ、A出→QJT）；非飞牌花色固定 AKQ 不往下移——消除 ♠AK+xx 缺 T 类 J/T 位置敏感假阳性
   - 6NT ♠(T) 误判修复（南♠AK32♥K32♦432♣KQJ/北♠54♥AQJ♦AQT987♣A2 不再误改 ♠2，只识别真实 ♦(K) 结构）
-- 投递：bridge/play_service.py, bridge/mcts/dd_search.py, bridge/play_types.py, config.py
+  - **接应选牌"威胁比较制"**（`_finesse_commit_check` 废除 10 分界，2026-09-08）：敌方本墩已出对象 → 最小顶张盖；对象历史已现身 → 不贴小牌尊重引擎；否则威胁 = 敌方剩余（全部牌面−我方庄/明现手−已出）中除对象外最大者——同伙引牌 > 威胁 → 出最小牌保留结构；引牌不足 → 出 >威胁 的最小牌（第三家打大牌），无牌可压 → 尊重引擎
+  - **跟牌接应侧 flow 补构**：探针判空但有活动 finesse_flow 时用 flow 对象补齐结构再判接应（与领出侧同口径）**【2026-09-09 已撤销：严格只信当墩探针，见 v1.71】**
+  - **接应尊重引擎退让裁剪为单判据**：删除 AK 双顶张"砸路线"判据（适用面窄、总张数少时常误判），统一走威胁比较制强制接应；仅保留接应飞张与榜首决策分比值 <0.90 尊重引擎**【2026-09-09 比值退让一并删除，仅剩"选不出牌"尊重引擎，见 v1.71】**
+- 投递：bridge/play_service.py, bridge/mcts/dd_search.py, bridge/play_types.py, config.py, tests/_tmp_commit_check.py（新增）
 
 ### 2026-09-06（研究复盘：否决清将干预，无源码改动）
 - **6♠ 失败局归因反转**（详见 `docs/6S清将干预研究_局部vs全局口径.md`）
