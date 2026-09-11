@@ -16,6 +16,7 @@ from bridge.mcts.state_utils import (
     get_current_trick_state,
 )
 from bridge.mcts.sampler import DealSampler, ALL_CARDS
+from bridge.mcts.belief import collect_voids
 
 _DEBUG_LOG = os.path.join(BASE_DIR, "dd_debug.log")
 
@@ -537,6 +538,15 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
     return samples_done, solve_times, solve_total, solve_max
 
 
+def _hand_violates_void(hands: Dict[str, List[Card]], voids: Dict[str, set]) -> bool:
+    """手牌是否违反已知 void 硬事实（某位置某花色已垫过牌，不可能再有该花色）。"""
+    for pos, hand in hands.items():
+        s = voids.get(pos)
+        if s and any(c.suit in s for c in hand):
+            return True
+    return False
+
+
 class DDSearch:
 
     def __init__(self, sampler: DealSampler = None, num_samples: int = 100,
@@ -568,6 +578,175 @@ class DDSearch:
             # 纯平均赢墩（MP 思路）：不混合 min，避免 maximin 的保守惩罚
             return sum(scores) / len(scores) if scores else 0.0
         return None
+
+    def _fmt_score(self, s: dict) -> str:
+        """按计分制格式化候选分数（search 与残局枚举共用同一输出口径）。"""
+        mode = s.get("scoring_mode", "avg_tricks")
+        if mode == "imp":
+            return f"{s.get('scoring_val', 0):+.3f}IMP"
+        elif mode == "make_rate":
+            return f"{s.get('scoring_val', 0)*100:.1f}%"
+        else:
+            return f"{s['avg_tricks']}[{s['min_tricks']}-{s['max_tricks']}]"
+
+    def _finalize_decision(self, card_scores, state, playable, is_declarer_side, elapsed):
+        """选牌汇总与排序，search（采样）与残局枚举共用同一决策口径。
+
+        card_scores: {str(card): {"weighted_sum", "total_weight", "scores", "mn", "mx"}}
+        两种路径唯一区别是样本来源（随机采样 vs 穷举世界），
+        计分制决策（_decision_value）、差值比较（_compare_candidates）、
+        排序与输出格式（_fmt_score）完全一致。
+        """
+        obj_map = {str(c): c for c in playable}
+        best_card = None
+        best_blended = None
+        best_scores = None
+        best_rank_val = None
+        child_stats = []
+        blended_map = {}
+        scores_map = {}
+        for card_str, stats in card_scores.items():
+            scores = stats["scores"]
+            w_sum = stats["weighted_sum"]
+            w_total = stats["total_weight"]
+            # 加权平均（纯约束模式下所有 weight=1.0，退化为普通平均）
+            w_avg = w_sum / w_total if w_total > 0 else 0.0
+            mn = stats["mn"] if stats["mn"] != float("inf") else 0
+            mx = stats["mx"] if stats["mx"] != -float("inf") else 0
+            child_stats.append({
+                "card": card_str,
+                "samples": len(scores),
+                "avg_tricks": round(w_avg, 2),
+                "min_tricks": mn,
+                "max_tricks": mx,
+                "scores": scores,
+                "scoring_val": None,
+                "scoring_mode": self.scoring_mode,
+            })
+
+            rank_val = _card_rank_val(card_str)
+
+            scoring_val = self._decision_value(scores, state)
+            if scoring_val is not None:
+                blended = scoring_val
+                child_stats[-1]["scoring_val"] = round(scoring_val, 3)
+            else:
+                blended = w_avg
+
+            blended_map[card_str] = blended
+            scores_map[card_str] = scores
+
+            # 配对差值检验：同 world 配对差值的样本标准差决定显著性阈值
+            if best_card is None or _compare_candidates(blended, scores, rank_val, best_blended, best_scores, best_rank_val, is_declarer_side) > 0:
+                best_card = obj_map[card_str]
+                best_blended = blended
+                best_scores = scores
+                best_rank_val = rank_val
+
+        from functools import cmp_to_key
+        child_stats.sort(key=cmp_to_key(
+            lambda a, b: -_compare_candidates(
+                blended_map[a["card"]], scores_map[a["card"]], _card_rank_val(a["card"]),
+                blended_map[b["card"]], scores_map[b["card"]], _card_rank_val(b["card"]),
+                is_declarer_side
+            )
+        ))
+
+        top_plays_str = ", ".join(
+            f"{s['card']}({self._fmt_score(s)})"
+            for s in child_stats[:5]
+        )
+        return {
+            "best_card": best_card,
+            "child_stats": child_stats,
+            "top_plays_str": top_plays_str,
+            "blended_map": blended_map,
+            "scores_map": scores_map,
+            "best_blended": best_blended,
+            "best_scores": best_scores,
+            "best_rank_val": best_rank_val,
+        }
+
+    def _solve_worlds(self, worlds, all_played, trick_cards, trick_leader,
+                      playable, state, perspective, actual_turn, declarer, dummy,
+                      trump, card_scores, eval_stats, finesse_probe,
+                      start_time, mode_note=""):
+        """批量求解 + 串行降级 + 耗时统计，search（采样）与残局枚举共用。
+
+        worlds 是两张路径的唯一区别：sample_n 的随机采样 vs 穷举世界。
+        返回 (samples_done, solve_times, solve_total, solve_max)。
+        """
+        samples_done = 0
+        _solve_total = 0.0
+        _solve_max = 0.0
+        _solve_count = 0
+        _solve_times = []
+        _batch_used = False
+        time_limit = self.time_limit
+        if worlds:
+            _t_batch_total = time.time()
+            _bd, _bt, _bs_tot, _bs_max = _solve_batch(
+                worlds, all_played, trick_cards, trick_leader,
+                playable, state, perspective, actual_turn, declarer, dummy,
+                trump, card_scores, time_limit, start_time, eval_stats,
+                finesse_probe=finesse_probe)
+            if _bd > 0:
+                _batch_used = True
+                samples_done = _bd
+                _solve_times = _bt
+                _solve_total = _bs_tot
+                _solve_max = _bs_max
+                _solve_count = _bd
+                with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                    _f.write(f"[DD] 批量求解完成: {_bd}世界 batch_total={_bs_tot:.2f}s\n")
+            else:
+                # 批量失败：降级到串行（等权）
+                with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                    _f.write(f"[DD] 批量求解失败，降级到串行\n")
+                for world in worlds:
+                    if time.time() - start_time > time_limit:
+                        break
+                    samples_done += 1
+                    _t_s0 = time.time()
+                    _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
+                                       playable, state, perspective, actual_turn, declarer, dummy,
+                                       trump, card_scores, 1.0, samples_done, eval_stats,
+                                       finesse_probe=finesse_probe)
+                    _dt_solve = time.time() - _t_s0
+                    _solve_times.append(_dt_solve)
+                    _solve_total += _dt_solve
+                    _solve_count += 1
+                    if _dt_solve > _solve_max:
+                        _solve_max = _dt_solve
+                    if _solve_count <= 3:
+                        with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                            _f.write(f"[DD]   sample#{_solve_count} solve={_dt_solve:.3f}s\n")
+                    if _dt_solve > 0.1:
+                        with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                            _f.write(f"[DD_SLOW] sample#{_solve_count} solve={_dt_solve:.3f}s\n")
+            # 输出耗时分布统计
+            if _solve_times:
+                _st_sorted = sorted(_solve_times)
+                _n = len(_st_sorted)
+                _p50 = _st_sorted[int(_n * 0.5)]
+                _p90 = _st_sorted[int(_n * 0.9)]
+                _p99 = _st_sorted[min(int(_n * 0.99), _n - 1)]
+                _avg = sum(_st_sorted) / _n
+                _mode = "BATCH" if _batch_used else "SERIAL"
+                with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+                    _f.write(f"[DD_STATS] mode={_mode} n={_n} avg={_avg*1000:.1f}ms p50={_p50*1000:.1f}ms "
+                             f"p90={_p90*1000:.1f}ms p99={_p99*1000:.1f}ms max={_solve_max*1000:.1f}ms "
+                             f"total={_solve_total:.2f}s\n")
+        elapsed = time.time() - start_time
+        _solve_avg = (_solve_total / _solve_count) if _solve_count > 0 else 0.0
+        print(f"[DD] 全量模式完成: {samples_done} 世界, {elapsed:.1f}s"
+              f"{mode_note} solve_avg={_solve_avg:.3f}s solve_max={_solve_max:.3f}s "
+              f"solve_total={_solve_total:.1f}s")
+        with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+            _f.write(f"[DD] 完成: {samples_done}世界 {elapsed:.1f}s "
+                     f"solve_avg={_solve_avg:.3f}s solve_max={_solve_max:.3f}s "
+                     f"solve_total={_solve_total:.1f}s\n")
+        return samples_done, _solve_times, _solve_total, _solve_max
 
     def search(self, state: PlayState, perspective: str = None,
                actual_turn: str = None) -> dict:
@@ -644,12 +823,6 @@ class DDSearch:
         samples_done = 0
         eval_stats = {"kept": 0, "sure_win": 0, "critical": 0, "sure_lose": 0,
                       "dropped_win": 0, "dropped_crit": 0, "dropped_lose": 0}
-        _solve_total = 0.0
-        _solve_max = 0.0
-        _solve_count = 0
-
-        # 批量求解优先：solve_all_boards 内部用线程池加速，dds C 库自管理线程安全
-        # 失败时降级到串行 DDS
         # 飞牌后果敏感性探针：按缺失大牌位置分桶，零额外 DDS。
         # 门控（2026-09-09 修正）：仅"本家正在领出"才探测——跟牌/垫牌时探针
         # 会因滑动窗口下移发明新对象（如飞Q时Q刚出，探针滑到"飞T"），把本应
@@ -657,143 +830,18 @@ class DDSearch:
         # DD 飞牌管理开关（DD_FINESSE_ENABLE=False）时探测一并关闭，输出空。
         _probe_ok = (not trick_cards) and (actual_turn in (declarer, dummy))
         finesse_probe = {} if (_probe_ok and _dd_config.DD_FINESSE_ENABLE) else None
-        _solve_times = []  # 所有粒子耗时，用于统计分布
-        _batch_used = False
-        if samples:
-            # 尝试批量求解
-            _t_batch_total = time.time()
-            _bd, _bt, _bs_tot, _bs_max = _solve_batch(
-                samples, all_played, trick_cards, trick_leader,
-                playable, state, perspective, actual_turn, declarer, dummy,
-                trump, card_scores, self.time_limit, start_time, eval_stats,
-                finesse_probe=finesse_probe)
-            if _bd > 0:
-                # 批量成功
-                _batch_used = True
-                samples_done = _bd
-                _solve_times = _bt
-                _solve_total = _bs_tot
-                _solve_max = _bs_max
-                _solve_count = _bd
-                with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
-                    _f.write(f"[DD] 批量求解完成: {_bd}世界 batch_total={_bs_tot:.2f}s\n")
-            else:
-                # 批量失败：降级到串行（等权）
-                with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
-                    _f.write(f"[DD] 批量求解失败，降级到串行\n")
-                for world in samples:
-                    if time.time() - start_time > self.time_limit:
-                        break
-                    samples_done += 1
-                    _t_s0 = time.time()
-                    _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
-                                       playable, state, perspective, actual_turn, declarer, dummy,
-                                       trump, card_scores, 1.0, samples_done, eval_stats,
-                                       finesse_probe=finesse_probe)
-                    _dt_solve = time.time() - _t_s0
-                    _solve_times.append(_dt_solve)
-                    _solve_total += _dt_solve
-                    _solve_count += 1
-                    if _dt_solve > _solve_max:
-                        _solve_max = _dt_solve
-                    if _solve_count <= 3:
-                        with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
-                            _f.write(f"[DD]   sample#{_solve_count} solve={_dt_solve:.3f}s\n")
-                    if _dt_solve > 0.1:
-                        with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
-                            _f.write(f"[DD_SLOW] sample#{_solve_count} solve={_dt_solve:.3f}s\n")
-            # 输出耗时分布统计
-            if _solve_times:
-                _st_sorted = sorted(_solve_times)
-                _n = len(_st_sorted)
-                _p50 = _st_sorted[int(_n * 0.5)]
-                _p90 = _st_sorted[int(_n * 0.9)]
-                _p99 = _st_sorted[min(int(_n * 0.99), _n - 1)]
-                _avg = sum(_st_sorted) / _n
-                _mode = "BATCH" if _batch_used else "SERIAL"
-                with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
-                    _f.write(f"[DD_STATS] mode={_mode} n={_n} avg={_avg*1000:.1f}ms p50={_p50*1000:.1f}ms "
-                             f"p90={_p90*1000:.1f}ms p99={_p99*1000:.1f}ms max={_solve_max*1000:.1f}ms "
-                             f"total={_solve_total:.2f}s\n")
+
+        samples_done, _solve_times, _solve_total, _solve_max = self._solve_worlds(
+            samples, all_played, trick_cards, trick_leader,
+            playable, state, perspective, actual_turn, declarer, dummy,
+            trump, card_scores, eval_stats, finesse_probe, start_time,
+            mode_note=" (均匀采样)")
         elapsed = time.time() - start_time
-        _solve_avg = (_solve_total / _solve_count) if _solve_count > 0 else 0.0
-        print(f"[DD] 全量模式完成: {samples_done} 世界, {elapsed:.1f}s"
-              f"{' (均匀采样)'} "
-              f"solve_avg={_solve_avg:.3f}s solve_max={_solve_max:.3f}s "
-              f"solve_total={_solve_total:.1f}s prepare={_prepare_t:.2f}s")
-        with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
-            _f.write(f"[DD] 完成: {samples_done}世界 {elapsed:.1f}s "
-                     f"solve_avg={_solve_avg:.3f}s solve_max={_solve_max:.3f}s "
-                     f"solve_total={_solve_total:.1f}s prepare={_prepare_t:.2f}s\n")
 
-        best_card = None
-        best_blended = None
-        best_scores = None
-        best_rank_val = None
-        child_stats = []
-        blended_map = {}
-        scores_map = {}
-        for card in playable:
-            stats = card_scores[str(card)]
-            scores = stats["scores"]
-            w_sum = stats["weighted_sum"]
-            w_total = stats["total_weight"]
-            # 加权平均（纯约束模式下所有 weight=1.0，退化为普通平均）
-            w_avg = w_sum / w_total if w_total > 0 else 0.0
-            mn = stats["mn"] if stats["mn"] != float("inf") else 0
-            mx = stats["mx"] if stats["mx"] != -float("inf") else 0
-            child_stats.append({
-                "card": str(card),
-                "samples": len(scores),
-                "avg_tricks": round(w_avg, 2),
-                "min_tricks": mn,
-                "max_tricks": mx,
-                "scores": scores,
-                "scoring_val": None,
-                "scoring_mode": self.scoring_mode,
-            })
-
-            rank_val = RANK_ORDER.get(card.rank, 0)
-
-            scoring_val = self._decision_value(scores, state)
-            if scoring_val is not None:
-                blended = scoring_val
-                child_stats[-1]["scoring_val"] = round(scoring_val, 3)
-            else:
-                blended = w_avg
-
-            blended_map[str(card)] = blended
-            scores_map[str(card)] = scores
-
-            # 配对差值检验：同 world 配对差值的样本标准差决定显著性阈值
-            if best_card is None or _compare_candidates(blended, scores, rank_val, best_blended, best_scores, best_rank_val, is_declarer_side) > 0:
-                best_card = card
-                best_blended = blended
-                best_scores = scores
-                best_rank_val = rank_val
-
-        from functools import cmp_to_key
-        child_stats.sort(key=cmp_to_key(
-            lambda a, b: -_compare_candidates(
-                blended_map[a["card"]], scores_map[a["card"]], _card_rank_val(a["card"]),
-                blended_map[b["card"]], scores_map[b["card"]], _card_rank_val(b["card"]),
-                is_declarer_side
-            )
-        ))
-
-        def _fmt_score(s):
-            mode = s.get("scoring_mode", "avg_tricks")
-            if mode == "imp":
-                return f"{s.get('scoring_val', 0):+.3f}IMP"
-            elif mode == "make_rate":
-                return f"{s.get('scoring_val', 0)*100:.1f}%"
-            else:
-                return f"{s['avg_tricks']}[{s['min_tricks']}-{s['max_tricks']}]"
-
-        top_plays_str = ", ".join(
-            f"{s['card']}({_fmt_score(s)})"
-            for s in child_stats[:5]
-        )
+        _sel = self._finalize_decision(card_scores, state, playable, is_declarer_side, elapsed)
+        best_card = _sel["best_card"]
+        child_stats = _sel["child_stats"]
+        top_plays_str = _sel["top_plays_str"]
         _dropped_parts = []
         if eval_stats["dropped_win"]:
             _dropped_parts.append(f"全赢{eval_stats['dropped_win']}")
@@ -858,6 +906,10 @@ class DDSearch:
             known_positions.add(state.dummy)
         if state.dummy and perspective in (state.contract.declarer, state.dummy):
             known_positions.add(state.contract.declarer)
+
+        # void 硬事实（同采样路径 collect_voids）：已出牌中垫过牌的花色，
+        # 该位置剩余手牌不可能再出现，枚举阶段同样过滤掉违反的分布。
+        voids = collect_voids(state)
 
         unknown_positions = [p for p in POSITION_ORDER if p not in known_positions]
         if len(unknown_positions) not in (2, 3):
@@ -950,6 +1002,10 @@ class DDSearch:
                                       if not (c.suit == card.suit and c.rank == card.rank)]
                 if _has_duplicates(hands):
                     continue
+                # void 硬事实过滤：已出牌中某位置垫过牌的花色（collect_voids），
+                # 该位置剩余手牌不可能再出现该花色，命中即不可能分布，剔除。
+                if _hand_violates_void(hands, voids):
+                    continue
                 worlds.append(hands)
 
         return worlds if worlds else None
@@ -967,17 +1023,24 @@ class DDSearch:
         if worlds is None:
             return None
         enum_count = len(worlds)
-        valid_count = len(worlds)
 
         # ── 预计算共享状态 ──
         trick_state = get_current_trick_state(state)
         trick_cards = trick_state["cards"]
         trick_leader = trick_state.get("leader")
 
+        # 收集所有已出牌（已完成墩 + 当前墩），按出牌顺序
+        all_played = []
+        for trick in state.tricks:
+            all_played.extend(trick.cards)
+        all_played.extend(trick_cards)
+
         total_played_tricks = state.declarer_tricks + state.defender_tricks
         remaining_tricks = 13 - total_played_tricks
 
-        card_scores = {str(c): [] for c in playable}
+        card_scores = {str(c): {"weighted_sum": 0.0, "total_weight": 0,
+                        "scores": [], "mn": float("inf"), "mx": -float("inf")}
+               for c in playable}
         # 与 search() 同口径的三分类统计（全赢/临界/全输），供页面与策略读取
         eval_stats = {"kept": 0, "sure_win": 0, "critical": 0, "sure_lose": 0,
                       "dropped_win": 0, "dropped_crit": 0, "dropped_lose": 0}
@@ -990,111 +1053,22 @@ class DDSearch:
         _probe_ok = (not trick_cards) and (actual_turn in (declarer, dummy))
         finesse_probe = {} if (_probe_ok and _dd_config.DD_FINESSE_ENABLE) else None
 
-        # ── 逐世界 DDS 求解 ──
-        for hands in worlds:
-            if time.time() - start_time > self.time_limit:
-                break
-
-            try:
-                # DDS: trick_cards 不能出现在 hands 中（否则 remainCards 与 currentTrickSuit 双重计算）
-                # 生成器安全网已移除，不再加回
-
-                # Phase 0b: DirectDDS 替换 endplay
-                first_p = trick_leader if trick_cards else actual_turn
-                solved_list = solve_all_boards_raw([(hands, trump, first_p, trick_cards)])
-                if not solved_list or solved_list[0] is None:
-                    continue
-                result = solved_list[0]
-                score_map = _dds_result_to_score_map(result)
-
-                _DD_POS = {'北': 0, '东': 1, '南': 2, '西': 3}
-                cur_p = (_DD_POS.get(first_p, 0) + len(trick_cards)) % 4
-                curplayer_is_declarer = cur_p in (_DD_POS.get(declarer, 2), _DD_POS.get(dummy, 0))
-
-                total_map = {}
-                for card in playable:
-                    key = (card.suit, card.rank)
-                    target_tricks = score_map.get(key, 0)
-                    if curplayer_is_declarer:
-                        decl_side_tricks = target_tricks
-                    else:
-                        decl_side_tricks = remaining_tricks - target_tricks
-                    total = state.declarer_tricks + decl_side_tricks
-                    total_map[str(card)] = total
-                    card_scores[str(card)].append(total)
-                # 三分类（全赢/临界/全输）按整手赢墩相对所需墩判定，与 search() 同口径
-                totals = list(total_map.values())
-                tricks_needed = state.contract.tricks_needed
-                if all(t >= tricks_needed for t in totals):
-                    eval_stats["sure_win"] += 1
-                elif all(t < tricks_needed for t in totals):
-                    eval_stats["sure_lose"] += 1
-                else:
-                    eval_stats["critical"] += 1
-                # 飞牌后果敏感性探针：按缺失大牌（东/西）分桶累加（与 search() 主路径同口径）
-                _accumulate_finesse_probe(score_map, playable, state, hands,
-                                          finesse_probe, remaining_tricks,
-                                          curplayer_is_declarer)
-
-            except Exception:
-                continue  # 跳过无效分布
-
-        # ── 5. 汇总结果 ──
+        # ── 与 search() 完全相同的求解累计（batch 优先 + 串行降级）──
+        samples_done, _solve_times, _solve_total, _solve_max = self._solve_worlds(
+            worlds, all_played, trick_cards, trick_leader,
+            playable, state, perspective, actual_turn, declarer, dummy,
+            trump, card_scores, eval_stats, finesse_probe, start_time,
+            mode_note=" (残局枚举)")
         elapsed = time.time() - start_time
 
-        if not any(card_scores.values()):
+        if not any(cs["scores"] for cs in card_scores.values()):
             return None  # 无有效分布，回退采样
 
-        best_card = None
-        best_blended = None
-        best_scores = None
-        best_rank_val = None
-        child_stats = []
-        blended_map = {}
-        scores_map = {}
-
-        for card in playable:
-            scores = card_scores[str(card)]
-            avg = sum(scores) / len(scores) if scores else 0.0
-            mn = min(scores) if scores else 0
-            mx = max(scores) if scores else 0
-            child_stats.append({
-                "card": str(card),
-                "samples": len(scores),
-                "avg_tricks": round(avg, 2),
-                "min_tricks": mn,
-                "max_tricks": mx,
-                "scores": scores,
-            })
-            rank_val = RANK_ORDER.get(card.rank, 0)
-            # 残局枚举同样支持计分制决策；否则回退纯平均
-            scoring_val = self._decision_value(scores, state)
-            if scoring_val is not None:
-                blended = scoring_val
-            else:
-                blended = avg
-            blended_map[str(card)] = blended
-            scores_map[str(card)] = scores
-            # 配对差值检验：同分布配对差值的样本标准差决定显著性阈值
-            if best_card is None or _compare_candidates(blended, scores, rank_val, best_blended, best_scores, best_rank_val, is_declarer_side) > 0:
-                best_blended = blended
-                best_scores = scores
-                best_rank_val = rank_val
-                best_card = card
-
-        from functools import cmp_to_key
-        child_stats.sort(key=cmp_to_key(
-            lambda a, b: -_compare_candidates(
-                blended_map[a["card"]], scores_map[a["card"]], _card_rank_val(a["card"]),
-                blended_map[b["card"]], scores_map[b["card"]], _card_rank_val(b["card"]),
-                is_declarer_side
-            )
-        ))
-
-        top_plays_str = ", ".join(
-            f"{s['card']}({s['avg_tricks']}[{s['min_tricks']}-{s['max_tricks']}])"
-            for s in child_stats[:5]
-        )
+        _sel = self._finalize_decision(card_scores, state, playable, is_declarer_side, elapsed)
+        best_card = _sel["best_card"]
+        child_stats = _sel["child_stats"]
+        top_plays_str = _sel["top_plays_str"]
+        valid_count = samples_done
         reasoning = (
             f"DD-endgame: {enum_count} enumerations ({valid_count} valid) "
             f"in {elapsed:.1f}s. Top plays: {top_plays_str}"
@@ -1121,9 +1095,10 @@ class DDSearch:
                 # 飞牌后果敏感性探针（与 search() 主路径同口径）：{花色: {对象, Δ, 引牌}}
                 "finesse_probe": _finalize_finesse_probe(finesse_probe or {}),
                 "mcts_stats": {
-                    "iterations": enum_count,
-                    "valid_distributions": valid_count,
+                    "iterations": samples_done,
+                    "valid_distributions": enum_count,
                     "time_sec": round(elapsed, 2),
+                    "iters_per_sec": round(samples_done / elapsed, 1) if elapsed > 0 else 0,
                     "remaining_cards": sum(len(h) for h in worlds[0].values()) if worlds else remaining_tricks,
                     "candidates": child_stats,
                 },

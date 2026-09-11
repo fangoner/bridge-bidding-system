@@ -498,14 +498,18 @@ class PlayService:
 
 转译规则：
 1. 每个叫品：从其"含义"提取公开承诺。含义明确给出的点力区间/花色张数/牌型必须转写；含义未提及的不写；不确定一律不写。
-2. pass 的负面推断（对方/同伴正常叫牌后仍pass，仅[XR]/[JF]行）：
+2. HCP 段必须是该叫品对**本家个人大牌点（HCP）**的承诺。含义中"联手点力/联手至少X点/合计X点"表示己方两人总点力：
+   - [XR]/[JF] 来源（非AI，约定含义可靠）：若含义明确给出联手下限 X 且含义中已注明同伴的 HCP 区间，可推导本家下限 = X − 同伴区间上限，写成个人 HCP（例：同伴 2NT=20-21、含义"联手≥37点"→ 本家 HCP16+）；同伴区间未知或无法推导时，HCP 段留空。
+   - [AI] 来源：一律禁止推导，HCP 段留空。
+   - 任何情况都不得把联手总点力直接写成任一家个人 HCP（如"联手≥37点"不得写成 HCP37+）。
+3. pass 的负面推断（对方/同伴正常叫牌后仍pass，仅[XR]/[JF]行）：
    - 有开叫机会但未开叫 → HCP≤11
    - 对方1阶开叫后自己未争叫 → 无5张以上套（或HCP过低无法争叫）
    - 对方2阶开叫/争叫后自己未叫 → 无6张以上套（或HCP过低）
-3. 扣叫（叫敌方已叫花色/配合将牌后的新花扣叫）→ 承诺该花色有控制，写 控X
-4. 4NT/5NT 问关键张后的答叫（如5C/5D/5H/5S）→ 按答叫承诺写 关键张N（标准黑木：5C=1或4个，5D=0或3个，5H=2或5个，5S=2或5个且有将牌Q）
-5. 同一位置多次叫牌：各自输出当次的承诺（不累计、不合并），由程序合并
-6. pass 若不提供明确上限（如正常跟pass无信息），constraint 可为空字符串
+4. 扣叫（叫敌方已叫花色/配合将牌后的新花扣叫）→ 承诺该花色有控制，写 控X
+5. 4NT/5NT 问关键张后的答叫（如5C/5D/5H/5S）→ 按答叫承诺写 关键张N（标准黑木：5C=1或4个，5D=0或3个，5H=2或5个，5S=2或5个且有将牌Q）
+6. 同一位置多次叫牌：各自输出当次的承诺（不累计、不合并），由程序合并
+7. pass 若不提供明确上限（如正常跟pass无信息），constraint 可为空字符串
 
 仅输出JSON，不要Markdown代码块："""
 
@@ -2641,7 +2645,7 @@ class PlayService:
         for s, obj in state.finesse_flow.items():
             if not isinstance(obj, int) or s in merged:
                 continue
-            if self._finesse_obj_played(state, s, obj):
+            if self._finesse_flow_dead(state, s, obj):
                 continue
             merged[s] = {"对象": obj, "说明": "流程进行中（flow）", "来源": "flow",
                          "对象牌": self._finesse_obj_name(obj)}
@@ -2972,11 +2976,10 @@ class PlayService:
                     continue
                 obj = info_s["对象"]
                 state.finesse_flow[s] = obj
-            if self._finesse_obj_played(state, s, obj):
+            if self._finesse_flow_dead(state, s, obj):
                 del state.finesse_flow[s]
-                # 对象现身终结流程：撤销该花色"曾领出"行为证据（2026-09-11）——
-                # 此后须我方重新领出该花色才有资格再次隐式启动，避免滑动窗口
-                # 新对象（A 已出→窗口只剩 Q）在同一花色上立即"复活"流程。
+                # 对象现身或己方已无盖过对象的牌 => 流程终结（2026-09-12 双原则）：
+                # 记录终结墩数供审计，此后须重新领出该花色才有资格再启动流程。
                 state.finesse_flow_ends[s] = len(state.tricks)
                 continue
             active.append((s, obj))
@@ -3011,6 +3014,11 @@ class PlayService:
                     continue  # 无稳赢回手牌 → 该流程无法行动
                 pick, val = reentry
                 mode = "回手"
+                # 比值退让（2026-09-12，与强制接应同款两段式）：回手牌相对引擎
+                # 榜首做成率/决策值差距悬殊 → 尊重引擎，该流程不行动。
+                if not self._finesse_ratio_ok(state, candidates, pick,
+                                             FINESSE_RATIO, b_card=cur_str):
+                    continue
             elif cur_in_flow:
                 # 榜首已是该花色（正在飞）→ 尊重引擎
                 pick, val, mode = cur_str, _cv(cur_str), "正在飞"
@@ -3031,6 +3039,11 @@ class PlayService:
                 pick = pick_c["card"]
                 val = _cv(pick)
                 mode = "续飞"
+                # 比值退让（2026-09-12，与强制接应同款两段式）：续飞牌相对引擎
+                # 榜首做成率/决策值差距悬殊（如 ♣Q 56.6% vs ♦9）→ 尊重引擎。
+                if not self._finesse_ratio_ok(state, candidates, pick,
+                                             FINESSE_RATIO, b_card=cur_str):
+                    continue
             if best is None or val > best[0]:
                 best = (val, s, obj, mode, pick)
         if best is None:
@@ -3087,6 +3100,21 @@ class PlayService:
             if c and c.suit == suit and self._FINESSE_R2V.get(c.rank, 0) == obj:
                 return True
         return False
+
+    def _finesse_flow_dead(self, state: PlayState, suit: str, obj: int) -> bool:
+        """飞牌流程是否已无意义而应清除（双原则，2026-09-12 修正）：
+
+        ① 对方被飞对象已现身（被打出/砸落）→ 流程终结（既有）；
+        ② 己方联手现手已无高于对象的牌（上方控制张全出，对象成该花色最大，
+           飞无可飞）→ 流程同样终结（如 ♦A 已出而现手只剩 ♦JT，飞 K 无意义）。
+        """
+        if self._finesse_obj_played(state, suit, obj):
+            return True
+        for pos in (state.contract.declarer, state.dummy):
+            for c in state.hands.get(pos, []):
+                if c.suit == suit and self._FINESSE_R2V.get(c.rank, 0) > obj:
+                    return False
+        return True
 
     def _nine_cash_done(self, state: PlayState, suit: str) -> bool:
         """9砸后阶段判定：该花色对象为 K，联手≥9张，且 A 已砸出（played 含 14）、
@@ -3313,8 +3341,9 @@ class PlayService:
             # 实质升级：飞牌决策值确实更高 → 唯一能穿透"榜首已稳成"的判据
             return True, f"升级价值（{fin_val:.3f}>{top_val:.3f}）"
         if (not stable and top_val > 0
-                and (fin_val / top_val) >= FINESSE_NEC_RATIO):
-            return True, f"比值尚可（{fin_val / top_val:.2f}≥{FINESSE_NEC_RATIO}）"
+                and self._finesse_ratio_ok(state, candidates, fin["card"],
+                                           FINESSE_NEC_RATIO, b_card=top["card"])):
+            return True, f"比值尚可（≥{FINESSE_NEC_RATIO}）"
         slack = top.get("avg_tricks", 0.0) - need
         ratio_txt = f"{fin_val / top_val:.2f}" if top_val > 0 else "—"
         return False, (f"退让（榜首做成{top_make:.0%}·盈余{slack:+.1f}已够，"
@@ -3343,6 +3372,12 @@ class PlayService:
         cur_str = str(cur) if cur else ""
         leader = state.current_player
 
+        # 引擎榜首已在任一飞牌结构花色（本侧+伙伴侧合并池）→ 尊重引擎：
+        # 不得仅因 Δ 降序"跳过榜首花色"而继续尝试其他结构（如 D Δ 大、榜首
+        # ♦Q 却被改 ♣3 启动草花——榜首本就是飞牌花色时，窗口期无需再启动）。
+        if cur_str and any(cur_str[0] == s for s in finesse_struct):
+            return None
+
         # 多结构并存时按 Δ 降序尝试（2026-09-10）：位置最敏感（Δ 最高）的
         # 花色最先启动；无牌可出 / 退让门控不过再依次试下一个结构。
         for s, info in sorted(
@@ -3352,8 +3387,6 @@ class PlayService:
             obj = info["对象"]
             if self._nine_cash_done(state, s):
                 continue  # 已砸A后续流程另行处理（回手/继续飞）
-            if cur_str and cur_str[0] == s:
-                continue  # 引擎已在飞牌花色，尊重引擎
             suit_cands = [c for c in candidates if c.get("card") and c["card"][0] == s]
             if not suit_cands:
                 continue  # 领出方无该花色可出
@@ -3537,8 +3570,9 @@ class PlayService:
             if val <= 0:
                 continue
             # 9砸是确定的打法规则（联手≥9张缺K持AQ必先砸A），不受比值软保护限制；
-            # 比值保护只用于"8飞"（改飞张属软干预，差距悬殊时尊重评估不干预）。
-            if not should_garrison and (val / top_val) < ratio:
+            # 比值保护只用于"8飞"（改飞张属软干预，统一两段式比值退让：做成率优先/决策值兜底）。
+            if not should_garrison and not self._finesse_ratio_ok(
+                    state, candidates, cs, ratio, b_card=cur_str):
                 continue
             if should_garrison:
                 # 9砸：候选里"顶张"（>对象）取代榜首"飞张"（低于对象、≥10）
@@ -3691,10 +3725,11 @@ class PlayService:
 
         接应是飞牌流程内的强制动作：同伙已在飞牌花色启动（当前墩出了该花色
         小牌/间张），本家必须按"盖/跟/飞"规则接应——流程一旦启动必须完成
-        （与领出续飞/回手同口径）。尊重引擎（2026-09-09 起唯一途径）=
-        接应流程选不出牌（_finesse_commit_check 返回 None：本家无牌可压威胁/
-        对象已现身/同伙未引飞等）；威胁比较制选出牌则一律强制，不再按决策分
-        比值退让——比值是采样口径（对象位置敏感），不能否决已确定的结构动作。
+        （与领出续飞/回手同口径）。尊重引擎的途径（2026-09-09 起）：
+        ① 接应流程选不出牌（_finesse_commit_check 返回 None）；
+        ② 强制接应比值退让（2026-09-12 加入）：从引擎候选取"强制牌 vs 榜首"
+        的决策值，强制牌明显差于榜首（比值 < FINESSE_RATIO）时尊重引擎——
+        接应贴小牌是流程内动作，但引擎榜首若 100% 而强制牌 0% 时不能硬推。
         """
         if not FINESSE_DEFER_ENABLE:
             return result, False
@@ -3704,6 +3739,8 @@ class PlayService:
         if not forced:
             return result, False
         flyer_str, block_str = forced
+        if not self._finesse_commit_ratio_ok(state, result, flyer_str, ratio):
+            return result, False
         flyer = Card(flyer_str[0], flyer_str[1:])
         struct_desc = "、".join(
             f"{s}(" + self._finesse_obj_name(finesse_struct[s]["对象"]) + ")" for s in finesse_struct
@@ -3719,6 +3756,77 @@ class PlayService:
         full_output["飞牌接应"] = {"结构": struct_desc, "启动花色": flyer_str[0],
                                     "强制出": flyer_str, "压制": block_str, "说明": "同伙已启动飞牌，必须接应"}
         return result, True
+
+    def _finesse_commit_ratio_ok(self, state: PlayState, result: Dict[str, Any],
+                                 forced_card: str, ratio: float) -> bool:
+        """强制接应比值退让判据：委托统一两段式 _finesse_ratio_ok。"""
+        cands = ((result.get("full_output") or {}).get("mcts_stats") or {}).get("candidates") or []
+        if not cands:
+            return True
+        return self._finesse_ratio_ok(state, cands, forced_card, ratio)
+
+    def _finesse_ratio_ok(self, state: PlayState, candidates: List[Dict[str, Any]],
+                          a_card: str, ratio: float,
+                          b_card: Optional[str] = None) -> bool:
+        """比值退让统一判据：做成率优先、决策值兜底（三处飞牌干预共用）。
+
+        段1 做成率（success_rate / scores 相对所需墩达成占比，双方可算且参照>0）：
+            比值 = 动作牌达成率 / 参照达成率，< ratio 退让（尊重引擎）；
+            参照制成率≤0（双方都无法成约）时进入段2，避免二值失真。
+        段2 决策值（scoring_val → avg_tricks）：比值 < ratio 退让。
+        无数据 / 参照≤0 / 动作≥参照 → 不干预（维持动作）。
+        返回 True=差距可接受（维持动作）；False=退让、尊重引擎。
+        """
+        def _make(c: Dict[str, Any]) -> Optional[float]:
+            sr = c.get("success_rate")
+            if sr is not None:
+                return float(sr)
+            scores = c.get("scores")
+            if not scores:
+                return None
+            need = state.contract.tricks_needed
+            return sum(1 for s in scores if s >= need) / len(scores)
+
+        def _val(c: Dict[str, Any]) -> float:
+            v = c.get("scoring_val")
+            if v is not None:
+                return float(v)
+            a = c.get("avg_tricks")
+            if a is not None:
+                return float(a)
+            s = c.get("scores")
+            if s:
+                return sum(s) / len(s)
+            return 0.0
+
+        a = next((c for c in candidates if str(c.get("card")) == a_card), None)
+        if a is None:
+            return True
+        # 段1：做成率优先
+        am = _make(a)
+        if am is not None:
+            ref_m = None
+            if b_card is not None:
+                bc = next((c for c in candidates if str(c.get("card")) == b_card), None)
+                ref_m = _make(bc) if bc is not None else None
+            if ref_m is None:
+                pairs = [(_make(c), c) for c in candidates if _make(c) is not None] or []
+                ref_m = max((p[0] for p in pairs), default=None)
+            if ref_m is not None and ref_m > 0:
+                if am >= ref_m:
+                    return True
+                return (am / ref_m) >= ratio
+        # 段2：决策值兜底
+        av = _val(a)
+        bv = None
+        if b_card is not None:
+            bc = next((c for c in candidates if str(c.get("card")) == b_card), None)
+            bv = _val(bc) if bc is not None else None
+        if bv is None:
+            bv = max((_val(c) for c in candidates), default=0.0)
+        if bv <= 0 or av >= bv:
+            return True
+        return (av / bv) >= ratio
 
     def _dd_play(self, state: PlayState, dd_samples: int = None, dd_scoring_mode: str = None) -> Dict[str, Any]:
         """DD搜索打牌（纯蒙特卡洛 + 双明手评估，由asyncio.to_thread调用）"""

@@ -580,6 +580,19 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.74（2026-09-12）
+- **DD 枚举与采样路径合并**（详见 `docs/飞牌讨论与修改记录_20260912.md`，新档）：
+  - 提取 `_solve_worlds`（批量求解优先+串行降级+耗时分布统计）、`_finalize_decision`（选牌/配对差值排序/计分制决策输出）、`_fmt_score`（类方法）——`search()` 采样与 `_enumerate_endgame` 枚举**唯一差异只剩世界来源**（sample_n vs `_enumerate_endgame_worlds`）
+  - 枚举 `card_scores` 结构对齐采样（weighted_sum/total_weight/scores/mn/mx），`child_stats` 补齐 `scoring_val`/`scoring_mode`（前端不再默认"赢墩制"，与决策口径一致），`mcts_stats` 补 `iters_per_sec`/`iterations=samples_done`
+  - 枚举改走 `_solve_batch` 批量求解：同残局场景 4.9s→0.1s（此前逐 world 单发 `solve_all_boards_raw`）
+  - 历史根因：枚举于 e14e948（2026-06-14）作为 search 的复制品引入，此后 8 个版本两处重复修改且改得不平均（计分制只进采样路径），漂移→"第 10 步口径突变"
+- **枚举 world void 硬事实过滤**：`_enumerate_endgame_worlds` 接入 `collect_voids`（belief.py）+ 新增 `_hand_violates_void`——已出牌中某位置垫过牌的花色（硬事实）不得再分给该位置；真局 3 样本→1（西♥8♦7/东♣Q），错选 ♣A（make_rate 66.7% 假样本）→ 正确改出 ♣8（+10IMP vs −2IMP）
+- **约束"联手点力"转译口径**（`CONSTRAINT_TRANSLATE_PROMPT` 规则2）："联手≥37点"禁止直接转写为个人 HCP；[XR]/[JF] 来源可按"联手下限−同伴区间上限"推导本家（北 7NT：37−21=**16+**）；[AI] 来源一律禁止推导、HCP 留空——消除"北 HCP≥37"荒谬约束与采样污染
+- **飞牌比值退让统一（两段式 `_finesse_ratio_ok`）**：段1 做成率（success_rate / scores≥所需墩）、参照≤0 或缺失时段2 决策值（scoring_val→avg_tricks→scores 平均）兜底（补宕深浅/超墩感知）；窗口启动 D 闸 `FINESSE_NEC_RATIO=0.90`、强制接应/8飞9砸/续飞/回手 `FINESSE_RATIO=0.75`；2026-09-09"威胁比较制一律强制"设计废止
+- **窗口期启动尊重引擎**：`_probe_lead_finesse_prefer` 榜首已落在任一飞牌结构花色（本侧+伙伴侧合并池）→ 直接 `return None`，不再因 Δ 降序"跳过榜首花色"而误启动其他结构（♦Q 26.5% 被改 ♣3 案例）
+- **流程清除双原则（`_finesse_flow_dead`）**：①对象已现身（既有）；②己方联手现手已无高于对象的牌（上方控制全出、对象成最大、飞无可飞，如 ♦A 已出只剩 JT 飞 K）→ 均清 flow 并记 `finesse_flow_ends`；应用到 `_apply_flow_continuation` 清理段与 `_merge_finesse_flow`（跟牌侧结构来源过滤）
+- 投递：bridge/mcts/dd_search.py, bridge/play_service.py, docs/飞牌讨论与修改记录_20260912.md（新增）
+
 ### v1.73（2026-09-11）
 - **删除隐式启动（飞牌流程登记只走显式路径）**：用户复盘 6♠ 例发现 `finesse_flow[♠]=A` 源自隐式启动——"曾领出 + 对象未现身"即把当前探针偶发结构补登 flow，条件过宽、**不走退让门控且无日志**。删除隐式启动与配套 `_our_side_led_suit`；飞牌流程登记仅保留四类显式路径（窗口期启动改出/引牌直出/伙伴侧过手/引擎已在该花色的补登记），均过门控且带日志；`finesse_flow_ends` 保留作终结审计
 - **飞牌启动机制修正：流程终结防复活 + 窗口期引牌直出 + 伙伴侧过手**（详见 `docs/飞牌讨论与修改记录_20260911.md`，新档承接 20260830 旧档）
