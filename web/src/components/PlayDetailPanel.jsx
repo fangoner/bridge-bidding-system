@@ -198,6 +198,7 @@ function PlayDetailPanel({
               {(() => {
                 const MODEL_LABELS = {
                   'deepseek-v4-flash': 'V4-Flash',
+                  'deepseek-flash': 'V4.1',
                   'deepseek-v4-pro': 'V4-Pro',
                   'doubao-seed-2.1-pro': '豆包Pro',
                   'doubao-seed-2.1-turbo': '豆包Turbo',
@@ -215,6 +216,7 @@ function PlayDetailPanel({
               {(() => {
                 const MODEL_LABELS = {
                   'deepseek-v4-flash': 'V4-Flash',
+                  'deepseek-flash': 'V4.1',
                   'deepseek-v4-pro': 'V4-Pro',
                   'doubao-seed-2.1-pro': '豆包Pro',
                   'doubao-seed-2.1-turbo': '豆包Turbo',
@@ -236,6 +238,7 @@ function PlayDetailPanel({
                             {(() => {
                 const MODEL_LABELS = {
                   'deepseek-v4-flash': 'V4-Flash',
+                  'deepseek-flash': 'V4.1',
                   'deepseek-v4-pro': 'V4-Pro',
                   'doubao-seed-2.1-pro': '豆包 Pro',
                   'doubao-seed-2.1-turbo': '豆包 Turbo',

@@ -65,16 +65,16 @@ export function GameProvider({ children }) {
   // ── 模型配置（localStorage 持久化）──
   const [fallbackModel, setFallbackModelState] = useState(() => {
     try {
-      return localStorage.getItem(FALLBACK_MODEL_KEY) || 'deepseek-v4-flash'
+      return localStorage.getItem(FALLBACK_MODEL_KEY) || 'deepseek-flash'
     } catch {
-      return 'deepseek-v4-flash'
+      return 'deepseek-flash'
     }
   })
   const [playModel, setPlayModelState] = useState(() => {
     try {
-      return localStorage.getItem(PLAY_MODEL_KEY) || 'deepseek-v4-flash'
+      return localStorage.getItem(PLAY_MODEL_KEY) || 'deepseek-flash'
     } catch {
-      return 'deepseek-v4-flash'
+      return 'deepseek-flash'
     }
   })
 

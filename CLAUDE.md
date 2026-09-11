@@ -49,7 +49,7 @@ Frontend runs on `http://localhost:5173` (Vite). Requires backend API on port 80
 ```bash
 claude-deepseek.bat
 ```
-Sets `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL` (`deepseek-v4-flash`), `API_TIMEOUT_MS` (600000ms).
+Sets `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL` (`deepseek-flash`), `API_TIMEOUT_MS` (600000ms).
 
 ## Getting Started
 ### Prerequisites
@@ -217,8 +217,8 @@ DOUBAO_SEED_ENDPOINT=your_seed_endpoint_id
 
 ### AI Client
 - `DeepSeekClient` in `llm/deepseek_client.py`: OpenAI SDK with JSON schema validation.
-- Dual provider support: DeepSeek (`deepseek-v4-flash`/`deepseek-v4-pro`) or Doubao Seed API.
-- Separate model selection for main prompt (default `deepseek-v4-flash`) and fallback prompt (default `deepseek-v4-flash`), each configurable to chat or reasoner model.
+- Dual provider support: DeepSeek (`deepseek-flash`) or Doubao Seed API.
+- Separate model selection for main prompt (default `deepseek-flash`) and fallback prompt (default `deepseek-flash`), each configurable to chat or reasoner model.
 - Temperature: 0.2 for main prompt, 0.5 for fallback prompt.
 - Config keys in `config.py`: `DEFAULT_MAIN_PROMPT_MODEL`, `DEFAULT_FALLBACK_MODEL`, `DEFAULT_AI_PROVIDER`, `SHOW_FULL_LLM_OUTPUT`.
 

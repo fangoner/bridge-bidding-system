@@ -56,7 +56,7 @@ class BiddingGame:
         self.deal_system: str = DEFAULT_DEAL_SYSTEM
         self.output_mode: str = DEFAULT_OUTPUT_MODE
         self.df_format_output: str = ""
-        self.model: str = "deepseek-v4-flash"
+        self.model: str = "deepseek-flash"
         
         self.jf_loader = JFLoader(JF_CONVENTION_FILE)
         self.jf_segments = self.jf_loader.load()
@@ -1313,13 +1313,13 @@ def select_model(game: BiddingGame):
     print("2. DeepSeek Reasoner (推理)")
     choice = input("请选择 (1/2): ").strip()
     if choice == "1":
-        game.model = "deepseek-v4-flash"
-        game.llm_client.model = "deepseek-v4-flash"
-        print("AI模型已设置为: DeepSeek V4-Flash")
+        game.model = "deepseek-flash"
+        game.llm_client.model = "deepseek-flash"
+        print("AI模型已设置为: DeepSeek V4.1-Flash")
     elif choice == "2":
-        game.model = "deepseek-v4-pro"
-        game.llm_client.model = "deepseek-v4-pro"
-        print("AI模型已设置为: DeepSeek V4-Pro")
+        game.model = "deepseek-flash"
+        game.llm_client.model = "deepseek-flash"
+        print("AI模型已设置为: DeepSeek V4.1-Flash (推理)")
 
 
 def select_ai_settings(game: BiddingGame):

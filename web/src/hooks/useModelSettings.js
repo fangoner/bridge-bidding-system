@@ -20,7 +20,7 @@ const VISION_PROVIDER_KEY = 'bridge_vision_provider'
 
 // 解析组合模型值 "model::reasoning" → { model, reasoning }
 export function parseModelValue(value) {
-  const parts = (value || 'deepseek-v4-flash').split('::')
+  const parts = (value || 'deepseek-flash').split('::')
   return { model: parts[0], reasoning: parts[1] === 'reasoning' }
 }
 

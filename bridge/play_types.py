@@ -240,6 +240,7 @@ class PlayState:
     bidding_sequence: str = "未提供"
     vulnerability: str = "NV"
     finesse_flow: Dict[str, int] = field(default_factory=dict)
+    finesse_flow_ends: Dict[str, int] = field(default_factory=dict)
     
     def copy_hands(self) -> Dict[str, List[Card]]:
         """返回手牌的深拷贝"""
@@ -418,6 +419,8 @@ class PlayState:
             "declarer_tricks": self.declarer_tricks,
             "defender_tricks": self.defender_tricks,
             "phase": self.phase.value,
+            "finesse_flow": self.finesse_flow,
+            "finesse_flow_ends": self.finesse_flow_ends,
             "is_human_turn": self.is_human_turn(),
         }
 

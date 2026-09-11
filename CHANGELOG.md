@@ -1,5 +1,59 @@
 # 开发日志
 
+## 2026-09-11（删除隐式启动，飞牌流程登记只走显式路径 v1.73 补充）
+
+**背景**: 复盘发现 6♠ 例 `finesse_flow[♠]=A` 的来源是"隐式启动"——历史上我方曾领出过该花色即把当前探针偶发报出的结构补登进 flow，条件过宽且**不走退让门控、无任何日志**。用户追问隐式启动的目的与必要性后，确认其已无存在价值，定调**删除**。
+
+**改进**:
+- **删除隐式启动**：`_apply_flow_continuation` 不再从"曾领出 + 对象未现身"补登记流程，删除配套的 `_our_side_led_suit` 判定
+- **飞牌流程登记仅显式路径**：窗口期启动改出/引牌直出/伙伴侧过手/引擎已在该花色的补登记四类显式入口全覆盖，均经过退让门控且带日志
+- **finesse_flow_ends 保留**：仍随对象现身记录终止点（`play_types.PlayState`），改作终结审计用途，不再驱动隐式重建
+
+**修改文件**: bridge/play_service.py
+
+**测试验证**: `python -m py_compile bridge/play_service.py` 通过；`_our_side_led_suit` 在 play_service 无方法定义残留（仅注释提及历史）；临时复现脚本（tests/_tmp_*.py、scripts/_t_*.py）为开发期遗留，不入库
+
+## 2026-09-11（飞牌启动机制修正：流程终结防复活 + 窗口期引牌直出 + 伙伴侧过手 v1.73）
+
+**背景**: 3NT 南庄牌局连续四类问题：①流程被滑动窗口新对象复活（第2墩飞♦(A)、东♦A 现身后 flow 被 ♦(Q) 重建，每轮强制续飞 ♦5，挤掉 Δ0.8 的 ♣）；②探针引牌被"顶张方回手"卡死（♣ 引牌 ♣A、南持 A 被判顶张方、无回手牌 → 整花色跳过 → 落到 Δ 更低的 ♦）；③引擎已领出飞牌花色时不登记 finesse_flow，下一家跟牌无结构来源不接应；④v1.72 合池时删除 `_apply_lead_transfer`，丢失"伙伴侧结构过手"语义。详见 `docs/飞牌讨论与修改记录_20260911.md`（新档，承接 20260830 旧档）。
+
+**改进**:
+- **流程终结防复活**（用户提出）：对象现身清 flow 时记 `finesse_flow_ends[s]=len(tricks)`（play_types.PlayState 新字段），`_our_side_led_suit` 只统计终止点之后的领出——旧"曾领出"证据作废，须重新领出该花色才有资格再次隐式启动；否定"清理先行"方案（同轮被 `if s in flow` 天然挡，只挡一轮无效）
+- **窗口期按探针引牌直出**（用户提出）：探针引牌即出牌决定（如 ♣ 对象Q Δ0.8 引牌♣A → 直接出♣A），不再做顶张方回手/非顶张方直飞分流——那是流程延续/9砸的规则，窗口期不适用；无引牌结构（αμ 模板）仍走原分流
+- **领出补登记 finesse_flow**：引擎领出飞牌花色且对象未现身 → 写 flow，供下一家跟牌接应（接应判据唯一结构来源是 flow）
+- **伙伴侧结构过手**：恢复 v1.70 语义——结构来自队友视角探测 → `cash_reentry` 过手给队友引飞；**不检测本侧顶张方**（原"非顶张方 continue"已删）；9砸后、队友无飞张小牌、无稳赢回手牌仍跳过
+- **结构"侧"标记**：本侧/伙伴侧，合并时随 Δ 高者保留，供启动分支区分直出/过手
+
+**修改文件**: bridge/play_service.py, bridge/play_types.py, docs/飞牌讨论与修改记录_20260911.md（新增）
+
+**测试验证**: `python -m py_compile` 通过；后端重启 8003 健康检查通过；探针分桶复现（♣2/♣3 Δ0.677 相同、♣A Δ0.811 最优、♦Q 仅 0.337<0.4 属采样噪声）
+
+## 2026-09-10（飞牌多结构启动：两侧探针合并 + Δ 降序过门控 v1.72）
+
+**背景**: 用户复盘发现多飞牌结构并存时启动顺序无依据（`_probe_lead_finesse_prefer` 按 dict 序逐花色试）；且"本侧探针判空才兜底伙伴侧"（`_apply_lead_transfer`）的机制把两侧探测结果割裂，同花色在不同侧口径不一致。用户定调：**所有探测结果合池，按 Δ 从高到低排序后逐个过退让门控，启动第一个通过的花色**——不是直接选最高的（最高的照样要过门控，不过就试次高的）。
+
+**教训（用户强调必须记录）**:
+- **"T 在 Q 的后面"（QT 结构飞 K）是真实位置性飞牌**：位置性飞牌的飞张 = 对象紧邻下一档（K→Q、Q→J、J→T），只要飞张（+支撑牌）在联手，对象位置就翻转飞张赢墩，Δ>0.45 正是这类结构的特征量级——**"联手无高于对象的牌=假结构"不可一刀切**，对象为 A 时天然无上方牌，飞行正当
+- **本次决策：不加假结构过滤**（用户否决，曾批评"你太笨了，不配给我写程序"）——用户只要"多结构按 Δ 排序"，就只做排序，不扩展自认为合理的过滤逻辑；先讲清规则、获得确认再动手（AskUserQuestion 确认后仍被否决，教训是确认选项要忠实用户原话，别自作主张）
+
+**改进**:
+- **两侧探针合并成统一结构池**（`_apply_lead_finesse_check`）：本侧 `_detect_finesse_struct` + 队友侧**新 helper `_probe_partner_finesse_struct`**（仅庄/明手领出时，以队友为领出方真跑一次 DD 评估，共用探针 Δ≥0.4 门槛），同花色保留 Δ 高者
+- **按 Δ 降序过门控启动**：统一池走 `_probe_lead_finesse_prefer`（循环改为 `sorted(..., key=Δ, reverse=True)`），逐个花色过 `_finesse_launch_worthwhile` 四道退让闸（契约必要/失败安全/升级价值/比值兜底），**启动第一个通过的花色**（顶张方回手/非顶张方直飞小牌）；9砸后分支 `nine_suits` 同步按 Δ 降序
+- **删除 `_apply_lead_transfer`**：顶张侧过手兜底被合池逻辑取代（伙伴侧若有结构，本侧无论如何都能看到；本侧+伙伴侧都判空则确实无结构，不再需要独立兜底）
+- **结构字典新增 `Δ` 键**：`_detect_finesse_struct` 探针分支与伙伴侧探测均输出 Δ，作为排序依据（说明字符串中的 Δ 仅展示用，不参与排序）
+
+**修改文件**: bridge/play_service.py
+
+**测试验证**: `python -m py_compile bridge/play_service.py` 通过；后端重启（`python -m uvicorn api.main:app --host 0.0.0.0 --port 8003`）8003 健康检查通过；`_apply_lead_transfer` 无残留调用
+
+## 2026-09-10（模型迁移：DeepSeek 统一 V4.1-Flash）
+
+- DeepSeek 今日发布 **V4.1-Flash**（模型名 `deepseek-flash`）：新架构原生多模态，性能/费用/速度全面超越 V4 Pro；`deepseek-v4-pro` 将于 09-14 12:00 下线并路由到 Flash
+- 全项目 DeepSeek 模型名统一 `deepseek-flash`：config.py（main/fallback/reasoner/vision 默认值，`DEEPSEEK_MODEL_PRO` 暂同指 flash、`_DS_MODELS` 去重）、api/main.py（可用模型列表/提供商 models，现为 flash + flash::reasoning）、main.py CLI、llm/deepseek_client.py 默认、autoplay_hand.py、.env.example、前端 SettingsPanel 模型选项（V4.1-Flash）/默认值/GameContext/useModelSettings、CardTable/PlayDetailPanel 模型标签（新增 deepseek-flash 键，旧键保留兼容历史记录显示）
+- 旧名 `deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` 由官方临时路由，未在前端历史显示映射之外保留依赖
+- 验证：config 解析（main/fallback/vision/models 均为 deepseek-flash，模型列表去重，客户端 is_configured）；`deepseek-flash` 真实 API 冒烟调用（`scripts/_llm_finesse_test.py` 飞牌分析）成功返回
+- 注意：正在运行的后端/前端需重启/重建后模型迁移才生效
+
 ## 2026-09-09~10（接应判据收敛 + 探针门控修正 + DD 飞牌开关与 Δ 滑块 v1.71）
 
 **背景**: 6♠ 例复盘发现接应判据链层层叠加后互相矛盾（比值退让否决确定结构动作、内部二次检测吞掉接应、flow 补构产生"补构式修改"）；3NT 例跟牌时探针因滑动窗口下移发明"飞T"对象，把本应放小的接应误判成必须盖 T。用户定性：不要"迫不得已的补丁"，删繁就简。另：3NT 南庄第一墩盖 ♠K 暴露 DDMC 双明手全知评估盲区（让过保留双止张才可成），已另立方案文档（`docs/坐庄决策_双明手全知偏差与单明手精修方案.md`），本期不改引擎。

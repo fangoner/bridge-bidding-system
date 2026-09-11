@@ -543,8 +543,8 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 |--------|--------|------|
 | `DEFAULT_DEAL_SYSTEM` | `2D/2H/2S：自然阻击` | 阻击叫体系，影响关键字提取 |
 | `DEFAULT_PLAY_ENGINE` | `dd_alphamu_llm` | 默认打牌引擎（可选 llm/mcts/dd/perfect/alphamu/dd_alphamu_llm） |
-| `DEFAULT_MAIN_PROMPT_MODEL` | `deepseek-v4-flash` | 主提示词模型 |
-| `DEFAULT_FALLBACK_MODEL` | `deepseek-v4-flash` | 备用提示词模型 |
+| `DEFAULT_MAIN_PROMPT_MODEL` | `deepseek-flash` | 主提示词模型 |
+| `DEFAULT_FALLBACK_MODEL` | `deepseek-flash` | 备用提示词模型 |
 | `MAIN_PROMPT_TEMPERATURE` | 0.2 | 主提示词温度 |
 | `FALLBACK_PROMPT_TEMPERATURE` | 0.5 | 备用提示词温度 |
 | `MAIN_PROMPT_MAX_RETRIES` | 2 | 主提示词合规性重试次数 |
@@ -579,6 +579,24 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 3. 启动前端：`cd web && npm run dev`
 
 ## 版本历史
+
+### v1.73（2026-09-11）
+- **删除隐式启动（飞牌流程登记只走显式路径）**：用户复盘 6♠ 例发现 `finesse_flow[♠]=A` 源自隐式启动——"曾领出 + 对象未现身"即把当前探针偶发结构补登 flow，条件过宽、**不走退让门控且无日志**。删除隐式启动与配套 `_our_side_led_suit`；飞牌流程登记仅保留四类显式路径（窗口期启动改出/引牌直出/伙伴侧过手/引擎已在该花色的补登记），均过门控且带日志；`finesse_flow_ends` 保留作终结审计
+- **飞牌启动机制修正：流程终结防复活 + 窗口期引牌直出 + 伙伴侧过手**（详见 `docs/飞牌讨论与修改记录_20260911.md`，新档承接 20260830 旧档）
+  - **流程终结防复活**：对象现身清 flow 时记 `finesse_flow_ends[s]=len(tricks)`，`_our_side_led_suit` 只统计终止点后的领出——旧"曾领出"证据作废，须重新领出才有资格再次隐式启动（防滑动窗口新对象 A→Q 复活流程）；PlayState 新增 `finesse_flow_ends` 字段并序列化（注：隐式启动与 `_our_side_led_suit` 后已整体删除，`finesse_flow_ends` 保留作终结审计，见本版本首条）
+  - **窗口期按探针引牌直出**：探针引牌即出牌决定（♣ 对象Q Δ0.8 引牌♣A → 直接出♣A），不再做顶张方回手/非顶张方直飞分流（那是流程延续/9砸规则，窗口期不适用）；无引牌结构走原分流
+  - **领出补登记 finesse_flow**：引擎领出飞牌花色且对象未现身 → 写 flow，供下一家跟牌接应（接应唯一结构来源是 flow）
+  - **伙伴侧结构过手**：恢复 v1.70 `_apply_lead_transfer` 语义——队友视角结构 → `cash_reentry` 过手给队友引飞，不检测本侧顶张方；9砸后/队友无飞张小牌/无稳赢回手牌跳过
+  - **结构"侧"标记**（本侧/伙伴侧），合并时随 Δ 高者保留
+- 投递：bridge/play_service.py, bridge/play_types.py, docs/飞牌讨论与修改记录_20260911.md（新增）
+
+### v1.72（2026-09-10）
+- **飞牌多结构启动：两侧探针合并 + Δ 降序过门控**（详见 `docs/飞牌优化讨论与修改记录_20260830.md`）
+  - **背景/决策**：多飞牌结构并存时启动顺序需按位置敏感度排序（Δ 高者优先）；"本侧判空才兜底伙伴侧"的机制割裂两侧结果。用户定调：**所有探测结果合池 → 按 Δ 降序 → 逐花色过退让门控 → 启动第一个通过的花色**（最高的也要过门控，不过再试次高）；**不加假结构过滤**（QT 飞 K、"T 在 Q 后"是真实位置飞，Δ>0.45 是其特征量级——本次不干预，只排序）
+  - **两侧探针合并**：`_apply_lead_finesse_check` 探测本侧（`_detect_finesse_struct`）+ 新 helper `_probe_partner_finesse_struct`（仅庄/明手领出时以队友为领出方真跑 DD 评估，探针 Δ≥0.4 同门槛），同花色保留 Δ 高者成统一结构池
+  - **Δ 降序过门控**：`_probe_lead_finesse_prefer` 循环 `sorted(key=Δ, reverse=True)` 逐花色过 `_finesse_launch_worthwhile` 四道闸，启动第一个通过的（顶张方回手/非顶张方直飞小牌）；9砸后 `nine_suits` 同步 Δ 降序
+  - **删除 `_apply_lead_transfer`**：顶张侧过手兜底被合池逻辑取代；结构字典新增 `Δ` 键作排序依据
+- 投递：bridge/play_service.py
 
 ### v1.71（2026-09-09~10）
 - **接应判据收敛 + 探针门控修正 + DD 飞牌开关与 Δ 滑块**（详见 `docs/飞牌优化讨论与修改记录_20260830.md`；3NT 坐庄让过问题另见 `docs/坐庄决策_双明手全知偏差与单明手精修方案.md`）

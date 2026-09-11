@@ -109,8 +109,7 @@ def get_available_models() -> list:
     available = []
     # DeepSeek 模型：需 API Key
     if llm_client.is_configured():
-        available.extend(["deepseek-v4-flash", "deepseek-v4-flash::reasoning",
-                          "deepseek-v4-pro", "deepseek-v4-pro::reasoning"])
+        available.extend(["deepseek-flash", "deepseek-flash::reasoning"])
     return available
 
 def get_llm_client(ai_provider: str = None):
@@ -149,7 +148,7 @@ class BidRequest(BaseModel):
 
 
 class FallbackModelRequest(BaseModel):
-    fallback_model: str  # deepseek-v4-flash 或 deepseek-v4-pro
+    fallback_model: str  # deepseek-flash
 
 
 class FallbackModelResponse(BaseModel):
@@ -424,7 +423,7 @@ async def get_ai_provider():
         "ai_provider": current_ai_provider,
         "available_providers": [
             {"id": AI_PROVIDER_DEEPSEEK, "name": "DeepSeek",
-             "models": ["deepseek-v4-flash", "deepseek-v4-pro"]},
+             "models": ["deepseek-flash"]},
             {"id": AI_PROVIDER_DOUBAO, "name": "Doubao (豆包)",
              "models": [DOUBAO_MODEL_2_1_PRO, DOUBAO_MODEL_2_1_TURBO]}
         ]

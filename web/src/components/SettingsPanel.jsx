@@ -7,9 +7,9 @@ import {
 import { parseModelValue } from '../hooks/useModelSettings'
 
 // 基础模型（不含 ::reasoning 后缀），思考模式通过 ToggleButton 控制
+// 2026-09-10 V4.1-Flash 发布：V4 Pro 下线，DeepSeek 统一 deepseek-flash
 const BASE_MODELS = [
-  { label: 'V4-Flash', value: 'deepseek-v4-flash' },
-  { label: 'V4-Pro', value: 'deepseek-v4-pro' },
+  { label: 'V4.1-Flash', value: 'deepseek-flash' },
 ]
 
 // ── 模型选择器 + 思考切换（模块级组件）──
@@ -163,7 +163,7 @@ function SettingsPanel({
     if (!newMode) return
     const reasoning = newMode === 'reasoning'
     const base = visibleModels.some(m => m.value === biddingParsed.model)
-      ? biddingParsed.model : visibleModels[0]?.value || 'deepseek-v4-flash'
+      ? biddingParsed.model : visibleModels[0]?.value || 'deepseek-flash'
     handleFallbackModelChange({ target: { value: makeCombined(base, reasoning) } })
   }
 
@@ -175,7 +175,7 @@ function SettingsPanel({
     if (!newMode) return
     const reasoning = newMode === 'reasoning'
     const base = visibleModels.some(m => m.value === playParsed.model)
-      ? playParsed.model : visibleModels[0]?.value || 'deepseek-v4-flash'
+      ? playParsed.model : visibleModels[0]?.value || 'deepseek-flash'
     handlePlayModelChange({ target: { value: makeCombined(base, reasoning) } })
   }
 

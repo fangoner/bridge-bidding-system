@@ -14,6 +14,7 @@ import { isHumanPosition, hasAnyHuman, getHumanPositions, BRIDGE_POSITIONS } fro
 import { calcScore } from '../utils/score';
 
 const MODEL_LABELS = {
+  'deepseek-flash': 'DSF',
   'deepseek-v4-flash': 'DSF',
   'deepseek-v4-pro': 'DSP',
   'doubao-seed-2.1-pro': 'DBP',
@@ -26,7 +27,7 @@ function modelVer(modelId) {
 }
 
 function modelLabel(modelId) {
-  const abbr = MODEL_LABELS[modelId] || modelId.replace(/^deepseek-v4-/, 'DS').substring(0, 4)
+  const abbr = MODEL_LABELS[modelId] || modelId.replace(/^deepseek(-v4)?-/, 'DS').substring(0, 4)
   const ver = modelVer(modelId)
   return ver ? `${abbr} ${ver}` : abbr
 }

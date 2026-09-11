@@ -15,7 +15,7 @@ DOUBAO_API_KEY = os.getenv("DOUBAO_API_KEY", "")
 DOUBAO_BASE_URL = os.getenv("DOUBAO_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
 DOUBAO_VISION_ENDPOINT = os.getenv("DOUBAO_VISION_ENDPOINT", "")
 
-DEEPSEEK_VISION_MODEL = os.getenv("DEEPSEEK_VISION_MODEL", "deepseek-v4-flash-vision-exp")
+DEEPSEEK_VISION_MODEL = os.getenv("DEEPSEEK_VISION_MODEL", "deepseek-flash")
 VISION_PROVIDER = os.getenv("VISION_PROVIDER", "deepseek")
 DOUBAO_SEED_2_1_PRO_CHAT_ENDPOINT = os.getenv("DOUBAO_SEED_2_1_PRO_CHAT_ENDPOINT", "")
 DOUBAO_SEED_2_1_PRO_REASONING_ENDPOINT = os.getenv("DOUBAO_SEED_2_1_PRO_REASONING_ENDPOINT", "")
@@ -37,12 +37,12 @@ OUTPUT_MODE_DEEP_FINESSE = "deep_finesse"
 OUTPUT_MODE_ALL = "all"
 DEFAULT_OUTPUT_MODE = OUTPUT_MODE_ALL
 
-FALLBACK_MODEL_CHAT = "deepseek-v4-flash"
-FALLBACK_MODEL_REASONER = "deepseek-v4-pro"
+FALLBACK_MODEL_CHAT = "deepseek-flash"
+FALLBACK_MODEL_REASONER = "deepseek-flash"
 DEFAULT_FALLBACK_MODEL = FALLBACK_MODEL_CHAT
 
-MAIN_PROMPT_MODEL_CHAT = "deepseek-v4-flash"
-MAIN_PROMPT_MODEL_REASONER = "deepseek-v4-pro"
+MAIN_PROMPT_MODEL_CHAT = "deepseek-flash"
+MAIN_PROMPT_MODEL_REASONER = "deepseek-flash"
 DEFAULT_MAIN_PROMPT_MODEL = MAIN_PROMPT_MODEL_CHAT
 
 MAIN_PROMPT_TEMPERATURE = 0.2
@@ -53,15 +53,17 @@ AI_PROVIDER_DOUBAO = "doubao"
 DEFAULT_AI_PROVIDER = AI_PROVIDER_DEEPSEEK
 
 # ── 模型名称常量 ──
-# DeepSeek
-DEEPSEEK_MODEL_FLASH = "deepseek-v4-flash"
-DEEPSEEK_MODEL_PRO = "deepseek-v4-pro"
+# DeepSeek（2026-09-10 V4.1-Flash 发布后统一正名 deepseek-flash；
+# V4 Pro 已于 09-14 下线，DEEPSEEK_MODEL_PRO 暂时同指 flash，
+# 未来 V4.1 Pro 上线时改回即可）
+DEEPSEEK_MODEL_FLASH = "deepseek-flash"
+DEEPSEEK_MODEL_PRO = "deepseek-flash"
 # Doubao Seed
 DOUBAO_MODEL_2_1_PRO = "doubao-seed-2.1-pro"
 DOUBAO_MODEL_2_1_TURBO = "doubao-seed-2.1-turbo"
 
 # ── 统一模型列表（所有可用模型，不含 ::reasoning 后缀的视为 chat 版）──
-_DS_MODELS = [DEEPSEEK_MODEL_FLASH, DEEPSEEK_MODEL_PRO]
+_DS_MODELS = list(dict.fromkeys([DEEPSEEK_MODEL_FLASH, DEEPSEEK_MODEL_PRO]))
 _DB_MODELS = [DOUBAO_MODEL_2_1_PRO, DOUBAO_MODEL_2_1_TURBO]
 ALL_BASE_MODELS = _DS_MODELS + _DB_MODELS
 # 模型对应客户端类型
@@ -118,13 +120,40 @@ FINESSE_DEFER_ENABLE = True          # 飞牌干预总开关（窗口期启动/�
 FINESSE_EIGHT_NINE_ENABLE = True     # 8飞9砸 总开关
 DD_FINESSE_ENABLE = True             # DD 引擎飞牌管理开关（窗口期启动/接应/流程/8飞9砸；
                                      # 关闭后 DD 仅按引擎得分选牌，αμ 不受影响；运行时切换）
-FINESSE_RATIO = 0.95                 # 飞牌干预统一比值（DD 三种计分制 / αμ 引擎共用），
+FINESSE_RATIO = 0.75                 # 飞牌干预统一比值（DD 三种计分制 / αμ 引擎共用），
                                      # 以比值（相对成功率）统一跨计分制：改选牌/榜首 ≥ 该值才干预
+                                     # （0.95→0.75：0.95 只在"几乎并列"时才改，协同退让门控的
+                                     #  低比值兜底放宽，与 8飞9砸 共用）
 FINESSE_PROBE_DELTA = 0.4            # 飞牌后果敏感性探针阈值：缺失大牌在东/西两桶的
                                      # 整手赢墩均值差 ≥ 此值才判该花色为飞牌结构
                                      # （0.5→0.4：真实触发时点下 8/9 张 Δ 分布
-                                     #  平均 0.76/0.86、P50≈0.5，0.4 可多抓灰色地带，
-                                     #  由现有比值门控兜底）
+                                     #  平均 0.76/0.86、P50≈0.5，0.4 可多抓灰色地带；
+                                     #  Δ 只是"位置敏感"信号，是否真的启动由
+                                     #  _probe_lead_finesse_prefer 的退让门控决定）
+
+# 启动飞牌退让门控（2026-09-10）：探针识别出结构≠立刻飞，先按"契约必要性 /
+# 失败代价·安全 / 升级价值"三项判据 + 低比值兜底决定是否主动改出飞牌花色，
+# 都不满足则退让（尊重引擎）。将牌不豁免——与边花走同一套判据。
+FINESSE_NEC_MAKE = 0.85              # 判据A：榜首做成率 < 此值 → 契约本就需要飞牌 → 启动
+FINESSE_NEC_SLACK = 1.0              # 判据A：榜首做成率已 < FINESSE_NEC_MAKE_HIGH、
+                                     # 且平均盈余（均值−所需墩）≤ 此值 → 契约吃紧但做成率
+                                     # 尚可，飞牌能显著提升 → 启动。做成率已达高线的稳成
+                                     # 局面不靠盈余启动（修正 2026-09-10：6H 例做成率 100%、
+                                     # 盈余 +0.86 曾被误判"必要"，白白用 74% 做成的飞牌
+                                     # 替换 100% 做成的清将）。
+FINESSE_NEC_MAKE_HIGH = 0.95         # 判据A：做成率 ≥ 此值 → 盈余条件不参与（稳成不启动）；
+                                     # 判据D：做成率 ≥ 此值即"不飞也稳成"，比值兜底同样不参与
+                                     # （防止 100% 稳成被 76% 的飞牌替换——比值 0.762≥0.75 曾
+                                     #  误放行，绝对差 24 个点被比值掩盖）
+FINESSE_NEC_RATIO = 0.90             # 判据D 比值兜底专用阈值（0.75→0.90，2026-09-10）：
+                                     # 飞牌候选 / 榜首 ≥ 此值才放行。与 8飞9砸/αμ 共用的
+                                     # FINESSE_RATIO 独立——兜底是"差距不大才飞"的宽口径，
+                                     # 测试见 0.762（差 24 点）不应放行；8飞9砸 的比值保护
+                                     # 维持已有的收紧节奏，不受影响。
+FINESSE_SAFE_PCT = 10                # 判据B：取飞牌候选分数下沿的第 pct 百分位（最近秩），
+                                     # 其 ≥ 所需墩（最差 10% 世界仍不宕）→ 无风险 → 启动；
+                                     # 仅榜首做成率 < FINESSE_NEC_MAKE_HIGH（非稳成）时参与——
+                                     # 榜首已稳成时飞牌再安全也只是次优选，不放行
 
 # 首攻与信号方案："standard"（标准方案，源自新睿自然）| 预留扩展（如"reverse"反式信号）
 LEAD_SIGNAL_SCHEME = "standard"
