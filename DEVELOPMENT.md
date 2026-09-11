@@ -591,6 +591,7 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 - **飞牌比值退让统一（两段式 `_finesse_ratio_ok`）**：段1 做成率（success_rate / scores≥所需墩）、参照≤0 或缺失时段2 决策值（scoring_val→avg_tricks→scores 平均）兜底（补宕深浅/超墩感知）；窗口启动 D 闸 `FINESSE_NEC_RATIO=0.90`、强制接应/8飞9砸/续飞/回手 `FINESSE_RATIO=0.75`；2026-09-09"威胁比较制一律强制"设计废止
 - **窗口期启动尊重引擎**：`_probe_lead_finesse_prefer` 榜首已落在任一飞牌结构花色（本侧+伙伴侧合并池）→ 直接 `return None`，不再因 Δ 降序"跳过榜首花色"而误启动其他结构（♦Q 26.5% 被改 ♣3 案例）
 - **流程清除双原则（`_finesse_flow_dead`）**：①对象已现身（既有）；②己方联手现手已无高于对象的牌（上方控制全出、对象成最大、飞无可飞，如 ♦A 已出只剩 JT 飞 K）→ 均清 flow 并记 `finesse_flow_ends`；应用到 `_apply_flow_continuation` 清理段与 `_merge_finesse_flow`（跟牌侧结构来源过滤）
+- **流程迁移**：比值退让/无牌导致尊重引擎后，引擎实际出牌落在飞牌结构池的另一花色（第4墩退让出 ♣Q、♣ 也是探针结构）→ 取消原花色 flow（记 ends）、登记实际出牌花色 flow——防下一墩续飞仍强改原花色（♦9 58.5% vs ♣3 75.2%）；之后榜首属新流程花色走"正在飞"尊重引擎
 - 投递：bridge/mcts/dd_search.py, bridge/play_service.py, docs/飞牌讨论与修改记录_20260912.md（新增）
 
 ### v1.73（2026-09-11）

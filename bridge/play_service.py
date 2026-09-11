@@ -3047,9 +3047,29 @@ class PlayService:
             if best is None or val > best[0]:
                 best = (val, s, obj, mode, pick)
         if best is None:
-            # 所有流程均无法行动 → 尊重引擎
-            full_output["领出飞牌"] = {"引发": False,
-                                       "说明": "飞牌流程进行中但无可行动作，尊重引擎"}
+            # 所有流程均无法行动 → 尊重引擎。
+            # 流程迁移（2026-09-12，用户提出）：比值退让/无牌导致尊重引擎后，
+            # 引擎实际出牌若落在飞牌结构池的另一花色（如退让后出 ♣Q，而 ♣ 也是
+            # 探针结构），应取消原花色 flow、登记实际出牌花色 flow——否则下一墩
+            # 续飞仍强改原花色（♦9 58.5% vs ♣3 75.2% 案例），流程与实际路线脱节。
+            active_suits = {s for s, _ in active}
+            new_s = cur_str[0] if cur_str else ""
+            info_new = finesse_struct.get(new_s)
+            if (new_s and info_new and new_s not in active_suits
+                    and not self._finesse_flow_dead(state, new_s, info_new["对象"])):
+                for s0 in list(state.finesse_flow.keys()):
+                    if s0 != new_s:
+                        state.finesse_flow_ends[s0] = len(state.tricks)
+                state.finesse_flow = {new_s: info_new["对象"]}
+                full_output["领出飞牌"] = {"引发": False,
+                                           "说明": f"{new_s}飞牌流程进行中但无可行动作，"
+                                                   f"尊重引擎出 {cur_str}，飞牌标志迁移至 {new_s}"}
+                full_output["飞牌迁移"] = {"原流程": sorted(state.finesse_flow_ends.keys()),
+                                            "新流程": new_s,
+                                            "说明": "比值退让尊重引擎选实际出牌花色，飞牌标志迁移"}
+            else:
+                full_output["领出飞牌"] = {"引发": False,
+                                           "说明": "飞牌流程进行中但无可行动作，尊重引擎"}
             result["full_output"] = full_output
             return True
         val, s, obj, mode, pick = best
