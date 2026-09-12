@@ -794,15 +794,11 @@ def _play_budget(engine: str, reasoning: bool) -> float:
         "dd": DD_TIME_LIMIT + PLAY_BUDGET_MARGIN,
         "perfect": PLAY_BUDGET_MARGIN,
         "alphamu": ALPHA_MU_TIME_LIMIT + PLAY_BUDGET_MARGIN,
-        "dd_alphamu_llm": max(DD_TIME_LIMIT, ALPHA_MU_TIME_LIMIT) + PLAY_BUDGET_MARGIN,
     }
     engine_budget = engine_budgets.get(engine, DD_TIME_LIMIT + PLAY_BUDGET_MARGIN)
     if engine == "llm":
         # chat_play 单次尝试（max_attempts=1，P1-1 后端部分已修）
         llm_worst = LLM_TIMEOUT_REASONING if reasoning else LLM_TIMEOUT_CHAT
-    elif engine in ("alphamu", "dd_alphamu_llm"):
-        # 分组 LLM 审查走 chat_json 默认 2 次尝试
-        llm_worst = _llm_chain_worst(reasoning)
     else:
         llm_worst = 0.0
     return round(engine_budget + llm_worst, 1)
@@ -815,7 +811,7 @@ async def get_time_budgets():
     前端以「预算 + 10s 网络余量」作为请求超时，保证后端仍在合法
     重试/计算时前端不会提前 abort（P1-1 前端对齐）。
     """
-    engines = ["llm", "dd", "perfect", "alphamu", "dd_alphamu_llm"]
+    engines = ["llm", "dd", "perfect", "alphamu"]
     return {
         "bid": {"chat": _bid_budget(False), "reasoning": _bid_budget(True)},
         "play": {
@@ -2194,11 +2190,9 @@ async def undo_play(session_id: str = Query("default")):
 class PlayAIRequest(BaseModel):
     use_reasoning: bool = False
     play_model: Optional[str] = None
-    play_engine: Optional[str] = None  # "llm" | "dd" | "perfect" | "alphamu" | "dd_alphamu_llm"
+    play_engine: Optional[str] = None  # "llm" | "dd" | "perfect" | "alphamu"
     dd_sample_count: Optional[int] = None  # DD 蒙地卡罗采样数
-    dd_alphamu_switch_cards: Optional[int] = None  # DD-αμ-LLM 引擎中盘/残局切换分界
     dd_scoring_mode: Optional[str] = None  # DD 决策计分制: "imp" | "make_rate" | "avg_tricks"
-    use_llm_review: bool = False  # DD-αμ-LLM 引擎是否启用 LLM 分组审查（默认关闭）
     session_id: str = "default"
 
 
@@ -2285,8 +2279,8 @@ async def _execute_ai_play(request: PlayAIRequest, progress_cb=None) -> PlayAIRe
         try:
             if not service.is_human_turn():
                 engine = request.play_engine or DEFAULT_PLAY_ENGINE
-                # P2 修复：未识别引擎显式报错，避免静默落到 LLM 引擎（tiered/alphamu_llm 旧名已下线）
-                KNOWN_PLAY_ENGINES = {"llm", "dd", "perfect", "alphamu", "dd_alphamu_llm"}
+                # P2 修复：未识别引擎显式报错，避免静默落到 LLM 引擎（tiered/alphamu_llm/dd_alphamu_llm 旧名已下线）
+                KNOWN_PLAY_ENGINES = {"llm", "dd", "perfect", "alphamu"}
                 if request.play_engine and engine not in KNOWN_PLAY_ENGINES:
                     return PlayAIResponse(
                         success=False,
@@ -2296,12 +2290,8 @@ async def _execute_ai_play(request: PlayAIRequest, progress_cb=None) -> PlayAIRe
                 use_dd = engine == "dd"
                 use_perfect = engine == "perfect"
                 use_alphamu = engine == "alphamu"
-                use_dd_alphamu_llm = engine == "dd_alphamu_llm"
-                enable_llm_review = request.use_llm_review
-                dd_samples = (request.dd_sample_count
-                              if (use_dd or use_dd_alphamu_llm) else None)
-                dd_switch_cards = request.dd_alphamu_switch_cards if use_dd_alphamu_llm else None
-                dd_scoring_mode = request.dd_scoring_mode if (use_dd or use_dd_alphamu_llm) else None
+                dd_samples = (request.dd_sample_count if use_dd else None)
+                dd_scoring_mode = (request.dd_scoring_mode if use_dd else None)
                 t0 = time.time()
                 # 记录DD提示所需的出牌前状态
                 state_before = service.get_state()
@@ -2314,10 +2304,7 @@ async def _execute_ai_play(request: PlayAIRequest, progress_cb=None) -> PlayAIRe
                     use_dd=use_dd,
                     use_perfect=use_perfect,
                     use_alphamu=use_alphamu,
-                    use_dd_alphamu_llm=use_dd_alphamu_llm,
-                    enable_llm_review=enable_llm_review,
                     dd_samples=dd_samples,
-                    dd_alphamu_switch_cards=dd_switch_cards,
                     dd_scoring_mode=dd_scoring_mode)
                 elapsed_ms = int((time.time() - t0) * 1000)
 

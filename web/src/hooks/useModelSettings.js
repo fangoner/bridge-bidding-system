@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { setFallbackModel, getFallbackModel, healthCheck, reloadJF, getParticleSettings, setParticleSettings, getVisionProvider, setVisionProvider, setDdWorldFilter, setDdFinesseEnable, getDdFinesseDelta, setDdFinesseDelta } from '../services/api'
+import { setFallbackModel, getFallbackModel, healthCheck, reloadJF, getParticleSettings, setParticleSettings, getVisionProvider, setVisionProvider, setDdWorldFilter, setDdFinesseEnable, setDdFinesseDelta } from '../services/api'
 import { useGame } from '../context/GameContext'
 
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
@@ -8,7 +8,6 @@ const DD_SAMPLE_COUNT_KEY = 'bridge_dd_sample_count'
 const DD_PARTICLES_KEY = 'bridge_dd_particles'
 const ALPHA_MU_PARTICLES_KEY = 'bridge_alpha_mu_particles'
 const ALPHA_MU_M_KEY = 'bridge_alpha_mu_m'
-const SWITCH_CARDS_KEY = 'bridge_dd_alphamu_switch_cards'
 const DD_SCORING_MODE_KEY = 'bridge_dd_scoring_mode'
 const DD_KEEP_WIN_KEY = 'bridge_dd_keep_sure_win'
 const DD_KEEP_CRIT_KEY = 'bridge_dd_keep_critical'
@@ -91,7 +90,7 @@ export function useModelSettings() {
     const num = parseInt(value) || 250
     setDDSampleCount(num)
     try { localStorage.setItem(DD_SAMPLE_COUNT_KEY, num) } catch {/* empty */}
-    // 全局DD样本数同步到后端，持久作用于所有采样引擎（dd / dd_alphamu_llm）
+    // 全局DD样本数同步到后端，持久作用于 DD 引擎
     scheduleParticleSync({ dd_particles: num })
   }, [scheduleParticleSync])
 
@@ -105,22 +104,6 @@ export function useModelSettings() {
   }, [])
 
   const [alphaMuParticlesRange, setAlphaMuParticlesRange] = useState({ min: 10, max: 100 })
-
-  // DD-αμ-LLM 引擎：中盘DD/残局αμ切换分界（每手剩余牌数≤此值切αμ，0=全程DD，13=全程αμ）
-  const [switchCards, setSwitchCards] = useState(() => {
-    try {
-      const v = parseInt(localStorage.getItem(SWITCH_CARDS_KEY), 10)
-      return Number.isNaN(v) ? 8 : v
-    } catch { return 8 }
-  })
-  const [switchCardsRange] = useState({ min: 0, max: 13 })
-
-  const handleSwitchCardsChange = useCallback((value) => {
-    const v = parseInt(value, 10)
-    const num = Number.isNaN(v) ? 8 : v
-    setSwitchCards(num)
-    try { localStorage.setItem(SWITCH_CARDS_KEY, num) } catch {/* empty */}
-  }, [])
 
   // DD 决策计分制（localStorage 持久化），随 aiPlay 请求下发到后端 DD 引擎
   const [ddScoringMode, setDdScoringMode] = useState(() => {
@@ -342,9 +325,6 @@ export function useModelSettings() {
     // αμ 层数 M
     alphaMuM, alphaMuMRange,
     handleAlphaMuMChange,
-    // DD-αμ-LLM 分界
-    switchCards, switchCardsRange,
-    handleSwitchCardsChange,
     // DD 决策计分制
     ddScoringMode,
     handleDdScoringModeChange,

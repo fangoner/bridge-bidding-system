@@ -94,9 +94,13 @@ def test_complex_scenario():
         print(f"\n{'='*60}")
         print(f"Config: {cfg['name']} — worlds={cfg['worlds']} depth={cfg['depth']} time={cfg['time']}s")
 
-        sampler = DealSampler()
+        from bridge.mcts.dd_search import DDSearch
+        _dd = DDSearch(num_samples=cfg['worlds'], min_samples=5, time_limit=10.0, endgame_card_threshold=4)
+        _worlds, _, _ = _dd._generate_worlds(
+            state, state.current_player, 13 - (state.declarer_tricks + state.defender_tricks),
+            num_samples=cfg['worlds'])
         am = AlphaMuSearch(
-            sampler=sampler,
+            sampler=_dd.sampler,
             num_worlds=cfg['worlds'],
             max_depth=cfg['depth'],
             time_limit=cfg['time'],
@@ -105,7 +109,7 @@ def test_complex_scenario():
 
         t0 = time.time()
         try:
-            result = am.search(state)
+            result = am.search(state, worlds=_worlds, worlds_source="sampled")
             elapsed = time.time() - t0
             card = result.get("card")
             print(f"  Result card: {card}")

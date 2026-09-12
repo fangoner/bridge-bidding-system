@@ -33,7 +33,6 @@ function PlayDetailPanel({
   onBackToBidding,
   playTotalTime, // v1.61：打牌总耗时（秒，打牌完成时计算）
   playEngine, // P1-10：当前打牌引擎（估算AI单张出牌预计耗时）
-  useLlmReview, // P1-10：LLM 审查开关（开启时预计耗时上浮）
   playStartTime, // P1-10：打牌开始时间戳（打牌中实时显示本局已进行时长）
 }) {
   const aiProgress = useAIProgress() // 任务化轮询实时进度文案（AI出牌阶段）
@@ -67,13 +66,11 @@ function PlayDetailPanel({
 
   // P1-10：按引擎估算 AI 单张出牌预计耗时区间（秒）
   const aiExpectedRange = (() => {
-    if (useLlmReview && (playEngine === 'dd_alphamu_llm' || playEngine === 'alphamu_llm')) return [10, 90]
     switch (playEngine) {
       case 'llm': return [10, 40]
       case 'dd': return [5, 25]
       case 'perfect': return [1, 5]
       case 'alphamu': return [5, 25]
-      case 'dd_alphamu_llm': return [5, 45]
       default: return null
     }
   })()
@@ -192,46 +189,6 @@ function PlayDetailPanel({
           ) : record.used_engine === 'alphamu' ? (
             <Typography variant="caption" sx={{ color: '#7b1fa2', fontSize: '0.7rem', fontWeight: 500 }}>
               αμ
-            </Typography>
-          ) : record.used_engine === 'alphamu_llm' ? (
-            <Typography variant="caption" sx={{ color: '#6a1b9a', fontSize: '0.7rem', fontWeight: 500 }}>
-              {(() => {
-                const MODEL_LABELS = {
-                  'deepseek-v4-flash': 'V4-Flash',
-                  'deepseek-flash': 'V4.1',
-                  'deepseek-v4-pro': 'V4-Pro',
-                  'doubao-seed-2.1-pro': '豆包Pro',
-                  'doubao-seed-2.1-turbo': '豆包Turbo',
-                }
-                const base = (record.used_model || '').replace('::reasoning', '')
-                const label = MODEL_LABELS[base] || base || 'LLM'
-                const hasLLM = !!(fullOutput && fullOutput.llm_review)
-                const isReasoning = (record.used_model || '').includes('::reasoning')
-                if (hasLLM) return `αμ·${label}${isReasoning ? '·思考' : '·快答'}`
-                return 'αμ'
-              })()}
-            </Typography>
-          ) : record.used_engine === 'dd_alphamu_llm' ? (
-            <Typography variant="caption" sx={{ color: '#e65100', fontSize: '0.7rem', fontWeight: 500 }}>
-              {(() => {
-                const MODEL_LABELS = {
-                  'deepseek-v4-flash': 'V4-Flash',
-                  'deepseek-flash': 'V4.1',
-                  'deepseek-v4-pro': 'V4-Pro',
-                  'doubao-seed-2.1-pro': '豆包Pro',
-                  'doubao-seed-2.1-turbo': '豆包Turbo',
-                }
-                const base = (record.used_model || '').replace('::reasoning', '')
-                const label = MODEL_LABELS[base] || base || 'LLM'
-                // 仅当 LLM 审查实际触发（llm_review 存在）时才显示 LLM
-                const hasLLM = !!(fullOutput && fullOutput.llm_review)
-                const isMidgame = !!(fullOutput && fullOutput.engine_phase === 'midgame_dd')
-                const isReasoning = (record.used_model || '').includes('::reasoning')
-                if (hasLLM) {
-                  return `${isMidgame ? 'DD' : 'αμ'}·${label}${isReasoning ? '·思考' : '·快答'}`
-                }
-                return isMidgame ? 'DD' : 'αμ'
-              })()}
             </Typography>
           ) : record.used_model && (
             <Typography variant="caption" sx={{ color: colorMuted, fontSize: '0.7rem' }}>
@@ -369,7 +326,7 @@ function PlayDetailPanel({
                 </Box>
               )
             })}
-            {(record.used_engine === 'dd' || record.used_engine === 'tiered' || record.used_engine === 'perfect' || record.used_engine === 'alphamu' || record.used_engine === 'alphamu_llm' || record.used_engine === 'dd_alphamu_llm') && (() => {
+            {(record.used_engine === 'dd' || record.used_engine === 'tiered' || record.used_engine === 'perfect' || record.used_engine === 'alphamu') && (() => {
               try {
                 const mctsRaw = fullOutput.mcts_stats
                 if (!mctsRaw) { console.log('[Stats] no mcts_stats'); return null }
@@ -481,50 +438,11 @@ function PlayDetailPanel({
                 )
               } catch (e) { console.error('[Stats] viz error:', e); return null }
             })()}
-            {(record.used_engine === 'alphamu_llm' || record.used_engine === 'dd_alphamu_llm') && fullOutput.llm_review_status && (
-              <Typography variant="caption" sx={{ fontSize: '0.65rem', color: fullOutput.llm_review_status === '已激活' ? '#6a1b9a' : colorMuted, display: 'block', mt: 0.5 }}>
-                LLM审查: {fullOutput.llm_review_status}
-              </Typography>
-            )}
-            {(record.used_engine === 'alphamu_llm' || record.used_engine === 'dd_alphamu_llm') && (() => {
-              try {
-                const reviewRaw = fullOutput.llm_review
-                if (!reviewRaw) return null
-                const review = typeof reviewRaw === 'string' ? JSON.parse(reviewRaw) : reviewRaw
-                const groupIdx = review.group || 0
-                const reviewCard = review.card || ''
-                const reason = review.reason || ''
-                const plan = review.plan || ''
-                const planValid = review.plan_valid === true
-                const planInvalid = review.plan_valid === false
-                const hasGroup = groupIdx > 0 && Boolean(reviewCard)
-                const engineName = record.used_engine === 'dd_alphamu_llm' ? 'DD' : 'αμ'
-                let labelColor = '#757575'
-                let labelText = `采纳${engineName}选择`
-                if (hasGroup) {
-                  labelColor = '#6a1b9a'
-                  labelText = `选组${groupIdx}出${reviewCard}（${reason}）`
-                } else if (planValid) {
-                  labelColor = '#1565c0'
-                  labelText = `计划有效: ${plan.length > 48 ? plan.slice(0, 48) + '...' : plan}`
-                } else if (planInvalid) {
-                  labelColor = '#e65100'
-                  labelText = `计划无效: ${plan.length > 48 ? plan.slice(0, 48) + '...' : plan}`
-                }
-                return (
-                  <Box sx={{ mt: 0.5, p: 0.5, borderRadius: 0.5, bgcolor: isDark ? 'rgba(255,255,255,0.04)' : '#f5f5f5' }}>
-                    <Typography variant="caption" sx={{ fontSize: '0.65rem', color: labelColor, fontWeight: 500, display: 'block' }}>
-                      {labelText}
-                    </Typography>
-                  </Box>
-                )
-              } catch { return null }
-            })()}
           </>
         ) : (
           // 输入模式：显示传给AI的完整提示词
           (() => {
-            // LLM打牌的提示词在 llm_review.llm_prompt 中
+            // LLM打牌的提示词在 llm_review.llm_prompt 中（旧纪录兼容）
             const reviewRaw = fullOutput.llm_review
             const review = reviewRaw && typeof reviewRaw === 'string' ? JSON.parse(reviewRaw) : reviewRaw
             const llmPrompt = review ? review.llm_prompt : null

@@ -97,7 +97,7 @@ function CardTable({
   const engineLabel = useCallback((isPlayPanel) => {
     if (!isPlayPanel) return modelLabel(fallbackModel)
     // 非 LLM 引擎统一显示 "AI"
-    if (playEngine && playEngine !== 'llm' && playEngine !== 'dd_alphamu_llm') {
+    if (playEngine && playEngine !== 'llm') {
       return 'AI'
     }
     return modelLabel(playModel)

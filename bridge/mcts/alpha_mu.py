@@ -276,7 +276,8 @@ class AlphaMuSearch:
         self._prev_best_score: float = -1.0
         self._is_root: bool = False  # 标记当前是否在根节点
 
-    def search(self, state: PlayState, worlds: Optional[List[Dict[str, List[Card]]]] = None) -> dict:
+    def search(self, state: PlayState, worlds: Optional[List[Dict[str, List[Card]]]] = None,
+               worlds_source: Optional[str] = None) -> dict:
         self._nodes_searched = 0
         self._dds_calls = 0
         self._dds_time_total = 0.0
@@ -333,23 +334,16 @@ class AlphaMuSearch:
                 "full_output": {"推荐出牌": str(playable[0])},
             }
 
-        # ── 1. 生成 possible worlds ──
-        # 残局时可传入完备枚举世界集（worlds_source=enumerated）：
-        # 枚举只是替代采样的世界生成方式，决策算法不变（αμ 布尔成功率/Pareto）
+        # ── 1. 世界集生成与 DD 完全共用（external）──
+        # 世界集由 play_service 经 DD 引擎 _generate_worlds 统一生成后传入：
+        # 残局→完备枚举（worlds_source="enumerated"）、不可行/非残局→均匀采样
+        # （worlds_source="sampled"）。αμ 内部不再自行采样，仅执行决策算法
+        # （布尔成功率/Pareto），来源差异不影响后续任何逻辑。
         self._start_time = time.time()
-        worlds_source = "sampled"
-        if worlds:
-            worlds_source = "enumerated"
-        else:
-            # Phase 0a: 直接调用 sampler.sample_n()，等权均匀 world 集合
-            # P1-4 修复：时间限制从 worlds 生成开始计时（原在生成后，约束难满足时
-            # worlds 生成耗时不受 time_limit 约束）
-            try:
-                worlds = self.sampler.sample_n(self.num_worlds, state, perspective)
-            except Exception:
-                worlds = []
-            if not worlds:
-                raise RuntimeError("αμ: 无法生成 possible worlds")
+        if not worlds:
+            raise RuntimeError("αμ: worlds 未由外部统一样本生成（DD 引擎 _generate_worlds），"
+                               "αμ 不再内部采样")
+        worlds_source = worlds_source or ("enumerated" if worlds else "sampled")
 
         # 诊断
         has_constraints = bool(getattr(self.sampler, 'constraints', None))

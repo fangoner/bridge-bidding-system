@@ -13,7 +13,6 @@ export function usePlay() {
 }
 
 const PLAY_ENGINE_KEY = 'bridge_play_engine'
-const LLM_REVIEW_KEY = 'bridge_use_llm_review'
 
 export function PlayProvider({ children }) {
   // ── 打牌核心状态 ──
@@ -46,23 +45,18 @@ export function PlayProvider({ children }) {
   // ── 打牌引擎 ──
   // 2026-09-07：MCTS 引擎已从系统中移除，旧 localStorage 残留的 "mcts" 一律回退默认（旧值作废），
   // 避免后端拒绝报错。
-  const PLAYABLE_ENGINES = ['llm', 'dd', 'perfect', 'alphamu', 'dd_alphamu_llm']
+  const PLAYABLE_ENGINES = ['llm', 'dd', 'perfect', 'alphamu']
   const [playEngine, setPlayEngineState] = useState(() => {
     try {
       const saved = localStorage.getItem(PLAY_ENGINE_KEY)
-      return PLAYABLE_ENGINES.includes(saved) ? saved : 'dd_alphamu_llm'
+      return PLAYABLE_ENGINES.includes(saved) ? saved : 'dd'
     } catch {
-      return 'dd_alphamu_llm'
+      return 'dd'
     }
   })
 
   // ── 打牌开始时间（P1-10：打牌中显示已进行时长与预计耗时的基准）──
   const [playStartTime, setPlayStartTime] = useState(null)
-
-  // ── LLM 分组审查开关（DD-αμ-LLM 引擎内，默认关闭以与纯引擎对比）──
-  const [useLlmReview, setUseLlmReview] = useState(() => {
-    try { return localStorage.getItem(LLM_REVIEW_KEY) === 'true' } catch { return false }
-  })
 
   // ── helper 闭包（保持引用稳定即可，暂不需要 useCallback）──
   const toggleDDHints = () => {
@@ -75,10 +69,6 @@ export function PlayProvider({ children }) {
   const handlePlayEngineChange = (value) => {
     setPlayEngineState(value)
     try { localStorage.setItem(PLAY_ENGINE_KEY, value) } catch {/* empty */}
-  }
-  const handleLlmReviewChange = (value) => {
-    setUseLlmReview(value)
-    try { localStorage.setItem(LLM_REVIEW_KEY, String(value)) } catch {/* empty */}
   }
 
   const value = useMemo(
@@ -106,8 +96,6 @@ export function PlayProvider({ children }) {
       playEngine, setPlayEngineState,
       handlePlayEngineChange,
       playStartTime, setPlayStartTime,
-      useLlmReview, setUseLlmReview,
-      handleLlmReviewChange,
     }),
     [
       playState, playLoading, showPlayPanel, showPlayedCards, playCenterView,
@@ -116,7 +104,7 @@ export function PlayProvider({ children }) {
       showDDHints, ddHints, ddHintsLoading,
       contractDialogOpen,
       resetOpeningLeadDialogOpen, directPlayContractInfo,
-      playEngine, playStartTime, useLlmReview,
+      playEngine, playStartTime,
     ],
   )
 

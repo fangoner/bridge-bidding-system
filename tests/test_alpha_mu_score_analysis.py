@@ -87,6 +87,17 @@ def build_defeated_endgame():
     return state
 
 
+def _gen_worlds(state, n_worlds):
+    """世界集生成与生产路径共用（DD 引擎 _generate_worlds 唯一分叉）。"""
+    from bridge.mcts.dd_search import DDSearch
+    dd = DDSearch(num_samples=max(20, n_worlds), min_samples=5,
+                  time_limit=10.0, endgame_card_threshold=4)
+    worlds, _, _ = dd._generate_worlds(
+        state, state.current_player, 13 - (state.declarer_tricks + state.defender_tricks),
+        num_samples=n_worlds)
+    return worlds
+
+
 def run_scenario(name, state):
     print(f"\n{'='*60}")
     print(f"场景: {name}")
@@ -102,7 +113,7 @@ def run_scenario(name, state):
         return
 
     search = AlphaMuSearch(num_worlds=8, M=3, time_limit=15.0)
-    result = search.search(state)
+    result = search.search(state, worlds=_gen_worlds(state, 8), worlds_source="sampled")
 
     print(f"\nαμ 推荐: {result.get('card')}")
     print(f"推理: {result.get('reasoning')}")

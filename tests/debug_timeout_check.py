@@ -58,10 +58,13 @@ def test_13_card_scenario():
     print(f"\nTesting alpha_mu search...")
     print(f"  num_worlds=20, max_depth=1, time_limit=60.0s, dds_budget=20000")
 
-    sampler = DealSampler()
-
+    from bridge.mcts.dd_search import DDSearch
+    _dd = DDSearch(num_samples=20, min_samples=5, time_limit=10.0, endgame_card_threshold=4)
+    _worlds, _, _ = _dd._generate_worlds(
+        state, state.current_player, 13 - (state.declarer_tricks + state.defender_tricks),
+        num_samples=20)
     am = AlphaMuSearch(
-        sampler=sampler,
+        sampler=_dd.sampler,
         num_worlds=20,
         max_depth=1,
         time_limit=60.0,
@@ -70,7 +73,7 @@ def test_13_card_scenario():
 
     t0 = time.time()
     try:
-        result = am.search(state)
+        result = am.search(state, worlds=_worlds, worlds_source="sampled")
         elapsed = time.time() - t0
         card = result.get("card")
         print(f"\nResult card: {card}")

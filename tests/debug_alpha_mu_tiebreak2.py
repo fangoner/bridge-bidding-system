@@ -280,8 +280,14 @@ def test_slam_down_scenario():
         time_limit=15.0,
     )
 
+    from bridge.mcts.dd_search import DDSearch
+    _dd_gen = DDSearch(num_samples=20, min_samples=5, time_limit=10.0, endgame_card_threshold=4)
+    _worlds, _, _ = _dd_gen._generate_worlds(
+        state, state.current_player, 13 - (state.declarer_tricks + state.defender_tricks),
+        num_samples=20)
+
     t0 = time.time()
-    result = am.search(state)
+    result = am.search(state, worlds=_worlds, worlds_source="sampled")
     elapsed = time.time() - t0
 
     mcts_stats = result['full_output'].get('mcts_stats', {})

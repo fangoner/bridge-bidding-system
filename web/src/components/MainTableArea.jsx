@@ -197,7 +197,6 @@ function RightPanelSwitcher({
     showPlayPanel,
     playLoading,
     playEngine,
-    useLlmReview,
     playStartTime,
   } = usePlay()
 
@@ -234,7 +233,6 @@ function RightPanelSwitcher({
         onReviewCompletedPlay={onReviewCompletedPlay}
         playTotalTime={playTotalTime}
         playEngine={playEngine}
-        useLlmReview={useLlmReview}
         playStartTime={playStartTime}
       />
     )

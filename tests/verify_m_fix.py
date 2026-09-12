@@ -85,9 +85,14 @@ def run(name, hands, contract_str, declarer, decl_t, def_t, cp,
     state = build_state(hands, contract_str, declarer, decl_t, def_t, cp)
     playable = state.get_playable_cards(cp)
 
-    sampler = DealSampler()
+    from bridge.mcts.dd_search import DDSearch
+    dd = DDSearch(num_samples=max(20, num_worlds), min_samples=5,
+                  time_limit=10.0, endgame_card_threshold=4)
+    worlds, _, _ = dd._generate_worlds(
+        state, cp, 13 - (decl_t + def_t), num_samples=num_worlds)
+
     am = AlphaMuSearch(
-        sampler=sampler,
+        sampler=dd.sampler,
         num_worlds=num_worlds,
         M=M,
         time_limit=time_limit,
@@ -96,7 +101,7 @@ def run(name, hands, contract_str, declarer, decl_t, def_t, cp,
 
     t0 = time.time()
     try:
-        result = am.search(state)
+        result = am.search(state, worlds=worlds, worlds_source="sampled")
     except Exception as e:
         print(f"  ERROR: {e}")
         traceback.print_exc()

@@ -20,7 +20,6 @@ const BUDGET_FALLBACK = {
     dd: { chat: 35, reasoning: 35 },
     perfect: { chat: 5, reasoning: 5 },
     alphamu: { chat: 126, reasoning: 306 },
-    dd_alphamu_llm: { chat: 126, reasoning: 306 },
   },
 };
 const BUDGET_MARGIN_S = 10; // 预算外网络余量
@@ -476,10 +475,9 @@ export const undoPlay = async () => {
 };
 
 // AI出牌
-export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null, ddAlphamuSwitchCards = null, useLlmReview = false, ddScoringMode = null, onProgress = null) => {
+export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null, ddScoringMode = null, onProgress = null) => {
   const requestData = {
     use_reasoning: useReasoning,
-    use_llm_review: useLlmReview,
     session_id: PLAY_SESSION_ID,
   };
 
@@ -491,9 +489,6 @@ export const aiPlay = async (playModel = null, useReasoning = false, playEngine 
   }
   if (ddSampleCount) {
     requestData.dd_sample_count = ddSampleCount;
-  }
-  if (ddAlphamuSwitchCards != null) {
-    requestData.dd_alphamu_switch_cards = ddAlphamuSwitchCards;
   }
   if (ddScoringMode) {
     requestData.dd_scoring_mode = ddScoringMode;
@@ -508,9 +503,9 @@ export const aiPlay = async (playModel = null, useReasoning = false, playEngine 
       if (e?.response?.status === 404) {
         // 旧后端无任务端点：回退同步路径（预算对齐超时，P1-1）
         const budgets = await getTimeBudgets();
-        const engineKey = playEngine || 'dd_alphamu_llm';
+        const engineKey = playEngine || 'dd';
         const budgetS = budgets?.play?.[engineKey]?.[useReasoning ? 'reasoning' : 'chat']
-          ?? BUDGET_FALLBACK.play.dd_alphamu_llm.chat;
+          ?? BUDGET_FALLBACK.play.dd.chat;
         const config = { timeout: (budgetS + BUDGET_MARGIN_S) * 1000, signal };
         const response = await api.post('/api/play/ai-play', requestData, config);
         return response.data;

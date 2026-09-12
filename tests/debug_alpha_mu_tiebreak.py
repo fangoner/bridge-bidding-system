@@ -126,7 +126,12 @@ def debug_tiebreak():
     if len(playable) >= 2:
         print(f"\n🔬 运行 αμ 搜索...")
         t0 = time.time()
-        result = am.search(state)
+        from bridge.mcts.dd_search import DDSearch
+        _dd_gen = DDSearch(num_samples=10, min_samples=5, time_limit=10.0, endgame_card_threshold=4)
+        _worlds, _, _ = _dd_gen._generate_worlds(
+            state, state.current_player, 13 - (state.declarer_tricks + state.defender_tricks),
+            num_samples=10)
+        result = am.search(state, worlds=_worlds, worlds_source="sampled")
         elapsed = time.time() - t0
 
         mcts_stats = result['full_output'].get('mcts_stats', {})

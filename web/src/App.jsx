@@ -256,8 +256,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     playEngine,
     handlePlayEngineChange,
     setPlayStartTime,
-    useLlmReview,
-    handleLlmReviewChange,
   } = usePlay()
 
   // 载入已完成牌局时的操作选择：null=未决定, 'replay'=只重新打牌, 'review'=复盘
@@ -378,8 +376,6 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     handleParticleChange,
     alphaMuM, alphaMuMRange,
     handleAlphaMuMChange,
-    switchCards, switchCardsRange,
-    handleSwitchCardsChange,
     ddScoringMode, handleDdScoringModeChange,
     keepSureWin, keepCritical, keepSureLose,
     handleKeepClassChange,
@@ -2361,7 +2357,7 @@ const handleReviewCompletedPlay = async () => {
     try {
       const pm = parseModelValue(playModel)
       const t0 = performance.now()
-      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, switchCards, useLlmReview, ddScoringMode, (msg) => setAiProgress(msg))
+      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, ddScoringMode, (msg) => setAiProgress(msg))
       if (controller.signal.aborted) return
       // 撤销序号守卫：AI 出牌在途期间用户点了撤销 → 丢弃本次响应，以后端撤销后的真实状态为准
       if (undoSeqRef.current !== seqAtStart) {
@@ -3000,8 +2996,6 @@ const handleReviewCompletedPlay = async () => {
         handlePlayModelChange={handlePlayModelChange}
         playEngine={playEngine}
         handlePlayEngineChange={handlePlayEngineChange}
-        useLlmReview={useLlmReview}
-        handleLlmReviewChange={handleLlmReviewChange}
         ddSampleCount={ddSampleCount}
         handleDDSampleCountChange={handleDDSampleCountChange}
         ddParticles={ddParticles} ddParticlesRange={ddParticlesRange}
@@ -3009,8 +3003,6 @@ const handleReviewCompletedPlay = async () => {
         handleParticleChange={handleParticleChange}
         alphaMuM={alphaMuM} alphaMuMRange={alphaMuMRange}
         handleAlphaMuMChange={handleAlphaMuMChange}
-        switchCards={switchCards} switchCardsRange={switchCardsRange}
-        handleSwitchCardsChange={handleSwitchCardsChange}
         ddScoringMode={ddScoringMode} handleDdScoringModeChange={handleDdScoringModeChange}
         keepSureWin={keepSureWin} keepCritical={keepCritical} keepSureLose={keepSureLose}
         handleKeepClassChange={handleKeepClassChange}

@@ -95,7 +95,7 @@ ALL_MODELS = expand_model_list(ALL_BASE_MODELS)
 
 # DD play engine settings
 # 2026-09-07：MCTS 引擎已移除（能力弱，代码不再保留）
-DEFAULT_PLAY_ENGINE = "dd_alphamu_llm"  # 主力引擎；可选 "llm" | "dd" | "perfect" | "alphamu" | "dd_alphamu_llm"
+DEFAULT_PLAY_ENGINE = "dd"  # 主力引擎；可选 "llm" | "dd" | "perfect" | "alphamu"
 DD_NUM_SAMPLES = 200  # DD 引擎默认采样数
 DD_MIN_SAMPLES = 15   # floor for adaptive sample scaling
 DD_TIME_LIMIT = 30.0  # seconds per DD play decision (30秒预算，允许首攻冷启动)
@@ -162,11 +162,7 @@ LEAD_SIGNAL_SCHEME = "standard"
 DD_ENDGAME_CARD_THRESHOLD = 4    # 每手剩余牌数≤此值时触发枚举所有分布
 DD_ENDGAME_MAX_ENUMERATIONS = 5000  # 枚举总数超过此值时回退采样
 
-# DD-αμ-LLM 主力引擎：中盘DD与残局αμ的切换分界（每手剩余牌数≤此值切到αμ）
-DD_ALPHAMU_SWITCH_CARDS = 8
-
-# LLM 审查触发门槛：αμ阶段 top-1 与 top-2 成功率差达到此值时视为"一边倒"，跳过审查
-ALPHAMU_LLM_GAP_CAP = 0.35
+# LLM 审查已随 dd-αμ-LLM 引擎下线（2026-09-12）：DD_ALPHAMU_SWITCH_CARDS / ALPHAMU_LLM_GAP_CAP 移除
 
 # 引擎粒子数/采样数范围（供 API 配置端点校验用）
 DD_PARTICLES_MIN = 100

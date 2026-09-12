@@ -154,10 +154,14 @@ def run_scenario(name, hands, contract_str, declarer, decl_tricks, def_tricks,
     playable = state.get_playable_cards(cp)
     print(f"playable={len(playable)}: {[str(c) for c in playable]}")
 
-    sampler = DealSampler()
+    from bridge.mcts.dd_search import DDSearch
+    _dd_gen = DDSearch(num_samples=max(20, num_worlds), min_samples=5,
+                       time_limit=10.0, endgame_card_threshold=4)
+    _worlds, _, _ = _dd_gen._generate_worlds(
+        state, cp, 13 - (decl_tricks + def_tricks), num_samples=num_worlds)
 
     am = AlphaMuSearch(
-        sampler=sampler,
+        sampler=_dd_gen.sampler,
         num_worlds=num_worlds,
         M=max_depth,
         time_limit=time_limit,
@@ -166,7 +170,7 @@ def run_scenario(name, hands, contract_str, declarer, decl_tricks, def_tricks,
 
     t0 = time.time()
     try:
-        result = am.search(state)
+        result = am.search(state, worlds=_worlds, worlds_source="sampled")
     except Exception as e:
         print(f"搜索异常: {e}")
         traceback.print_exc()

@@ -748,6 +748,35 @@ class DDSearch:
                      f"solve_total={_solve_total:.1f}s\n")
         return samples_done, _solve_times, _solve_total, _solve_max
 
+    def _generate_worlds(self, state: PlayState, perspective: str,
+                         remaining_tricks: int, num_samples: Optional[int] = None):
+        """样本来源选择（唯一分叉）+ 独立计时（DD 与 αμ 共用）。
+
+        残局（剩余墩≤endgame_card_threshold）优先穷举未知分布；枚举不可行
+        （数量超限/一致性失败）或非残局落回均匀采样。生成阶段独立计时
+        （gen_time），不计入求解 time_limit 预算。
+        num_samples=None 时按剩余墩自适应（DD 用它）；传入具体值则用该值
+        采样（αμ 用它——αμ 的世界数按牌数自适应，与 DD 样本数不同）。
+        返回 (worlds, source, gen_time)：source 仅用于日志与展示，不参与
+        后续求解/决策的任何分支。
+        """
+        gen_start = time.time()
+        worlds = None
+        source = "均匀采样"
+        if remaining_tricks <= self.endgame_card_threshold:
+            enum = self._enumerate_endgame_worlds(state, perspective)
+            if enum is not None:
+                worlds = enum
+                source = "残局枚举"
+        if worlds is None:
+            if num_samples is None:
+                ratio = max(0, remaining_tricks / 13)
+                num_samples = int(self.min_samples + (self.num_samples - self.min_samples) * ratio)
+                num_samples = max(self.min_samples, min(self.num_samples, num_samples))
+            worlds = self.sampler.sample_n(num_samples, state, perspective)
+        gen_time = time.time() - gen_start
+        return worlds, source, gen_time
+
     def search(self, state: PlayState, perspective: str = None,
                actual_turn: str = None) -> dict:
         # perspective/actual_turn 可覆盖（顶张侧过手探测用队友侧视角，
@@ -774,16 +803,21 @@ class DDSearch:
         # 残局判定：用剩余墩数（=每手牌数），与模式无关
         remaining_tricks = 13 - (state.declarer_tricks + state.defender_tricks)
 
-        # 残局：尝试精确枚举所有分布
-        if remaining_tricks <= self.endgame_card_threshold:
-            enum_result = self._enumerate_endgame(state, perspective, actual_turn, playable,
-                                                   declarer, dummy, trump, is_declarer_side)
-            if enum_result is not None:
-                return enum_result
-
-        ratio = max(0, remaining_tricks / 13)
-        adaptive_samples = int(self.min_samples + (self.num_samples - self.min_samples) * ratio)
-        adaptive_samples = max(self.min_samples, min(self.num_samples, adaptive_samples))
+        # 样本来源选择（唯一分叉）+ 独立计时：残局优先穷举未知分布，不可行/
+        # 非残局落回均匀采样。生成耗时单独统计，不计入求解 time_limit 预算。
+        worlds, source, gen_time = self._generate_worlds(
+            state, perspective, remaining_tricks)
+        _has_constraints = bool(self.sampler.constraints)
+        _constraint_count = len(self.sampler.constraints) if self.sampler.constraints else 0
+        print(f"[DD] {source}: {len(worlds)} 样本, "
+              f"gen={gen_time:.2f}s, "
+              f"constraints={_has_constraints}({_constraint_count}), "
+              f"remaining_tricks={remaining_tricks}")
+        with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
+            _f.write(f"[DD] trick={13-remaining_tricks+1} source={source} samples={len(worlds)} "
+                     f"gen={gen_time:.2f}s "
+                     f"constraints={_has_constraints}({_constraint_count}) "
+                     f"remaining_tricks={remaining_tricks}\n")
 
         card_scores = {str(c): {"weighted_sum": 0.0, "total_weight": 0.0,
                                   "scores": [], "mn": float("inf"), "mx": -float("inf")}
@@ -800,26 +834,9 @@ class DDSearch:
             all_played.extend(trick.cards)
         all_played.extend(trick_cards)
 
-        # Phase 0a: 均匀采样生成样本（替代旧 BeliefTracker）
-        # P1-4 修复：时间预算从采样开始计时（原在采样后，约束难满足时采样耗时不受 30s 预算约束）
+        # ── 求解与决策：此后采样/枚举共用同一份代码，无任何来源区分 ──
+        # P1-4 修复：时间预算从求解开始计时（样本生成已独立计时，不再挤占预算）
         start_time = time.time()
-        samples = None  # List[Dict[str, List[Card]]]
-        _prepare_t = 0.0
-        _prep_t0 = time.time()
-        samples = self.sampler.sample_n(adaptive_samples, state, perspective)
-        _prepare_t = time.time() - _prep_t0
-        _has_constraints = bool(self.sampler.constraints)
-        _constraint_count = len(self.sampler.constraints) if self.sampler.constraints else 0
-        print(f"[DD] 均匀采样: {len(samples)} 样本, "
-              f"prepare={_prepare_t:.2f}s, "
-              f"constraints={_has_constraints}({ _constraint_count }), "
-              f"remaining_tricks={remaining_tricks}")
-        with open(_DEBUG_LOG, "a", encoding="utf-8") as _f:
-            _f.write(f"[DD] trick={13-remaining_tricks+1} samples={len(samples)} "
-                     f"prepare={_prepare_t:.2f}s "
-                     f"constraints={_has_constraints}({ _constraint_count }) "
-                     f"remaining_tricks={remaining_tricks}\n")
-
         samples_done = 0
         eval_stats = {"kept": 0, "sure_win": 0, "critical": 0, "sure_lose": 0,
                       "dropped_win": 0, "dropped_crit": 0, "dropped_lose": 0}
@@ -832,11 +849,20 @@ class DDSearch:
         finesse_probe = {} if (_probe_ok and _dd_config.DD_FINESSE_ENABLE) else None
 
         samples_done, _solve_times, _solve_total, _solve_max = self._solve_worlds(
-            samples, all_played, trick_cards, trick_leader,
+            worlds, all_played, trick_cards, trick_leader,
             playable, state, perspective, actual_turn, declarer, dummy,
             trump, card_scores, eval_stats, finesse_probe, start_time,
-            mode_note=" (均匀采样)")
+            mode_note=f" ({source})")
         elapsed = time.time() - start_time
+
+        # 统一有效性检查（来源无关）：所有世界求解失败时兜底，避免
+        # _finalize_decision 拿到空 card_scores 返回 card=None。
+        if not any(cs["scores"] for cs in card_scores.values()):
+            return {
+                "card": playable[0],
+                "reasoning": "DD: 全部世界求解失败，兜底",
+                "full_output": {"推荐出牌": str(playable[0])},
+            }
 
         _sel = self._finalize_decision(card_scores, state, playable, is_declarer_side, elapsed)
         best_card = _sel["best_card"]
@@ -853,7 +879,7 @@ class DDSearch:
         _crit_pct = eval_stats["critical"] / samples_done * 100 if samples_done else 0.0
         _lose_pct = eval_stats["sure_lose"] / samples_done * 100 if samples_done else 0.0
         reasoning = (
-            f"DDMC: 评分样本{eval_stats['kept']}/{samples_done} in {elapsed:.1f}s"
+            f"DD-{source}: 评分样本{eval_stats['kept']}/{samples_done} in {elapsed:.1f}s"
             f"{_dropped_note}. "
             f"Top plays: {top_plays_str}"
         )
@@ -866,7 +892,7 @@ class DDSearch:
                 "核心逻辑": reasoning,
                 "候选对比": str(child_stats),
                 "局面评估": (
-                    f"DDMC 总样本 {samples_done}（全赢{eval_stats['sure_win']}·临界{eval_stats['critical']}·全输{eval_stats['sure_lose']}"
+                    f"DD-{source} 总样本 {samples_done}（全赢{eval_stats['sure_win']}·临界{eval_stats['critical']}·全输{eval_stats['sure_lose']}"
                     f"，其中临界占{_crit_pct:.0f}%、全输占{_lose_pct:.0f}%），评分样本 {eval_stats['kept']}"
                     f"{'，过滤 ' + '、'.join(_dropped_parts) if _dropped_parts else ''}，耗时 {elapsed:.1f}s"
                 ),
@@ -889,6 +915,7 @@ class DDSearch:
                     "iters_per_sec": round(samples_done / elapsed, 1) if elapsed > 0 else 0,
                     "adaptive_cap": self.num_samples,
                     "remaining_cards": remaining_tricks * 4,
+                    "valid_distributions": len(worlds) if source == "残局枚举" else None,
                     "candidates": child_stats,
                 },
             },
@@ -1009,101 +1036,6 @@ class DDSearch:
                 worlds.append(hands)
 
         return worlds if worlds else None
-
-    def _enumerate_endgame(self, state: PlayState, perspective: str, actual_turn: str,
-                           playable: List[Card], declarer: str, dummy: str,
-                           trump: str, is_declarer_side: bool) -> Optional[dict]:
-        """残局精确枚举：枚举所有可能的未知牌分布，对每个做双明手求解。
-
-        返回同 search() 的 dict 格式，若枚举不可行则返回 None（回退采样）。
-        """
-        start_time = time.time()
-
-        worlds = self._enumerate_endgame_worlds(state, perspective)
-        if worlds is None:
-            return None
-        enum_count = len(worlds)
-
-        # ── 预计算共享状态 ──
-        trick_state = get_current_trick_state(state)
-        trick_cards = trick_state["cards"]
-        trick_leader = trick_state.get("leader")
-
-        # 收集所有已出牌（已完成墩 + 当前墩），按出牌顺序
-        all_played = []
-        for trick in state.tricks:
-            all_played.extend(trick.cards)
-        all_played.extend(trick_cards)
-
-        total_played_tricks = state.declarer_tricks + state.defender_tricks
-        remaining_tricks = 13 - total_played_tricks
-
-        card_scores = {str(c): {"weighted_sum": 0.0, "total_weight": 0,
-                        "scores": [], "mn": float("inf"), "mx": -float("inf")}
-               for c in playable}
-        # 与 search() 同口径的三分类统计（全赢/临界/全输），供页面与策略读取
-        eval_stats = {"kept": 0, "sure_win": 0, "critical": 0, "sure_lose": 0,
-                      "dropped_win": 0, "dropped_crit": 0, "dropped_lose": 0}
-        # 飞牌后果敏感性探针（与 search() 主路径同口径）：枚举世界四家手牌已知，
-        # 同样可按缺失大牌位置分桶——补齐残局枚举路径的 finesse_probe 缺口。
-        # 门控与 search() 一致（2026-09-09 统一）：仅"本家正在领出"才探测——
-        # 跟牌/垫牌时探针会因滑动窗口下移发明新对象（如飞Q时Q刚出，探针滑到
-        # "飞T"），把本应放小的接应误判成必须盖T。跟牌时无论谁领出都不探测；
-        # 受 DD 飞牌管理开关（DD_FINESSE_ENABLE）控制，关闭时输出空。
-        _probe_ok = (not trick_cards) and (actual_turn in (declarer, dummy))
-        finesse_probe = {} if (_probe_ok and _dd_config.DD_FINESSE_ENABLE) else None
-
-        # ── 与 search() 完全相同的求解累计（batch 优先 + 串行降级）──
-        samples_done, _solve_times, _solve_total, _solve_max = self._solve_worlds(
-            worlds, all_played, trick_cards, trick_leader,
-            playable, state, perspective, actual_turn, declarer, dummy,
-            trump, card_scores, eval_stats, finesse_probe, start_time,
-            mode_note=" (残局枚举)")
-        elapsed = time.time() - start_time
-
-        if not any(cs["scores"] for cs in card_scores.values()):
-            return None  # 无有效分布，回退采样
-
-        _sel = self._finalize_decision(card_scores, state, playable, is_declarer_side, elapsed)
-        best_card = _sel["best_card"]
-        child_stats = _sel["child_stats"]
-        top_plays_str = _sel["top_plays_str"]
-        valid_count = samples_done
-        reasoning = (
-            f"DD-endgame: {enum_count} enumerations ({valid_count} valid) "
-            f"in {elapsed:.1f}s. Top plays: {top_plays_str}"
-        )
-
-        return {
-            "card": best_card,
-            "reasoning": reasoning,
-            "full_output": {
-                "推荐出牌": str(best_card),
-                "核心逻辑": reasoning,
-                "候选对比": str(child_stats),
-                "局面评估": (
-                    f"DD-endgame enumerated {enum_count} distributions "
-                    f"({valid_count} valid) in {elapsed:.1f}s"
-                ),
-                # 与 search() 同口径的结构化三分类统计（供页面与飞牌拖延策略读取）
-                "dd_stats": {
-                    "samples": valid_count,
-                    "sure_win": eval_stats["sure_win"],
-                    "critical": eval_stats["critical"],
-                    "sure_lose": eval_stats["sure_lose"],
-                },
-                # 飞牌后果敏感性探针（与 search() 主路径同口径）：{花色: {对象, Δ, 引牌}}
-                "finesse_probe": _finalize_finesse_probe(finesse_probe or {}),
-                "mcts_stats": {
-                    "iterations": samples_done,
-                    "valid_distributions": enum_count,
-                    "time_sec": round(elapsed, 2),
-                    "iters_per_sec": round(samples_done / elapsed, 1) if elapsed > 0 else 0,
-                    "remaining_cards": sum(len(h) for h in worlds[0].values()) if worlds else remaining_tricks,
-                    "candidates": child_stats,
-                },
-            },
-        }
 
     def search_perfect(self, state: PlayState) -> dict:
         """全知双明手搜索：AI 知道四家手牌，一次 DirectDDS 得所有候选精确分。

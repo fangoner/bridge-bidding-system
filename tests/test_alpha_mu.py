@@ -113,6 +113,17 @@ def test_pareto_front():
     print("  测试通过!\n")
 
 
+def _gen_worlds(state, n_worlds):
+    """世界集生成与生产路径共用（DD 引擎 _generate_worlds 唯一分叉）。"""
+    from bridge.mcts.dd_search import DDSearch
+    dd = DDSearch(num_samples=max(20, n_worlds), min_samples=5,
+                  time_limit=10.0, endgame_card_threshold=4)
+    worlds, source, _ = dd._generate_worlds(
+        state, state.current_player, 13 - (state.declarer_tricks + state.defender_tricks),
+        num_samples=n_worlds)
+    return worlds, source
+
+
 def _build_endgame_state():
     """构建一个残局测试场景（每手 4 张牌）。
 
@@ -161,7 +172,8 @@ def test_alpha_mu_endgame():
     )
 
     try:
-        result = search.search(state)
+        worlds, _src = _gen_worlds(state, 8)
+        result = search.search(state, worlds=worlds, worlds_source="sampled")
         card = result.get("card")
         reasoning = result.get("reasoning", "")
         print(f"  αμ 推荐: {card}")
@@ -206,7 +218,7 @@ def test_alpha_mu_vs_dd_consistency():
     alpha_search = AlphaMuSearch(
         num_worlds=6, M=2, time_limit=10.0,
     )
-    alpha_result = alpha_search.search(state)
+    alpha_result = alpha_search.search(state, worlds=_gen_worlds(state, 6)[0], worlds_source="sampled")
     alpha_card = alpha_result.get("card")
     print(f"  αμ 推荐: {alpha_card}")
 

@@ -342,9 +342,9 @@ def test_6_dd_engine():
 
 
 def test_8_dd_alphamu_llm_midgame():
-    """测试 8: DD-αμ-LLM 引擎中盘（DD+LLM审查）。"""
+    """测试 8: DD 引擎中盘（dd-αμ-LLM 已下线，2026-09-12，等价改为纯 DD）。"""
     print("=" * 60)
-    print("测试 8: DD-αμ-LLM 引擎中盘阶段")
+    print("测试 8: DD 引擎中盘阶段")
     print("=" * 60)
 
     if not DD_ENDPLAY_OK:
@@ -357,26 +357,26 @@ def test_8_dd_alphamu_llm_midgame():
     loop = asyncio.new_event_loop()
     try:
         result = loop.run_until_complete(
-            service.get_ai_play(use_dd_alphamu_llm=True, dd_samples=10, dd_alphamu_switch_cards=8)
+            service.get_ai_play(use_dd=True, dd_samples=10)
         )
     finally:
         loop.close()
 
     card = result.get("card")
     engine_phase = result.get("full_output", {}).get("engine_phase", "")
-    assert card is not None, f"DD-αμ-LLM 应返回出牌, 实际: {result}"
+    assert card is not None, f"DD 应返回出牌, 实际: {result}"
     card_obj = Card(suit=card["suit"], rank=card["rank"])
     playable = service.get_playable_cards()
-    assert card_obj in playable, f"DD-αμ-LLM 推荐 {card_obj} 不在合法出牌中"
-    print(f"  ✓ DD-αμ-LLM 推荐: {card_obj} (phase={engine_phase})")
+    assert card_obj in playable, f"DD 推荐 {card_obj} 不在合法出牌中"
+    print(f"  ✓ DD 推荐: {card_obj} (phase={engine_phase})")
 
     print("  测试通过!\n")
 
 
 def test_9_dd_alphamu_llm_endgame_alpha_mu():
-    """测试 9: DD-αμ-LLM 引擎残局阶段走 αμ。"""
+    """测试 9: αμ 纯引擎残局阶段（dd-αμ-LLM 已下线，2026-09-12）。"""
     print("=" * 60)
-    print("测试 9: DD-αμ-LLM 残局阶段")
+    print("测试 9: αμ 残局阶段")
     print("=" * 60)
 
     if not ALPHA_MU_ENDPLAY_OK:
@@ -389,7 +389,7 @@ def test_9_dd_alphamu_llm_endgame_alpha_mu():
     loop = asyncio.new_event_loop()
     try:
         result = loop.run_until_complete(
-            service.get_ai_play(use_dd_alphamu_llm=True)
+            service.get_ai_play(use_alphamu=True)
         )
     finally:
         loop.close()
@@ -446,7 +446,6 @@ def test_11_engine_consistency():
 
     engines_to_test = [
         ("DD", {"use_dd": True, "dd_samples": 8}),
-        ("DD-αμ-LLM", {"use_dd_alphamu_llm": True, "dd_samples": 8}),
         ("Perfect", {"use_perfect": True}),
     ]
 
@@ -567,27 +566,30 @@ def test_14_doubled_contract():
 def test_15_dd_alphamu_llm_structure():
     """测试 15: DD-αμ-LLM 引擎结构存在性。"""
     print("=" * 60)
-    print("测试 15: DD-αμ-LLM 引擎结构")
+    print("测试 15: 引擎集合（dd-αμ-LLM 已下线）")
     print("=" * 60)
 
     service = _make_service()
 
-    # 验证 DD-αμ-LLM 引擎方法存在
-    assert hasattr(service, "_dd_alphamu_llm_play"), "缺少 _dd_alphamu_llm_play 方法"
-    assert hasattr(service, "_dd_llm_play"), "缺少 _dd_llm_play 方法"
-    assert hasattr(service, "_group_candidates_by_tricks_vec"), "缺少 _group_candidates_by_tricks_vec 方法"
-    print("  ✓ _dd_alphamu_llm_play: 存在")
-    print("  ✓ _dd_llm_play: 存在")
-    print("  ✓ _group_candidates_by_tricks_vec: 存在")
+    # dd-αμ-LLM 引擎及其 LLM 审查辅助方法已下线（2026-09-12）
+    assert not hasattr(service, "_dd_alphamu_llm_play"), "_dd_alphamu_llm_play 应已删除"
+    assert not hasattr(service, "_dd_llm_play"), "_dd_llm_play 应已删除"
+    assert not hasattr(service, "_alphamu_llm_play"), "_alphamu_llm_play 应已删除"
+    print("  ✓ _dd_alphamu_llm_play / _dd_llm_play / _alphamu_llm_play 已下线")
 
-    # 验证方法签名
-    sig = inspect.signature(service._dd_alphamu_llm_play)
+    # 保留引擎方法仍在
+    assert hasattr(service, "_llm_play"), "缺少 _llm_play 方法"
+    assert hasattr(service, "_dd_play"), "缺少 _dd_play 方法"
+    assert hasattr(service, "_alpha_mu_play"), "缺少 _alpha_mu_play 方法"
+    print("  ✓ _llm_play / _dd_play / _alpha_mu_play 存在")
+
+    # get_ai_play 不再接收 use_dd_alphamu_llm / enable_llm_review 参数
+    sig = inspect.signature(service.get_ai_play)
     params = list(sig.parameters.keys())
-    assert "state" in params
-    assert "use_reasoning" in params
-    assert "dd_samples" in params
-    assert "switch_cards" in params
-    print(f"  ✓ 方法签名: {params}")
+    assert "use_dd_alphamu_llm" not in params
+    assert "enable_llm_review" not in params
+    assert "use_dd" in params and "use_alphamu" in params
+    print(f"  ✓ get_ai_play 参数: {params}")
 
     print("  测试通过!\n")
 

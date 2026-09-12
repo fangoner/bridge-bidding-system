@@ -98,8 +98,6 @@ function SettingsPanel({
   handlePlayModelChange,
   playEngine,
   handlePlayEngineChange,
-  useLlmReview,
-  handleLlmReviewChange,
   ddSampleCount,
   handleDDSampleCountChange,
   ddParticlesRange,
@@ -107,8 +105,6 @@ function SettingsPanel({
   handleParticleChange,
   alphaMuM, alphaMuMRange,
   handleAlphaMuMChange,
-  switchCards, switchCardsRange,
-  handleSwitchCardsChange,
   ddScoringMode,
   handleDdScoringModeChange,
   keepSureWin, keepCritical, keepSureLose,
@@ -182,7 +178,7 @@ function SettingsPanel({
   if (!showSettings) return null
 
   // 计分制仅对用到 DD 决策的引擎生效（纯 DD 与 DD-αμ-LLM 中盘）
-  const ddScoringVisible = playEngine === 'dd' || playEngine === 'dd_alphamu_llm'
+  const ddScoringVisible = playEngine === 'dd'
 
   return (
     <Paper elevation={2} sx={{ p: { xs: 2, md: 2.5 }, mb: 3, width: '100%' }}>
@@ -263,7 +259,7 @@ function SettingsPanel({
             parsed={playParsed}
             onModelChange={onPlayModelChange}
             onReasoningChange={onPlayReasoningChange}
-            disabled={playEngine !== 'llm' && playEngine !== 'dd_alphamu_llm'}
+            disabled={playEngine !== 'llm'}
             models={visibleModels}
           />
 
@@ -274,7 +270,6 @@ function SettingsPanel({
               onChange={(e) => handlePlayEngineChange(e.target.value)}
               label="打牌引擎"
             >
-              <MenuItem value="dd_alphamu_llm">DD-αμ-LLM</MenuItem>
               <MenuItem value="llm">LLM</MenuItem>
               <MenuItem value="dd">DD</MenuItem>
               <MenuItem value="perfect" disabled={mode !== 'practice' && !allHandsComplete} title={mode !== 'practice' && !allHandsComplete ? '完美DD需要四家完整手牌，暂不可用' : ''}>完美DD</MenuItem>
@@ -358,25 +353,6 @@ function SettingsPanel({
             <RangeSlider label="样本数" value={ddSampleCount}
               min={ddParticlesRange.min} max={ddParticlesRange.max} step={250} width={72}
               onCommit={handleDDSampleCountChange} />
-          )}
-          {playEngine === 'dd_alphamu_llm' && (
-            <>
-              <RangeSlider label="分界" value={switchCards}
-                min={switchCardsRange.min} max={switchCardsRange.max} step={1} width={60}
-                onCommit={handleSwitchCardsChange} />
-              <ToggleButtonGroup
-                value={useLlmReview ? 'on' : 'off'}
-                exclusive
-                onChange={(_, v) => v && handleLlmReviewChange(v === 'on')}
-                size="small"
-                sx={{
-                  '& .MuiToggleButton-root': { px: 1, py: 0.2, fontSize: '0.65rem', textTransform: 'none', minWidth: 40 },
-                }}
-              >
-                <ToggleButton value="off">纯引擎</ToggleButton>
-                <ToggleButton value="on">LLM审查</ToggleButton>
-              </ToggleButtonGroup>
-            </>
           )}
           {playEngine === 'alphamu' && (
             <>
