@@ -595,6 +595,7 @@ class AlphaMuSearch:
                     "num_worlds": n_worlds,
                     "worlds_source": worlds_source,
                     "nodes_searched": self._nodes_searched,
+                    "M": self.M,
                     "algorithm": "alpha_mu",
                     "err_stats": dict(self._err_stats),
                     "err_samples": dict(self._err_samples),

@@ -5,6 +5,7 @@ import { getSuitColor } from '../constants/suits'
 import { PANEL_LAYOUT } from '../styles/constants'
 import { formatTotalTime } from '../utils/format'
 import { useAIProgress } from '../context/AIProgressContext'
+import { EngineView } from './play/engineViews'
 
 function PlayDetailPanel({
   isMobile,
@@ -87,8 +88,6 @@ function PlayDetailPanel({
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
   const bgWhite = isDark ? 'rgba(30, 41, 59, 0.7)' : 'white'
-  const bgCode = isDark ? 'rgba(255,255,255,0.05)' : '#f8f9fa'
-  const borderCode = isDark ? '1px solid rgba(255,255,255,0.1)' : '1px solid #e9ecef'
   const colorMuted = isDark ? '#94a3b8' : '#888'
   
   const contract = playState?.contract
@@ -105,18 +104,6 @@ function PlayDetailPanel({
   })()
   const isComplete = playState?.phase === 'complete'
   const isStartOfTrick = (playState?.current_trick?.cards?.length || 0) === 0
-
-  // 估算token数（中文字符≈1 token，其他≈4字符/token）
-  const estimateTokens = (text) => {
-    if (!text) return 0
-    let chinese = 0
-    let other = 0
-    for (const ch of text) {
-      if (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(ch)) chinese++
-      else other++
-    }
-    return Math.ceil(chinese + other / 4)
-  }
 
   // 渲染AI输出卡片的通用组件
   const renderAIOutputCard = (record, showClose = false, onCloseExternal = null) => {
@@ -143,31 +130,6 @@ function PlayDetailPanel({
     }
 
     const fullOutput = record.full_output || {}
-    const prompt = record.prompt || ''
-
-    // 输出模式：显示 fullOutput 中所有有效字段（排除内部/已渲染的）
-    const SKIP_KEYS = ['mcts_stats', 'tiered_phase', 'tiered_dd_fallback', 'validation_warning', 'llm_review', 'engine_phase', 'llm_review_status', '叫牌约束', '最新约束', '各家已出统计']
-    const FIELD_COLORS = ['#e65100', 'text.primary', '#2e7d32', '#1976d2', '#37474f', '#1565c0']
-    const fields = Object.keys(fullOutput)
-      .filter(k => !SKIP_KEYS.includes(k) && fullOutput[k] != null && fullOutput[k] !== '')
-      .map((k, i) => ({
-        key: k,
-        label: k,
-        color: FIELD_COLORS[i % FIELD_COLORS.length],
-        multiline: typeof fullOutput[k] === 'string' && fullOutput[k].length > 40,
-      }))
-    // dd_hint 确保在最前面
-    if (fullOutput.dd_hint && !fields.find(f => f.key === 'dd_hint')) {
-      fields.unshift({ key: 'dd_hint', label: 'DD注入', color: '#e65100', multiline: true })
-    }
-
-    const getValue = (key) => {
-      const val = fullOutput[key] || record[key]
-      if (val === null || val === undefined) return ''
-      if (typeof val === 'string') return val
-      if (typeof val === 'object') return JSON.stringify(val, null, 2)
-      return String(val)
-    }
 
     return (
       <Box sx={{ p: 1.5, background: bgWhite, borderRadius: 1, borderLeft: '4px solid #2196f3', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', overflow: viewMode === 'input' ? 'hidden' : undefined }}>
@@ -194,9 +156,9 @@ function PlayDetailPanel({
             <Typography variant="caption" sx={{ color: colorMuted, fontSize: '0.7rem' }}>
                             {(() => {
                 const MODEL_LABELS = {
-                  'deepseek-v4-flash': 'V4-Flash',
-                  'deepseek-flash': 'V4.1',
-                  'deepseek-v4-pro': 'V4-Pro',
+                  'deepseek-v4-flash': 'deepseek-flash',
+                  'deepseek-flash': 'deepseek-flash',
+                  'deepseek-v4-pro': 'deepseek-flash',
                   'doubao-seed-2.1-pro': '豆包 Pro',
                   'doubao-seed-2.1-turbo': '豆包 Turbo',
                 }
@@ -213,16 +175,18 @@ function PlayDetailPanel({
             </Typography>
           )}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-            <ToggleButtonGroup
-              value={viewMode}
-              exclusive
-              onChange={(_, v) => v && setViewMode(v)}
-              size="small"
-              sx={{ height: 24, '& .MuiToggleButton-root': { py: 0, px: 1, fontSize: '0.7rem' } }}
-            >
-              <ToggleButton value="output" sx={{ textTransform: 'none' }}>输出</ToggleButton>
-              <ToggleButton value="input" sx={{ textTransform: 'none' }}>输入</ToggleButton>
-            </ToggleButtonGroup>
+            {(record.used_engine || '') === 'llm' && (
+              <ToggleButtonGroup
+                value={viewMode}
+                exclusive
+                onChange={(_, v) => v && setViewMode(v)}
+                size="small"
+                sx={{ height: 24, '& .MuiToggleButton-root': { py: 0, px: 1, fontSize: '0.7rem' } }}
+              >
+                <ToggleButton value="output" sx={{ textTransform: 'none' }}>输出</ToggleButton>
+                <ToggleButton value="input" sx={{ textTransform: 'none' }}>输入</ToggleButton>
+              </ToggleButtonGroup>
+            )}
             {showClose && (
               <Button size="small" onClick={() => {
                 setSelectedRecord(null)
@@ -232,243 +196,7 @@ function PlayDetailPanel({
           </Box>
         </Box>
         
-        {viewMode === 'output' ? (
-          // 输出模式：显示AI返回的字段
-          <>
-            {(() => {
-              const initTxt = fullOutput['叫牌约束']
-              const latestTxt = fullOutput['最新约束']
-              const playedStats = fullOutput['各家已出统计']
-              if (!initTxt && !latestTxt && !playedStats) return null
-              const parseRows = (text) => {
-                const map = {}
-                for (const line of String(text || '').split('\n')) {
-                  const m = line.match(/^([东西南北]):\s*(.*)$/)
-                  if (m) map[m[1]] = m[2]
-                }
-                return map
-              }
-              const initRows = parseRows(initTxt)
-              const latestRows = parseRows(latestTxt)
-              const positions = ['南', '西', '北', '东']
-              const noInit = !initTxt || initTxt.includes('无约束')
-              const noLatest = !latestTxt || latestTxt.includes('无约束') || latestTxt.includes('全部满足')
-              const tdSx = { border: borderCode, p: 0.5, fontSize: '0.65rem', lineHeight: 1.3, verticalAlign: 'top' }
-              const thSx = { ...tdSx, fontWeight: 600, background: isDark ? 'rgba(255,255,255,0.06)' : '#f5f5f5', color: 'text.primary' }
-              return (
-                <Box key="constraint-table" sx={{ mt: 0.5 }}>
-                  <Typography variant="caption" sx={{ fontSize: '0.7rem', color: '#1976d2', fontWeight: 600, display: 'block', mb: 0.3 }}>
-                    约束与已出牌对照
-                  </Typography>
-                  <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <Box component="thead">
-                      <Box component="tr">
-                        <Box component="th" sx={{ ...thSx, whiteSpace: 'nowrap' }}>位置</Box>
-                        <Box component="th" sx={thSx}>初始约束</Box>
-                        <Box component="th" sx={thSx}>最新约束</Box>
-                        <Box component="th" sx={{ ...thSx, whiteSpace: 'nowrap' }}>已出点力</Box>
-                        {['♠', '♥', '♦', '♣'].map(s => (
-                          <Box component="th" key={s} sx={{ ...thSx, textAlign: 'center' }}>{s}</Box>
-                        ))}
-                      </Box>
-                    </Box>
-                    <Box component="tbody">
-                      {positions.map(pos => {
-                        const st = playedStats && playedStats[pos]
-                        return (
-                          <Box component="tr" key={pos}>
-                            <Box component="td" sx={{ ...tdSx, fontWeight: 600 }}>{pos}</Box>
-                            <Box component="td" sx={{ ...tdSx, color: colorMuted }}>{initRows[pos] || '—'}</Box>
-                            <Box component="td" sx={{ ...tdSx, color: colorMuted }}>{latestRows[pos] || '—'}</Box>
-                            <Box component="td" sx={{ ...tdSx, textAlign: 'center' }}>{st ? st.hcp : '—'}</Box>
-                            {['♠', '♥', '♦', '♣'].map(s => (
-                              <Box component="td" key={s} sx={{ ...tdSx, textAlign: 'center' }}>{st ? (st[s] ?? '—') : '—'}</Box>
-                            ))}
-                          </Box>
-                        )
-                      })}
-                    </Box>
-                  </Box>
-                  {(noInit || noLatest) && (
-                    <Typography variant="caption" sx={{ color: colorMuted, display: 'block', mt: 0.2 }}>
-                      {noInit ? '计入此项时初始无约束（随机采样），不参与推断。' : ''}
-                      {noLatest ? '最新约束为剩余部分约束（已随出牌扣减）。' : ''}
-                    </Typography>
-                  )}
-                </Box>
-              )
-            })()}
-            {fields.map(({ key, label, color, multiline }) => {
-              const value = getValue(key)
-              if (!value) return null
-              return (
-                <Box key={key} sx={{ mt: 0.5 }}>
-                  {multiline ? (
-                    <Box>
-                      <Typography variant="body2" sx={{ fontSize: '0.7rem', color, fontWeight: 500 }}>
-                        {label}:
-                      </Typography>
-                      <Box component="pre" sx={{
-                        mt: 0.25, p: 0.5, background: bgCode, borderRadius: 1,
-                        fontSize: '0.75rem', lineHeight: 1.3,
-                        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                        border: borderCode, maxHeight: '120px', overflow: 'auto',
-                        color,
-                      }}>
-                        {value}
-                      </Box>
-                    </Box>
-                  ) : (
-                    <Typography variant="body2" sx={{ fontSize: '0.7rem', color }}>
-                      <strong>{label}:</strong> {value}
-                    </Typography>
-                  )}
-                </Box>
-              )
-            })}
-            {(record.used_engine === 'dd' || record.used_engine === 'tiered' || record.used_engine === 'perfect' || record.used_engine === 'alphamu') && (() => {
-              try {
-                const mctsRaw = fullOutput.mcts_stats
-                if (!mctsRaw) { console.log('[Stats] no mcts_stats'); return null }
-                const mctsData = typeof mctsRaw === 'string' ? JSON.parse(mctsRaw) : mctsRaw
-                const candidates = mctsData.candidates
-                if (!candidates || candidates.length === 0) { console.log('[Stats] no candidates'); return null }
-
-                const isAlphaMu = mctsData.algorithm === 'alpha_mu'
-                const isDD = (record.used_engine || '') === 'dd' || (!isAlphaMu && candidates[0].samples !== undefined)
-                const ddScoringMode = isDD && candidates[0] ? (candidates[0].scoring_mode || 'avg_tricks') : null
-
-                // αμ: bar = success_rate (成功率 0-1); DD: bar = scoring_val/avg_tricks
-                const barValues = candidates.map(c => {
-                  if (isAlphaMu) return (c.success_rate || 0) * 100
-                  if (isDD) {
-                    if (ddScoringMode === 'imp') return c.scoring_val || 0
-                    if (ddScoringMode === 'make_rate') return (c.scoring_val || 0) * 100
-                    return c.avg_tricks || 0
-                  }
-                  return c.avg_tricks || 0
-                })
-                const maxVal = Math.max(...barValues.map(v => Math.abs(v)), 0.01)
-                const barColors = isAlphaMu
-                  ? ['#263238', '#37474f', '#546e7a', '#78909c', '#b0bec5']
-                  : ['#1976d2', '#42a5f5', '#90caf9', '#bbdefb', '#e3f2fd']
-                return (
-                  <Box key="stats" sx={{ mt: 0.75 }}>
-                    <Typography variant="caption" sx={{ fontSize: '0.7rem', color: colorMuted, mb: 0.25, display: 'block' }}>
-                      {isAlphaMu
-                        ? `αμ: ${mctsData.num_worlds || '?'} worlds · depth≤4 · ${mctsData.nodes_searched || '?'} nodes · ${mctsData.iterations || '?'} DDS · ${mctsData.time_sec || '?'}s`
-                        : isDD
-                          ? `DDMC: ${mctsData.iterations}次搜索 · ${mctsData.time_sec}s · ${mctsData.iters_per_sec}it/s · 剩${mctsData.remaining_cards}张 · ${ddScoringMode === 'imp' ? 'IMP制' : ddScoringMode === 'make_rate' ? '成约率制' : '赢墩制'}`
-                          : ''
-                      }
-                    </Typography>
-                    {candidates.map((c, i) => {
-                      const isInherited = isAlphaMu && typeof c.precision === 'string' && c.precision.includes('inherited')
-                      return (
-                      <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.15 }}>
-                        <Typography variant="caption" sx={{ minWidth: 28, fontSize: '0.7rem', fontWeight: 600, color: isDark ? '#e0e0e0' : '#333' }}>
-                          {c.card}
-                        </Typography>
-                        <Box sx={{ flex: 1, height: 12, bgcolor: isDark ? 'rgba(255,255,255,0.06)' : '#eee', borderRadius: 0.5, overflow: 'hidden' }}>
-                          <Box sx={{
-                            width: `${(Math.abs(barValues[i]) / maxVal) * 100}%`,
-                            height: '100%',
-                            bgcolor: barColors[i] || '#90caf9',
-                            opacity: isInherited ? 0.45 : 1,
-                            borderRadius: 0.5,
-                            transition: 'width 0.3s, opacity 0.3s',
-                          }} />
-                        </Box>
-                        <Typography variant="caption" sx={{ minWidth: 110, fontSize: '0.65rem', color: colorMuted, textAlign: 'right' }}>
-                          {isAlphaMu
-                            ? `${((c.success_rate || 0) * 100).toFixed(0)}% · ${c.avg_tricks ?? '?'}墩 · ${c.success_count || 0}/${c.total_useful || '?'} · front${c.front_size || 1}${isInherited ? ' · 继承' : ''}`
-                            : isDD
-                              ? `${ddScoringMode === 'imp'
-                                ? `${c.scoring_val >= 0 ? '+' : ''}${c.scoring_val}IMP`
-                                : ddScoringMode === 'make_rate'
-                                  ? `${(c.scoring_val * 100).toFixed(1)}%`
-                                  : `${c.avg_tricks}墩 [${c.min_tricks}-${c.max_tricks}]`}`
-                              : ''
-                          }
-                        </Typography>
-                      </Box>
-                      )
-                    })}
-                    {isAlphaMu && Array.isArray(mctsData.timing_stats) && mctsData.timing_stats.length > 0 && (() => {
-                      const ts = mctsData.timing_stats
-                      const totalEval = ts.reduce((s, t) => s + (t.evaluated || 0), 0)
-                      const totalInh = ts.reduce((s, t) => s + (t.inherited || 0), 0)
-                      return (
-                        <Box sx={{ mt: 0.75, p: 0.5, borderRadius: 0.5, bgcolor: isDark ? 'rgba(255,255,255,0.03)' : '#fafafa', border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : '#eee'}` }}>
-                          <Typography variant="caption" sx={{ fontSize: '0.65rem', color: colorMuted, fontWeight: 600, display: 'block', mb: 0.25 }}>
-                            ⏱ 时间监控 · {ts.length}次迭代 · 累计评估{totalEval}候选 · 继承{totalInh}
-                          </Typography>
-                          {ts.map((t, i) => {
-                            const cutInfo = (t.root_cut_at && t.root_cut_at > 0)
-                              ? ` · RootCut@${t.root_cut_at}`
-                              : ''
-                            const inhInfo = (t.inherited || 0) > 0
-                              ? ` · 继承${t.inherited}`
-                              : ''
-                            return (
-                              <Box key={i} sx={{ mt: 0.25 }}>
-                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <Typography variant="caption" sx={{ fontSize: '0.65rem', color: isDark ? '#e0e0e0' : '#333', fontWeight: 500 }}>
-                                    M={t.M} · {t.time_sec}s · {t.dds_calls} DDS · {t.evaluated}/{t.total_candidates}评估{inhInfo}{cutInfo}
-                                  </Typography>
-                                  <Typography variant="caption" sx={{ fontSize: '0.6rem', color: colorMuted }}>
-                                    {t.nodes || 0} nodes
-                                  </Typography>
-                                </Box>
-                                <Box sx={{ display: 'flex', gap: 0.25, mt: 0.15, height: 4 }}>
-                                  <Box sx={{ flex: t.time_sec || 1, height: '100%', bgcolor: '#7b1fa2', borderRadius: 0.5, minWidth: 2 }} title={`耗时 ${t.time_sec}s`} />
-                                  <Box sx={{ flex: t.dds_calls || 1, height: '100%', bgcolor: '#26a69a', borderRadius: 0.5, minWidth: 2 }} title={`DDS ${t.dds_calls}次`} />
-                                </Box>
-                              </Box>
-                            )
-                          })}
-                          <Box sx={{ display: 'flex', gap: 1, mt: 0.4, justifyContent: 'flex-end' }}>
-                            <Typography variant="caption" sx={{ fontSize: '0.6rem', color: '#7b1fa2' }}>■ 耗时</Typography>
-                            <Typography variant="caption" sx={{ fontSize: '0.6rem', color: '#26a69a' }}>■ DDS调用</Typography>
-                          </Box>
-                        </Box>
-                      )
-                    })()}
-                  </Box>
-                )
-              } catch (e) { console.error('[Stats] viz error:', e); return null }
-            })()}
-          </>
-        ) : (
-          // 输入模式：显示传给AI的完整提示词
-          (() => {
-            // LLM打牌的提示词在 llm_review.llm_prompt 中（旧纪录兼容）
-            const reviewRaw = fullOutput.llm_review
-            const review = reviewRaw && typeof reviewRaw === 'string' ? JSON.parse(reviewRaw) : reviewRaw
-            const llmPrompt = review ? review.llm_prompt : null
-            const displayPrompt = llmPrompt || prompt
-            return displayPrompt ? (
-              <Box>
-                <Typography variant="caption" sx={{ display: 'block', color: colorMuted, fontSize: '0.7rem', mb: 0.25 }}>
-                  提示词长度: {displayPrompt.length.toLocaleString()} 字符
-                  &nbsp;·&nbsp;约 {(estimateTokens(displayPrompt)).toLocaleString()} token
-                </Typography>
-                <Box component="pre" sx={{ 
-                  p: 0.75, background: bgCode, borderRadius: 1,
-                  fontSize: '0.7rem', lineHeight: 1.4,
-                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                  border: '1px solid #e9ecef', maxHeight: '400px', overflow: 'auto',
-                }}>
-                  {displayPrompt}
-                </Box>
-              </Box>
-            ) : (
-              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
-                无输入数据
-              </Typography>
-            )
-          })()
-        )}
+        <EngineView record={record} fullOutput={fullOutput} viewMode={viewMode} />
       </Box>
     )
   }
@@ -727,6 +455,11 @@ function PlayDetailPanel({
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5, flexShrink: 0, height: 44, flexWrap: 'nowrap', gap: 0.5, overflow: 'hidden' }}>
         <Typography variant="h6" sx={{ fontSize: '0.95rem', color: isDark ? '#e2e8f0' : undefined, flexShrink: 0 }}>打牌详情</Typography>
         <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', flexShrink: 0 }}>
+          {!isComplete && playStartTime != null && playInitiated && (
+            <Chip size="small" color="info" variant="outlined"
+              label={`⏱ 本局已进行：${formatTotalTime(elapsedSeconds)}${aiExpectedRange ? ` · AI单张预计 ${aiExpectedRange[0]}~${aiExpectedRange[1]}s` : ''}`}
+              sx={{ fontSize: '0.6rem', height: 22, whiteSpace: 'nowrap', maxWidth: 240 }} />
+          )}
           {!isComplete && !playInitiated && (
             <Button variant="outlined" color="success" onClick={onBeginPlay} disabled={aiLoading} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.2 }}>开始打牌</Button>
           )}
@@ -754,18 +487,10 @@ function PlayDetailPanel({
         </Box>
       </Box>
 
-      {/* v1.61：打牌结束后显示打牌总耗时；P1-10：打牌中实时显示本局已进行时长 */}
+      {/* v1.61：打牌结束后显示打牌总耗时 */}
       {isComplete && playTotalTime != null && (
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5, flexShrink: 0 }}>
           <Chip size="small" color="success" variant="outlined" label={`⏱ 打牌总耗时：${formatTotalTime(playTotalTime)}`} sx={{ fontSize: '0.7rem', height: 22 }} />
-        </Box>
-      )}
-      {!isComplete && playStartTime != null && playInitiated && (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5, flexShrink: 0 }}>
-          <Chip size="small" color="info" variant="outlined" label={`⏱ 本局已进行：${formatTotalTime(elapsedSeconds)}`} sx={{ fontSize: '0.7rem', height: 22 }} />
-          {aiExpectedRange && (
-            <Chip size="small" variant="outlined" label={`AI单张预计 ${aiExpectedRange[0]}~${aiExpectedRange[1]}s`} sx={{ fontSize: '0.65rem', height: 22, color: colorMuted, borderColor: isDark ? 'rgba(255,255,255,0.2)' : '#ccc' }} />
-          )}
         </Box>
       )}
 

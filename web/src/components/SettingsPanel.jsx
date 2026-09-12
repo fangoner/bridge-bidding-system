@@ -9,7 +9,7 @@ import { parseModelValue } from '../hooks/useModelSettings'
 // 基础模型（不含 ::reasoning 后缀），思考模式通过 ToggleButton 控制
 // 2026-09-10 V4.1-Flash 发布：V4 Pro 下线，DeepSeek 统一 deepseek-flash
 const BASE_MODELS = [
-  { label: 'V4.1-Flash', value: 'deepseek-flash' },
+  { label: 'deepseek-flash', value: 'deepseek-flash' },
 ]
 
 // ── 模型选择器 + 思考切换（模块级组件）──
@@ -254,14 +254,16 @@ function SettingsPanel({
       {/* ── 打牌设置 ── */}
       {tab === 'playing' && (
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
-          <ModelSelector
-            label="模型"
-            parsed={playParsed}
-            onModelChange={onPlayModelChange}
-            onReasoningChange={onPlayReasoningChange}
-            disabled={playEngine !== 'llm'}
-            models={visibleModels}
-          />
+          {/* 模型选择仅 LLM 引擎需要：其他引擎不使用 LLM，隐藏下拉框 */}
+          {playEngine === 'llm' && (
+            <ModelSelector
+              label="模型"
+              parsed={playParsed}
+              onModelChange={onPlayModelChange}
+              onReasoningChange={onPlayReasoningChange}
+              models={visibleModels}
+            />
+          )}
 
           <FormControl size="small" sx={{ minWidth: 90 }}>
             <InputLabel>打牌引擎</InputLabel>

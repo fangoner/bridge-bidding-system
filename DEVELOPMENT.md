@@ -580,6 +580,26 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.75（2026-09-13）
+- **探针飞牌结构判定纯条件化（`_probe_finesse_ok`）**（详见 `docs/飞牌讨论与修改记录_20260913.md`，新档）：
+  - 用户定义判定：引牌侧对侧存在一张 G，`obj > G > 防家除 obj 外该花色最大牌` → 是飞结构（保留探针）；否则废弃——纯条件、不做赢墩推演
+  - 演进过程：单套 minimax 比"对象放防家两侧赢墩"（总墩→大间张墩）两版均被 5/6/7 冗余中牌补位掩盖（K567/234 对 A 误判）→ 最终纯条件；`_single_suit_decl_tricks` 整体删除
+  - 探针确认标注：每条（侧|花色|引牌）过 `_probe_finesse_ok` → `_probe_confirm`，前端逐条显示 `✓飞结构/✗未确认`
+- **窗口期启动流程重构（用户定序，BM2000 L2 A-300 验证通过）**：
+  - `过手预检` 前置：伙伴侧条目先求安全过手牌（`_partner_overhand_action`，排除其他探针结构花色），失败出局、成功挂"过手牌"（对侧引牌只是模拟确认结构，不可用于排序/真实出牌）
+  - 7.1 引擎一致：榜首花色∈候选池 → 尊重引擎；7.2 排序：代表牌（本侧=引牌/伙伴侧=过手牌）候选决策值主 ±0.02、Δ 平局决胜；7.3 必要性：`_finesse_launch_worthwhile` 逐花色、首过=第一名；7.4 本侧直出+写 flow 标记开始 / 伙伴侧出过手牌不写 flow；7.9 9张分砸分流保留
+  - **多花色结构池**：通过测试的探针花色全部保留（同花色取 Δ 高者），不再压 Δ 最大单条——"引擎一致优先"自然生效（榜首草花在池即尊重引擎，不误改飞红桃 57%）
+- **过手不启动飞牌**：`_partner_overhand_action` 不再写 `finesse_flow`；过手牌排除所有探针结果花色（`_cash_reentry.excluded_suits` ← `full_output["_probe_suits"]`），无安全过手牌则花色出局/尊重引擎——规避过手牌被将吃拦截留下的死流程
+- **成约率制超额赢墩决胜**：`dd_search._finalize_decision` 在 make_rate 模式用 `blended = rate×10000 + avg_tricks`（♣A 9 墩 vs ♣5 10 墩同为 100% 时选赢墩多者）
+- **打牌输出显示优化**（web/src/components/play/*）：
+  - 候选条同显 `墩数[min-max] · IMP · 做成率`，当前计分制加粗
+  - 全赢/临界/全输子集筛选（后端 `scores_win|crit|lose` 分桶 + `subsets` 统计 + 前端 ToggleButtonGroup，切换自定义指标重排）
+  - IMP 双向条：0 点随数据范围动态定位、负值向左红色、两侧同背景；bar 固定宽 360px
+  - DD/αμ 视图去重：移除"DdSummary/均匀采样"行与会话核心逻辑重复行，候选对比/DDS 诊断折叠（`CollapseSection`），标题行并入 source 与三分类统计
+  - 飞牌印章单行化（FinesseStamps 标签+内容一行）；探针行合入印章流（FinesseProbeView 支持伙伴探针、同侧同对象取 Δ 高）；打牌计时合并进 PlayDetailPanel 标题栏
+- **回归测试**：`tests/test_probe_finesse.py`（8 用例，直接 `python tests/test_probe_finesse.py` 运行）
+- 投递：bridge/play_service.py, bridge/mcts/dd_search.py, web/src/components/play/{shared,CandidateBars,engineViews,utils}.*, web/src/components/PlayDetailPanel.jsx, tests/test_probe_finesse.py（新增）, docs/飞牌讨论与修改记录_20260913.md（新增）
+
 ### v1.74（2026-09-12）
 - **DD 枚举与采样路径合并**（详见 `docs/飞牌讨论与修改记录_20260912.md`，新档）：
   - 提取 `_solve_worlds`（批量求解优先+串行降级+耗时分布统计）、`_finalize_decision`（选牌/配对差值排序/计分制决策输出）、`_fmt_score`（类方法）——`search()` 采样与 `_enumerate_endgame` 枚举**唯一差异只剩世界来源**（sample_n vs `_enumerate_endgame_worlds`）

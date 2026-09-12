@@ -148,6 +148,26 @@ def _make_rate_value(scores, tricks_needed):
     return sum(1 for t in scores if t >= tricks_needed) / len(scores)
 
 
+def _subset_metrics(vals, contract, vul_decl, mode, is_declarer_side):
+    """子集样本统计：赢墩均值 / IMP / 做成率 + 方向归一的决策值（排序/条宽用）。
+
+    vals: 该子集（全赢/临界/全输/全部）内该候选的庄家方总赢墩列表。
+    val 越大越优（防守方视角取负），前端直接降序排序。
+    """
+    n = len(vals)
+    if n == 0:
+        return {"n": 0, "tricks": None, "imp": None, "rate": None, "val": None,
+                "mn": None, "mx": None}
+    avg = sum(vals) / n
+    imp = _expected_imp_value(vals, contract, vul_decl)
+    rate = _make_rate_value(vals, contract.tricks_needed)
+    raw = {"imp": imp, "make_rate": rate, "avg_tricks": avg}.get(mode, avg)
+    val = raw if is_declarer_side else -raw
+    return {"n": n, "tricks": round(avg, 2), "imp": round(imp, 3),
+            "rate": round(rate, 3), "val": round(val, 3),
+            "mn": min(vals), "mx": max(vals)}
+
+
 def _has_duplicates(hands: Dict[str, List[Card]]) -> bool:
     """检测采样手牌中是否存在同一张牌出现在多个位置的情况。"""
     seen = set()
@@ -238,11 +258,13 @@ def _accumulate_world_totals(score_map, playable, state, curplayer_is_declarer,
         if stats is not None:
             stats[_dropped_keys.get(cls, "dropped_" + cls)] += 1
         return False
+    _bucket = {"sure_win": "win", "critical": "crit", "sure_lose": "lose"}[cls]
     for total, card in zip(totals, playable):
         card_stats = card_scores[str(card)]
         card_stats["weighted_sum"] += total * weight
         card_stats["total_weight"] += weight
         card_stats["scores"].append(total)
+        card_stats["scores_" + _bucket].append(total)
         card_stats["mn"] = min(card_stats["mn"], total)
         card_stats["mx"] = max(card_stats["mx"], total)
     if stats is not None:
@@ -345,12 +367,14 @@ def _accumulate_finesse_probe(score_map, playable, state, hands,
 def _finalize_finesse_probe(probe):
     """把分桶原始计数转成 play_service 可消费的结构。
 
-    返回 {花色: {"对象": M, "Δ": 最大桶间差, "引牌": card_str}}；
+    返回 {花色: {"对象": M, "Δ": 最大桶间差, "引牌": card_str, "全": [对象探针全列表]}}；
+    "全" 按 Δ 降序列出该花色所有达标探针（K/Q/J 等缺失大牌各算一条），
+    供界面完整展示"过手必要性"；play_service 只读 对象/Δ/引牌，兼容。
     无有效分桶数据时返回 {}。
     """
     out = {}
     for suit, by_m in probe.items():
-        best = None  # (Δ, M, card_str)
+        entries = []
         for m, sides in by_m.items():
             east = sides.get("东") or {}
             west = sides.get("西") or {}
@@ -360,10 +384,15 @@ def _finalize_finesse_probe(probe):
                 if not ev or not wv:
                     continue
                 delta = abs(sum(ev) / len(ev) - sum(wv) / len(wv))
-                if best is None or delta > best[0]:
-                    best = (delta, m, card_str)
-        if best and best[0] >= _dd_config.FINESSE_PROBE_DELTA:
-            out[suit] = {"对象": best[1], "Δ": round(best[0], 2), "引牌": best[2]}
+                if delta >= _dd_config.FINESSE_PROBE_DELTA:
+                    entries.append({"对象": m, "Δ": round(delta, 2), "引牌": card_str})
+        if entries:
+            entries.sort(key=lambda e: e["Δ"], reverse=True)
+            best = entries[0]
+            out[suit] = {
+                "对象": best["对象"], "Δ": best["Δ"], "引牌": best["引牌"],
+                "全": entries,
+            }
     return out
 
 
@@ -605,6 +634,8 @@ class DDSearch:
         child_stats = []
         blended_map = {}
         scores_map = {}
+        _vul_decl = _declarer_side_vulnerable(
+            state.contract.declarer, getattr(state, "vulnerability", "NV"))
         for card_str, stats in card_scores.items():
             scores = stats["scores"]
             w_sum = stats["weighted_sum"]
@@ -622,13 +653,32 @@ class DDSearch:
                 "scores": scores,
                 "scoring_val": None,
                 "scoring_mode": self.scoring_mode,
+                "imp_val": round(_expected_imp_value(scores, state.contract, _vul_decl), 3),
+                "make_rate_val": round(_make_rate_value(scores, state.contract.tricks_needed), 3),
+                "subsets": {
+                    sk: _subset_metrics(vals, state.contract, _vul_decl,
+                                        self.scoring_mode, is_declarer_side)
+                    for sk, vals in (
+                        ("all", scores),
+                        ("win", stats.get("scores_win") or []),
+                        ("crit", stats.get("scores_crit") or []),
+                        ("lose", stats.get("scores_lose") or []),
+                    )
+                },
             })
 
             rank_val = _card_rank_val(card_str)
 
             scoring_val = self._decision_value(scores, state)
             if scoring_val is not None:
-                blended = scoring_val
+                if self.scoring_mode == "make_rate":
+                    # 成约率制（2026-09-13）：做成率主、超额赢墩 avg_tricks 决胜——
+                    # ♣A 9墩 与 ♣5 10墩 同 100% 时，选赢墩多的候选（避免
+                    # 平局任意排序选中浪费顶张的那个）。10000 权重远大于赢墩
+                    # 幅度（≤13），做成率差 <0.001 时才由赢墩主宰（几乎平）。
+                    blended = scoring_val * 10000.0 + w_avg
+                else:
+                    blended = scoring_val
                 child_stats[-1]["scoring_val"] = round(scoring_val, 3)
             else:
                 blended = w_avg
@@ -820,8 +870,9 @@ class DDSearch:
                      f"remaining_tricks={remaining_tricks}\n")
 
         card_scores = {str(c): {"weighted_sum": 0.0, "total_weight": 0.0,
-                                  "scores": [], "mn": float("inf"), "mx": -float("inf")}
-                       for c in playable}
+                          "scores": [], "scores_win": [], "scores_crit": [],
+                          "scores_lose": [], "mn": float("inf"), "mx": -float("inf")}
+               for c in playable}
 
         # 当前墩信息（补回手牌 + 写入 Deal 当前墩）
         trick_state = get_current_trick_state(state)
@@ -876,8 +927,6 @@ class DDSearch:
         if eval_stats["dropped_lose"]:
             _dropped_parts.append(f"全输{eval_stats['dropped_lose']}")
         _dropped_note = f"（过滤{'·'.join(_dropped_parts)}）" if _dropped_parts else ""
-        _crit_pct = eval_stats["critical"] / samples_done * 100 if samples_done else 0.0
-        _lose_pct = eval_stats["sure_lose"] / samples_done * 100 if samples_done else 0.0
         reasoning = (
             f"DD-{source}: 评分样本{eval_stats['kept']}/{samples_done} in {elapsed:.1f}s"
             f"{_dropped_note}. "
@@ -891,11 +940,6 @@ class DDSearch:
                 "推荐出牌": str(best_card),
                 "核心逻辑": reasoning,
                 "候选对比": str(child_stats),
-                "局面评估": (
-                    f"DD-{source} 总样本 {samples_done}（全赢{eval_stats['sure_win']}·临界{eval_stats['critical']}·全输{eval_stats['sure_lose']}"
-                    f"，其中临界占{_crit_pct:.0f}%、全输占{_lose_pct:.0f}%），评分样本 {eval_stats['kept']}"
-                    f"{'，过滤 ' + '、'.join(_dropped_parts) if _dropped_parts else ''}，耗时 {elapsed:.1f}s"
-                ),
                 # 结构化统计（供飞牌拖延等策略读取，避免解析文本）：
                 # sure_win = 该候选出牌在所有样本中都 ≥ 所需墩的样本数（全赢）
                 # critical = 成约与否依赖出牌的样本数（临界）
@@ -916,6 +960,7 @@ class DDSearch:
                     "adaptive_cap": self.num_samples,
                     "remaining_cards": remaining_tricks * 4,
                     "valid_distributions": len(worlds) if source == "残局枚举" else None,
+                    "source": source,
                     "candidates": child_stats,
                 },
             },
