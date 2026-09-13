@@ -1134,9 +1134,16 @@ class PlayService:
                     obj_v = r2v.get(obj, None)
                     if obj_v is None:
                         continue  # 探针对象无法映射为数值，跳过该花色
-                    # 可飞性校验2026-09-09删除：Δ≥阈值即采纳为结构。
-                    # 误出防护已由接应/领出执行层承接——威胁比较制"选不出牌就尊重
-                    # 引擎"（_finesse_commit_check 返回 None），不会再误改出小牌。
+                    # 组合飞条目把 废弃对象/组合飞 放在 "全"[0]（顶层无此键），
+                    # 顶层取不到时回退到全列表首条，保证结构池判定与 UI 确认一致
+                    all_items = (info.get("全") if isinstance(info.get("全"), list)
+                                 and info.get("全") else [info])
+                    combo = bool(info.get("组合飞") or any(
+                        isinstance(it, dict) and it.get("组合飞") for it in all_items))
+                    disc = info.get("废弃对象")
+                    if not disc:
+                        disc = next((it.get("废弃对象") for it in all_items
+                                     if isinstance(it, dict) and it.get("废弃对象")), None)
                     detected[suit] = {
                         "对象": obj_v,
                         "Δ": info.get("Δ", 0),
@@ -1145,6 +1152,8 @@ class PlayService:
                         "来源": "probe",
                         "侧": "本侧",
                         "对象牌": obj,
+                        "组合飞": combo,
+                        "废弃对象": disc or [],
                     }
                 return detected
         # 以下为方法B：静态间张识别庄家+明手各花色是否存在飞牌结构。
@@ -1201,7 +1210,7 @@ class PlayService:
 
     @staticmethod
     def _finesse_obj_name(m: int) -> str:
-        for r, v in {"A": 14, "K": 13, "Q": 12, "J": 11, "T": 10}.items():
+        for r, v in {"A": 14, "K": 13, "Q": 12, "J": 11, "T": 10, "9": 9, "8": 8}.items():
             if v == m:
                 return r
         return "?"
@@ -1256,7 +1265,13 @@ class PlayService:
                 r = r2v.get(c.rank)
                 if r:
                     played.add(r)
-        enemy = [r for r in range(2, 15) if r not in mine and r not in played and r != obj]
+        # 组合飞废弃对象（如 ♥KQ 双飞保留 K 后废弃 Q）：不参与"防家最大牌"，
+        # 否则被飞对象会被废弃对象抬高挡住飞张判定
+        discard_obj = {r2v.get(d) for d in (info.get("废弃对象") or [])
+                       if r2v.get(d) is not None}
+        enemy = [r for r in range(2, 15)
+                 if r not in mine and r not in played and r != obj
+                 and r not in discard_obj]
         if not enemy:
             return False
         max_enemy = max(enemy)
@@ -1366,9 +1381,16 @@ class PlayService:
         probe_suits = set(local) | set(partner)
         full_output["_probe_suits"] = sorted(probe_suits)
         pool = []
+        confirm = {}
         for s, info in list(local.items()) + list(partner.items()):
+            mark_prefix = "探针" if info.get("侧") == "本侧" else "伙伴探针"
             if info.get("来源") == "probe" and info.get("引牌"):
-                if not self._probe_finesse_ok(state, s, info):
+                # 判定只做一次（2026-09-13）：结果同时决定"是否进结构池"（行为）
+                # 与 _probe_confirm 的 ✓/✗（UI 显示），两者同源，杜绝两边参数
+                # 不一致导致的"显示✓实际判废"
+                ok = self._probe_finesse_ok(state, s, info)
+                confirm[f"{mark_prefix}|{s}|{info.get('引牌')}"] = ok
+                if not ok:
                     print(f"[探针废弃] {s}对象{self._finesse_obj_name(info.get('对象'))} "
                           f"引{info.get('引牌')}：对象放防家两侧无差异，不能飞")
                     continue
@@ -1384,27 +1406,6 @@ class PlayService:
                 finesse_struct[s] = info
         if partner:
             full_output["伙伴探针"] = partner
-        # 探针确认标注（2026-09-12）：每条探针（侧|花色|引牌）是否确认为飞牌结构，
-        # 供界面逐条显示；判定走 _probe_finesse_ok（对侧有 obj>G>防家非对象最大牌）
-        confirm = {}
-        raw_probe = full_output.get("finesse_probe") or {}
-        for s, info in raw_probe.items():
-            items = (info.get("全") if isinstance(info.get("全"), list) and info.get("全")
-                     else [info])
-            for it in items:
-                lead = it.get("引牌")
-                if not lead:
-                    continue
-                obj_raw = it.get("对象")
-                obj_v = (self._FINESSE_R2V.get(obj_raw)
-                         if isinstance(obj_raw, str) else obj_raw)
-                confirm[f"探针|{s}|{lead}"] = bool(self._probe_finesse_ok(
-                    state, s, {"对象": obj_v, "引牌": lead, "侧": "本侧"}))
-        for s, info in partner.items():
-            lead = info.get("引牌")
-            if lead:
-                confirm[f"伙伴探针|{s}|{lead}"] = bool(self._probe_finesse_ok(
-                    state, s, {"对象": info.get("对象"), "引牌": lead, "侧": "伙伴侧"}))
         if confirm:
             full_output["_probe_confirm"] = confirm
         mcts_stats = full_output.get("mcts_stats") or {}
@@ -1543,7 +1544,7 @@ class PlayService:
             # （跟牌侧探针必空、flow 为空 → 尊重引擎，不接应）。对象未现身则记
             # 为流程进行中，由跟牌侧 _merge_finesse_flow 并入结构走威胁比较制、
             # 领出侧 _apply_flow_continuation 强制续飞/回手。
-            state.finesse_flow[suit] = obj
+            self._register_finesse_flow(state, suit, obj, finesse_struct.get(suit))
             full_output["领出飞牌"] = {"引发": True, "花色": suit, "对象": obj,
                                        "Δ": finesse_struct[suit].get("Δ"),
                                        "领出": cur_str,
@@ -1617,6 +1618,14 @@ class PlayService:
         for s, info in partner_probe.items():
             obj = r2v.get(info.get("对象"))
             if obj is not None:
+                all_items = (info.get("全") if isinstance(info.get("全"), list)
+                             and info.get("全") else [info])
+                combo = bool(info.get("组合飞") or any(
+                    isinstance(it, dict) and it.get("组合飞") for it in all_items))
+                disc = info.get("废弃对象")
+                if not disc:
+                    disc = next((it.get("废弃对象") for it in all_items
+                                 if isinstance(it, dict) and it.get("废弃对象")), None)
                 out[s] = {
                     "对象": obj,
                     "Δ": info.get("Δ", 0),
@@ -1624,6 +1633,8 @@ class PlayService:
                     "说明": f"探针Δ{info.get('Δ', 0)}（{info.get('引牌', '?')}）",
                     "来源": "probe",
                     "侧": "伙伴侧",
+                    "组合飞": combo,
+                    "废弃对象": disc or [],
                 }
         return out
 
@@ -1670,6 +1681,9 @@ class PlayService:
                 state.finesse_flow[s] = obj
             if self._finesse_flow_dead(state, s, obj):
                 del state.finesse_flow[s]
+                extra = getattr(state, "finesse_flow_extra", None)
+                if extra:
+                    extra.pop(s, None)
                 # 对象现身或己方已无盖过对象的牌 => 流程终结（2026-09-12 双原则）：
                 # 记录终结墩数供审计，此后须重新领出该花色才有资格再启动流程。
                 state.finesse_flow_ends[s] = len(state.tricks)
@@ -2067,6 +2081,25 @@ class PlayService:
                        f"飞牌下沿{fin_floor}<{need}有险"
                        + ("" if stable else f"，比值{ratio_txt}<{FINESSE_NEC_RATIO}") + "）")
 
+    def _register_finesse_flow(self, state: PlayState, s: str, obj: int,
+                               info: Optional[Dict[str, Any]] = None) -> None:
+        """登记飞牌流程：写 flow（对象）+ flow_extras（组合飞废弃对象）。
+
+        组合飞（保 K 废 Q）启动后，后续接应方靠 flow 取结构——当墩探针在跟牌
+        时判空，废弃对象随 flow_extras 带过去，供 _finesse_commit_check 威胁
+        计算排除。
+        """
+        state.finesse_flow[s] = obj
+        extra = getattr(state, "finesse_flow_extra", None)
+        if extra is None:
+            extra = {}
+            setattr(state, "finesse_flow_extra", extra)
+        disc = (info or {}).get("废弃对象") or []
+        if disc:
+            extra[s] = {"废弃对象": list(disc)}
+        else:
+            extra.pop(s, None)
+
     def _partner_overhand_action(self, state: PlayState, s: str, obj, partner_lead,
                                  candidates: List[Dict[str, Any]], gate_why: str,
                                  excluded_suits=()):
@@ -2201,7 +2234,7 @@ class PlayService:
             # 本侧：探针引牌直出，标记飞牌开始（写 flow）
             pick = info.get("引牌")
             if pick and any(c.get("card") == pick for c in suit_cands):
-                state.finesse_flow[s] = obj
+                self._register_finesse_flow(state, s, obj, info)
                 why = f"按探针引牌直出{pick}"
                 return pick, f"{gate_why}；动作：{why}"
             combined = self._combined_suit_count(state, s)
@@ -2225,7 +2258,7 @@ class PlayService:
                         continue
                     pick = reentry[0]
                     why = "顶张方回手队友侧飞"
-                    state.finesse_flow[s] = obj
+                    self._register_finesse_flow(state, s, obj, info)
                 else:
                     # 应飞 + 非顶张方：直接出该花色最小飞张小牌（≤9）。
                     small = [c for c in suit_cands
@@ -2235,7 +2268,7 @@ class PlayService:
                     pick = min(small,
                                key=lambda c: self._FINESSE_R2V.get(c["card"][1:], 0))["card"]
                     why = "非顶张方直接飞小牌"
-                    state.finesse_flow[s] = obj
+                    self._register_finesse_flow(state, s, obj, info)
             else:
                 # <9张：8飞9砸 → 只飞不砸
                 if self._has_high_suit_cards(state, s, leader, (14, 12)):
@@ -2245,7 +2278,7 @@ class PlayService:
                         continue
                     pick = reentry[0]
                     why = "顶张方回手队友侧飞"
-                    state.finesse_flow[s] = obj
+                    self._register_finesse_flow(state, s, obj, info)
                 else:
                     small = [c for c in suit_cands
                              if self._FINESSE_R2V.get(c["card"][1:], 0) <= 9]
@@ -2254,7 +2287,7 @@ class PlayService:
                     pick = min(small,
                                key=lambda c: self._FINESSE_R2V.get(c["card"][1:], 0))["card"]
                     why = "非顶张方直接飞小牌"
-                    state.finesse_flow[s] = obj
+                    self._register_finesse_flow(state, s, obj, info)
             return pick, f"{gate_why}；动作：{why}"
         return None
 
@@ -2470,8 +2503,17 @@ class PlayService:
         for _, c in trick.cards:
             if c and c.suit == suit:
                 present.add(r2v.get(c.rank, 0))
+        # 组合飞：该花色被废弃对象（如保 K 废 Q）不是"应压威胁"，从敌方剩余
+        # 牌剔除——否则威胁被抬高，本家会选不出（或错误地不敢）接应牌。
+        info_disc = finesse_struct.get(suit, {}) or {}
+        disc = {r2v.get(d) for d in (info_disc.get("废弃对象") or [])
+                if r2v.get(d) is not None}
+        extra = getattr(state, "finesse_flow_extra", None) or {}
+        if isinstance(extra.get(suit), dict):
+            disc |= {r2v.get(d) for d in (extra[suit].get("废弃对象") or [])
+                     if r2v.get(d) is not None}
         guarded = [r for r in range(14, 1, -1)
-                   if r not in present and r != obj]
+                   if r not in present and r != obj and r not in disc]
         threat = max(guarded) if guarded else 0
         # 第三家接应判定（不再用 10 分界，2026-09-08）：
         #   同伙引牌已大过敌方全部非对象剩余 → 引牌一方可赢，本家出最小牌保留结构；
@@ -2648,6 +2690,9 @@ class PlayService:
                 "prompt": "[DD] no prompt",
             }
         except Exception as e:
+            import traceback as _tb
+            print(f"[DD_ERROR] {type(e).__name__}: {e}")
+            _tb.print_exc()
             playable = self.engine.get_playable_cards()
             card = self._select_best_card(playable, state)
             return {

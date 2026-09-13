@@ -274,46 +274,47 @@ def _accumulate_world_totals(score_map, playable, state, curplayer_is_declarer,
 
 # ── 飞牌后果敏感性探针（分桶统计，零额外 DDS）────────────────────────
 # 复用 search() 现有采样世界：每个世界已知四家手牌，因此对每个"缺失大牌
-# M"（庄家+明手+已打出未现的 A/K/Q/J/T），可确定 M 落在东家还是西家。
+# M"（庄家+明手+已打出未现的 A/K/Q/J/T/9/8），可确定 M 落在东家还是西家。
 # 按此分桶累计"候选出牌在该花色"的整手赢墩均值的桶间差 Δ；
-# 探针监控窗口（2026-09-08 修正）：不是固定 AKQJT 五张集，而是 3 张滑动窗口。
-# 默认 AKQ；仅对"飞牌花色"（state.finesse_flow 中活动流程的花色）在窗口内
-# 大牌被打出后向下滑动补齐三张（如 K 出 → AQJ，A 再出 → QJT），残局阶段
-# 飞 J/T 才能被识别。非飞牌花色固定 AKQ，不往下移——避免"J/T 位置敏感"
-# 的假阳性（如 ♠AK+xx 缺 T 被误报成可飞结构）。
-_FINESSE_WINDOW_BASE = ["A", "K", "Q", "J", "T"]
+# 探针监控窗口（2026-09-13 修正）：3 张滑动窗口，AKQ 起步、出一个向下补一个，
+# 逐次下移至 AKQJT98（最低 8），不一次性全包。任何花色统一滑动——残局阶段
+# 才能识别飞 J/T/9/8 的低位间张结构（如 T7 对防家 95 → 飞 9）。
+# 下限 8：9/8 仍有飞牌意义，7/6 及以下（7/6...）位置敏感假阳性风险高，不做。
+_FINESSE_WINDOW_BASE = ["A", "K", "Q", "J", "T", "9", "8"]
 
 
 def _honor_missing_of_state(state):
     """返回 {花色: [缺失大牌...]}：庄家方现手未持有的监控窗口大牌。
 
-    滑动窗口规则：非飞牌花色窗口固定 [A,K,Q]（打出即排除、不补位）；
-    飞牌花色窗口取 AKQJT 中前 3 张未打出者（出掉一张、下移补一张）。
-    缺失大牌必然在防守方（东/西）某家手中（未打出），分桶依据。
+    每个花色单独维护 3 张滑动窗口（持久于 state.finesse_windows，AKQ 起步）：
+    每次检测探针时更新——窗口取 AKQJT98 中该花色"未打出"的前 3 张
+    （出一个向下补一个，下限 8，不全包），各花色互不干扰。
+    对象须未打出且不在我方手中 ⇒ 必在防守方（东/西），分桶依据。
     """
     known = set()
     for pos in (state.contract.declarer, state.dummy):
         if pos:
             for c in state.hands.get(pos, []):
                 known.add((c.suit, c.rank))
-    played = set()
+    played = {}
     for t in state.tricks:
         for _, c in t.cards:
             if c:
                 known.add((c.suit, c.rank))
-                played.add((c.suit, c.rank))
+                played.setdefault(c.suit, set()).add(c.rank)
     for _, c in state.current_trick.cards:
         if c:
             known.add((c.suit, c.rank))
-            played.add((c.suit, c.rank))
-    flow = getattr(state, "finesse_flow", None) or {}
+            played.setdefault(c.suit, set()).add(c.rank)
+    windows = getattr(state, "finesse_windows", None)
+    if windows is None:
+        windows = {}
+        setattr(state, "finesse_windows", windows)
     missing = {}
     for suit in ("♠", "♥", "♦", "♣"):
-        if suit in flow:
-            unplayed = [h for h in _FINESSE_WINDOW_BASE if (suit, h) not in played]
-            window = unplayed[:3]
-        else:
-            window = ["A", "K", "Q"]
+        unplayed = [h for h in _FINESSE_WINDOW_BASE if h not in played.get(suit, set())]
+        window = unplayed[:3]
+        windows[suit] = window
         miss = [m for m in window if (suit, m) not in known]
         if miss:
             missing[suit] = miss
@@ -375,6 +376,7 @@ def _finalize_finesse_probe(probe):
     out = {}
     for suit, by_m in probe.items():
         entries = []
+        raw = []
         for m, sides in by_m.items():
             east = sides.get("东") or {}
             west = sides.get("西") or {}
@@ -384,8 +386,40 @@ def _finalize_finesse_probe(probe):
                 if not ev or not wv:
                     continue
                 delta = abs(sum(ev) / len(ev) - sum(wv) / len(wv))
+                print(
+                    f"[探针原始] {suit} 对象{m} 引牌{card_str} "
+                    f"东{round(sum(ev)/len(ev),2)}(n{len(ev)}) "
+                    f"西{round(sum(wv)/len(wv),2)}(n{len(wv)}) Δ{round(delta,2)} "
+                    f"{'达标' if delta >= _dd_config.FINESSE_PROBE_DELTA else '未达标'}")
+                raw.append({"对象": m, "Δ": round(delta, 2), "引牌": card_str})
                 if delta >= _dd_config.FINESSE_PROBE_DELTA:
                     entries.append({"对象": m, "Δ": round(delta, 2), "引牌": card_str})
+        if not entries:
+            # 组合飞探测门（2026-09-13）：双飞（KQ）时"分家 vs 同家"的真实敏感
+            # 性被单对象位置稀释（各自 Δ<阈值但合计显著）。该花色 ≥2 个对象且
+            # 各对象自身最高 Δ 加和 ≥ 阈值 → 保留较高对象（如 K），将其 Δ 改写为
+            # 加和值参与后续流程，其余对象废弃（记入 废弃对象 供 _probe_finesse_ok
+            # 与接应威胁计算排除，否则被废弃对象会抬高威胁/最大防家牌导致不确认
+            # 或选不出接应牌）。
+            per_obj = {}
+            for e in raw:
+                prev = per_obj.get(e["对象"])
+                if prev is None or e["Δ"] > prev["Δ"]:
+                    per_obj[e["对象"]] = e
+            if len(per_obj) >= 2:
+                total = sum(e["Δ"] for e in per_obj.values())
+                if total >= _dd_config.FINESSE_PROBE_DELTA:
+                    keep_m = max(per_obj.keys(), key=lambda r: RANK_ORDER.get(r, 0))
+                    keep = dict(per_obj[keep_m])
+                    combined = round(total, 2)
+                    print(f"[组合飞探测] {suit} 对象[{('/'.join(per_obj.keys()))}] "
+                          f"Δ加和={combined}（单条均<阈值），保留较高对象"
+                          f"{keep['对象']}，Δ改为{combined}，废弃"
+                          f"{[m for m in per_obj if m != keep_m]}")
+                    keep["Δ"] = combined
+                    keep["组合飞"] = True
+                    keep["废弃对象"] = sorted(m for m in per_obj if m != keep_m)
+                    entries = [keep]
         if entries:
             entries.sort(key=lambda e: e["Δ"], reverse=True)
             best = entries[0]

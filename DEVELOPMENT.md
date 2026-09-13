@@ -580,6 +580,21 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.76（2026-09-13）
+- **滑动窗口统一 7 张 AKQJT98（每花色独立持久）**（详见 `docs/飞牌讨论与修改记录_20260913.md` §5.1）：
+  - `_honor_missing_of_state` 窗口 = `state.finesse_windows[suit]` 中该花色"未打出"前 3 张（AKQ 起步、出一个向下补一个、最低 8、不全包），每次检测探针时更新，各花色互不干扰；去掉 flow/非 flow 分支差异
+  - 解决残局 T7 对防家 95"可飞 9"探不到的问题（对象最低到 8；9/8 仍可飞，7 以下假阳性风险高不做）
+- **组合飞探测门（用户定调）**（详见 §5.2/§6.1）：
+  - 花色内无单条 Δ≥0.4 时，≥2 对象各取最高 Δ **加和 ≥0.4** → 保留较高对象（按 `RANK_ORDER` 数值取大，修字符串比较 `"Q">"K"` bug），Δ 改写为加和值、标记 `组合飞=True`、其余对象记 `废弃对象` 废弃
+  - `_probe_finesse_ok` 与 `_finesse_commit_check` 威胁计算均剔除废弃对象（后者经 `finesse_struct["废弃对象"]` 与 `state.finesse_flow_extra` 双来源）；`_register_finesse_flow` 启动写 flow 时同步写废弃对象进 `finesse_flow_extra`，flow 清理时同步清除
+  - 前端组合飞 Δ 值蓝色加粗
+- **探针判定收敛一次**（§5.3）：删除独立 confirm 循环，pool 判定（`_probe_finesse_ok`）结果同时写 `_probe_confirm`（含 False）与结构池——杜绝"显示 ✓ 实际判废"的参数不一致 bug；`_detect_finesse_struct`/`_probe_partner_finesse_struct` 对 组合飞/废弃对象 从顶层回退 "全"[0]
+- **修复 RecursionError**（§5.5）：`_register_finesse_flow` 方法体首行恢复直接赋值（批量替换误改成自调用）；`_dd_play` 异常分支补 `[DD_ERROR]`+traceback 诊断（此前静默降级返回无 full_output，表现为 UI 输出全空）
+- **启动门控阈值**：`FINESSE_NEC_MAKE` 0.85 → 0.50（A1 契约必要放宽，榜首做成率 <50% 才判"不飞没机会"）
+- **探针展示格式**：`本侧 - ♦K,Δ1.04,♦Q,✓ | ♦K,Δ1.04,♦J,✓`（段内英文逗号、段间红色加粗竖线、✓/✗未确认、位置列 本侧/对侧、同花色引牌连排）
+- **讨论决策（待实现，已入项目记忆）**：续飞流程移除方案（每领出重探+重闸、登记存活到本墩出完即取消）；**顶张方概念废弃**——飞牌可行性唯一判据 `_probe_finesse_ok`，禁止再引入"顶张方/非顶张方"概念；顶张残留代码随续飞移除，8飞9砸 的 A/K 砸张判定（`_nine_suit_should_garrison`）保留
+- 投递：bridge/mcts/dd_search.py, bridge/play_service.py, config.py, web/src/components/play/shared.jsx, docs/飞牌讨论与修改记录_20260913.md
+
 ### v1.75（2026-09-13）
 - **探针飞牌结构判定纯条件化（`_probe_finesse_ok`）**（详见 `docs/飞牌讨论与修改记录_20260913.md`，新档）：
   - 用户定义判定：引牌侧对侧存在一张 G，`obj > G > 防家除 obj 外该花色最大牌` → 是飞结构（保留探针）；否则废弃——纯条件、不做赢墩推演

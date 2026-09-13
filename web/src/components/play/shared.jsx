@@ -166,7 +166,7 @@ export function FinesseStamps({ fullOutput }) {
       const parts = []
       if (val['花色']) parts.push(`花色${val['花色']}`)
       if (val['对象'] && typeof val['对象'] !== 'boolean') {
-        const rankName = { 14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T' }[val['对象']]
+        const rankName = { 14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9', 8: '8' }[val['对象']]
         parts.push(`对象${rankName || val['对象']}`)
       }
       if (val['Δ'] != null && val['Δ'] !== '') parts.push(`Δ${val['Δ']}`)
@@ -198,16 +198,18 @@ export function FinesseStamps({ fullOutput }) {
   )
 }
 
-// 探针结果：本侧 finesse_probe + 伙伴侧 伙伴探针（{花色: {对象, Δ, 引牌, 全}}）。
-// 与飞牌印章同一控件样式、单行显示；"全" 列出同花色全部对象探针（K/Q/...各一条）
+// 探针结果：本侧 finesse_probe（位置：本侧）+ 伙伴侧 伙伴探针（位置：对侧）。
+// 每个位置一行，引牌用分号连排；片段格式：花色 · 对象 · Δ · 引牌 · ✓飞/✗未确认
 export function FinesseProbeView({ fullOutput }) {
   const { isDark, colorMuted } = usePanelColors()
-  const rankName = { 14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T' }
+  const rankName = { 14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9', 8: '8' }
+  const suitOrder = { '♠': 0, '♥': 1, '♦': 2, '♣': 3 }
   const confirmMap = (fullOutput && fullOutput._probe_confirm) || {}
   const sources = [
-    { key: 'finesse_probe', label: '探针' },
-    { key: '伙伴探针', label: '伙伴探针' },
+    { key: 'finesse_probe', label: '探针', side: '本侧' },
+    { key: '伙伴探针', label: '伙伴探针', side: '对侧（伙伴）' },
   ]
+  // 先收集全部行再按 标签|花色|对象|引牌 去重（同引牌只留 Δ 更高者）
   const rows = []
   for (const { key, label } of sources) {
     const probe = fullOutput && fullOutput[key]
@@ -217,49 +219,66 @@ export function FinesseProbeView({ fullOutput }) {
       if (!info || typeof info !== 'object') continue
       const all = Array.isArray(info.全) && info.全.length ? info.全 : [info]
       for (const e of all) {
-        rows.push({ label, s, obj: e.对象, delta: e.Δ, lead: e.引牌 })
+        rows.push({ label, s, obj: e.对象, delta: e.Δ, lead: e.引牌, combo: !!e.组合飞 })
       }
     }
   }
-  // 同侧+同花色+同一飞牌对象 → 只显示 Δ 更高者；不同侧不合并
   const merged = []
   const seen = new Map()
   for (const r of rows) {
-    const k = `${r.label}|${r.s}|${r.obj}`
+    const k = `${r.label}|${r.s}|${r.obj}|${r.lead}`
     const prev = seen.get(k)
     if (!prev || (r.delta ?? -1) > (prev.delta ?? -1)) {
-      seen.set(k, { ...r, orig: prev })
+      seen.set(k, { ...r })
     }
   }
-  for (const r of seen.values()) {
-    merged.push(r)
-  }
+  for (const r of seen.values()) merged.push(r)
   if (!merged.length) return null
+  // 按位置分组排序：花色 ♠♥♦♣ → 对象降序 → Δ 降序
+  const lists = []
+  for (const src of sources) {
+    const entries = merged.filter(r => r.label === src.label)
+    if (!entries.length) continue
+    const sorted = [...entries].sort((a, b) =>
+      (suitOrder[a.s] - suitOrder[b.s]) || (b.obj - a.obj) || (b.delta - a.delta))
+    lists.push({ side: src.side, entries: sorted })
+  }
   return (
     <Box sx={{ mt: 0.5, display: 'flex', flexDirection: 'column', gap: 0.4 }}>
-      {merged.map((r, i) => {
-        const key = `${r.label}|${r.s}|${r.lead}`
-        const confirmed = key in confirmMap ? !!confirmMap[key] : null
-        return (
-          <Box key={i} sx={{
-            p: 0.5, borderRadius: 0.5,
-            bgcolor: isDark ? 'rgba(255,255,255,0.04)' : '#fafafa',
-            borderLeft: '3px solid #1976d2',
-            border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : '#eee'}`,
-          }}>
-            <Typography variant="caption" sx={{ fontSize: '0.7rem', color: colorMuted, lineHeight: 1.3, display: 'block' }}>
-              <Box component="span" sx={{ fontWeight: 600, color: '#1976d2' }}>{r.label}</Box>
-              {` · 花色${r.s} · 对象${rankName[r.obj] || r.obj} · Δ${r.delta} · 引牌${r.lead}`}
-              {confirmed === true && (
-                <Box component="span" sx={{ fontWeight: 700, color: '#2e7d32' }}> · ✓飞结构</Box>
-              )}
-              {confirmed === false && (
-                <Box component="span" sx={{ color: '#c62828' }}> · ✗未确认</Box>
-              )}
-            </Typography>
-          </Box>
-        )
-      })}
+      {lists.map(({ side, entries }) => (
+        <Typography key={side} variant="caption" sx={{
+          fontSize: '0.7rem', color: colorMuted, lineHeight: 1.5, display: 'block',
+        }}>
+          {entries.map((r, i) => {
+            const key = `${r.label}|${r.s}|${r.lead}`
+            const confirmed = key in confirmMap ? !!confirmMap[key] : null
+            return (
+              <Box component="span" key={`${r.s}-${r.obj}-${r.lead}`}>
+                {i === 0 && (
+                  <Box component="span" sx={{ fontWeight: 600, color: '#1976d2' }}>{side}</Box>
+                )}
+                {i === 0 && ' - '}
+                {`${r.s}${rankName[r.obj] || r.obj},Δ`}
+                {r.combo ? (
+                  <Box component="span" sx={{ color: '#1976d2', fontWeight: 700 }}>
+                    {Number(r.delta).toFixed(2)}
+                  </Box>
+                ) : Number(r.delta).toFixed(2)}
+                {`,${r.lead},`}
+                {confirmed === true && (
+                  <Box component="span" sx={{ fontWeight: 700, color: '#2e7d32' }}>✓</Box>
+                )}
+                {confirmed === false && (
+                  <Box component="span" sx={{ color: '#c62828' }}>✗未确认</Box>
+                )}
+                {i < entries.length - 1 && (
+                  <Box component="span" sx={{ fontWeight: 700, color: '#e53935' }}> | </Box>
+                )}
+              </Box>
+            )
+          })}
+        </Typography>
+      ))}
     </Box>
   )
 }
