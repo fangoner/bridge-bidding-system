@@ -1,5 +1,22 @@
 # 开发日志
 
+## 2026-09-14（续飞移除实施 + 启动门控简化 v1.77）
+
+**背景**: ①v1.76 讨论确定的"续飞流程彻底拿掉"方案正式实施——跨墩 flow 状态机（`_apply_flow_continuation`/`_merge_finesse_flow`/`_finesse_flow_dead`/流程迁移）导致启动墩身份承诺跨墩延续、回手衔接依赖顶张方概念，用户主张每次领出重新探测+重新过闸，保持飞牌一致性；②启动门控 A 系列与 B/C 判据存在冗余与死代码——C（升级价值 `fin_val>top_val`）在同排序口径下不可达（v1.75 引入 blended 后成死代码），A2（盈余）与 B（失败安全）语义与"比值"主线重叠，用户定调简化为两道闸。详见 `docs/飞牌讨论与修改记录_20260913.md`（§8）。
+
+**改进**:
+- **续飞移除（约 210 行状态机删除）**：
+  - 删除 `_apply_flow_continuation`（续飞/回手/正在飞三分支 + 流程迁移）、`_merge_finesse_flow`（改为 `_registry_finesse_struct` 读本墩登记）、`_finesse_flow_dead`、`_has_finesse_reentry_high`（无引用死代码）
+  - 登记生命周期改本墩边界（`_apply_finesse_tactics`）：领出=新墩开始→先作废上一墩登记（`finesse_flow.clear()`+`flow_extra.clear()`，组合飞废弃对象随登记同灭）→ 启动登记（含废弃对象）→ 同墩队友跟牌读登记强制接应 → 下墩领出前作废
+  - 执行分派 7.4：9砸（应砸 A/K 兑现）保留；应飞/8飞9砸 统一"直接飞小牌"——方向由 `_probe_finesse_ok`（对侧 G 判定）保证，彻底移除旧"顶张方回手"分支（`_has_high_suit_cards(14,12)`）
+- **删判据 C（升级价值）**：`fin_val > top_val`——blended 排序（make_rate 下 = 做成率×10000+avg）与 `_val`=做成率不同口径，同口径比较 top 恒最大，实际不可达；删除后稳成线（≥0.95）恒不启动飞牌成为明确语义
+- **门控简化（用户定调，A2/B 删除）**：`_finesse_launch_worthwhile` 最终形态 = `top_make ≥0.95 不飞；<0.50 且飞牌/榜首 ≥ FINESSE_NEC_MIN_RATIO 必飞；中间区间 飞牌/榜首 ≥ FINESSE_NEC_RATIO 才飞；否则退让尊重引擎`；删除 `FINESSE_NEC_SLACK`（A2 盈余）、`FINESSE_SAFE_PCT`/`fin_floor`（B 失败安全）常量与判据
+- **阈值调优**：A1 新增 `FINESSE_NEC_MIN_RATIO = 0.50`（堵"25% 换 45%"缺口——榜首虽差，飞牌不能差到离谱才强制起飞）；`FINESSE_NEC_RATIO` 0.90 → **0.70**（0.86 比值案例如 ♥4 59.1% vs ♣A 68.5% 恢复可启动）
+
+**修改文件**: bridge/play_service.py, config.py, docs/飞牌讨论与修改记录_20260913.md
+
+**测试验证**: `python -m py_compile` 通过；`tests/test_probe_finesse.py` 8/8；后端重启 8003 健康；重打验证：飞牌启动→本墩接应正常、不再出现 `[续飞]/[续飞回手]/[飞牌迁移]` 日志、双飞 K/Q 飞掉一个后自然停止（重测达标再重启）
+
 ## 2026-09-13（组合飞探测门 + 滑动窗口扩展 + 探针判定收敛 v1.76）
 
 **背景**: ①残局 T7 对防家 95"可飞 9"探不到——窗口基座 AKQJT 不含 9 且非 flow 花色固定 AKQ；②双飞（KQ）单对象 Δ 各自不达标（本侧 ♥K 0.25/♥Q 0.18），"分家 vs 同家"敏感性被单对象位置稀释致双飞整体漏检；③`_probe_finesse_ok` 被调两遍（pool 与 confirm）参数不一致——同一探针"显示✓实际判废"，出现"有结构却无飞牌结构"；④10300 批量替换误把 `_register_finesse_flow` 方法体首行改成自调用，启动飞牌即无限递归（RecursionError），`_dd_play` 异常分支静默降级返回无 full_output → UI"输出全空"。详见 `docs/飞牌讨论与修改记录_20260913.md`（§5/§6）。

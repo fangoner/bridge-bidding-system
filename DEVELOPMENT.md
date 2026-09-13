@@ -580,6 +580,17 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.77（2026-09-14）
+- **续飞流程移除（用户 v1.76 讨论定调后实施，详见 §8）**：
+  - 删除跨墩状态机：`_apply_flow_continuation`（续飞/回手/正在飞三分支 + 流程迁移）、`_merge_finesse_flow`（改为 `_registry_finesse_struct` 读本墩登记）、`_finesse_flow_dead`、`_has_finesse_reentry_high`
+  - **登记改本墩边界**（`_apply_finesse_tactics`）：领出=新墩开始 → 先作废上一墩登记（`finesse_flow.clear()` + `flow_extra.clear()`，组合飞废弃对象随登记同灭）→ 启动登记（`_register_finesse_flow` 保持，含废弃对象）→ 同墩队友跟牌读登记强制接应（`_finesse_commit_check` 威胁计算排除废弃对象）→ 下墩领出前作废
+  - 执行分派 7.4：9砸（`_nine_suit_should_garrison` 应砸 A/K 兑现）保留；应飞/8飞9砸 统一"直接飞小牌"——方向由 `_probe_finesse_ok`（对侧 G 判定）保证，删除旧"顶张方回手"分支（`_has_high_suit_cards(14,12)`）
+- **启动门控简化（用户定调）**（`_finesse_launch_worthwhile`）：
+  - 删除判据 C（升级价值，`fin_val>top_val`）——blended 排序与 `_val`=做成率不同口径，同口径比较 top 恒最大，死代码
+  - 删除 A2（`FINESSE_NEC_SLACK` 盈余）与 B（`FINESSE_SAFE_PCT`/`fin_floor` 失败安全）判据及 config 常量
+  - **最终形态**：`top_make ≥0.95（FINESSE_NEC_MAKE_HIGH）→ 退让不飞；<0.50（FINESSE_NEC_MAKE）且 飞牌/榜首 ≥0.50（FINESSE_NEC_MIN_RATIO，新增，堵"25%换45%"缺口）→ 必飞；0.50~0.95 区间 飞牌/榜首 ≥0.70（FINESSE_NEC_RATIO，0.90→0.70）→ 飞；否则退让尊重引擎`
+- 投递：bridge/play_service.py, config.py, docs/飞牌讨论与修改记录_20260913.md
+
 ### v1.76（2026-09-13）
 - **滑动窗口统一 7 张 AKQJT98（每花色独立持久）**（详见 `docs/飞牌讨论与修改记录_20260913.md` §5.1）：
   - `_honor_missing_of_state` 窗口 = `state.finesse_windows[suit]` 中该花色"未打出"前 3 张（AKQ 起步、出一个向下补一个、最低 8、不全包），每次检测探针时更新，各花色互不干扰；去掉 flow/非 flow 分支差异
