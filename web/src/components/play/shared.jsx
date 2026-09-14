@@ -250,7 +250,7 @@ export function FinesseProbeView({ fullOutput }) {
           fontSize: '0.7rem', color: colorMuted, lineHeight: 1.5, display: 'block',
         }}>
           {entries.map((r, i) => {
-            const key = `${r.label}|${r.s}|${r.lead}`
+            const key = `${r.label}|${r.s}|${r.obj}|${r.lead}`
             const confirmed = key in confirmMap ? !!confirmMap[key] : null
             return (
               <Box component="span" key={`${r.s}-${r.obj}-${r.lead}`}>

@@ -1154,6 +1154,7 @@ class PlayService:
                         "对象牌": obj,
                         "组合飞": combo,
                         "废弃对象": disc or [],
+                        "全": list(all_items),
                     }
                 return detected
         # 以下为方法B：静态间张识别庄家+明手各花色是否存在飞牌结构。
@@ -1218,11 +1219,19 @@ class PlayService:
     def _probe_finesse_ok(self, state: PlayState, suit: str, info: Dict[str, Any]) -> bool:
         """探针飞牌结构条件判定（用户定义，纯条件、不做赢墩推演）。
 
-        飞牌结构成立 ⇔ 引发飞牌位置（引牌侧）的对侧，存在一张牌 G，同时满足：
+        飞牌结构成立 ⇔ 存在一张飞张 G，同时满足：
           ① G < 被飞对象 obj （比对象小）
           ② G > 防守方除 obj 以外的全部该花色牌（能盖住它们）
         即 G 是"对象之下、但盖得住防家所有非对象牌"的飞张（如 K 对 A、
         Q 对 K——前提是防家没有比 G 更大的非对象牌）。
+
+        G 的位置（2026-09-14 用户修订）：
+          · 引牌侧的对侧（同伙手里有间张，引牌后可作飞张）
+          · **引牌侧自身**：仅当**引牌本身**满足条件（如南持 Q 飞 K、
+            Q 在引牌南手——出 Q 逼出 K 或 Q 赢）——与
+            _finesse_commit_check 的"同伙引牌 > 威胁 → 引牌一方可赢"判据一致。
+            此处是"引牌本身"而非引牌侧整手：本侧引小牌 2 时，南手 Q 不该
+            构成飞（用例：本侧引2/A → 废弃）。
         存在 ⇒ 真飞结构（保留探针）；不存在 ⇒ 不能飞（废弃探针）。
         """
         obj = info.get("对象")
@@ -1238,13 +1247,17 @@ class PlayService:
             lead_side = state.current_player
         if lead_side not in (decl, dummy):
             return False
-        # 对侧 = 引牌侧的另一半（庄/明手中的另一家）
+        # 对侧 = 引牌侧的另一半（庄/明手中的另一家）：G 候选 = 对侧全部牌 ∪ 引牌本身
         peer = dummy if lead_side == decl else decl
-        peer_ranks = {r2v.get(c.rank, 0) for c in state.hands.get(peer, [])
-                      if c.suit == suit}
-        peer_ranks.discard(0)
-        if not peer_ranks:
-            return False
+        g_ranks = set()
+        for c in state.hands.get(peer, []):
+            if c.suit == suit:
+                rv = r2v.get(c.rank, 0)
+                if rv:
+                    g_ranks.add(rv)
+        lead_rv = r2v.get(lead[1:], 0)
+        if lead_rv:
+            g_ranks.add(lead_rv)
         # 防家除 obj 外该花色剩余牌 = 全部该花色 − 我方持有 − 已出 − obj
         mine = set()
         for pos in (decl, dummy):
@@ -1275,8 +1288,7 @@ class PlayService:
         if not enemy:
             return False
         max_enemy = max(enemy)
-        # 对侧是否存在飞张 G：obj > G > max_enemy
-        return any(obj > g > max_enemy for g in peer_ranks)
+        return any(obj > g > max_enemy for g in g_ranks)
 
     def _registry_finesse_struct(self, state: PlayState,
                                  finesse_struct: Dict[str, Dict[str, Any]]
@@ -1381,6 +1393,40 @@ class PlayService:
         花色则尊重引擎。领出不引入 8飞9砸（按"队友跟牌必须接应"才考虑）。
         """
         # 结构探测（2026-09-10）：本侧 + 队友侧（仅领出方为庄/明手时探测）全部
+        # 汇聚。9砸 连拔（2026-09-15 方案A）在探测前独立裁定：上墩砸 A（缺Q/J
+        # 持 A+K）登记 nine_cash_bank——本墩领出且对象未现 → 本方可出 K → 连拔
+        # K（第二墩砸）；对象现身/无牌可出 → 清登记（后续正常流程接管）。
+        bank9 = getattr(state, "nine_cash_bank", None)
+        if bank9 and state.current_player in (state.contract.declarer, state.dummy):
+            mcts9 = (result.get("full_output") or {}).get("mcts_stats") or {}
+            cands9 = mcts9.get("candidates") or []
+            for s, bk in list(bank9.items()):
+                obj9 = bk.get("obj")
+                rv9 = bk.get("rv")
+                if obj9 is None or rv9 is None:
+                    del bank9[s]
+                    continue
+                if self._finesse_obj_played(state, s, obj9):
+                    del bank9[s]  # 对象已现身，无需再连拔
+                    continue
+                tgt9 = next((c for c in cands9 if c.get("card")
+                             and c["card"][0] == s
+                             and self._FINESSE_R2V.get(c["card"][1:], 0) == rv9), None)
+                if not tgt9:
+                    continue  # 本方可出无该顶张（K 在对侧/已出）→ 保留登记下墩再试
+                hint9b = (f"[9砸连拔] {s} 对象{self._finesse_obj_name(obj9)}未现，"
+                          f"连拔{self._finesse_obj_name(rv9)}")
+                print(hint9b)
+                result["card"] = Card(s, self._finesse_obj_name(rv9))
+                result["reasoning"] = hint9b + "\n" + result.get("reasoning", "")
+                fo9 = result.get("full_output") or {}
+                fo9["推荐出牌"] = tgt9["card"]
+                fo9["核心逻辑"] = hint9b + "\n" + fo9.get("核心逻辑", "")
+                fo9["八九原则"] = {"花色": s, "缺": self._finesse_obj_name(obj9),
+                                    "原则": "9砸连拔", "改选": tgt9["card"]}
+                del bank9[s]
+                return result
+        # 结构探测（2026-09-10）：本侧 + 队友侧（仅领出方为庄/明手时探测）全部
         # 汇聚；每个探针先过"引牌测试"（_probe_finesse_ok 单花色推演，非 DDS）——
         # 引牌打出后对象在防家两侧结果相同 ⇒ 不能飞，废弃该探针。保留的探针
         # 按 Δ 取最大一条作为优先飞牌结构（引牌在本侧直飞、在伙伴侧过手）。
@@ -1393,34 +1439,93 @@ class PlayService:
         full_output["_probe_suits"] = sorted(probe_suits)
         pool = []
         confirm = {}
+        r2v = self._FINESSE_R2V
         for s, info in list(local.items()) + list(partner.items()):
             mark_prefix = "探针" if info.get("侧") == "本侧" else "伙伴探针"
             if info.get("来源") == "probe" and info.get("引牌"):
                 # 判定只做一次（2026-09-13）：结果同时决定"是否进结构池"（行为）
                 # 与 _probe_confirm 的 ✓/✗（UI 显示），两者同源，杜绝两边参数
-                # 不一致导致的"显示✓实际判废"
-                ok = self._probe_finesse_ok(state, s, info)
-                confirm[f"{mark_prefix}|{s}|{info.get('引牌')}"] = ok
-                if not ok:
-                    print(f"[探针废弃] {s}对象{self._finesse_obj_name(info.get('对象'))} "
-                          f"引{info.get('引牌')}：对象放防家两侧无差异，不能飞")
-                    continue
-                pool.append((s, info))
+                # 不一致导致的"显示✓实际判废"。
+                # 逐条展开（2026-09-15）：此前只裁决每花色最高Δ代表一条（如 ♠J），
+                # 其余对象（如 ♠K 引小、Q 可盖 J 的真飞结构）被连带废弃，整花色
+                # 一并漏判成"无飞牌结构"。现按"全"逐条 (对象, 引牌) 各过
+                # _probe_finesse_ok，通过者才入结构池；确认键带对象避免
+                # 同引牌多对象撞键（J3/K3 共显✗）。
+                all_probe = (info.get("全")
+                             if isinstance(info.get("全"), list) and info.get("全")
+                             else [info])
+                entry_combo = bool(info.get("组合飞"))
+                entry_disc = info.get("废弃对象") or []
+                for e in all_probe:
+                    e_info = dict(info)
+                    obj_s = (e.get("对象牌") or e.get("对象")
+                             or info.get("对象牌") or info.get("对象"))
+                    if isinstance(obj_s, str):
+                        obj_v = r2v.get(obj_s)
+                    elif isinstance(obj_s, int):
+                        obj_v = obj_s
+                        obj_s = self._finesse_obj_name(obj_v)
+                    else:
+                        obj_v = None
+                    if obj_v is None:
+                        continue
+                    e_info["对象"] = obj_v
+                    e_info["对象牌"] = obj_s
+                    e_info["Δ"] = e.get("Δ", info.get("Δ", 0))
+                    e_info["引牌"] = e.get("引牌", info.get("引牌", ""))
+                    e_info["组合飞"] = bool(e.get("组合飞", entry_combo))
+                    e_info["废弃对象"] = e.get("废弃对象") or entry_disc
+                    ok = self._probe_finesse_ok(state, s, e_info)
+                    confirm[f"{mark_prefix}|{s}|{obj_s}|{e_info['引牌']}"] = ok
+                    if not ok:
+                        print(f"[探针废弃] {s}对象{self._finesse_obj_name(obj_v)} "
+                              f"引{e_info['引牌']}：对象放防家两侧无差异，不能飞")
+                        continue
+                    pool.append((s, e_info))
             else:
                 pool.append((s, info))
-        # 多花色结构池（2026-09-12）：全部通过测试的探针花色都保留，同花色取 Δ 高者。
-        # 启动规则由 _probe_lead_finesse_prefer 执行：引擎榜首所在花色优先（尊重引擎），
-        # 无引擎一致花色才按 Δ 降序逐花色过退让门控。
-        finesse_struct = {}
+        mcts_stats = full_output.get("mcts_stats") or {}
+        candidates = mcts_stats.get("candidates") or []
+        # 多花色结构池（2026-09-12）：全部通过测试的探针花色都保留。
+        # 引牌选择（2026-09-15 用户规则，口径与 7.2 结构排序一致）：同一
+        # (花色, 对象, 侧) 下的多条达标引牌（如 ♦K 引♦2/♦Q 均达标）按
+        # "做成率取档量化（0.02 粒度，同档视为打平）、Δ 平局决胜"定代表；
+        # 对象/侧之间仍按 Δ 取最大（保持"最高缺张大牌优先"与直飞/过手语义）。
+        _VAL_QUANT = 0.02
+
+        def _lead_val(card_str):
+            if not card_str:
+                return 0.0
+            for c in candidates:
+                if c.get("card") == card_str:
+                    v = c.get("scoring_val")
+                    return v if v is not None else c.get("avg_tricks", 0.0)
+            return 0.0
+
+        def _lead_bucket(card_str):
+            return round(_lead_val(card_str) / _VAL_QUANT)
+
+        by_key = {}
         for s, info in pool:
-            if s not in finesse_struct or (info.get("Δ") or 0) > (finesse_struct[s].get("Δ") or 0):
+            key = (s, info.get("对象"), info.get("侧"))
+            cur = by_key.get(key)
+            if cur is None:
+                by_key[key] = info
+                continue
+            bi = _lead_bucket(info.get("引牌"))
+            bc = _lead_bucket(cur.get("引牌"))
+            if (bi > bc
+                    or (bi == bc and (info.get("Δ") or 0) > (cur.get("Δ") or 0))):
+                by_key[key] = info
+        finesse_struct = {}
+        for (s, _o, _side), info in by_key.items():
+            cur = finesse_struct.get(s)
+            if cur is None or (info.get("Δ") or 0) > (cur.get("Δ") or 0):
                 finesse_struct[s] = info
         if partner:
             full_output["伙伴探针"] = partner
         if confirm:
             full_output["_probe_confirm"] = confirm
-        mcts_stats = full_output.get("mcts_stats") or {}
-        candidates = mcts_stats.get("candidates") or []
         if not finesse_struct:
             # 本侧+队友侧均无结构：Δ 是采样量，探针判空即无飞牌结构，
             # 尊重引擎（2026-09-13：跨墩续飞已移除，不再有"流程延续"路径）。
@@ -1537,6 +1642,84 @@ class PlayService:
         suit = cur_str[0]
         obj = finesse_struct[suit]["对象"]
         struct_desc = f"{suit}(" + self._finesse_obj_name(obj) + ")"
+        # 9砸（被迫引发·领出侧，2026-09-14 用户定调）：引擎榜首已是该花色飞张
+        # 小牌时，先走 9砸 规则（联手≥9张且顶张齐）——顶张在手→改出顶张砸；
+        # 顶张在对侧→改引最小≤9 小牌让对侧本墩 A 超吃（登记"九砸"标记）。
+        # 只有不满足 9砸 才落到"尊重引擎+登记"。张数闸显式带（_nine_suit_
+        # should_garrison 本身不查张数）。
+        if (self._combined_suit_count(state, suit) >= 9
+                and self._nine_suit_should_garrison(state, suit, obj)):
+            mcts_stats = result.get("full_output", {}).get("mcts_stats") or {}
+            cands = mcts_stats.get("candidates") or []
+            bank = [c for c in cands if c.get("card")
+                    and c["card"][0] == suit
+                    and self._FINESSE_R2V.get(c["card"][1:], 0) > obj]
+            own_cards = [c for pos in (state.contract.declarer, state.dummy)
+                         for c in state.hands.get(pos, []) if c.suit == suit]
+            own_played = 0
+            for t in state.tricks:
+                for p, c in t.cards:
+                    if c and p in (state.contract.declarer, state.dummy) and c.suit == suit:
+                        own_played += 1
+            for p, c in state.current_trick.cards:
+                if c and p in (state.contract.declarer, state.dummy) and c.suit == suit:
+                    own_played += 1
+            trump_cnt = len(own_cards) + own_played
+            if bank:
+                tgt = max(bank, key=lambda c: self._FINESSE_R2V.get(c["card"][1:], 0))
+                hint9 = (f"[8飞9砸] {suit} 联手{trump_cnt}张缺"
+                         f"{self._finesse_obj_name(obj)}应9砸（顶张在手）："
+                         f"榜首{cur_str} → 改出{tgt['card']}")
+                print(hint9)
+                result["card"] = Card(tgt["card"][0], tgt["card"][1:])
+                result["reasoning"] = hint9 + "\n" + result.get("reasoning", "")
+                full_output["推荐出牌"] = tgt["card"]
+                full_output["核心逻辑"] = hint9 + "\n" + full_output.get("核心逻辑", "")
+                full_output["八九原则"] = {"花色": suit, "缺": self._finesse_obj_name(obj),
+                                            "联手张数": trump_cnt, "原则": "9砸",
+                                            "榜首": cur_str, "改选": tgt["card"]}
+                full_output["领出飞牌"] = {"引发": True, "花色": suit, "对象": obj,
+                                           "Δ": finesse_struct[suit].get("Δ"),
+                                           "领出": cur_str,
+                                           "说明": "9砸（顶张在手，出顶张砸）"}
+                # 缺Q(或J) 持 A+K：A 砸后 K 仍 > 对象 → 登记"九砸余顶"（独立于
+                # 本墩 flow，下墩领出连拔 K；对象现身/连拔完成即清，2026-09-15）
+                if (obj != 13
+                        and any(self._FINESSE_R2V.get(c.rank, 0) == 13
+                                for c in own_cards)):
+                    bank9 = getattr(state, "nine_cash_bank", None)
+                    if bank9 is None:
+                        bank9 = {}
+                        setattr(state, "nine_cash_bank", bank9)
+                    bank9[suit] = {"obj": obj, "rv": 13}
+                return result
+            small = [c for c in cands if c.get("card")
+                     and c["card"][0] == suit
+                     and 2 <= self._FINESSE_R2V.get(c["card"][1:], 0) <= 9]
+            if small:
+                tgt = min(small, key=lambda c: self._FINESSE_R2V.get(c["card"][1:], 0))
+                self._register_finesse_flow(state, suit, obj, finesse_struct.get(suit))
+                extra9 = getattr(state, "finesse_flow_extra", None)
+                if extra9 is None:
+                    extra9 = {}
+                    setattr(state, "finesse_flow_extra", extra9)
+                extra9.setdefault(suit, {})["九砸"] = True
+                hint9 = (f"[8飞9砸] {suit} 联手{trump_cnt}张缺"
+                         f"{self._finesse_obj_name(obj)}应9砸（顶张在对侧）："
+                         f"榜首{cur_str} → 改出{tgt['card']}让对侧A超吃")
+                print(hint9)
+                result["card"] = Card(tgt["card"][0], tgt["card"][1:])
+                result["reasoning"] = hint9 + "\n" + result.get("reasoning", "")
+                full_output["推荐出牌"] = tgt["card"]
+                full_output["核心逻辑"] = hint9 + "\n" + full_output.get("核心逻辑", "")
+                full_output["八九原则"] = {"花色": suit, "缺": self._finesse_obj_name(obj),
+                                            "联手张数": trump_cnt, "原则": "9砸(顶张在对侧)",
+                                            "榜首": cur_str, "改选": tgt["card"]}
+                full_output["领出飞牌"] = {"引发": True, "花色": suit, "对象": obj,
+                                           "Δ": finesse_struct[suit].get("Δ"),
+                                           "领出": cur_str,
+                                           "说明": "9砸（顶张在对侧，引小让A砸）"}
+                return result
         hint = (f"[领出飞牌] 引擎领出{cur_str}（{struct_desc}）：已在该花色，尊重引擎，"
                 f"{'登记流程' if not self._finesse_obj_played(state, suit, obj) else '对象已现身'}")
         print(hint)
@@ -1635,6 +1818,7 @@ class PlayService:
                     "侧": "伙伴侧",
                     "组合飞": combo,
                     "废弃对象": disc or [],
+                    "全": list(all_items),
                 }
         return out
 
@@ -1955,10 +2139,13 @@ class PlayService:
                             else c.get("avg_tricks", 0.0))
             return 0.0
 
-        _BUCKET = 0.02
+        # 决策值按 0.02 粒度取档量化（_VAL_QUANT）：做成率差在一档以内视为
+        # 打平，由 Δ 决胜；跨档一律高档胜。注意此"取档"与探针的东/西分桶
+        # （位置敏感度）无关，只是量化容差。
+        _VAL_QUANT = 0.02
         ordered = sorted(
             finesse_struct.items(),
-            key=lambda kv: (-round((_rep_val(kv[0], kv[1]) / _BUCKET)),
+            key=lambda kv: (-round((_rep_val(kv[0], kv[1]) / _VAL_QUANT)),
                             -(kv[1].get("Δ") or 0.0)))
         for s, info in ordered:
             obj = info["对象"]
@@ -2012,7 +2199,23 @@ class PlayService:
                     bank = [c for c in suit_cands
                             if self._FINESSE_R2V.get(c["card"][1:], 0) > obj]
                     if not bank:
-                        continue
+                        # 顶张在对侧（明手）：9砸 仍是确定打法（2026-09-14 用户定调，
+                        # 不因 A 位置而有不同）——引该花色最小小牌（≤9）给对侧持 A 方
+                        # 本墩第三家超吃（接应读 flow_extra"九砸"标记强制 A 砸）
+                        small = [c for c in suit_cands
+                                 if self._FINESSE_R2V.get(c["card"][1:], 0) <= 9]
+                        if not small:
+                            continue
+                        pick = min(small,
+                                   key=lambda c: self._FINESSE_R2V.get(c["card"][1:], 0))["card"]
+                        self._register_finesse_flow(state, s, obj, info)
+                        extra9 = getattr(state, "finesse_flow_extra", None)
+                        if extra9 is None:
+                            extra9 = {}
+                            setattr(state, "finesse_flow_extra", extra9)
+                        extra9.setdefault(s, {})["九砸"] = True
+                        why = "9砸(顶张在对侧，引小让A砸)"
+                        return pick, f"{gate_why}；动作：{why}"
                     target = max(bank,
                                  key=lambda c: self._FINESSE_R2V.get(c["card"][1:], 0))
                     pick = target["card"]
@@ -2143,12 +2346,37 @@ class PlayService:
                 # 8飞：候选里"飞张"（低于对象、≥10）取代榜首"砸张"（>对象）
                 if 10 <= rv < obj and top_rv > obj and val > targets["val"]:
                     targets = {"card": cs, "val": val, "why": "8飞", "ak": ak_ok}
+        if not targets["card"] and should_garrison:
+            # 顶张在对侧（明手，本方可出候选无 >对象 顶张）：9砸 不因 A 位置而
+            # 跳过（2026-09-14 用户定调）——引该花色最小小牌（≤9）给对侧持 A 方
+            # 本墩第三家超吃；接应读 flow_extra"九砸"标记强制 A 砸（_finesse_commit_check）
+            lead_small = [c for c in candidates
+                          if c.get("card", "")[:1] == suit
+                          and 2 <= self._FINESSE_R2V.get(c.get("card", "")[1:], 0) <= 9]
+            if lead_small:
+                small_card = min(lead_small,
+                                 key=lambda c: self._FINESSE_R2V.get(c["card"][1:], 0))["card"]
+                info9 = finesse_struct.get(suit) or {}
+                self._register_finesse_flow(state, suit, obj, info9)
+                extra9b = getattr(state, "finesse_flow_extra", None)
+                if extra9b is None:
+                    extra9b = {}
+                    setattr(state, "finesse_flow_extra", extra9b)
+                extra9b.setdefault(suit, {})["九砸"] = True
+                small_val = next((c.get("scoring_val") for c in lead_small
+                                  if c.get("card") == small_card), 0.0)
+                if small_val is None:
+                    small_val = 0.0
+                targets = {"card": small_card, "val": small_val,
+                           "why": "9砸(顶张在对侧)", "ak": ak_ok}
         if not targets["card"]:
             return result
         pick = Card(targets["card"][0], targets["card"][1:])
         obj_name = self._finesse_obj_name(obj)
         if targets["why"] == "9砸先飞":
             ak_note = "（缺K持AQ：先砸A再飞Q）"
+        elif targets["why"] == "9砸(顶张在对侧)":
+            ak_note = "（顶张在对侧，引小让A砸）"
         else:
             ak_note = "" if ak_ok else "（AK不齐，只能飞）"
         if should_garrison:
@@ -2227,6 +2455,13 @@ class PlayService:
         )
         covers = [c for c in suit_cards if self._FINESSE_R2V[c.rank] > obj]
         below = [c for c in suit_cards if self._FINESSE_R2V[c.rank] < obj]
+        # 9砸（顶张在对侧）：同伙引小、起 launch 于登记（flow_extra"九砸"）——
+        # 持 A 方（第三家）强制用最大顶张超吃完成砸，规则优先于威胁判定
+        extra9 = getattr(state, "finesse_flow_extra", None) or {}
+        if isinstance(extra9.get(suit), dict) and extra9[suit].get("九砸"):
+            if covers:
+                pick9 = max(covers, key=lambda c: self._FINESSE_R2V[c.rank])
+                return str(pick9), "9砸（同伙引小，持顶张超吃）"
         if enemy_top >= obj:
             # 敌方本墩已出对象 → 用最小顶张盖（此时对象"现身"是盖牌动作，必须处理）
             if not covers:

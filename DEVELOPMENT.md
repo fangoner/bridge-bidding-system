@@ -580,6 +580,16 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.78（2026-09-15）
+- **9砸 领出侧补全**（详见 `docs/飞牌讨论与修改记录_20260913.md` §9.4）：在"引擎榜首已在该花色"路径插入 `_nine_suit_should_garrison` 检查，触发双闸 = 联手 ≥9 张（`_combined_suit_count`）+ 顶张齐；顶张在手 → 改出顶张砸；顶张在对侧 → 改引该花色最小 ≤9 小牌让对侧持 A 方本墩第三家超吃（登记 `flow_extra[suit]["九砸"]`）
+- **9砸 连拔（方案A，用户定调）**（§9.4）：缺Q持A+K 分砸 A、K 两墩——砸 A 时登记 `nine_cash_bank[suit]={"obj","rv":13}`（"九砸余顶"），下墩同花色领出、对象未现身、本方可出 K → 改出 K 连拔；对象现身/本侧无牌可出 → 清登记正常接管；缺K持A+Q 先砸 A 再飞 Q（既有 `"9砸先飞"` 保留）
+- **9砸 接应侧**（§9.5，`_finesse_commit_check`）：同伙引小、`flow_extra[suit]["九砸"]` 成立、本家持顶张 → 强制最大顶张超吃（规则优先于威胁判定）
+- **探针"全"逐条展开**（§9.1）：`_detect_finesse_struct`/`_probe_partner_finesse_struct` 顶部输出 `"全"`；结构池按"全"逐条 `(对象, 引牌)` 各过 `_probe_finesse_ok`，通过者才入池（不再只裁决最高 Δ 代表一条，消除"漏判整花色无飞牌结构"）；`_probe_confirm` 键 `(侧|花色|对象|引牌)` 避免同引牌多对象撞键；前端 confirm 键同步加 `obj`
+- **`_probe_finesse_ok` 扩展（用户修订）**（§9.2）：G 候选 = 对侧全部牌 ∪ 引牌本身（引牌本身满足 `obj > 引牌 > 防家非对象最大牌` 也构成飞；是"引牌本身"而非引牌侧整手）
+- **滑动窗口剔除己方现手持有**（§9.3，`_honor_missing_of_state`）：先剔己方持有（不占窗口名额、窗口自然下移）再取未打出前 3 张——与引牌侧 G 判定、接应剔废弃对象共同解决 B11 双飞问题
+- **引牌选择量化取档统一**（§9.6，与 7.2 结构排序同口径）：同一 `(花色, 对象, 侧)` 下多条达标引牌按"做成率取档量化（`_VAL_QUANT=0.02`，同档视为打平）、Δ 平局决胜"定代表；对象/侧之间仍按 Δ 取最大；`_BUCKET` 改名 `_VAL_QUANT`（"分桶"=位置敏感度、"取档"=量化容差术语区分）
+- 投递：bridge/play_service.py, bridge/mcts/dd_search.py, web/src/components/play/shared.jsx, docs/飞牌讨论与修改记录_20260913.md
+
 ### v1.77（2026-09-14）
 - **续飞流程移除（用户 v1.76 讨论定调后实施，详见 §8）**：
   - 删除跨墩状态机：`_apply_flow_continuation`（续飞/回手/正在飞三分支 + 流程迁移）、`_merge_finesse_flow`（改为 `_registry_finesse_struct` 读本墩登记）、`_finesse_flow_dead`、`_has_finesse_reentry_high`

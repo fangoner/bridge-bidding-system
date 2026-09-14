@@ -287,9 +287,10 @@ def _honor_missing_of_state(state):
     """返回 {花色: [缺失大牌...]}：庄家方现手未持有的监控窗口大牌。
 
     每个花色单独维护 3 张滑动窗口（持久于 state.finesse_windows，AKQ 起步）：
-    每次检测探针时更新——窗口取 AKQJT98 中该花色"未打出"的前 3 张
-    （出一个向下补一个，下限 8，不全包），各花色互不干扰。
-    对象须未打出且不在我方手中 ⇒ 必在防守方（东/西），分桶依据。
+    每次检测探针时更新——先剔除"己方现手持有"的大牌（己方手里的大牌不是
+    可飞对象，不占窗口名额，窗口自然下移），再取 AKQJT98 中该花色
+    "未打出"的前 3 张（出一个向下补一个，下限 8，不全包），各花色互不干扰。
+    对象 = 窗口内 ⇒ 未打出且不在我方手中 ⇒ 必在防守方（东/西），分桶依据。
     """
     known = set()
     for pos in (state.contract.declarer, state.dummy):
@@ -313,11 +314,11 @@ def _honor_missing_of_state(state):
     missing = {}
     for suit in ("♠", "♥", "♦", "♣"):
         unplayed = [h for h in _FINESSE_WINDOW_BASE if h not in played.get(suit, set())]
-        window = unplayed[:3]
+        cands = [h for h in unplayed if (suit, h) not in known]
+        window = cands[:3]
         windows[suit] = window
-        miss = [m for m in window if (suit, m) not in known]
-        if miss:
-            missing[suit] = miss
+        if window:
+            missing[suit] = window
     return missing
 
 
