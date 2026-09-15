@@ -580,6 +580,12 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.80（2026-09-15）约束来源规则定死：AI 一律不转译
+- **背景**：v1.79 修复约束失效后实测截屏牌局，约束转换 LLM 对 [AI] 约定叫（扣叫）仍提取，把东 3H"对♠有配合≥3张"错转 `♠≥3`（截屏=新睿二盖一模拟补全含义，全 [AI] 行）
+- **修改**：`CONSTRAINT_TRANSLATE_PROMPT` 来源过滤规则删除"[AI] 约定叫可提取"例外，**[AI] 行一律不转译**（无论自然叫/约定叫，constraint 输出空字符串）；与前端注释"后端仅对非AI来源行做约束转译"（App.jsx:2150）对齐
+- **明确记录**：约束唯一可信来源 = 叫牌阶段真实产物（[JF]/[XR] 含义）；[AI] 行（模拟补全/解释）不进入约束；提高 AI 叫牌能力为独立工作，另行评估
+- 投递：bridge/play_service.py, docs/约束来源分级废弃记录.md
+
 ### v1.79（2026-09-15）⚠️ 重大BUG：约束系统性失效修复
 - **问题**：自 v1.66 起打牌采样叫牌约束全部失效（DD/αμ 纯均匀采样），跨 v1.66~v1.78
 - **根因**（详见 `docs/约束来源分级废弃记录.md`）：v1.65 引入 `structured` 来源、v1.66 移除规则库后约束 100% 为 `structured`/`merged`，但 `filter_hard_constraints` 白名单仍是 Phase 0a 六前缀（hard_coded*/meaning_parsed/...），从未涵盖新来源 → 过滤恒空；三层打印（`约束已应用 N家`/`constraints=True(N)`）均只看未过滤结果，假象掩盖至今
