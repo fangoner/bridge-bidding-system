@@ -377,6 +377,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     alphaMuM, alphaMuMRange,
     handleAlphaMuMChange,
     ddScoringMode, handleDdScoringModeChange,
+    ddMajorityVotes, handleDdMajorityVotesChange,
     keepSureWin, keepCritical, keepSureLose,
     handleKeepClassChange,
     ddFinesseEnable, handleDdFinesseChange,
@@ -3004,6 +3005,7 @@ const handleReviewCompletedPlay = async () => {
         alphaMuM={alphaMuM} alphaMuMRange={alphaMuMRange}
         handleAlphaMuMChange={handleAlphaMuMChange}
         ddScoringMode={ddScoringMode} handleDdScoringModeChange={handleDdScoringModeChange}
+        ddMajorityVotes={ddMajorityVotes} handleDdMajorityVotesChange={handleDdMajorityVotesChange}
         keepSureWin={keepSureWin} keepCritical={keepCritical} keepSureLose={keepSureLose}
         handleKeepClassChange={handleKeepClassChange}
         ddFinesseEnable={ddFinesseEnable}

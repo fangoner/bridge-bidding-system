@@ -21,6 +21,7 @@ from config import (
     FINESSE_DEFER_ENABLE, FINESSE_EIGHT_NINE_ENABLE,
     FINESSE_RATIO, FINESSE_NEC_MAKE, FINESSE_NEC_MAKE_HIGH,
     FINESSE_NEC_MIN_RATIO, FINESSE_NEC_RATIO,
+    DD_MAJORITY_VOTES,
 )
 
 
@@ -146,6 +147,8 @@ class PlayService:
         self.bid_system = bid_system or ""  # 实际叫牌体系（仅存档用，约束不再依赖体系）
         self.bid_constraints = None  # 延迟提取
         self._seed_constraints = constraints or None  # 前端弹窗已生成的家约束，直接seed
+        # DD 多数投票票数（运行时可由粒子设置 API 修改；默认 1=关闭）
+        self.dd_majority_votes = DD_MAJORITY_VOTES
         # Phase 0a: BeliefTracker 已移除，粒子缓存不再需要清理
 
         return self.engine.initialize(hands, contract, player_roles, bidding_sequence, vulnerability)
@@ -2631,6 +2634,87 @@ class PlayService:
             return True
         return (av / bv) >= ratio
 
+    def _dd_maybe_majority_vote(self, state: PlayState, result: Dict[str, Any],
+                                engine_card: Optional[Card]) -> Optional[Card]:
+        """多数投票（2026-09-16 方案乙，用户定判据）：飞牌优先，未改选才触发。
+
+        触发条件（全部满足才投票）：
+          1. DD_MAJORITY_VOTES > 1（开关；1=关闭保持现状）
+          2. 飞牌介入未改选（engine_card == result.card → 飞牌尊重引擎）
+          3. "口径矛盾"：非等价候选按做成率 vs 按赢墩排出的 top 组不同
+             —— 做成率榜第一组 ≠ 赢墩榜第一组，说明"到底谁好"取决于
+             看哪个指标，此局面值得多采几票（用户定调，无阈值）。
+             （等价候选按逐世界 scores 全等进同一组——KQJ连张/中间牌已出
+               的KJ 不算对手，不触发）
+        每票＝一次独立 search（内部自重新采样，按面板计分制选牌），取多数。
+        返回 None 表示不触发（照常单次结果）；否则返回多数票牌。
+        """
+        if (self.dd_majority_votes if hasattr(self, "dd_majority_votes")
+                else DD_MAJORITY_VOTES) <= 1:
+            return None
+        card = result.get("card")
+        if card is None or engine_card is None or card != engine_card:
+            return None  # 飞牌已改选/无牌：飞牌优先，不票选
+        cands = (result.get("full_output") or {}).get("mcts_stats", {}).get("candidates") or []
+        if len(cands) < 2:
+            return None
+
+        # ── 等价分组：逐世界 scores 全等视为同一组（代表=第一张遇到的）──
+        groups = []
+        for cc in cands:
+            sa = cc.get("scores") or []
+            if not sa:
+                groups.append([cc])
+                continue
+            placed = False
+            for g in groups:
+                gs = g[0].get("scores") or []
+                if len(gs) == len(sa) and all(x == y for x, y in zip(gs, sa)):
+                    g.append(cc)
+                    placed = True
+                    break
+            if not placed:
+                groups.append([cc])
+        if len(groups) < 2:
+            return None  # 全部等价：无对手可比较，不触发
+
+        def grp_make(g):
+            return max((cc.get("make_rate_val") or 0.0) for cc in g)
+        def grp_avg(g):
+            return max((cc.get("avg_tricks") or 0.0) for cc in g)
+
+        by_make = sorted(groups, key=lambda g: -grp_make(g))
+        by_avg = sorted(groups, key=lambda g: -grp_avg(g))
+        top_make_cards = {str(cc["card"]) for cc in by_make[0]}
+        top_avg_cards = {str(cc["card"]) for cc in by_avg[0]}
+        if top_make_cards == top_avg_cards:
+            return None  # 两口径一致：做成率高者也赢墩高，无需票选
+
+        # ── 触发票选：每票独立 search（自重新采样，按面板计分制）──
+        from collections import Counter
+        tally = Counter()
+        _votes = (self.dd_majority_votes if hasattr(self, "dd_majority_votes")
+                  else DD_MAJORITY_VOTES)
+        for _ in range(_votes):
+            r = self.dd_search.search(state)
+            rc = r.get("card")
+            if rc is not None:
+                tally[str(rc)] += 1
+        winner_str = tally.most_common(1)[0][0]
+        # 从候选列表确认多数牌合法存在（engine.get_playable_cards 依赖出牌方
+        # 前置状态，此时可能为空；候选本身即 search 的合法出牌）
+        if not any(str(cc["card"]) == winner_str
+                   for cc in (result.get("full_output") or {})
+                   .get("mcts_stats", {}).get("candidates") or []):
+            return None
+        winner = self._card_from_str(state, winner_str)
+        if winner is None:
+            return None
+        print(f"[DD多数投票] {_votes}票 口径矛盾"
+              f"(做成率{str(list(top_make_cards))} vs 赢墩{str(list(top_avg_cards))}) "
+              f"→ 多数{winner} 分布{dict(tally)}")
+        return winner
+
     def _dd_play(self, state: PlayState, dd_samples: int = None, dd_scoring_mode: str = None) -> Dict[str, Any]:
         """DD搜索打牌（纯蒙特卡洛 + 双明手评估，由asyncio.to_thread调用）"""
         constraints = self._get_bid_constraints()
@@ -2656,6 +2740,7 @@ class PlayService:
             if card is None:
                 playable = self.engine.get_playable_cards()
                 card = self._select_best_card(playable, state)
+            engine_card = card  # 飞牌介入前的引擎牌（判定飞牌是否改选）
             full_output = result.get("full_output", {})
             full_output["叫牌约束"] = self._format_constraints_for_display(constraints)
             full_output["最新约束"] = self._format_latest_constraints_for_display(state, constraints)
@@ -2669,6 +2754,20 @@ class PlayService:
             if _svc_config.DD_FINESSE_ENABLE:
                 result = self._apply_finesse_tactics(state, result, FINESSE_RATIO)
             card = result.get("card")
+            # 平局多数投票（2026-09-16 方案乙）：飞牌优先——飞牌已改选则
+            # 不再票选；只有飞牌尊重引擎时，才在"top 与首个非等价对手
+            # 做成率差 ≤ 阈值"时触发多票多数（每票独立 search 自重新采样）。
+            vote_card = self._dd_maybe_majority_vote(state, result, engine_card)
+            if vote_card is not None:
+                card = vote_card
+                result["card"] = vote_card
+                _votes = (self.dd_majority_votes if hasattr(self, "dd_majority_votes")
+                          else DD_MAJORITY_VOTES)
+                result["reasoning"] = (result.get("reasoning") or "") + \
+                    f" [多数投票{_votes}票: {vote_card}]"
+                full_output["推荐出牌"] = str(vote_card)
+                full_output["多数投票"] = {"票数": _votes,
+                                           "结果": str(vote_card)}
             return {
                 "card": card.to_dict() if card else None,
                 "reasoning": result.get("reasoning", ""),
@@ -2867,6 +2966,31 @@ class PlayService:
                 if card.suit == suit and card.rank == rank:
                     return card
         
+        return None
+
+    @staticmethod
+    def _card_from_str(state: PlayState, card_str: str) -> Optional[Card]:
+        """从字符串（如 ♦K）在庄家/明手手牌中找对应 Card 对象。
+
+        多数投票的赢家在 search 候选里已知合法，但 engine.get_playable_cards()
+        依赖出牌方前置状态可能为空；从手牌直接构造即可（出牌方=当前玩家，
+        其手牌必含该合法出牌）。
+        """
+        if not card_str:
+            return None
+        cstr = card_str.strip().upper()
+        import re as _re
+        m = _re.match(r'([♠♥♦♣])([AKQJT98765432])', cstr)
+        if not m:
+            return None
+        suit, rank = m.group(1), m.group(2)
+        for card in state.hands.get(state.current_player, []):
+            if card.suit == suit and card.rank == rank:
+                return card
+        # 兜底：明手（若当前方是明手由庄家代出，手牌在 dummy）
+        for card in state.hands.get(state.dummy or "", []):
+            if card.suit == suit and card.rank == rank:
+                return card
         return None
 
     def _validate_and_fallback(self, card: Card, playable: List[Card],

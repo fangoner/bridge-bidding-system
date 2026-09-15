@@ -107,6 +107,8 @@ function SettingsPanel({
   handleAlphaMuMChange,
   ddScoringMode,
   handleDdScoringModeChange,
+  ddMajorityVotes,
+  handleDdMajorityVotesChange,
   keepSureWin, keepCritical, keepSureLose,
   handleKeepClassChange,
   ddFinesseEnable,
@@ -352,9 +354,14 @@ function SettingsPanel({
           )}
 
           {playEngine === 'dd' && (
+            <>
             <RangeSlider label="样本数" value={ddSampleCount}
               min={ddParticlesRange.min} max={ddParticlesRange.max} step={250} width={72}
               onCommit={handleDDSampleCountChange} />
+            <RangeSlider label="多数投票" value={ddMajorityVotes}
+              min={1} max={20} step={1} width={56}
+              onCommit={handleDdMajorityVotesChange} />
+            </>
           )}
           {playEngine === 'alphamu' && (
             <>

@@ -580,6 +580,15 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.81（2026-09-16）DD 多数投票：口径矛盾时多票定选
+- **背景**：4♠ 牌局（南 ♠KJT9 ♦KQJT9 ♣A 第4墩）重打时 ♦K/♠K 抖动；逐世界诊断 66.6% 等价、24% 仅♦K好、9% 仅♠K好——♦K 优势真实但单次采样噪声翻盘
+- **判据（用户定调，无阈值）**：候选按逐世界 scores 全等分组（KQJ连张/中间牌已出的KJ 等价不算对手）；做成率榜 top 组 ≠ 赢墩榜 top 组 → 触发多票多数。实测矛盾率 20/60 精准命中该牌型
+- **实现**：`_dd_maybe_majority_vote`（`play_service.py`）——每票独立 `search` 按面板计分制选牌取多数；`_dd_play` 先飞牌介入、飞牌改选则跳过投票（飞牌优先）；`_card_from_str` 从候选/手牌解析赢家
+- **效果**：850 样本单次 62%♦K → 投票后 93%♦K（100次实测）；非矛盾局面不减速
+- **设置项**：`DD_MAJORITY_VOTES`（config，默认1=关闭）→ `service.dd_majority_votes` 实例属性；粒子设置 API `dd_majority_votes`（1~20 实时改）；前端 SettingsPanel「多数投票」滑块（localStorage + debounce 推送）
+- **相关发现（遗留隐患）**："DK 打不出来"实为历史记录恢复的旧 [AI] 误约束「东♠≥3」绕过 v1.80 过滤锁死分布；重生成约束已恢复。载入记录恢复约束路径待接 [AI] 过滤（后续处理）
+- 投递：bridge/play_service.py, config.py, api/main.py, web/src/App.jsx, web/src/components/SettingsPanel.jsx, web/src/hooks/useModelSettings.js
+
 ### v1.80（2026-09-15）约束来源规则定死：AI 一律不转译
 - **背景**：v1.79 修复约束失效后实测截屏牌局，约束转换 LLM 对 [AI] 约定叫（扣叫）仍提取，把东 3H"对♠有配合≥3张"错转 `♠≥3`（截屏=新睿二盖一模拟补全含义，全 [AI] 行）
 - **修改**：`CONSTRAINT_TRANSLATE_PROMPT` 来源过滤规则删除"[AI] 约定叫可提取"例外，**[AI] 行一律不转译**（无论自然叫/约定叫，constraint 输出空字符串）；与前端注释"后端仅对非AI来源行做约束转译"（App.jsx:2150）对齐

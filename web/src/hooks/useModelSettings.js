@@ -15,6 +15,7 @@ const DD_KEEP_LOSE_KEY = 'bridge_dd_keep_sure_lose'
 const DD_FINESSE_ENABLE_KEY = 'bridge_dd_finesse_enable'
 const DD_FINESSE_DELTA_KEY = 'bridge_dd_finesse_delta'
 const DD_FINESSE_DELTA_DEFAULT = 0.4
+const DD_MAJORITY_VOTES_KEY = 'bridge_dd_majority_votes'
 const VISION_PROVIDER_KEY = 'bridge_vision_provider'
 
 // 解析组合模型值 "model::reasoning" → { model, reasoning }
@@ -114,6 +115,19 @@ export function useModelSettings() {
     setDdScoringMode(v)
     try { localStorage.setItem(DD_SCORING_MODE_KEY, v) } catch {/* empty */}
   }, [])
+
+  // DD 多数投票票数（口径矛盾时触发多票多数；1=关闭）。localStorage 持久化，
+  // 变更实时推送到后端粒子设置（scheduleParticleSync 已有 300ms debounce）
+  const [ddMajorityVotes, setDDMajorityVotes] = useState(() => {
+    try { return parseInt(localStorage.getItem(DD_MAJORITY_VOTES_KEY)) || 1 } catch { return 1 }
+  })
+  const handleDdMajorityVotesChange = useCallback((value) => {
+    const num = parseInt(value) || 1
+    const v = Math.max(1, Math.min(20, num))
+    setDDMajorityVotes(v)
+    try { localStorage.setItem(DD_MAJORITY_VOTES_KEY, v) } catch {/* empty */}
+    scheduleParticleSync({ dd_majority_votes: v })
+  }, [scheduleParticleSync])
 
   // DD 样本类别保留开关（全赢/临界/全输，独立可多选；localStorage 缓存 + 启动时推送后端）
   const loadKeep = (key) => {
@@ -254,6 +268,7 @@ export function useModelSettings() {
       dd_particles: parseInt(localStorage.getItem(DD_SAMPLE_COUNT_KEY)) || undefined,
       alpha_mu_particles: parseInt(localStorage.getItem(ALPHA_MU_PARTICLES_KEY)) || undefined,
       alpha_mu_m: parseInt(localStorage.getItem(ALPHA_MU_M_KEY)) || undefined,
+      dd_majority_votes: parseInt(localStorage.getItem(DD_MAJORITY_VOTES_KEY)) || undefined,
     }).catch(() => {})
     // 以前端 localStorage 为准推送样本类别开关到后端
     syncDdWorldFilter()
@@ -328,6 +343,9 @@ export function useModelSettings() {
     // DD 决策计分制
     ddScoringMode,
     handleDdScoringModeChange,
+    // DD 多数投票票数（口径矛盾触发；1=关闭）
+    ddMajorityVotes,
+    handleDdMajorityVotesChange,
     // DD 样本类别保留开关（全赢/临界/全输）
     keepSureWin, keepCritical, keepSureLose,
     handleKeepClassChange,

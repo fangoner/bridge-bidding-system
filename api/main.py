@@ -62,6 +62,7 @@ from config import (
     ALPHA_MU_M, ALPHA_MU_M_MIN, ALPHA_MU_M_MAX,
     DD_TIME_LIMIT, ALPHA_MU_TIME_LIMIT,
     VISION_PROVIDER, DEEPSEEK_VISION_MODEL,
+    DD_MAJORITY_VOTES,
 )
 from bridge.bidding_service import MAIN_PROMPT_MAX_RETRIES, FALLBACK_PROMPT_MAX_RETRIES
 import config
@@ -2826,6 +2827,7 @@ def _compute_dd_hints_for_state_from_state(state) -> dict:
 # ── 样本数 / world数设置（原"粒子数"，Phase 0a 后改为直接控制引擎参数）──
 class ParticleSettingsRequest(BaseModel):
     dd_particles: Optional[int] = None       # DD 样本数
+    dd_majority_votes: Optional[int] = None  # DD 多数投票票数（口径矛盾时触发；1=关闭）
     alpha_mu_particles: Optional[int] = None # αμ world数
     alpha_mu_m: Optional[int] = None         # αμ 层数 M（Max 递归层数，M=1 退化为 PIMC）
     session_id: str = "default"
@@ -2836,12 +2838,16 @@ async def get_particle_settings(session_id: str = Query("default")):
     """获取当前采样/W数设置"""
     service = get_play_service(session_id)
     dd_val = service.dd_search.num_samples
+    dd_votes = getattr(service, "dd_majority_votes", DD_MAJORITY_VOTES)
     amu_val = service.alpha_mu_search.num_worlds if service.alpha_mu_search else ALPHA_MU_NUM_WORLDS
     amu_m = service.alpha_mu_search.M if service.alpha_mu_search else ALPHA_MU_M
     return {
         "dd_particles": dd_val,
         "dd_min": DD_PARTICLES_MIN,
         "dd_max": DD_PARTICLES_MAX,
+        "dd_majority_votes": dd_votes,
+        "dd_majority_votes_min": 1,
+        "dd_majority_votes_max": 20,
         "alpha_mu_particles": amu_val,
         "alpha_mu_min": ALPHA_MU_WORLDS_MIN,
         "alpha_mu_max": ALPHA_MU_WORLDS_MAX,
@@ -2860,6 +2866,10 @@ async def set_particle_settings(request: ParticleSettingsRequest):
         val = max(DD_PARTICLES_MIN, min(DD_PARTICLES_MAX, request.dd_particles))
         service.dd_search.num_samples = val
         updates["dd_particles"] = val
+    if request.dd_majority_votes is not None:
+        val = max(1, min(20, request.dd_majority_votes))
+        setattr(service, "dd_majority_votes", val)
+        updates["dd_majority_votes"] = val
     if request.alpha_mu_particles is not None:
         val = max(ALPHA_MU_WORLDS_MIN, min(ALPHA_MU_WORLDS_MAX, request.alpha_mu_particles))
         if service.alpha_mu_search is not None:
