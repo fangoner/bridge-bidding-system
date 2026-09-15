@@ -580,6 +580,18 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.79（2026-09-15）⚠️ 重大BUG：约束系统性失效修复
+- **问题**：自 v1.66 起打牌采样叫牌约束全部失效（DD/αμ 纯均匀采样），跨 v1.66~v1.78
+- **根因**（详见 `docs/约束来源分级废弃记录.md`）：v1.65 引入 `structured` 来源、v1.66 移除规则库后约束 100% 为 `structured`/`merged`，但 `filter_hard_constraints` 白名单仍是 Phase 0a 六前缀（hard_coded*/meaning_parsed/...），从未涵盖新来源 → 过滤恒空；三层打印（`约束已应用 N家`/`constraints=True(N)`）均只看未过滤结果，假象掩盖至今
+- **修复（用户定调"直接用约束，删白名单"）**：
+  - `constraints.py`：删除来源分级（`_HARD_SOURCE_PREFIXES`/`_IGNORED_SOURCES`/`is_hard_source`/`is_ignored_source`/`filter_hard_constraints`）；`validate_hard`/`validate_relaxed` 去 source 跳过
+  - `sampler.py`：`sample()`/`sample_n()` 直接 `self.constraints`
+  - `bid_constraint_library.py`：文件头 deprecated 标注（研究资产，不接入）
+  - `test_sampling_constraints.py`：清 `filter_hard_constraints` import
+- **验证**：复现当前牌 350 样本东♠ 固定 5/350（修复前均匀）；约束测试 5/5 通过；后端重启 8003 健康
+- **对飞牌影响**：探针 Δ/结构判定/启动门控消费的世界分布从均匀变为符合叫牌承诺，飞牌判断更真实；需实测回归
+- 投递：bridge/mcts/constraints.py, bridge/mcts/sampler.py, bridge/mcts/bid_constraint_library.py, tests/test_sampling_constraints.py, docs/约束来源分级废弃记录.md（新增）
+
 ### v1.78（2026-09-15）
 - **9砸 领出侧补全**（详见 `docs/飞牌讨论与修改记录_20260913.md` §9.4）：在"引擎榜首已在该花色"路径插入 `_nine_suit_should_garrison` 检查，触发双闸 = 联手 ≥9 张（`_combined_suit_count`）+ 顶张齐；顶张在手 → 改出顶张砸；顶张在对侧 → 改引该花色最小 ≤9 小牌让对侧持 A 方本墩第三家超吃（登记 `flow_extra[suit]["九砸"]`）
 - **9砸 连拔（方案A，用户定调）**（§9.4）：缺Q持A+K 分砸 A、K 两墩——砸 A 时登记 `nine_cash_bank[suit]={"obj","rv":13}`（"九砸余顶"），下墩同花色领出、对象未现身、本方可出 K → 改出 K 连拔；对象现身/本侧无牌可出 → 清登记正常接管；缺K持A+Q 先砸 A 再飞 Q（既有 `"9砸先飞"` 保留）

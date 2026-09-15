@@ -1,5 +1,28 @@
 # 开发日志
 
+## 2026-09-15（重大BUG修复：约束系统性失效——来源分级白名单从未涵盖新来源 v1.79）
+
+> ⚠️ **重大BUG（记录在案）**：自 v1.66（8062d08）起至本次修复，打牌采样的叫牌约束**全部失效**（DD/αμ 退化为纯均匀采样），持续约近一个月、跨 v1.66~v1.78。发现于复盘"北家出 ♠K 时东西样本黑桃分布"——东家叫过 1S（♠≥5）约束却呈均匀分布。
+
+**背景**: ①v1.65（48d9ab0）引入约束"来源双通道"，新增通道A `_build_constraint_from_structured` → `inference_source="structured"`；②v1.66（8062d08）约束生成重构（弹窗统一入口 + LLM 转换），**移除规则库接入**，约束来源 100% 变成 `structured`（合并后为 `merged`）；③但 `filter_hard_constraints` 的白名单（`_HARD_SOURCE_PREFIXES`）仍是 Phase 0a 时代的六条前缀（hard_coded*/meaning_parsed/convention_*/cue_bid/overcall_*/unusual_nt），**从未加入 structured/merged** → 每次采样前过滤结果恒为空 → 约束系统性失效。详见 `docs/约束来源分级废弃记录.md`（新档）。
+
+**根因（复盘）**:
+- 白名单诞生于 Phase 0a（3261457），当时约束只来自规则库（hard_coded*）和含义正则（meaning_parsed），白名单恰好全覆盖
+- v1.65 引入 structured 来源时未同步扩白名单（规则库仍并存，部分家约束靠 hard_coded 兜底，问题被掩盖）
+- v1.66 移除规则库后，来源全变 structured/merged，白名单与来源彻底脱节，但**摘要打印 `约束已应用: N家` 用的是未过滤计数 + dd_search 日志 `constraints=True(N)` 只查字典非空**——三层打印均不看过滤后结果，导致"约束在起作用"的假象一直未被察觉
+
+**修复（用户定调"直接用约束，删白名单"）**:
+- `bridge/mcts/constraints.py`：删除来源分级体系（`_HARD_SOURCE_PREFIXES`/`_IGNORED_SOURCES`/`is_hard_source`/`is_ignored_source`/`filter_hard_constraints`）；`validate_hard`/`validate_relaxed` 移除 source 跳过逻辑——所有进入验证的约束一律按硬约束检查
+- `bridge/mcts/sampler.py`：`sample()`/`sample_n()` 直接用 `self.constraints`，不再 filter
+- `tests/test_sampling_constraints.py`：移除 `filter_hard_constraints` import
+- `bridge/mcts/bid_constraint_library.py`：文件头标注 deprecated（保留作研究资产，不接入系统）
+
+**约束来源现状**: 仅存 `structured`（弹窗 seed + LLM 结构化转换）/ `merged`（同位置多叫品单调合并，如北 1C→3H 取更严格承诺，正常机制）/ `relaxed`（验证链内部降级产物）——均为叫牌明确承诺，可直接验证，无需分级。
+
+**修改文件**: bridge/mcts/constraints.py, bridge/mcts/sampler.py, bridge/mcts/bid_constraint_library.py, tests/test_sampling_constraints.py, docs/约束来源分级废弃记录.md（新增）, CHANGELOG.md, DEVELOPMENT.md
+
+**测试验证**: `python -m py_compile` 通过；`python tests/test_sampling_constraints.py` 5/5 全过；复现当前牌（东 1S）350 样本中**东♠ 固定 5/350、西♠ 0/350**（修复前东 0-5 张均匀散布）；后端重启 8003 健康，交用户实测验证
+
 ## 2026-09-15（9砸连拔 + 9砸领出/接应侧补全 + 探针逐条展开 + 引牌取档统一 v1.78）
 
 **背景**: ①缺Q持A+K 需分砸 A、K 两墩，但领出侧完全缺失 9砸 判定（A 在对侧/明手时也不应跳过）；②结构池此前只裁决"每花色最高 Δ 代表一条"（如 ♠J），其余对象（如 ♠K 引小、Q 可盖 J 的真飞结构）被连带废弃，整花色一并漏判成"无飞牌结构"；③同花色内选牌未用取档、与 7.2 结构排序口径不一致；④探针窗口未剔除己方持有，T/Q 在己手时窗口占位致对象错位。详见 `docs/飞牌讨论与修改记录_20260913.md`（§9）。

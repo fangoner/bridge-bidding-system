@@ -10,7 +10,7 @@ from bridge.mcts.constraints import (
     BidConstraint, validate_sample,
     HCP_MAP, CONTROL_MAP,
     validate_hard, validate_relaxed, validate_voids_only,
-    is_hard_source, filter_hard_constraints, _is_balanced, _check_constraint,
+    _is_balanced, _check_constraint,
 )
 from bridge.mcts.belief import collect_voids
 
@@ -779,8 +779,7 @@ class DealSampler:
         Phase 0a: 使用均匀随机分配 + 分级硬约束验证回退。
         """
         known_info = _extract_known_info(state, perspective)
-        hard_constraints = filter_hard_constraints(self.constraints)
-        return self._sample_one(known_info, hard_constraints)
+        return self._sample_one(known_info, self.constraints)
 
     def sample_n(self, n: int, state: PlayState, perspective: str) -> List[Dict[str, List[Card]]]:
         """生成 n 个独立均匀样本（用于 DD/αμ 引擎）。
@@ -788,16 +787,15 @@ class DealSampler:
         提取一次 known_info，复用 n 次，避免每个样本重复扫描 state。
         """
         known_info = _extract_known_info(state, perspective)
-        hard_constraints = filter_hard_constraints(self.constraints)
         results = []
         for _ in range(n):
-            results.append(self._sample_one(known_info, hard_constraints))
+            results.append(self._sample_one(known_info, self.constraints))
         return results
 
     def _sample_one(
         self,
         known_info: dict,
-        hard_constraints: Dict[str, "BidConstraint"],
+        constraints_in: Dict[str, "BidConstraint"],
     ) -> Dict[str, List[Card]]:
         """单次采样（复用 known_info，不重复提取）。"""
         # 过滤：已知手牌的位置不验证（手牌由发牌固定，无法通过采样改变）
@@ -806,7 +804,7 @@ class DealSampler:
         remaining_counts = known_info.get("remaining_counts", {})
         # 中局扣减：把整手约束按已出牌折算为剩余部分约束，再用于验证
         active_constraints = {}
-        for pos, c in hard_constraints.items():
+        for pos, c in constraints_in.items():
             if pos in known_positions:
                 continue
             reduced = _reduce_constraint_for_played(

@@ -1,10 +1,9 @@
 """叫牌约束：从叫牌含义中提取的点力/牌型限制，用于采样过滤。
 
-约束来源分类（描述性，不编号；采样尝试链的 Level 编号见 sampler.py）：
-  硬约束 — 叫牌明确承诺，采样时必须满足：
-    hard_coded* / meaning_parsed / convention_* / cue_bid / overcall_* / unusual_nt
-  忽略 — 推理猜测，不参与采样：
-    negative_inference / hcp_conservation
+约束不按来源分级：进入样本验证的所有约束都视为叫牌明确承诺（LLM 转换
+或前端确认的家约束）。inference_source 仅作来源标记/诊断保留，不参与过滤
+（v1.79：删除旧分级——规则库退役后硬/忽略分类失去区分对象，structured
+产生的白名单外来源导致约束系统性失效，见 CHANGELOG v1.79）。
 """
 from dataclasses import dataclass, field, copy as dc_copy
 from typing import Dict, List, Optional, Set, Tuple
@@ -12,46 +11,6 @@ from typing import Dict, List, Optional, Set, Tuple
 from bridge.play_types import Card, POSITION_ORDER
 
 CONTROL_MAP = {"A": 2, "K": 1}  # A=2控制，K=1控制
-
-
-# ---- 约束来源分类 ----
-_HARD_SOURCE_PREFIXES = (
-    "hard_coded",      # 叫牌阶段硬编码（含体系后缀 hard_coded_jf / hard_coded_natural）
-    "meaning_parsed",   # LLM 叫品含义解析
-    "convention_",      # 约定叫识别（convention_takeout_double / convention_stayman 等）
-    "cue_bid",          # 扣叫
-    "overcall_",        # 争叫（overcall_2level 等）
-    "unusual_nt",       # 非寻常无将
-)
-
-_IGNORED_SOURCES = {
-    "negative_inference",   # 否定推断："他 pass 了大概 ≤7 HCP"——不是事实
-    "hcp_conservation",     # 点力守恒链式推理——一步错全盘错
-}
-
-
-def is_hard_source(src: str) -> bool:
-    """约束来源是否是硬约束（叫牌明确承诺）。"""
-    if not src:
-        return False
-    if src in _IGNORED_SOURCES:
-        return False
-    return src.startswith(_HARD_SOURCE_PREFIXES)
-
-
-def is_ignored_source(src: str) -> bool:
-    """约束来源是否应在采样中忽略。"""
-    return src in _IGNORED_SOURCES
-
-
-def filter_hard_constraints(
-    constraints: Dict[str, "BidConstraint"],
-) -> Dict[str, "BidConstraint"]:
-    """从约束字典中筛选仅硬约束（用于均匀采样验证）。"""
-    return {
-        pos: c for pos, c in constraints.items()
-        if is_hard_source(c.inference_source)
-    }
 
 
 def relax_constraint(c: "BidConstraint") -> "BidConstraint":
@@ -97,13 +56,8 @@ def validate_hard(
     hands: Dict[str, List[Card]],
     constraints: Dict[str, "BidConstraint"],
 ) -> bool:
-    """硬约束验证：仅检查叫牌明确承诺（hard_coded / convention / meaning_parsed）。
-
-    忽略 negative_inference 和 hcp_conservation 来源的约束。
-    """
+    """硬约束验证：检查采样手牌是否满足所有传入约束（v1.79 起不过滤来源）。"""
     for pos, constraint in constraints.items():
-        if not is_hard_source(constraint.inference_source):
-            continue
         cards = hands.get(pos, [])
         if not cards:
             continue
@@ -116,10 +70,8 @@ def validate_relaxed(
     hands: Dict[str, List[Card]],
     constraints: Dict[str, "BidConstraint"],
 ) -> bool:
-    """放宽约束验证：HCP ±2, suit_min 减半。"""
+    """放宽约束验证：HCP ±2, suit_min 减半（v1.79 起不过滤来源）。"""
     for pos, constraint in constraints.items():
-        if not is_hard_source(constraint.inference_source):
-            continue
         cards = hands.get(pos, [])
         if not cards:
             continue
@@ -183,9 +135,8 @@ def validate_sample(
     hands: Dict[str, List[Card]],
     constraints: Dict[str, "BidConstraint"],
 ) -> bool:
-    """检查采样出的手牌是否满足所有硬约束。
+    """检查采样出的手牌是否满足所有约束（v1.79 起不过滤来源）。
 
-    自动忽略 negative_inference / hcp_conservation 来源的约束。
     等同于 validate_hard()，保留用于向后兼容。
     """
     return validate_hard(hands, constraints)

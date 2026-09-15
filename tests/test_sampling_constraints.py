@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import random
 from collections import Counter
-from bridge.mcts.constraints import BidConstraint, validate_sample, filter_hard_constraints, HCP_MAP
+from bridge.mcts.constraints import BidConstraint, validate_sample, HCP_MAP
 from bridge.mcts.sampler import DealSampler, _sample_uniform
 from bridge.play_service import PlayService
 from bridge.play_types import Card, PlayState, Contract, PlayPhase
