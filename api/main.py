@@ -1430,6 +1430,48 @@ async def image_deal(image: bytes = File(..., description="图片文件")):
         )
 
 
+@app.get("/api/bm-deal", response_model=ImageDealResponse)
+async def bm_deal(deck_id: str = Query(..., description="牌局id，如 2-89 / 2-B20"),
+                  hand_view: str = Query("four_hands", description="two_hands=仅庄家+明手 或 four_hands=全部四家")):
+    """读取 Bridge Master 2000 牌局"""
+    try:
+        lib_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bm_deals.json")
+        if not os.path.exists(lib_path):
+            return ImageDealResponse(hands={}, dealer="南", success=False, message="未找到 bm_deals.json，请先运行 tools/bm_import.py")
+        with open(lib_path, "r", encoding="utf-8") as f:
+            lib = json.load(f)
+        deal = lib.get("deals", {}).get(deck_id)
+        if not deal:
+            return ImageDealResponse(hands={}, dealer="南", success=False, message=f"未找到牌局 {deck_id}")
+        decl = deal.get("declarer")
+        partner = {"南": "北", "北": "南", "东": "西", "西": "东"}.get(decl)
+        hands = dict(deal["hands"])
+        if hand_view == "two_hands":
+            for pos in ["南", "西", "北", "东"]:
+                if pos not in (decl, partner):
+                    hands[pos] = {"spades": "", "hearts": "", "diamonds": "", "clubs": "", "hcp": 0}
+        return ImageDealResponse(
+            hands=hands,
+            dealer=deal.get("dealer") or "南",
+            success=True,
+            message="牌局已加载",
+            bidding_sequence=deal.get("bidding_sequence"),
+            contract=f"{deal.get('contract_level')}{deal.get('contract_suit')}",
+            contract_level=deal.get("contract_level"),
+            contract_suit=deal.get("contract_suit"),
+            contract_declarer=decl,
+            contract_doubled=deal.get("doubled", False),
+            contract_redoubled=deal.get("redoubled", False),
+            opening_lead=deal.get("opening_lead"),
+            page_type="BM2000",
+            vulnerability=None
+        )
+    except Exception as e:
+        print(f"[ERROR] 读取BM牌局失败: {str(e)}")
+        traceback.print_exc()
+        return ImageDealResponse(hands={}, dealer="南", success=False, message=f"读取失败: {str(e)}")
+
+
 class TriggerScreenshotResponse(BaseModel):
     success: bool
     message: str

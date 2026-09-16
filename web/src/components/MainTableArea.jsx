@@ -27,6 +27,7 @@ export default function MainTableArea({
   onPlayCardClick,
   onSetPlayHand,
   onImageDeal,
+  onBmDeal,
   onScreenshotDeal,
   onScreenshotBidding,
   screenshotBiddingDisabled,
@@ -85,6 +86,7 @@ export default function MainTableArea({
         onPlayCardClick={onPlayCardClick}
         onSetPlayHand={onSetPlayHand}
         onImageDeal={onImageDeal}
+        onBmDeal={onBmDeal}
         onScreenshotDeal={onScreenshotDeal}
         onScreenshotBidding={onScreenshotBidding}
         screenshotBiddingDisabled={screenshotBiddingDisabled}

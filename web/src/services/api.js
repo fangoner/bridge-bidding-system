@@ -313,6 +313,19 @@ export const imageDeal = async (imageFile) => {
   }
 };
 
+// 读取 Bridge Master 2000 牌局
+export const bmDeal = async (deckId, handView = 'four_hands') => {
+  try {
+    const response = await api.get('/api/bm-deal', {
+      params: { deck_id: deckId, hand_view: handView }
+    });
+    return response.data;
+  } catch (error) {
+    console.error('读取BM牌局失败:', error);
+    throw error;
+  }
+};
+
 // 上传单家手牌图片识别（移动端/相册路径）（P1-7：带超时）
 export const uploadSingleHandImage = async (position, imageFile, knownHands = null) => {
   try {

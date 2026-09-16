@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import { dealCards, customDeal, imageDeal, triggerScreenshot, readClipboardDeal, readSingleHandClipboard, uploadSingleHandImage, biddingImageDeal, readBiddingClipboard } from '../services/api'
+import { dealCards, customDeal, imageDeal, bmDeal, triggerScreenshot, readClipboardDeal, readSingleHandClipboard, uploadSingleHandImage, biddingImageDeal, readBiddingClipboard } from '../services/api'
 import { setPlayHand as apiSetPlayHand } from '../services/api'
 import { BRIDGE_POSITIONS } from '../utils/position'
 import { useGame } from '../context/GameContext'
@@ -294,6 +294,45 @@ export function useDealing({ clearBiddingDraft }) {
     }
   }, [clearBiddingDraft, setCurrentRecordId, setLoading, setError, setWarning,
       setHands, setDealer, setVulnerability, setBiddingSequence, setCurrentBidder, resetGameState])
+
+  // 3b. 导入 Bridge Master 2000 牌局
+  const handleBmDeal = useCallback(async (deckId, handView = 'four_hands') => {
+    if (!deckId) return
+    clearBiddingDraft()
+    setCurrentRecordId(null)
+    setLoading(true)
+    setError(null)
+    setWarning(null)
+    try {
+      const data = await bmDeal(deckId, handView)
+      if (data.success) {
+        setHands(data.hands)
+        if (data.message && data.message !== '牌局已加载') setWarning(data.message)
+        if (data.dealer) setDealer(data.dealer)
+        if (data.vulnerability) setVulnerability(data.vulnerability)
+        resetGameState({
+          directPlayInfo: buildDirectPlayInfo(data),
+          imageOpeningLead: data.opening_lead || null,
+        })
+        const parsedBidding = parseBiddingSequenceStr(data.bidding_sequence)
+        setBiddingSequence(parsedBidding)
+        if (data.dealer) setCurrentBidder(data.dealer)
+        setPositionRoles({ '南': 'ai', '北': 'ai', '东': 'human', '西': 'human' })
+        setShowPartnerHand(true)
+        setShowOpponentHands(true)
+        return data
+      } else {
+        setError(data.message || '读取BM牌局失败')
+        return null
+      }
+    } catch {
+      setError('读取BM牌局失败，请检查API服务是否正常运行')
+      return null
+    } finally {
+      setLoading(false)
+    }
+  }, [clearBiddingDraft, setCurrentRecordId, setLoading, setError, setWarning,
+      setHands, setDealer, setVulnerability, setBiddingSequence, setCurrentBidder, resetGameState, setPositionRoles, setShowPartnerHand, setShowOpponentHands])
 
   // 4. 截屏识别牌局
   const handleScreenshotDeal = useCallback(async ({ setShowSettings = null } = {}) => {
@@ -682,6 +721,7 @@ export function useDealing({ clearBiddingDraft }) {
     handleDeal,
     handleCustomDeal,
     handleImageDeal,
+    handleBmDeal,
     handleScreenshotDeal,
     handleBiddingScreenshot,
     handleBiddingImageUpload,

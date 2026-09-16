@@ -29,6 +29,7 @@ function CardTablePanel({
   onPlayCardClick,
   onSetPlayHand,
   onImageDeal,
+  onBmDeal,
   onScreenshotDeal,
   onScreenshotBidding,
   screenshotBiddingDisabled,
@@ -384,6 +385,15 @@ function CardTablePanel({
             sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5 }}
           >
             图片
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={onBmDeal}
+            disabled={loading}
+            sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5 }}
+          >
+            BM
           </Button>
           <Button
             variant="outlined"

@@ -742,6 +742,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   const {
     handleDeal,
     handleImageDeal,
+    handleBmDeal,
     handleScreenshotDeal,
     handleBiddingScreenshot,
     handleBiddingImageUpload,
@@ -2948,6 +2949,17 @@ const handleReviewCompletedPlay = async () => {
   // 图片发牌：带 File 参数时直接识别，否则打开图片发牌对话框
   const handleImageDealProp = useCallback((file) => file ? handleImageDeal(file) : setImageDealOpen(true), [handleImageDeal, setImageDealOpen])
 
+  // BM 牌局导入对话框
+  const [bmDealOpen, setBmDealOpen] = useState(false)
+  const [bmDealId, setBmDealId] = useState('2-B20')
+  const [bmHandView, setBmHandView] = useState('two_hands')
+
+  const handleBmDealProp = useCallback(() => {
+    setBmDealId('2-B20')
+    setBmHandView('two_hands')
+    setBmDealOpen(true)
+  }, [])
+
 
   return (
     <Box sx={{ maxWidth: 1400, mx: 'auto', py: { xs: 1.5, md: 2.5 }, px: { xs: 1, md: 3 } }}>
@@ -3101,6 +3113,7 @@ const handleReviewCompletedPlay = async () => {
           onPlayCardClick={handlePlayCardClick}
           onSetPlayHand={handleSetPlayHand}
           onImageDeal={handleImageDealProp}
+          onBmDeal={handleBmDealProp}
           onScreenshotDeal={onScreenshotDeal}
           onScreenshotBidding={onScreenshotBidding}
           screenshotBiddingDisabled={dealingLoading || aiThinking}
@@ -3442,6 +3455,47 @@ const handleReviewCompletedPlay = async () => {
             }
           }} variant="contained" disabled={!imageFile || loading}>
             {loading ? <CircularProgress size={20} /> : '确定'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* BM 牌局导入对话框 */}
+      <Dialog open={bmDealOpen} onClose={() => setBmDealOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>导入 Bridge Master 牌局</DialogTitle>
+        <DialogContent>
+          <Alert severity="info" sx={{ mb: 2 }}>
+            输入牌局 id（如 2-B20 或 2-89），并选择显示措置
+          </Alert>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              label="牌局 id"
+              value={bmDealId}
+              placeholder="例如 2-B20"
+              onChange={(e) => setBmDealId(e.target.value)}
+            />
+            <Box>
+              <Typography sx={{ mb: 0.5, fontWeight: 500 }}>手牌显示</Typography>
+              <Box sx={{ display: 'flex', gap: 3 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                  <input type="radio" checked={bmHandView === 'two_hands'} onChange={() => setBmHandView('two_hands')} />
+                  仅庄家 + 明手两家
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                  <input type="radio" checked={bmHandView === 'four_hands'} onChange={() => setBmHandView('four_hands')} />
+                  全部四家
+                </label>
+              </Box>
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBmDealOpen(false)}>取消</Button>
+          <Button onClick={async () => {
+            if (!bmDealId.trim()) return
+            const ok = await handleBmDeal(bmDealId.trim(), bmHandView)
+            if (ok) setBmDealOpen(false)
+          }} variant="contained" disabled={loading}>
+            {loading ? <CircularProgress size={20} /> : '导入'}
           </Button>
         </DialogActions>
       </Dialog>
