@@ -11,6 +11,7 @@ DDS 数据格式 (from endplay._dds):
 """
 
 import ctypes
+import ctypes.util
 import os
 import sys
 import threading
@@ -46,6 +47,33 @@ _dll_lock = threading.Lock()
 _dds_available = None
 
 
+def _dds_library_candidates() -> List[str]:
+    """构造 DDS 库候选路径（按优先级）。
+
+    1) 项目内置库：bridge/mcts/dds/libdds.so（或 dds.dll）
+    2) 系统库：ctypes.util.find_library("dds")
+    3) 回退：endplay._dds 自带的 dds.dll（endplay 为可选依赖，可能缺失）
+    """
+    candidates = []
+    here = os.path.dirname(os.path.abspath(__file__))
+    if sys.platform == "win32":
+        candidates.append(os.path.join(here, "dds", "dds.dll"))
+    else:
+        candidates.append(os.path.join(here, "dds", "libdds.so"))
+    try:
+        sys_lib = ctypes.util.find_library("dds")
+        if sys_lib:
+            candidates.append(sys_lib)
+    except Exception:
+        pass
+    try:
+        import endplay._dds
+        candidates.append(os.path.join(os.path.dirname(endplay._dds.__file__), "dds.dll"))
+    except Exception:
+        pass
+    return candidates
+
+
 def _load_dll():
     global _dds_dll
     if _dds_dll is not None:
@@ -53,13 +81,19 @@ def _load_dll():
     with _dll_lock:
         if _dds_dll is not None:
             return _dds_dll
-        import endplay._dds
-        dds_dir = os.path.dirname(endplay._dds.__file__)
-        dll_path = os.path.join(dds_dir, "dds.dll")
-        if sys.platform == "win32":
-            _dds_dll = ctypes.WinDLL(dll_path)
-        else:
-            _dds_dll = ctypes.CDLL(dll_path)
+        last_err = None
+        for dll_path in _dds_library_candidates():
+            try:
+                if sys.platform == "win32":
+                    _dds_dll = ctypes.WinDLL(dll_path)
+                else:
+                    _dds_dll = ctypes.CDLL(dll_path)
+                break
+            except OSError as e:
+                last_err = e
+                _dds_dll = None
+        if _dds_dll is None:
+            raise RuntimeError(f"无法加载任何 DDS 库: {last_err}")
         try:
             _dds_dll.SetMaxThreads.argtypes = [ctypes.c_int]
             _dds_dll.SetMaxThreads.restype = ctypes.c_int
@@ -238,8 +272,11 @@ def solve_all_boards_raw(
 
     # 调用 DDS（argtypes/restype 确保 64-bit 指针正确传递）
     # DDS C 库有全局内部状态，非并发安全：跨线程的顶层求解必须串行化
+    # DDS 2.9.0 的批量求解符号为 SolveAllChunksBin，chunkSize 传全部板数即可一次解完
     with _dll_lock:
-        dll.SolveAllBoardsBin(ctypes.byref(bop), ctypes.byref(solvedp))
+        dll.SolveAllChunksBin.argtypes = [ctypes.POINTER(_boards), ctypes.POINTER(_solvedBoards), ctypes.c_int]
+        dll.SolveAllChunksBin.restype = ctypes.c_int
+        dll.SolveAllChunksBin(ctypes.byref(bop), ctypes.byref(solvedp), bop.noOfBoards)
 
     results = []
     for i in range(n):
@@ -405,9 +442,9 @@ def solve_all_boards_bits(
 
         solvedp = _solvedBoards()
         with _dll_lock:
-            dll.SolveAllBoardsBin.argtypes = [ctypes.POINTER(_boards), ctypes.POINTER(_solvedBoards)]
-            dll.SolveAllBoardsBin.restype = ctypes.c_int
-            ret = dll.SolveAllBoardsBin(ctypes.byref(bop), ctypes.byref(solvedp))
+            dll.SolveAllChunksBin.argtypes = [ctypes.POINTER(_boards), ctypes.POINTER(_solvedBoards), ctypes.c_int]
+            dll.SolveAllChunksBin.restype = ctypes.c_int
+            ret = dll.SolveAllChunksBin(ctypes.byref(bop), ctypes.byref(solvedp), bn)
         if ret == 0:  # 0 = failure, non-zero = success
             all_results.extend([None] * bn)
             continue
