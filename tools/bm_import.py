@@ -248,7 +248,7 @@ def render_deal(level, hands, mbs, after_md, dealer):
         h = hands[p]
         sx[POS_CN[p]] = {"spades": "", "hearts": "", "diamonds": "", "clubs": ""}
         for sname, sletter in [("spades", "S"), ("hearts", "H"), ("diamonds", "D"), ("clubs", "C")]:
-            sx[POS_CN[p]][sname] = "".join(sorted(h.get(sletter, set()), key=lambda x: -RK.index(x)))
+            sx[POS_CN[p]][sname] = "".join(sorted(h.get(sletter, set()), key=RK.index))
     r["hands"] = sx
     r["contract_level"] = int(mm.group(1))
     r["contract_suit"] = su
@@ -263,7 +263,7 @@ def render_deal(level, hands, mbs, after_md, dealer):
     r["bidding_sequence"] = "-".join(parts) + "-"
     if lead:
         lsu, lrk = lead
-        r["opening_lead"] = f"{POS_CN[NEXT[dec]]}:{lrk}{SUIT_CN[lsu]}"
+        r["opening_lead"] = f"{POS_CN[NEXT[dec]]}:{SUIT_CN[lsu]}{lrk}"
     return r
 
 def build_library():

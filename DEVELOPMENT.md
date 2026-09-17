@@ -580,6 +580,12 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.86（2026-09-18）BM2000 导入输出格式修复：首攻 suit+rank、手牌降序
+- **背景**：用户实测读入 BM 牌局发现两处格式错误——首攻 rank+suit（`西:K♥`）应为 suit+rank（`西:♥K`）；手牌每门从小到大（`9TJKA`）应为从大到小（`AKJT9`）
+- **`tools/bm_import.py`**：`opening_lead` 由 `f"{POS}:{rank}{suit}"` 改 `f"{POS}:{suit}{rank}"`；手牌排序 `key=lambda x: -RK.index(x)`（实际升序）改 `key=RK.index`（A→2 降序）
+- **验证**：537 副手牌非降序 0、首攻格式异常 0、0 渲染失败、HCP 全对；API 实时读文件确认 `西:♥K`；前端纯字符串展示无解析依赖
+- 投递：tools/bm_import.py, bm_deals.json
+
 ### v1.85（2026-09-18）飞牌介入系统重构：介入层分支化，9砸 独立
 - **背景**：全面审查确认 6 个 bug（含 BUG-1 死代码 `_apply_eight_nine_rule` 153 行——跟牌侧内部重新探测恒为空，从未生效）+ 架构问题（9砸 判据写两份、与飞牌介入纠缠）。用户定调**介入层分支化**：9砸 完全独立于飞牌介入，判据自含零探针依赖，两者为引擎结果之上的并列规则分支，先命中先赢，未来分支（忍让等）同接口并列加入
 - **`_intervene` 总入口**（`_dd_play` 调用点改名）：非庄家方/垫牌返回；我方领出清空 flow/extra（登记只存活本墩）→ 9砸 分支先行 → 飞牌介入；跟牌 9砸 判据先行再接应
