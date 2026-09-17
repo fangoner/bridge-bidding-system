@@ -580,6 +580,16 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.85（2026-09-18）飞牌介入系统重构：介入层分支化，9砸 独立
+- **背景**：全面审查确认 6 个 bug（含 BUG-1 死代码 `_apply_eight_nine_rule` 153 行——跟牌侧内部重新探测恒为空，从未生效）+ 架构问题（9砸 判据写两份、与飞牌介入纠缠）。用户定调**介入层分支化**：9砸 完全独立于飞牌介入，判据自含零探针依赖，两者为引擎结果之上的并列规则分支，先命中先赢，未来分支（忍让等）同接口并列加入
+- **`_intervene` 总入口**（`_dd_play` 调用点改名）：非庄家方/垫牌返回；我方领出清空 flow/extra（登记只存活本墩）→ 9砸 分支先行 → 飞牌介入；跟牌 9砸 判据先行再接应
+- **9砸 独立分支 `_garrison_lead/_garrison_follow/_garrison_target`**：领出侧连拔检查（`nine_cash_bank` 私有跨墩，不受稳成线约束）→ 稳成线退让 → 四门按联手张数降序 → A 在领出方砸 A（缺Q持AK 登记连拔）/ A 在伙伴手引小+九砸标记（超吃）；跟牌侧引擎决策为低于对象间张（10≤rv<obj）改出 A。对象 = missing-max 口径（全牌面−联手现手−已打出之最大）。满手大牌探针 Δ 互偿趋零，9砸 不需要位置信息故零漏检
+- **修复**：BUG-2 接应校验领出方为我方（防 flow 残留误接应）；BUG-6 接应说明文案统一；FIX-7 `_stable_make` 稳成线统一全体候选最高做成率口径；FIX-9 删 9砸 后续链路（砸完交回引擎）；FIX-10 连拔登记三处补全（砸A/超吃/K对侧引小）
+- **执行分派**：`_probe_lead_finesse_prefer` 统一直接飞小牌（只飞不砸，9砸 由 garrison 先行裁定）；`_finesse_commit_check` 九砸超吃补登记
+- **删除**：`_apply_eight_nine_rule`（死代码）、`_nine_cash_done`、`_has_high_suit_cards`/`_nine_suit_should_garrison`（判据内嵌杜绝写两份）、`_finesse_lead` 三段旧 9砸 分流；清理 2 个引用已删函数的旧验证脚本 + 2 个探针临时脚本
+- **验证**：新 `tests/test_finesse_pipeline.py` 12/12；`test_probe_finesse.py` 回归 8/8；真实管线实测 9砸→连拔双步通过、8 张联手场景分支优先级正确（落到飞牌介入）
+- 投递：bridge/play_service.py, tests/test_finesse_pipeline.py, docs/飞牌介入系统审查与修复_20260917.md
+
 ### v1.84（2026-09-17）BM2000 座位归属修复：LIN 标准 md 解码
 - **背景**：用户实测 2-B29 南北颠倒、5-A19 庄家变东西（应只有南北）；全局统计 537 副中东西庄 199 副。根因：`md|` 首位数字被当作"起始座位+顺时针旋转"（仅 "1"→南 碰巧对），实为标准 LIN 的 **dealer 标记**（1=南 2=西 3=北 4=东、"w"=南），手牌四段**固定 南、西、北、东** 顺序。5-A19 讲解铁证："West ... 8 card heart suit with his opening 4 heart bid" 而旧西家仅 ♥32（8 张 ♥ 套实为段2 南位）
 - **座位解码**：`D2DEALER = {"1":S,"2":W,"3":N,"4":E,"w":S}` + 段序固定 `["S","W","N","E"]`（旧 "3" 起始南北对调=2-B29 症状；旧 "2"/"4"/"w" 整体旋转 90°/180°=东西错位）；3 段缺东推算、4 段残缺补全保持；dealer 直接读取，删除 4 假设枚举+南庄消解

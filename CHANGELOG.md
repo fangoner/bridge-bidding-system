@@ -1,5 +1,24 @@
 # 开发日志
 
+## 2026-09-18（飞牌介入系统重构：介入层分支化，9砸 独立 v1.85）
+
+**背景**: 全面审查飞牌介入系统（方案见 .trae/documents/飞牌介入系统审查与修复方案.md，用户批准实施）。确认 6 个 bug（含 BUG-1 死代码 `_apply_eight_nine_rule` 整函数 153 行——跟牌侧内部重新探测飞牌结构恒为空，从未生效）与架构问题：9砸 判据在 `_garrison_target`/`_nine_suit_should_garrison` 写两份、8飞9砸 与飞牌介入纠缠不清。用户定调：**介入层分支化架构**——9砸 完全独立于飞牌介入（判据自含：张数+持张+对象未现，零探针依赖），两者为引擎结果之上的并列规则分支，先命中先赢，未来分支（忍让等）同接口并列加入。
+
+**改进**:
+- **介入层总入口 `_intervene`**（`_dd_play` 调用点由 `_apply_finesse_tactics` 改名重构）：非庄家方/垫牌直接返回；我方领出清空 flow/extra（登记只存活本墩）→ `FINESSE_EIGHT_NINE_ENABLE` 时先跑 9砸 分支（命中即返回）→ 飞牌介入分支；跟牌时 9砸 跟牌判据先行、再接应链
+- **9砸 独立分支 `_garrison_lead`/`_garrison_follow`/`_garrison_target`**：领出侧 = 连拔检查（cash_bank 私有跨墩状态，不受稳成线约束）→ 稳成线退让 → 四门按联手张数降序扫描 → A 在领出方手直接砸 A（缺Q持AK 登记 cash_bank 下墩连拔 K）；A 在伙伴手引最小小牌+九砸标记（伙伴超吃）。跟牌侧 = 引擎决策牌为低于对象的间张（10≤rv<obj）时改出 A。对象 = 防家现手该花色最大牌（全牌面−联手现手−已打出，missing-max 口径）。实测验证探针在满手大牌场景 Δ 互偿趋零（位置不敏感），9砸 判据不需要位置信息故独立分支零漏检
+- **BUG-2 修复**：接应校验领出方为我方（`trick.cards[0]` 须为伙伴）——防守方领出时 flow 残留（`_intervene` 仅我方领出清空）曾可能误判我方启动而强制接应
+- **BUG-6 修复**：接应返回值第二元素统一说明文案（第三家压威胁显示牌名 + 不拔说明）
+- **FIX-7 稳成线统一口径 `_stable_make`**：全体候选最高做成率（非仅榜首）≥ FINESSE_NEC_MAKE_HIGH(0.95) 退让——榜首可能被位置信息误导，另有一条稳成路线时不应砸/飞
+- **FIX-9**：9砸 后续特殊链路（回手/继续飞）全部删除，砸完 AK/A 即退出交回引擎和飞牌介入（用户定调）
+- **FIX-10 连拔登记补全**：砸A处、接应超吃后、连拔检查 K 在对侧引小 三处登记 `nine_cash_bank`
+- **执行分派简化**（`_probe_lead_finesse_prefer`）：统一直接飞小牌，无"顶张方"概念；9砸（顶张兑现）由 `_garrison_lead` 先行裁定，本函数只飞不砸；`_finesse_commit_check` 九砸超吃后补登记 cash_bank
+- **删除**：`_apply_eight_nine_rule`（死代码）、`_nine_cash_done`、`_has_high_suit_cards`/`_nine_suit_should_garrison`（孤儿，判据内嵌 `_garrison_target` 杜绝"写两份"）、`_finesse_lead` 内三段旧 9砸 分流；清理 `scripts/_finesse_commit_verify.py`、`scripts/_finesse_defer_verify.py`（引用已删函数）、`tests/tmp_probe_ak9.py`、`tests/tmp_probe_after_cash.py`
+
+**修改文件**: bridge/play_service.py, tests/test_finesse_pipeline.py（新增）, CHANGELOG.md, DEVELOPMENT.md, docs/飞牌介入系统审查与修复_20260917.md
+
+**测试验证**: 新建 `tests/test_finesse_pipeline.py` 12 用例全过（9砸扫描命中/AQ场景/稳成退让/跟牌9砸/连拔K/K对侧引小+九砸标记/对象已现清登记/防守方领出接应None(BUG-2)/九砸超吃补登记/A已砸领出无强制干预/stable_make全体口径/探针空仍命中）；`test_probe_finesse.py` 回归 8/8；真实管线实测（PlayService 直连 DD 引擎）：♠AK8765+♠432 联手 9 张缺 Q 持 AK → `[9砸] 砸A` + 登记 cash_bank → ♠A 入墩南再领出 → `[9砸连拔] 连拔K`（不受稳成线约束，规则优先）；8 张联手场景验证分支优先级（9砸 判据不满足正确落到飞牌介入 `[窗口期启动飞牌]`）；后端 8003 + 前端 5173 构建启动正常
+
 ## 2026-09-17（BM2000 座位归属修复：LIN 标准 md 解码 v1.84）
 
 **背景**: 用户实测发现两类错位：2-B29 南北颠倒、5-A19 庄家变东西且"应该只有南北"。全局统计印证：537 副中东西庄 199 副。根因：`md|` 手牌串首位数字被当作"起始座位 + 顺时针旋转展开"（D2S+CCLK），仅 "1"→南 碰巧正确；5-A19 讲解铁证（"West ... 8 card heart suit with his opening 4 heart bid"，但旧西家仅 ♥32）证明首位数字实为 **dealer 标记**（1=南 2=西 3=北 4=东，"w"=南），手牌四段**固定按 南、西、北、东** 顺序（标准 LIN 格式）。旧 "3" 起始把段1 给北 → 南北对调；旧 "2"/"4"/"w" 起始整体旋转 90°/180° → 东西错位。
