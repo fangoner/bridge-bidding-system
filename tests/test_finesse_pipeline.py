@@ -12,6 +12,7 @@ _garrison_target）+ 飞牌介入分支（_finesse_lead/_finesse_commit_check）
   10    A 已砸 K 未现领出 → 无回手/继续飞强制干预（FIX-9）
   11    _stable_make 全体候选最高做成率口径（FIX-7）
   12    探针结构池空 → 9砸 仍命中（独立性回归）
+  13    AKQ 在手顶张齐全（对象≤J）→ 不走 9砸（2026-09-18 用户定调）
 
 运行: python tests/test_finesse_pipeline.py
 """
@@ -211,6 +212,16 @@ def t12_probe_empty_garrison_still_works():
     return ok, f"探针空（蹭线失败模拟）→ 9砸 仍命中（probe_absent={probe_absent}）"
 
 
+def t13_akq_no_garrison():
+    st = mk_state({"♠": "AKQ876", "♥": "Q32"}, {"♠": "543", "♥": "J54"})
+    cands = [cand("♥Q", 11.0), cand("♠A", 10.0)]
+    res = mk_result(Card("♥", "Q"), cands)
+    out = ps_new()._garrison_lead(st, res)
+    bank = getattr(st, "nine_cash_bank", None)
+    ok = out is None and not bank
+    return ok, f"AKQ在手顶张齐全（对象=J）→ 不走9砸（got {out is not None}, bank={bank}）"
+
+
 CASES = [
     t01_garrison_scan_hit,
     t02_garrison_scan_aq_case,
@@ -224,6 +235,7 @@ CASES = [
     t10_exit_after_cash,
     t11_stable_make,
     t12_probe_empty_garrison_still_works,
+    t13_akq_no_garrison,
 ]
 
 

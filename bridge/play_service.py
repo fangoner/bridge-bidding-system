@@ -1420,10 +1420,12 @@ class PlayService:
                          candidates: List[Dict[str, Any]]) -> Optional[Tuple[int, int, bool]]:
         """9砸 判据（独立分支核心，零探针依赖）：扫描单花色是否满足 9砸。
 
-        对象 = 防家现手该花色最大牌（全牌面 − 联手现手 − 已打出），
-        对齐 _nine_suit_should_garrison 的持张判据：
+        对象 = 防家现手该花色最大牌（全牌面 − 联手现手 − 已打出）。
+        对象仅限 K/Q 两种缺失（2026-09-18 用户定调）：
           缺K（对象=K）持 A+Q → 应砸 A（先砸后飞）
-          缺Q/J（对象<Q）持 A+K → 应砸 A（顺序砸，A 先 K 后）
+          缺Q（对象=Q）持 A+K → 应砸 A（顺序砸，A 先 K 后）
+        对象 ≤ J（顶张齐全，如 AKQ 在手缺 JT9）不走 9砸——
+        顶张全大无缺失威胁，交回引擎自然兑现。
         返回 (对象, 联手张数, 是否应砸)；不满足返回 None。
         """
         combined = self._combined_suit_count(state, suit)
@@ -1447,6 +1449,8 @@ class PlayService:
         if not missing:
             return None
         obj = missing[0]
+        if obj not in (12, 13):
+            return None
         own_ranks = {self._FINESSE_R2V.get(c.rank) for p in (declarer, dummy)
                      for c in state.hands.get(p, []) if c.suit == suit}
         if obj == 13:

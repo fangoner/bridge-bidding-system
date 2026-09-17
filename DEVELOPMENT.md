@@ -583,11 +583,11 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 ### v1.85（2026-09-18）飞牌介入系统重构：介入层分支化，9砸 独立
 - **背景**：全面审查确认 6 个 bug（含 BUG-1 死代码 `_apply_eight_nine_rule` 153 行——跟牌侧内部重新探测恒为空，从未生效）+ 架构问题（9砸 判据写两份、与飞牌介入纠缠）。用户定调**介入层分支化**：9砸 完全独立于飞牌介入，判据自含零探针依赖，两者为引擎结果之上的并列规则分支，先命中先赢，未来分支（忍让等）同接口并列加入
 - **`_intervene` 总入口**（`_dd_play` 调用点改名）：非庄家方/垫牌返回；我方领出清空 flow/extra（登记只存活本墩）→ 9砸 分支先行 → 飞牌介入；跟牌 9砸 判据先行再接应
-- **9砸 独立分支 `_garrison_lead/_garrison_follow/_garrison_target`**：领出侧连拔检查（`nine_cash_bank` 私有跨墩，不受稳成线约束）→ 稳成线退让 → 四门按联手张数降序 → A 在领出方砸 A（缺Q持AK 登记连拔）/ A 在伙伴手引小+九砸标记（超吃）；跟牌侧引擎决策为低于对象间张（10≤rv<obj）改出 A。对象 = missing-max 口径（全牌面−联手现手−已打出之最大）。满手大牌探针 Δ 互偿趋零，9砸 不需要位置信息故零漏检
+- **9砸 独立分支 `_garrison_lead/_garrison_follow/_garrison_target`**：领出侧连拔检查（`nine_cash_bank` 私有跨墩，不受稳成线约束）→ 稳成线退让 → 四门按联手张数降序 → A 在领出方砸 A（缺Q持AK 登记连拔）/ A 在伙伴手引小+九砸标记（超吃）；跟牌侧引擎决策为低于对象间张（10≤rv<obj）改出 A。对象 = missing-max 口径（全牌面−联手现手−已打出之最大），**仅限 K/Q**（缺K持AQ/缺Q持AK；AKQ 顶张齐全对象≤J 不走 9砸）。满手大牌探针 Δ 互偿趋零，9砸 不需要位置信息故零漏检
 - **修复**：BUG-2 接应校验领出方为我方（防 flow 残留误接应）；BUG-6 接应说明文案统一；FIX-7 `_stable_make` 稳成线统一全体候选最高做成率口径；FIX-9 删 9砸 后续链路（砸完交回引擎）；FIX-10 连拔登记三处补全（砸A/超吃/K对侧引小）
 - **执行分派**：`_probe_lead_finesse_prefer` 统一直接飞小牌（只飞不砸，9砸 由 garrison 先行裁定）；`_finesse_commit_check` 九砸超吃补登记
 - **删除**：`_apply_eight_nine_rule`（死代码）、`_nine_cash_done`、`_has_high_suit_cards`/`_nine_suit_should_garrison`（判据内嵌杜绝写两份）、`_finesse_lead` 三段旧 9砸 分流；清理 2 个引用已删函数的旧验证脚本 + 2 个探针临时脚本
-- **验证**：新 `tests/test_finesse_pipeline.py` 12/12；`test_probe_finesse.py` 回归 8/8；真实管线实测 9砸→连拔双步通过、8 张联手场景分支优先级正确（落到飞牌介入）
+- **验证**：新 `tests/test_finesse_pipeline.py` 13/13（含 AKQ 顶张齐全不走 9砸 用例）；`test_probe_finesse.py` 回归 8/8；真实管线实测 9砸→连拔双步通过、8 张联手场景分支优先级正确（落到飞牌介入）
 - 投递：bridge/play_service.py, tests/test_finesse_pipeline.py, docs/飞牌介入系统审查与修复_20260917.md
 
 ### v1.84（2026-09-17）BM2000 座位归属修复：LIN 标准 md 解码
