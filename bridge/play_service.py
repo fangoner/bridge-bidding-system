@@ -1418,48 +1418,38 @@ class PlayService:
 
     def _garrison_target(self, state: PlayState, suit: str,
                          candidates: List[Dict[str, Any]]) -> Optional[Tuple[int, int, bool]]:
-        """9砸 判据（独立分支核心，零探针依赖）：扫描单花色是否满足 9砸。
+        """9砸 判据（独立分支核心，零探针依赖）：仅两种情况（用户定调）。
 
-        对象 = 防家现手该花色最大牌（全牌面 − 联手现手 − 已打出）。
-        对象仅限 K/Q 两种缺失（2026-09-18 用户定调）：
-          缺K（对象=K）持 A+Q → 应砸 A（先砸后飞）
-          缺Q（对象=Q）持 A+K → 应砸 A（顺序砸，A 先 K 后）
-        对象 ≤ J（顶张齐全，如 AKQ 在手缺 JT9）不走 9砸——
-        顶张全大无缺失威胁，交回引擎自然兑现。
-        返回 (对象, 联手张数, 是否应砸)；不满足返回 None。
+          AK缺Q（A、K 在手，Q 未现）→ 砸 A 后连拔 K
+          AQ缺K（A、Q 在手，K 未现）→ 砸 A
+        其他一律不走 9砸（如 AKQ 在手顶张齐全，交回引擎自然兑现）。
+        "未现" = 不在联手现手且未打出。返回 (对象, 联手张数, True)，
+        对象供连拔检查（对象是否已现）与跟牌侧间张判定；不满足返回 None。
         """
         combined = self._combined_suit_count(state, suit)
         if combined < 9:
             return None
         declarer = state.contract.declarer
         dummy = state.dummy
-        present = set()
+        own = set()
+        seen = set()
         for p in (declarer, dummy):
             for c in state.hands.get(p, []):
                 if c.suit == suit:
-                    present.add(self._FINESSE_R2V.get(c.rank, 0))
+                    own.add(self._FINESSE_R2V.get(c.rank, 0))
         for t in state.tricks:
             for _, c in t.cards:
                 if c and c.suit == suit:
-                    present.add(self._FINESSE_R2V.get(c.rank, 0))
+                    seen.add(self._FINESSE_R2V.get(c.rank, 0))
         for _, c in state.current_trick.cards:
             if c and c.suit == suit:
-                present.add(self._FINESSE_R2V.get(c.rank, 0))
-        missing = [r for r in range(14, 1, -1) if r not in present]
-        if not missing:
-            return None
-        obj = missing[0]
-        if obj not in (12, 13):
-            return None
-        own_ranks = {self._FINESSE_R2V.get(c.rank) for p in (declarer, dummy)
-                     for c in state.hands.get(p, []) if c.suit == suit}
-        if obj == 13:
-            should = 14 in own_ranks and 12 in own_ranks
-        else:
-            should = 14 in own_ranks and 13 in own_ranks
-        if not should:
-            return None
-        return obj, combined, True
+                seen.add(self._FINESSE_R2V.get(c.rank, 0))
+        seen |= own
+        if 14 in own and 13 in own and 12 not in seen:
+            return 12, combined, True
+        if 14 in own and 12 in own and 13 not in seen:
+            return 13, combined, True
+        return None
 
     def _garrison_lead(self, state: PlayState,
                        result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
