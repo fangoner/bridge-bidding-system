@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { setFallbackModel, getFallbackModel, healthCheck, reloadJF, getParticleSettings, setParticleSettings, getVisionProvider, setVisionProvider, setDdWorldFilter, setDdFinesseEnable, setDdFinesseDelta } from '../services/api'
+import { setFallbackModel, getFallbackModel, healthCheck, reloadJF, getParticleSettings, setParticleSettings, getVisionProvider, setVisionProvider, setDdWorldFilter, setDdFinesseEnable, setDdFinesseDelta, setDdUseConstraints } from '../services/api'
 import { useGame } from '../context/GameContext'
 
 const FALLBACK_MODEL_KEY = 'bridge_fallback_model'
@@ -15,6 +15,7 @@ const DD_KEEP_LOSE_KEY = 'bridge_dd_keep_sure_lose'
 const DD_FINESSE_ENABLE_KEY = 'bridge_dd_finesse_enable'
 const DD_FINESSE_DELTA_KEY = 'bridge_dd_finesse_delta'
 const DD_FINESSE_DELTA_DEFAULT = 0.4
+const DD_USE_CONSTRAINTS_KEY = 'bridge_dd_use_constraints'
 const DD_MAJORITY_VOTES_KEY = 'bridge_dd_majority_votes'
 const VISION_PROVIDER_KEY = 'bridge_vision_provider'
 
@@ -176,6 +177,18 @@ export function useModelSettings() {
     }
   }, [])
 
+  // 打牌约束开关（localStorage 持久化 + 启动时推送后端；运行时即时生效，所有引擎）
+  const [ddUseConstraints, setDdUseConstraintsState] = useState(() => loadKeep(DD_USE_CONSTRAINTS_KEY))
+  const handleDdUseConstraintsChange = useCallback(async (enabled) => {
+    setDdUseConstraintsState(enabled)
+    try { localStorage.setItem(DD_USE_CONSTRAINTS_KEY, enabled ? 'true' : 'false') } catch {/* empty */}
+    try {
+      await setDdUseConstraints(enabled)
+    } catch (err) {
+      console.error('设置打牌约束开关失败:', err)
+    }
+  }, [])
+
   // DD 探针 Δ 阈值（localStorage 持久化 + 启动时同步后端；运行时即时生效）
   const [ddFinesseDelta, setDdFinesseDeltaState] = useState(() => {
     try {
@@ -274,6 +287,8 @@ export function useModelSettings() {
     syncDdWorldFilter()
     // 同步 DD 飞牌管理开关到后端
     setDdFinesseEnable(loadKeep(DD_FINESSE_ENABLE_KEY)).catch(() => {})
+    // 同步打牌约束开关到后端（前端 localStorage 为准）
+    setDdUseConstraints(loadKeep(DD_USE_CONSTRAINTS_KEY)).catch(() => {})
     // 同步 DD 探针 Δ 阈值到后端（前端 localStorage 为准）
     const storedDelta = (() => {
       try {
@@ -352,6 +367,9 @@ export function useModelSettings() {
     // DD 引擎飞牌管理开关
     ddFinesseEnable,
     handleDdFinesseChange,
+    // 打牌约束开关
+    ddUseConstraints,
+    handleDdUseConstraintsChange,
     // DD 探针 Δ 阈值
     ddFinesseDelta,
     handleDdFinesseDeltaChange,

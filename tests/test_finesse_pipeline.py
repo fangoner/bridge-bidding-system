@@ -222,6 +222,23 @@ def t13_akq_no_garrison():
     return ok, f"AKQ在手顶张齐全（对象=J）→ 不走9砸（got {out is not None}, bank={bank}）"
 
 
+def t14_commit_top1_same_suit():
+    st = mk_state({"♠": "AQ86", "♥": "Q32"}, {"♠": "42", "♥": "J54"})
+    cands = [cand("♠3", 0.1), cand("♥Q", 2.0)]
+    res = mk_result(Card("♠", "3"), cands)
+    got = ps_new()._finesse_commit_ratio_ok(st, res, "♠8", 0.75)
+    return not got, f"引擎榜首♠3 与强制♠8 同花色 → 退让采信 top1（got {got}, 期望 False）"
+
+
+def t15_commit_top1_diff_suit():
+    st = mk_state({"♠": "AQ86", "♥": "Q32"}, {"♠": "42", "♥": "J54"})
+    cands = [cand("♥Q", 2.0), cand("♠3", 0.1)]
+    res = mk_result(Card("♥", "Q"), cands)
+    # 强制 ♠8 不在候选 → _finesse_ratio_ok 返回 True（动作不在榜，维持强制）
+    got = ps_new()._finesse_commit_ratio_ok(st, res, "♠8", 0.75)
+    return got is True, f"榜首异花色 → 走比值判定（got {got}, 期望 True）"
+
+
 CASES = [
     t01_garrison_scan_hit,
     t02_garrison_scan_aq_case,
@@ -236,6 +253,8 @@ CASES = [
     t11_stable_make,
     t12_probe_empty_garrison_still_works,
     t13_akq_no_garrison,
+    t14_commit_top1_same_suit,
+    t15_commit_top1_diff_suit,
 ]
 
 

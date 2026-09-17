@@ -381,6 +381,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     keepSureWin, keepCritical, keepSureLose,
     handleKeepClassChange,
     ddFinesseEnable, handleDdFinesseChange,
+    ddUseConstraints, handleDdUseConstraintsChange,
     ddFinesseDelta, handleDdFinesseDeltaChange,
     handleFallbackModelChange,
     handlePlayModelChange,
@@ -3022,6 +3023,8 @@ const handleReviewCompletedPlay = async () => {
         handleKeepClassChange={handleKeepClassChange}
         ddFinesseEnable={ddFinesseEnable}
         handleDdFinesseChange={handleDdFinesseChange}
+        ddUseConstraints={ddUseConstraints}
+        handleDdUseConstraintsChange={handleDdUseConstraintsChange}
         ddFinesseDelta={ddFinesseDelta}
         handleDdFinesseDeltaChange={handleDdFinesseDeltaChange}
         dealSystem={dealSystem}

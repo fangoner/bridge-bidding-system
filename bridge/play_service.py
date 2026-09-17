@@ -938,6 +938,12 @@ class PlayService:
         （含pass，公开信息，不含手牌）交给 LLM 转换为各家累计约束。
         含义文本缺失 → 无约束（前端在进入打牌前已保证历史完整）。
         """
+        # 约束总开关（运行时切换）：关闭后全部引擎按无约束均匀采样，
+        # 不管有没有 payload/含义文本（config.DD_USE_CONSTRAINTS 即时生效）
+        import config as _cfg
+        if not _cfg.DD_USE_CONSTRAINTS:
+            return {}
+
         if self.bid_constraints is not None:
             return self.bid_constraints
 
@@ -2399,10 +2405,19 @@ class PlayService:
 
     def _finesse_commit_ratio_ok(self, state: PlayState, result: Dict[str, Any],
                                  forced_card: str, ratio: float) -> bool:
-        """强制接应比值退让判据：委托统一两段式 _finesse_ratio_ok。"""
+        """强制接应退让判据（B26 修复 2026-09-18）：
+        ① 引擎榜首已是飞牌同花色 → 采信引擎 top1（飞牌意图与引擎一致，
+           强制改选会破坏引擎规划——BM2000 Level 2 B26 丢墩根因）；
+        ② 否则委托统一两段式 _finesse_ratio_ok 做比值退让。
+        返回 True=差距可接受（维持强制动作）；False=退让、尊重引擎。
+        """
         cands = ((result.get("full_output") or {}).get("mcts_stats") or {}).get("candidates") or []
         if not cands:
             return True
+        top_str = str(cands[0].get("card") or "")
+        if top_str and top_str[0] == forced_card[0]:
+            print(f"[飞牌接应] 引擎榜首{top_str}与强制{forced_card}同花色，采信引擎 top1")
+            return False
         return self._finesse_ratio_ok(state, cands, forced_card, ratio)
 
     def _finesse_ratio_ok(self, state: PlayState, candidates: List[Dict[str, Any]],

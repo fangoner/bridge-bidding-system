@@ -2983,6 +2983,28 @@ async def set_dd_finesse_enable(request: DdFinesseEnableRequest):
     return {"success": True, "enable": bool(config.DD_FINESSE_ENABLE)}
 
 
+# ── 打牌约束开关（运行时动态，无需重启后端）──
+
+
+class DdUseConstraintsRequest(BaseModel):
+    use_constraints: Optional[bool] = None
+    session_id: str = "default"
+
+
+@app.get("/api/play/dd-constraints")
+async def get_dd_use_constraints(session_id: str = Query("default")):
+    """获取打牌约束开关（true=打牌决策使用叫牌约束采样/提示注入）"""
+    return {"use_constraints": bool(config.DD_USE_CONSTRAINTS)}
+
+
+@app.post("/api/play/dd-constraints")
+async def set_dd_use_constraints(request: DdUseConstraintsRequest):
+    """设置打牌约束开关（运行时即时生效，所有引擎：关闭后按无约束均匀采样）"""
+    if request.use_constraints is not None:
+        config.DD_USE_CONSTRAINTS = bool(request.use_constraints)
+    return {"success": True, "use_constraints": bool(config.DD_USE_CONSTRAINTS)}
+
+
 # ── DD 探针 Δ 阈值（运行时动态，无需重启后端）──
 
 FINESSE_DELTA_MIN = 0.2

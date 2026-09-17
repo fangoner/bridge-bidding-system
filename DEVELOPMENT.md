@@ -580,6 +580,21 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.88（2026-09-18）打牌约束开关：设置面板可切换是否使用约束
+- **背景**：BM Level 2 B25（`2-B25`）约束生成不合理锁死采样分布做不成，关闭约束做成——需运行时开关即时切换，便于横向对比约束合理性
+- **`config.py`**：`DD_USE_CONSTRAINTS = True`（运行时）；关闭后 `_get_bid_constraints`（play_service.py 入口）直接返回 `{}`，LLM/DD/完美DD 统一无约束均匀采样
+- **API**：`GET/POST /api/play/dd-constraints`（照抄 dd-finesse 模式）
+- **前端**：SettingsPanel 打牌设置 tab"使用约束"复选框（引擎选择旁、DD 区外，所有引擎生效）；useModelSettings `ddUseConstraints` + localStorage（`bridge_dd_use_constraints`）+ 启动推送 + 变更即时生效
+- **验证**：接口 200 切换正常；前端 build 成功；lint 无新增；后端 8003 健康
+- 投递：config.py, api/main.py, bridge/play_service.py, web/src/*（api.js/useModelSettings.js/App.jsx/SettingsPanel.jsx）
+
+### v1.87（2026-09-18）飞牌接应退让机制：引擎 top1 同花色即采信
+- **背景**：BM2000 Level 2 B26（`2-B26`）实测——强制改接应牌破坏引擎规划丢墩。方案：比值 0.75 保持不收紧，新增结构化退让
+- **`_finesse_commit_ratio_ok`**：接应判定成立后，引擎候选榜首 `candidates[0].card` 与强制牌同花色（首字符相同）→ 退让采信 top1（`_apply_finesse_commit` 尊重引擎）；否则走比值退让。日志 `[飞牌接应] 引擎榜首X与强制Y同花色，采信引擎 top1`
+- **`config.py`**：`FINESSE_RATIO` 维持 0.75（注释说明 B26 由新机制处理）
+- **验证**：t14/t15 新增用例（同花色退让/异花色比值），15/15；test_probe_finesse 8/8
+- 投递：bridge/play_service.py, config.py, tests/test_finesse_pipeline.py
+
 ### v1.86（2026-09-18）BM2000 导入输出格式修复：首攻 suit+rank、手牌降序
 - **背景**：用户实测读入 BM 牌局发现两处格式错误——首攻 rank+suit（`西:K♥`）应为 suit+rank（`西:♥K`）；手牌每门从小到大（`9TJKA`）应为从大到小（`AKJT9`）
 - **`tools/bm_import.py`**：`opening_lead` 由 `f"{POS}:{rank}{suit}"` 改 `f"{POS}:{suit}{rank}"`；手牌排序 `key=lambda x: -RK.index(x)`（实际升序）改 `key=RK.index`（A→2 降序）

@@ -692,6 +692,28 @@ export const setDdFinesseDelta = async (delta) => {
   }
 };
 
+// 获取打牌约束开关（true=打牌决策使用叫牌约束采样/提示注入）
+export const getDdUseConstraints = async () => {
+  try {
+    const response = await api.get('/api/play/dd-constraints', { params: { session_id: PLAY_SESSION_ID } });
+    return response.data;
+  } catch (error) {
+    console.error('获取打牌约束开关失败:', error);
+    throw error;
+  }
+};
+
+// 设置打牌约束开关（运行时即时生效，所有引擎：关闭后按无约束均匀采样）
+export const setDdUseConstraints = async (useConstraints) => {
+  try {
+    const response = await api.post('/api/play/dd-constraints', { use_constraints: useConstraints, session_id: PLAY_SESSION_ID });
+    return response.data;
+  } catch (error) {
+    console.error('设置打牌约束开关失败:', error);
+    throw error;
+  }
+};
+
 // 获取当前视觉识别模型 provider
 export const getVisionProvider = async () => {
   try {

@@ -1,5 +1,30 @@
 # 开发日志
 
+## 2026-09-18（打牌约束开关：设置面板可切换是否使用约束 v1.88）
+
+**背景**: BM Level 2 B25（`2-B25`）实测：约束生成不合理锁死采样分布导致做不成；关闭约束后做成。需要一个运行时开关让用户即时切换"是否使用叫牌约束"，方便横向对比约束合理性。
+
+**改进**:
+- **后端 `config.DD_USE_CONSTRAINTS`**（config.py，运行时切换）：关闭后 `_get_bid_constraints` 直接返回 `{}`——所有引擎（LLM/DD/完美DD）统一按无约束均匀采样，不管有无 payload/含义文本
+- **API `GET/POST /api/play/dd-constraints`**（api/main.py，照抄 dd-finesse 模式）；存入 `full_output` 的约束展示随之为空，日志从 `[DD] 约束已应用` 变 `[DD] 无约束`
+- **前端设置面板"使用约束"复选框**（SettingsPanel.jsx 打牌设置 tab，引擎选择旁、DD 专属区外——对所有引擎生效）：useModelSettings 新增 `ddUseConstraints` 状态 + localStorage 持久化（`bridge_dd_use_constraints`）+ 启动时推送后端 + 变更即时生效（api.js `getDdUseConstraints`/`setDdUseConstraints`）
+
+**修改文件**: config.py, api/main.py, bridge/play_service.py, web/src/services/api.js, web/src/hooks/useModelSettings.js, web/src/App.jsx, web/src/components/SettingsPanel.jsx, CHANGELOG.md, DEVELOPMENT.md
+
+**测试验证**: GET/POST 接口 200 且 true↔false 切换正常；后端 import 冒烟 + 8003 重启健康；前端 build 成功、5173 服务新构建；lint 无新增问题（shared.jsx 2 错误为历史遗留）
+
+## 2026-09-18（飞牌接应退让机制：引擎 top1 同花色即采信 v1.87）
+
+**背景**: BM2000 Level 2 B26（`2-B26`）实测：飞牌接应强制牌与引擎榜首决策值对比后，强制改选破坏引擎规划导致丢墩。定为方案：比值阈值保持 0.75 宽口径不收紧，改为新增结构化退让——**引擎 top1 本身就在飞牌花色时，直接采信引擎 top1**（飞牌意图与引擎一致，强制改选多余且有害）。
+
+**改进**:
+- **`_finesse_commit_ratio_ok` 加同花色退让**（play_service.py）：接应判定成立后，若引擎候选榜首 `candidates[0].card` 与强制接应牌**同花色** → 返回退让，`_apply_finesse_commit` 尊重引擎选 top1；否则走原有比值退让。日志 `[飞牌接应] 引擎榜首X与强制Y同花色，采信引擎 top1`
+- **FINESSE_RATIO 维持 0.75**（config.py 注释更新）：比值退让的代价悬殊场景改由上述新机制处理，阈值本身不回退调整
+
+**修改文件**: bridge/play_service.py, config.py, tests/test_finesse_pipeline.py, CHANGELOG.md, DEVELOPMENT.md
+
+**测试验证**: 新增 t14（top1 同花色 → 退让采信）t15（top1 异花色 → 走比值判定），15/15 全过；`test_probe_finesse.py` 回归 8/8；后端 8003 重启健康 200
+
 ## 2026-09-18（BM2000 导入输出格式修复：首攻 suit+rank、手牌降序 v1.86）
 
 **背景**: 用户实测读入 BM 牌局发现两处输出格式错误——首攻写成了 rank+suit（`西:K♥`）应为 suit+rank（`西:♥K`）；手牌每门花色排成了从小到大（`9TJKA`）应为从大到小（`AKJT9`）。

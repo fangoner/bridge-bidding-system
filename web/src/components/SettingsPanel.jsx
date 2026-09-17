@@ -113,6 +113,8 @@ function SettingsPanel({
   handleKeepClassChange,
   ddFinesseEnable,
   handleDdFinesseChange,
+  ddUseConstraints,
+  handleDdUseConstraintsChange,
   ddFinesseDelta,
   handleDdFinesseDeltaChange,
   dealSystem,
@@ -280,6 +282,20 @@ function SettingsPanel({
               <MenuItem value="alphamu">αμ</MenuItem>
             </Select>
           </FormControl>
+
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={!!ddUseConstraints}
+                onChange={(e) => handleDdUseConstraintsChange(e.target.checked)}
+                size="small"
+                sx={{ p: 0.4 }}
+              />
+            }
+            label="使用约束"
+            title="打牌决策是否使用叫牌约束（采样世界分布/LLM提示注入）；关闭后所有引擎按无约束均匀采样。运行时即时生效"
+            sx={{ fontSize: '0.65rem' }}
+          />
 
           {ddScoringVisible && (
             <>
