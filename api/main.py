@@ -377,6 +377,37 @@ async def generate_constraints(request: ConstraintsRequest):
         return ConstraintsResponse(success=False, error=f"约束生成失败: {str(e)}")
 
 
+@app.post("/api/constraints/parse", response_model=ConstraintsResponse)
+async def parse_constraints(request: ConstraintsRequest):
+    """解析用户在"确认定约与首攻"弹窗手动编辑的约束文本（display 格式逆向）→ 家约束 payload。
+
+    空文本 = 全部无约束（用于测试无约束随机采样）。
+    """
+    try:
+        service = PlayService(llm_client)
+        constraints = service.parse_constraints_text(request.bid_history or "")
+        payload = {}
+        for pos_cn, c in constraints.items():
+            payload[pos_cn] = {
+                "min_hcp": c.min_hcp,
+                "max_hcp": c.max_hcp,
+                "balanced": c.balanced,
+                "suit_min": c.suit_min,
+                "suit_max": c.suit_max,
+                "exact_suit": c.exact_suit,
+                "min_controls": c.min_controls,
+                "min_keycards": c.min_keycards,
+                "suit_controls": sorted(c.suit_controls),
+                "specific_cards": sorted(list(c.specific_cards)),
+            }
+        display = service._format_constraints_for_display(constraints)
+        return ConstraintsResponse(success=True, constraints=payload, display=display)
+    except Exception as e:
+        print(f"[ERROR] 约束文本解析失败: {str(e)}")
+        traceback.print_exc()
+        return ConstraintsResponse(success=False, error=f"约束解析失败: {str(e)}")
+
+
 @app.get("/api/fallback-model")
 async def get_fallback_model():
     """获取当前模型配置（仅返回已配置 endopoint 的可用模型）"""

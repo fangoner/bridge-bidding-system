@@ -634,6 +634,114 @@ class PlayService:
             lines.append(" ".join(parts))
         return "\n".join(lines) if lines else "无约束（随机采样）"
 
+    def parse_constraints_text(self, text: str) -> Dict[str, BidConstraint]:
+        """解析用户在"确认定约与首攻"弹窗手动编辑的约束文本。
+
+        _format_constraints_for_display 的逆过程，一行一个位置，格式示例：
+            南: HCP 12-14 均型 ♠≥5
+            西: HCP ≤10 ♥≥5 ♠≤3
+            北: ♠=4 必持:♠A,♥K ≥2控
+        支持 HCP 范围/≥/≤、均型/非均型、♠≥n/♠≤n/♠=n/♠2-4、
+        ≥n控、必持:♠A,♥K；来源标记（[约定] 等）与无法识别的 token 忽略；
+        无位置名的行忽略；无任何有效字段的位置排除（=该家无约束）。
+        """
+        constraints: Dict[str, BidConstraint] = {}
+        suit_alias = {"S": "♠", "H": "♥", "D": "♦", "C": "♣"}
+
+        def norm_suit(ch: str) -> str:
+            return suit_alias.get(ch, ch)
+
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            pos = None
+            body = None
+            for p in ("南", "北", "东", "西"):
+                if line.startswith(p + ":"):
+                    pos = p
+                    body = line[len(p) + 1:].strip()
+                    break
+            if pos is None or not body:
+                continue
+            c = BidConstraint(position=pos, inference_source="manual")
+            changed = False
+            cleaned = body.replace("，", " ").replace("；", " ").replace(",", " ")
+            tokens = cleaned.split()
+            i = 0
+            while i < len(tokens):
+                tok = tokens[i]
+                if tok.startswith("HCP"):
+                    rest = tokens[i + 1] if i + 1 < len(tokens) else ""
+                    m = re.match(r"^(\d{1,2})\s*-\s*(\d{1,2})$", rest)
+                    if m:
+                        lo, hi = int(m.group(1)), int(m.group(2))
+                        c.min_hcp = lo if c.min_hcp is None else max(c.min_hcp, lo)
+                        c.max_hcp = hi if c.max_hcp is None else min(c.max_hcp, hi)
+                        changed = True
+                        i += 1
+                    else:
+                        m = re.match(r"^≥\s*(\d{1,2})$", rest)
+                        if m:
+                            v = int(m.group(1))
+                            c.min_hcp = v if c.min_hcp is None else max(c.min_hcp, v)
+                            changed = True
+                            i += 1
+                        else:
+                            m = re.match(r"^≤\s*(\d{1,2})$", rest)
+                            if m:
+                                v = int(m.group(1))
+                                c.max_hcp = v if c.max_hcp is None else min(c.max_hcp, v)
+                                changed = True
+                                i += 1
+                elif tok in ("均型", "非均型"):
+                    c.balanced = (tok == "均型")
+                    changed = True
+                elif tok.endswith("控"):
+                    m = re.match(r"^≥\s*(\d{1,2})$", tok[:-1])
+                    if m:
+                        v = int(m.group(1))
+                        c.min_controls = v if c.min_controls is None else max(c.min_controls, v)
+                        changed = True
+                elif tok.startswith("必持:"):
+                    items = tok[len("必持:"):]
+                    for item in re.split(r"[,，]", items):
+                        m = re.match(r"^([♠♥♦♣SHDC])\s*((?:10)|[AKQJT])$", item)
+                        if m:
+                            c.specific_cards.add((norm_suit(m.group(1)), m.group(2)))
+                            changed = True
+                elif re.match(r"^[♠♥♦♣SHDC]", tok):
+                    s = norm_suit(tok[0])
+                    rest = tok[1:]
+                    if rest.startswith("≥"):
+                        v = int(rest[1:])
+                        c.suit_min[s] = max(c.suit_min.get(s, 0), v)
+                        changed = True
+                    elif rest.startswith("≤"):
+                        v = int(rest[1:])
+                        c.suit_max[s] = v if s not in c.suit_max else min(c.suit_max[s], v)
+                        changed = True
+                    else:
+                        m = re.match(r"^(\d{1,2})\s*-\s*(\d{1,2})$", rest)
+                        if m:
+                            c.suit_min[s] = max(c.suit_min.get(s, 0), int(m.group(1)))
+                            c.suit_max[s] = int(m.group(2))
+                            changed = True
+                        else:
+                            m = re.match(r"^=\s*(\d{1,2})$", rest)
+                            if m:
+                                c.exact_suit[s] = int(m.group(1))
+                                changed = True
+                            else:
+                                m = re.match(r"^(?:(10)|[AKQJT])$", rest)
+                                if m:
+                                    c.specific_cards.add((s, m.group(0)))
+                                    changed = True
+                i += 1
+            if changed:
+                constraints[pos] = c
+        return constraints
+
     def _format_latest_constraints_for_display(self, state: PlayState, constraints: Dict[str, BidConstraint]) -> str:
         """按当前已出牌把初始约束折算为剩余部分约束，展示约束随出牌的变化。
 

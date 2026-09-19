@@ -35,7 +35,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import HistoryIcon from '@mui/icons-material/History'
-import { aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, doubleDummyAnalysis, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles, undoPlay, setPlayHand, getDDHints, getDDHintsReview, customDeal as apiCustomDeal, generateConstraints } from './services/api'
+import { aiBid, analyzeBidding, humanBid, getOutputFormats, analyzeContract, doubleDummyAnalysis, playInit, playCard, aiPlay, getPlayState, updatePlayPlayerRoles, undoPlay, setPlayHand, getDDHints, getDDHintsReview, customDeal as apiCustomDeal, generateConstraints, parseConstraints } from './services/api'
 import HandDisplay from './components/HandDisplay'
 import Header from './components/layout/Header'
 import BiddingDetailPanel from './components/BiddingDetailPanel'
@@ -200,6 +200,9 @@ function AppShell({ darkMode, onToggleDarkMode }) {
   // 约束结果 ref 同步，供打牌中/打牌结束自动保存记录使用（避免 useCallback 闭包捕获旧值）
   const dialogConstraintsRef = useRef(null)
   const dialogConstraintsDisplayRef = useRef('')
+  // 手动编辑约束：编辑模式开关 + 草稿文本
+  const [constraintsEditMode, setConstraintsEditMode] = useState(false)
+  const [constraintsDraftText, setConstraintsDraftText] = useState('')
 
   // ── Bidding 域状态（迁入 BiddingContext）──
   const {
@@ -2100,6 +2103,8 @@ const handleReviewCompletedPlay = async () => {
     setDialogBidHistory('')
     dialogConstraintsRef.current = null
     dialogConstraintsDisplayRef.current = ''
+    setConstraintsEditMode(false)
+    setConstraintsDraftText('')
     if (!biddingSeq || biddingSeq.length === 0) {
       setDialogConstraintsError('无叫牌序列，无法生成叫牌约束')
       return
@@ -2129,7 +2134,7 @@ const handleReviewCompletedPlay = async () => {
     }
   }
 
-  const doPlayInit = async (contract, biddingSeq, aiHistory) => {
+  const doPlayInit = async (contract, biddingSeq, aiHistory, constraintsOverride = null) => {
     setPlayLoading(true)
     setError(null)
     setAiThinking(false) // 重新打牌/初始化时清除残留思考态（完成或中途单张直出后可能残留 true）
@@ -2176,7 +2181,7 @@ const handleReviewCompletedPlay = async () => {
         meaningLines,
         vulnerability,
         bidSystem,
-        dialogConstraints
+        constraintsOverride ?? dialogConstraints
       )
 
       if (result.success) {
@@ -2216,9 +2221,34 @@ const handleReviewCompletedPlay = async () => {
     // 保存用户确认的首攻信息，供 handleBeginPlay 使用
     setImageOpeningLead(openingLead || null)
     setContractDialogOpen(false)
+    // 手动编辑约束：确认时先解析编辑文本，成功后替代自动生成约束再进入打牌
+    let finalConstraints = dialogConstraints
+    if (constraintsEditMode) {
+      const orig = (dialogConstraintsDisplayRef.current || '').trim()
+      if (constraintsDraftText.trim() !== orig) {
+        try {
+          const resp = await parseConstraints(constraintsDraftText, bidSystem)
+          if (!resp?.success) {
+            setError(resp?.error || '约束文本解析失败，请检查格式')
+            setContractDialogOpen(true)
+            return
+          }
+          finalConstraints = resp.constraints || null
+          setDialogConstraints(finalConstraints)
+          dialogConstraintsRef.current = finalConstraints
+          const disp = resp.display || ''
+          setDialogConstraintsDisplay(disp)
+          dialogConstraintsDisplayRef.current = disp
+        } catch (err) {
+          setError('约束解析失败: ' + (err?.response?.data?.detail || err.message))
+          setContractDialogOpen(true)
+          return
+        }
+      }
+    }
     // 传递截屏/识别得到的叫牌序列，确保后端能据此提取约束（避免DD显示"无约束随机采样"）；
     // 未经过叫牌流程时，doPlayInit 内部会自动模拟人类叫牌生成含义+结构化约束
-    await doPlayInit(contract, biddingSequence, aiBiddingHistory)
+    await doPlayInit(contract, biddingSequence, aiBiddingHistory, finalConstraints)
   }
 
   // 出牌
@@ -3582,14 +3612,36 @@ const handleReviewCompletedPlay = async () => {
               )}
             </Box>
             <Box>
-              <Typography variant="subtitle2" gutterBottom>
-                叫牌约束
-              </Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="subtitle2" gutterBottom sx={{ m: 0 }}>
+                  叫牌约束
+                </Typography>
+                {!dialogConstraintsLoading && (constraintsEditMode ? (
+                  <Button size="small" onClick={() => { setConstraintsEditMode(false); setConstraintsDraftText('') }}>
+                    恢复自动生成
+                  </Button>
+                ) : (
+                  <Button size="small" onClick={() => { setConstraintsEditMode(true); setConstraintsDraftText(dialogConstraintsDisplayRef.current || '') }}>
+                    手动编辑
+                  </Button>
+                ))}
+              </Box>
               {dialogConstraintsLoading ? (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'text.secondary' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'text.secondary', mt: 0.5 }}>
                   <CircularProgress size={16} />
                   <Typography variant="caption">正在根据叫牌历史生成各家约束…</Typography>
                 </Box>
+              ) : constraintsEditMode ? (
+                <TextField
+                  multiline
+                  minRows={4}
+                  fullWidth
+                  size="small"
+                  value={constraintsDraftText}
+                  onChange={(e) => setConstraintsDraftText(e.target.value)}
+                  placeholder={'每行一个位置，例如：\n南: HCP 12-14 均型 ♠≥5\n西: HCP ≤10 ♥≥5\n北: ♠=4 必持:♠A,♥K\n支持 HCP范围/≥/≤、均型/非均型、♠≥n/♠≤n/♠=n/♠2-4、≥n控、必持:牌\n留空表示全部无约束（随机采样）'}
+                  sx={{ mt: 0.5 }}
+                />
               ) : dialogConstraintsError ? (
                 <Alert severity="warning" sx={{ py: 0.5, '& .MuiAlert-message': { py: 0.5 } }}>
                   <Typography variant="caption">{dialogConstraintsError}</Typography>
@@ -3603,13 +3655,13 @@ const handleReviewCompletedPlay = async () => {
                   {dialogConstraintsDisplay}
                 </Typography>
               ) : (
-                <Typography variant="caption" color="text.secondary">（未生成）</Typography>
+                <Typography variant="caption" color="text.secondary">（未生成，可点击手动编辑自行定义）</Typography>
               )}
             </Box>
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setContractDialogOpen(false); setDialogConstraints(null); dialogConstraintsRef.current = null; setDialogConstraintsDisplay(''); dialogConstraintsDisplayRef.current = ''; setDialogConstraintsError(''); setDialogBidHistory('') }}>取消</Button>
+          <Button onClick={() => { setContractDialogOpen(false); setDialogConstraints(null); dialogConstraintsRef.current = null; setDialogConstraintsDisplay(''); dialogConstraintsDisplayRef.current = ''; setDialogConstraintsError(''); setDialogBidHistory(''); setConstraintsEditMode(false); setConstraintsDraftText('') }}>取消</Button>
           <Button onClick={handleContractDialogConfirm} variant="contained" disabled={dialogConstraintsLoading}>确认</Button>
         </DialogActions>
       </Dialog>

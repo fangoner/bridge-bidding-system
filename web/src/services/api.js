@@ -461,6 +461,20 @@ export const generateConstraints = async (bidHistory, bidSystem = 'jf') => {
   }
 };
 
+// 解析手动编辑的约束文本（display 格式逆向）→ 家约束 payload
+export const parseConstraints = async (text, bidSystem = 'jf') => {
+  try {
+    const response = await api.post('/api/constraints/parse', {
+      bid_history: text,
+      bid_system: bidSystem,
+    }, { timeout: 30000 });
+    return response.data;
+  } catch (error) {
+    console.error('约束文本解析失败:', error);
+    throw error;
+  }
+};
+
 // 出牌
 export const playCard = async (position, card) => {
   try {
