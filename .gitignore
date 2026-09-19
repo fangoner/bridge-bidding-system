@@ -80,3 +80,4 @@ bridge_records_backup.json
 
 # Bidding cases (tracked - do not ignore)
 # bidding-cases/  # Uncomment to ignore, currently tracked
+runtime_config.json

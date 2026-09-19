@@ -2236,6 +2236,9 @@ class PlayAIRequest(BaseModel):
     play_engine: Optional[str] = None  # "llm" | "dd" | "perfect" | "alphamu"
     dd_sample_count: Optional[int] = None  # DD 蒙地卡罗采样数
     dd_scoring_mode: Optional[str] = None  # DD 决策计分制: "imp" | "make_rate" | "avg_tricks"
+    dd_majority_votes: Optional[int] = None  # DD 多数投票票数（1=关闭），随请求携带免配置漂移
+    alpha_mu_particles: Optional[int] = None  # αμ world数，随请求携带免配置漂移
+    alpha_mu_m: Optional[int] = None          # αμ 层数 M（Max 递归层数），随请求携带免配置漂移
     session_id: str = "default"
 
 
@@ -2289,6 +2292,10 @@ async def _execute_ai_play(request: PlayAIRequest, progress_cb=None) -> PlayAIRe
     """AI出牌核心逻辑（同步端点与异步任务共用；progress_cb 用于任务进度回报）"""
     try:
         service = get_play_service(request.session_id)
+        # 请求级票数即时应用到会话服务（v1.90：免刷新/免同步，每个决策以滑块为准）
+        if request.dd_majority_votes is not None:
+            setattr(service, "dd_majority_votes",
+                    max(1, min(20, request.dd_majority_votes)))
 
         # 临时切换打牌模型（不影响叫牌模型）
         pm_raw = request.play_model or ""
@@ -2348,7 +2355,9 @@ async def _execute_ai_play(request: PlayAIRequest, progress_cb=None) -> PlayAIRe
                     use_perfect=use_perfect,
                     use_alphamu=use_alphamu,
                     dd_samples=dd_samples,
-                    dd_scoring_mode=dd_scoring_mode)
+                    dd_scoring_mode=dd_scoring_mode,
+                    amu_worlds=request.alpha_mu_particles,
+                    amu_m=request.alpha_mu_m)
                 elapsed_ms = int((time.time() - t0) * 1000)
 
                 if result.get("card"):
@@ -2954,12 +2963,56 @@ async def set_dd_world_filter(request: DdWorldFilterRequest):
         config.DD_KEEP_CRITICAL = bool(request.keep_critical)
     if request.keep_sure_lose is not None:
         config.DD_KEEP_SURE_LOSE = bool(request.keep_sure_lose)
+    _save_runtime_overrides()
     return {
         "success": True,
         "keep_sure_win": config.DD_KEEP_SURE_WIN,
         "keep_critical": config.DD_KEEP_CRITICAL,
         "keep_sure_lose": config.DD_KEEP_SURE_LOSE,
     }
+
+
+# ── 运行时配置持久化（v1.90）：全局开关类的服务端落盘，后端重启不丢 ──
+# 覆盖 config 模块级属性的运行时可调项，写入 runtime_config.json；
+# 模块加载（服务启动）时读取恢复。前端刷新只是读取侧，改的是这里。
+
+_RUNTIME_OVERRIDABLE = ("DD_FINESSE_ENABLE", "DD_USE_CONSTRAINTS",
+                        "DD_KEEP_SURE_WIN", "DD_KEEP_CRITICAL", "DD_KEEP_SURE_LOSE",
+                        "FINESSE_PROBE_DELTA")
+
+
+def _runtime_config_path() -> Path:
+    from config import BASE_DIR
+    return Path(BASE_DIR) / "runtime_config.json"
+
+
+def _save_runtime_overrides():
+    """把当前 config 可覆写项写入 runtime_config.json（set 端点改动后调用）。"""
+    try:
+        payload = {k: getattr(config, k) for k in _RUNTIME_OVERRIDABLE}
+        _runtime_config_path().write_text(
+            json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception as e:
+        print(f"[runtime_config] 写入失败: {e}")
+
+
+def _load_runtime_overrides():
+    """启动时读取 runtime_config.json 并覆盖 config 默认值（文件缺失/损坏则忽略）。"""
+    try:
+        p = _runtime_config_path()
+        if not p.exists():
+            return
+        data = json.loads(p.read_text(encoding="utf-8"))
+        for k in _RUNTIME_OVERRIDABLE:
+            if k in data:
+                setattr(config, k, data[k])
+        print(f"[runtime_config] 已恢复 {len(data)} 项运行时配置: "
+              f"{ {k: getattr(config, k, None) for k in _RUNTIME_OVERRIDABLE} }")
+    except Exception as e:
+        print(f"[runtime_config] 读取恢复失败（忽略，用默认）: {e}")
+
+
+_load_runtime_overrides()
 
 
 # ── DD 引擎飞牌管理开关（运行时动态，无需重启后端）──
@@ -2980,6 +3033,7 @@ async def set_dd_finesse_enable(request: DdFinesseEnableRequest):
     """设置 DD 引擎飞牌管理开关（运行时即时生效；αμ 引擎不受影响）"""
     if request.enable is not None:
         config.DD_FINESSE_ENABLE = bool(request.enable)
+    _save_runtime_overrides()
     return {"success": True, "enable": bool(config.DD_FINESSE_ENABLE)}
 
 
@@ -3002,6 +3056,7 @@ async def set_dd_use_constraints(request: DdUseConstraintsRequest):
     """设置打牌约束开关（运行时即时生效，所有引擎：关闭后按无约束均匀采样）"""
     if request.use_constraints is not None:
         config.DD_USE_CONSTRAINTS = bool(request.use_constraints)
+    _save_runtime_overrides()
     return {"success": True, "use_constraints": bool(config.DD_USE_CONSTRAINTS)}
 
 
@@ -3027,6 +3082,7 @@ async def set_dd_finesse_delta(request: DdFinesseDeltaRequest):
     """设置 DD 探针 Δ 阈值（运行时即时生效，钳制在 0.2~0.5）"""
     if request.delta is not None:
         config.FINESSE_PROBE_DELTA = max(FINESSE_DELTA_MIN, min(FINESSE_DELTA_MAX, float(request.delta)))
+    _save_runtime_overrides()
     return {"success": True, "delta": float(config.FINESSE_PROBE_DELTA)}
 
 

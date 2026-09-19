@@ -223,7 +223,9 @@ class PlayService:
                           use_perfect: bool = False,
                           use_alphamu: bool = False,
                           dd_samples: int = None,
-                          dd_scoring_mode: str = None) -> Dict[str, Any]:
+                          dd_scoring_mode: str = None,
+                          amu_worlds: int = None,
+                          amu_m: int = None) -> Dict[str, Any]:
         state = self.engine.get_state()
         if not state:
             return {"error": "游戏未初始化"}
@@ -260,7 +262,7 @@ class PlayService:
 
         # === αμ 纯引擎分支（从开局到残局全覆盖） ===
         if use_alphamu:
-            return await asyncio.to_thread(self._alpha_mu_play, state)
+            return await asyncio.to_thread(self._alpha_mu_play, state, amu_worlds, amu_m)
 
         # === MCTS 引擎分支已移除（2026-09-07，能力弱） ===
 
@@ -987,16 +989,40 @@ class PlayService:
             result[pos_cn] = c
         return result
 
-    def _alpha_mu_play(self, state: PlayState) -> Dict[str, Any]:
+    def _alpha_mu_play(self, state: PlayState,
+                       amu_worlds: Optional[int] = None,
+                       amu_m: Optional[int] = None) -> Dict[str, Any]:
         """αμ 引擎（论文实现，纯αμ无回退）。
 
         M 值由 ALPHA_MU_M 配置（默认 2），全程不降级。
         注意：牌数多时 M=2 会非常慢（13 张牌约 30s+），研究用途可接受。
+        请求级 amu_worlds/amu_m：临时覆盖搜索器配置（用完恢复），
+        与 _dd_play 的 dd_samples 同模式——见 GET_AI_PLAY 请求携带（v1.90）。
         """
         from bridge.mcts.alpha_mu import AlphaMuSearch
 
         perspective = state.current_player
         cards = len(state.hands.get(perspective, []))
+
+        # 请求级临时覆盖（仅传入非 None 时）：αμ world数 / 层数M
+        _saved_worlds = None
+        _saved_m = None
+        if amu_worlds is not None and self.alpha_mu_search:
+            _saved_worlds = self.alpha_mu_search.num_worlds
+            self.alpha_mu_search.num_worlds = amu_worlds
+        if amu_m is not None and self.alpha_mu_search:
+            _saved_m = self.alpha_mu_search.M
+            self.alpha_mu_search.M = amu_m
+        try:
+            return self._alpha_mu_play_inner(state, perspective, cards)
+        finally:
+            if _saved_worlds is not None and self.alpha_mu_search:
+                self.alpha_mu_search.num_worlds = _saved_worlds
+            if _saved_m is not None and self.alpha_mu_search:
+                self.alpha_mu_search.M = _saved_m
+
+    def _alpha_mu_play_inner(self, state: PlayState, perspective: str,
+                             cards: int) -> Dict[str, Any]:
 
         # 时间预算从世界生成开始计时（含枚举/采样，共享总 deadline）
         _t_alpha_start = time.time()
@@ -1661,19 +1687,49 @@ class PlayService:
 
     def _finesse_lead(self, state: PlayState, result: Dict[str, Any],
                       ratio: float) -> Dict[str, Any]:
-        """飞牌介入分支·领出侧（v1.84：探测 → 启动 → 引擎一致）。
+        """飞牌介入分支·领出侧（v1.89：稳成前置 → 探测 → 留栈 → 逐动作门控 → 终选）。
 
         9砸 已独立为 _garrison_lead 分支先行裁定（未命中才进入本函数）。
-        结构识别（窗口期）；引擎榜首是其他花色时由 _probe_lead_finesse_prefer
-        主动改出该花色启动飞牌；引擎已在飞牌花色则尊重引擎。
+        0c 稳成前置：全体候选最高做成率 ≥95% 直接退让，不做探测/过手预检
+        （省伙伴侧 DD search）；仅保留"引擎已在飞牌花色"的本墩登记。
+        引擎榜首恰为该结构本侧引牌（正在飞）→ 尊重 + 登记本墩接应；
+        其余局面由逐动作门控 + 终选（复用引擎选牌流程）裁决。
         """
+        full_output = result.get("full_output", {})
+        candidates = (full_output.get("mcts_stats") or {}).get("candidates") or []
+        # 0c 稳成前置（v1.89 改动C）：不飞也 ≥95% 成约 → 不再探测/启动。
+        # 窗口期"位置敏感"信号失去意义，直接尊重引擎；仅引擎已在飞牌花色
+        # 时登记本墩接应（稳成不影响流程内接应）。
+        if candidates and self._stable_make(state, candidates) >= FINESSE_NEC_MAKE_HIGH:
+            cur_str = str(result.get("card") or "")
+            if cur_str:
+                local = self._detect_finesse_struct(state, result)
+                suit = cur_str[0]
+                if suit in local:
+                    info = local[suit]
+                    obj = info.get("对象")
+                    if obj is not None and not self._finesse_obj_played(state, suit, obj):
+                        self._register_finesse_flow(state, suit, obj, info)
+                        full_output["领出飞牌"] = {"引发": True, "花色": suit,
+                                                   "对象": obj, "Δ": info.get("Δ"),
+                                                   "领出": cur_str,
+                                                   "说明": "稳成且引擎已在飞牌花色，登记供本墩接应"}
+                    else:
+                        full_output["领出飞牌"] = {"引发": True, "花色": suit,
+                                                   "对象": obj, "Δ": info.get("Δ"),
+                                                   "领出": cur_str,
+                                                   "说明": "稳成，引擎领出飞牌花色，尊重引擎"}
+                    result["full_output"] = full_output
+                    return result
+            full_output["领出飞牌"] = {"引发": False, "说明": "稳成≥95%，提前退让"}
+            result["full_output"] = full_output
+            return result
         # 结构探测（2026-09-10）：本侧 + 队友侧（仅领出方为庄/明手时探测）全部
         # 汇聚；每个探针先过"引牌测试"（_probe_finesse_ok 单花色推演，非 DDS）——
         # 引牌打出后对象在防家两侧结果相同 ⇒ 不能飞，废弃该探针。保留的探针
-        # 按 Δ 取最大一条作为优先飞牌结构（引牌在本侧直飞、在伙伴侧过手）。
+        # 全部参与后续（v1.89：不再按 Δ 剪枝为单条，改留栈逐条过门控）。
         local = self._detect_finesse_struct(state, result)
         partner = self._probe_partner_finesse_struct(state)
-        full_output = result.get("full_output", {})
         # 全部探针结果花色（本侧+伙伴侧，含被废弃者）：选中的飞牌花色需要过手时，
         # 过手牌绝不能来自这些花色——可能破坏其他飞牌结构造成严重后果。
         probe_suits = set(local) | set(partner)
@@ -1758,34 +1814,49 @@ class PlayService:
             if (bi > bc
                     or (bi == bc and (info.get("Δ") or 0) > (cur.get("Δ") or 0))):
                 by_key[key] = info
-        finesse_struct = {}
+        # 留栈（v1.89 改动A）：同一花色下的代表条目全部保留（Δ 降序），
+        # 不再按 Δ 剪枝为单条——"位置敏感"只是进池门票，价值裁决交给
+        # 逐动作门控 + 终选（引擎流程），避免 Δ 大但动作价值低的结构垄断。
+        struct_stack: Dict[str, List[Dict[str, Any]]] = {}
         for (s, _o, _side), info in by_key.items():
-            cur = finesse_struct.get(s)
-            if cur is None or (info.get("Δ") or 0) > (cur.get("Δ") or 0):
-                finesse_struct[s] = info
+            struct_stack.setdefault(s, []).append(info)
+        for s in struct_stack:
+            struct_stack[s].sort(key=lambda i: -(i.get("Δ") or 0))
         if partner:
             full_output["伙伴探针"] = partner
         if confirm:
             full_output["_probe_confirm"] = confirm
-        if not finesse_struct:
+        if not struct_stack:
             # 本侧+队友侧均无结构：Δ 是采样量，探针判空即无飞牌结构，
             # 尊重引擎（2026-09-13：跨墩续飞已移除，不再有"流程延续"路径）。
             full_output["领出飞牌"] = {"引发": False, "说明": "无飞牌结构"}
             result["full_output"] = full_output
             return result
-        # 窗口期主动启动：探针识别出飞牌结构（Δ≥阈值）= 位置敏感。领出方为
-        # 庄/明手而引擎榜首是其他花色时，主动改出该花色路线启动飞牌，避免
-        # "顶张先打完、窗口关闭后飞牌无收益"的死锁。但"位置敏感"≠"该启动"：
-        # 是否值得由 _probe_lead_finesse_prefer → _finesse_launch_worthwhile
-        # 的退让门控（契约必要性/失败安全/低比值）逐花色裁定，全不
-        # 满足则退让、尊重引擎。将牌不豁免，与边花同判据。9张及以上按砸/飞
-        # 分流；<9张只飞不砸。
-        if finesse_struct and candidates:
+        # 引擎已在飞牌花色（top1 恰为本侧引牌，正在飞）→ 尊重 + 登记本墩接应。
+        cur_str = str(result.get("card") or "")
+        if cur_str:
+            for info in struct_stack.get(cur_str[0], []):
+                if (info.get("侧") == "本侧"
+                        and str(info.get("引牌") or "") == cur_str
+                        and not self._finesse_obj_played(state, cur_str[0],
+                                                         info.get("对象"))):
+                    self._register_finesse_flow(state, cur_str[0],
+                                                info.get("对象"), info)
+                    full_output["领出飞牌"] = {"引发": True, "花色": cur_str[0],
+                                               "对象": info.get("对象"),
+                                               "Δ": info.get("Δ"), "领出": cur_str,
+                                               "说明": "引擎领出飞牌引牌（方向正确），登记供本墩接应"}
+                    result["full_output"] = full_output
+                    return result
+        # 逐动作门控 + 终选（v1.89）：_probe_lead_finesse_prefer 内部对全部
+        # 飞牌动作逐个过启动门控（契约必要/比值闸），过闸动作作为候选子集
+        # 复用引擎选牌判据终选，改出第一名并登记。
+        if candidates:
             prefer = self._probe_lead_finesse_prefer(
-                state, finesse_struct, candidates, ratio, result)
+                state, struct_stack, candidates, ratio, result)
             if prefer:
                 pick, why = prefer
-                org_str = str(result.get("card")) if result.get("card") else ""
+                org_str = cur_str
                 hint4 = (f"[窗口期启动飞牌] 探针识别出飞牌结构，"
                          f"改出{pick}启动（{why}）")
                 print(hint4)
@@ -1798,45 +1869,20 @@ class PlayService:
                                              "改选": pick, "说明": why}
                 result["full_output"] = full_output
                 return result
-        cur = result.get("card")
-        cur_str = str(cur) if cur else ""
-        if not cur_str or cur_str[0] not in finesse_struct:
-            struct_list = []
-            for s in finesse_struct:
-                info_s = finesse_struct[s]
-                d = info_s.get("Δ")
-                name_s = f"{s}(" + self._finesse_obj_name(info_s["对象"]) + ")"
-                name_s = name_s[:-1] + f",Δ{d:.2f})" if d else name_s
-                struct_list.append(name_s)
-            full_output["领出飞牌"] = {
-                "引发": False,
-                "结构": "、".join(struct_list),
-                "说明": "未领出飞牌花色，不引发",
-            }
-            result["full_output"] = full_output
-            return result
-        suit = cur_str[0]
-        obj = finesse_struct[suit]["对象"]
-        struct_desc = f"{suit}(" + self._finesse_obj_name(obj) + ")"
-        hint = (f"[领出飞牌] 引擎领出{cur_str}（{struct_desc}）：已在该花色，尊重引擎，"
-                f"{'登记流程' if not self._finesse_obj_played(state, suit, obj) else '对象已现身'}")
-        print(hint)
-        if not self._finesse_obj_played(state, suit, obj):
-            # 补登记 finesse_flow（2026-09-10）：引擎已领出飞牌花色（方向正确）
-            # 时，登记供同墩队友强制接应（跟牌侧探针必空，靠本墩登记取结构）。
-            # 登记只存活到本墩出完（2026-09-13：跨墩续飞已移除）。
-            self._register_finesse_flow(state, suit, obj, finesse_struct.get(suit))
-            full_output["领出飞牌"] = {"引发": True, "花色": suit, "对象": obj,
-                                       "Δ": finesse_struct[suit].get("Δ"),
-                                       "领出": cur_str,
-                                       "说明": "引擎领出飞牌花色（对象未现身），登记供本墩接应"}
-        else:
-            full_output["领出飞牌"] = {"引发": True, "花色": suit, "对象": obj,
-                                       "Δ": finesse_struct[suit].get("Δ"),
-                                       "领出": cur_str, "说明": "引擎领出飞牌花色，尊重引擎"}
+        # 未介入：尊重引擎（全被门控否决 / 无动作可出 / 未领出飞牌花色）
+        struct_list = []
+        for s in struct_stack:
+            info_s = struct_stack[s][0]
+            d = info_s.get("Δ")
+            name_s = f"{s}(" + self._finesse_obj_name(info_s["对象"]) + ")"
+            name_s = name_s[:-1] + f",Δ{d:.2f})" if d else name_s
+            struct_list.append(name_s)
+        full_output["领出飞牌"] = {
+            "引发": False,
+            "结构": "、".join(struct_list),
+            "说明": "未领出飞牌花色，不引发",
+        }
         result["full_output"] = full_output
-        if not full_output.get("推荐出牌"):
-            full_output.setdefault("推荐出牌", str(result["card"]))
         return result
 
     def _probe_partner_finesse_struct(self, state: PlayState) -> Dict[str, Dict[str, Any]]:
@@ -1999,21 +2045,17 @@ class PlayService:
         k = max(0, min(len(vs) - 1, k))
         return vs[k]
 
-    def _finesse_launch_worthwhile(self, state: PlayState, suit: str,
+    def _finesse_launch_worthwhile(self, state: PlayState, action_card: str,
                                    candidates: List[Dict[str, Any]]
                                    ) -> Tuple[bool, str]:
-        """启动飞牌退让门控（2026-09-13 简化，用户定调，将牌不豁免）。
+        """逐动作启动退让门控（v1.89：稳成已由 _finesse_lead 入口短路）。
 
-        决策主线：
-          · 稳成（做成率 ≥ FINESSE_NEC_MAKE_HIGH=0.95，不飞也成）→ 全部
-            判据冻结，退让（尊重引擎，稳成不主动启动飞牌）；
-          · 非稳成 → 契约必要（做成率 < FINESSE_NEC_MAKE=0.50）且飞牌/榜首
-                      比值 ≥ FINESSE_NEC_MIN_RATIO=0.50 才必启动；否则
-                      比值 ≥ FINESSE_NEC_RATIO=0.70 才启动。
-        全不满足 → 退让（尊重引擎）。探针 Δ≥阈值只是"位置敏感"信号，
-        不等于"该飞"；判据 C（升级价值）、A2（盈余）、B（失败安全）已于
-        2026-09-13 删除。
-        返回 (是否启动, 说明)；无候选数据时不拦截。
+        分子 = 动作牌价值（本侧=引牌 / 伙伴侧=过手牌），分母 = 引擎榜首：
+          · 契约必要（榜首做成率 < FINESSE_NEC_MAKE=0.50）且动作/榜首
+            比值 ≥ FINESSE_NEC_MIN_RATIO=0.50 → 必飞；
+          · 否则动作/榜首 ≥ FINESSE_NEC_RATIO=0.70 → 启动；
+          · 否则退让（尊重引擎）。
+        无候选数据时不拦截。返回 (是否启动, 说明)。
         """
         if not candidates:
             return True, ""
@@ -2022,40 +2064,30 @@ class PlayService:
         top_scores = top.get("scores") or []
         n = len(top_scores)
         top_make = (sum(1 for x in top_scores if x >= need) / n) if n else 1.0
-        # 稳成线统一口径（v1.84 FIX-7）：全体候选最高做成率，非仅榜首——
-        # 榜首可能被位置信息误导，另有一条稳成路线时不应主动启动飞牌。
-        stable = self._stable_make(state, candidates) >= FINESSE_NEC_MAKE_HIGH
-
-        def _val(c: Dict[str, Any]) -> float:
-            v = c.get("scoring_val")
-            return v if v is not None else c.get("avg_tricks", 0.0)
-
-        suit_cands = [c for c in candidates
-                      if c.get("card") and c["card"][0] == suit]
-        if not suit_cands:
+        top_val = (top.get("scoring_val")
+                   if top.get("scoring_val") is not None
+                   else top.get("avg_tricks", 0.0))
+        action_val = next((c.get("scoring_val")
+                           if c.get("scoring_val") is not None
+                           else c.get("avg_tricks", 0.0)
+                           for c in candidates if str(c.get("card")) == action_card),
+                          None)
+        if action_val is None:
             return True, ""
-        fin = max(suit_cands, key=_val)
-        top_val = _val(top)
-        fin_val = _val(fin)
-
-        if not stable:
-            # 非稳成：A1 契约必要（做成率 < FINESSE_NEC_MAKE）且飞牌/榜首
-            # 比值 ≥ FINESSE_NEC_MIN_RATIO 才必启动；否则落 D 比值闸
-            # （≥ FINESSE_NEC_RATIO）才启动。
-            if top_make < FINESSE_NEC_MAKE:
-                if self._finesse_ratio_ok(state, candidates, fin["card"],
-                                          FINESSE_NEC_MIN_RATIO,
-                                          b_card=top["card"]):
-                    return True, f"契约必要（榜首做成{top_make:.0%}，不飞没机会）"
-                # 飞牌相对榜首差距过大（<下限）→ 不强制起飞，落 D 闸裁决
-        if (not stable and top_val > 0
-                and self._finesse_ratio_ok(state, candidates, fin["card"],
-                                           FINESSE_NEC_RATIO, b_card=top["card"])):
+        if top_make < FINESSE_NEC_MAKE:
+            if self._finesse_ratio_ok(state, candidates, action_card,
+                                      FINESSE_NEC_MIN_RATIO,
+                                      b_card=str(top.get("card"))):
+                return True, f"契约必要（榜首做成{top_make:.0%}，不飞没机会）"
+            # 飞牌相对榜首差距过大（<下限）→ 不强制起飞，落 D 闸裁决
+        if (top_val > 0
+                and self._finesse_ratio_ok(state, candidates, action_card,
+                                           FINESSE_NEC_RATIO,
+                                           b_card=str(top.get("card")))):
             return True, f"比值尚可（≥{FINESSE_NEC_RATIO}）"
         slack = top.get("avg_tricks", 0.0) - need
-        ratio_txt = f"{fin_val / top_val:.2f}" if top_val > 0 else "—"
-        return False, (f"退让（榜首做成{top_make:.0%}·盈余{slack:+.1f}已够"
-                       + ("" if stable else f"，比值{ratio_txt}<{FINESSE_NEC_RATIO}") + "）")
+        ratio_txt = f"{action_val / top_val:.2f}" if top_val > 0 else "—"
+        return False, f"退让（榜首做成{top_make:.0%}·盈余{slack:+.1f}已够，比值{ratio_txt}<{FINESSE_NEC_RATIO}）"
 
     def _register_finesse_flow(self, state: PlayState, s: str, obj: int,
                                info: Optional[Dict[str, Any]] = None) -> None:
@@ -2103,126 +2135,123 @@ class PlayService:
             return None
         return reentry[0], f"{gate_why}；动作：过手给队友引飞（引牌{partner_lead}）"
 
-    def _probe_lead_finesse_prefer(self, state: PlayState, finesse_struct: Dict[str, Any],
+    def _probe_lead_finesse_prefer(self, state: PlayState, struct_stack: Dict[str, List[Dict[str, Any]]],
                                    candidates: List[Dict[str, Any]], ratio: float,
                                    result: Dict[str, Any]) -> Optional[Tuple[str, str]]:
-        """窗口期主动启动飞牌（推广自 9张"不拖延就优先"，2026-09-08）。
+        """窗口期主动启动飞牌（v1.89 重构：过手预检 → 逐动作门控 → 终选引擎流程）。
 
-        探针识别出结构（Δ≥阈值）即"位置敏感"（窗口期），但不再"检测到结构
-        就飞"：逐花色先过 _finesse_launch_worthwhile 退让门控（契约必要 /
-        比值尚可，稳成线分流），不满足则退让、尊重
-        引擎（2026-09-10 重建退让机制）。将牌不豁免，与边花同判据。
-        返回说明携带判据与动作（如"契约必要（榜首做成49%）；动作：直接飞小牌"）。
-        9砸（顶张兑现）已独立为 _garrison_lead 分支先行裁定（v1.84），
-        本函数只飞不砸：引牌直出（引牌不可出则飞小牌）。
-        返回 (改出牌, 说明)；不满足条件 → None。
+        输入为以花色为键、Δ 降序的条目栈（探测已全部通过引牌测试，组合飞
+        字段透传）。过手预检：伙伴侧条目逐个求安全过手牌，失败只删该条目
+        （不再整花色出局）；动作统一为真实出牌（本侧=引牌 / 伙伴侧=过手牌）。
+        逐动作过启动门控（契约必要/比值闸；稳成已由 _finesse_lead 入口短路）：
+        比值分子 = 动作牌价值（不再是"花色最优候选"，避免顶张虚高）。
+        过闸动作作为候选子集，复用引擎选牌判据终选（_subset_select），
+        改出第一名并登记。全被否 / 无动作可出 → None（尊重引擎）。
         """
         if not FINESSE_DEFER_ENABLE:
             return None
-        cur = result.get("card")
-        cur_str = str(cur) if cur else ""
-        leader = state.current_player
-
-        # 过手预检（2026-09-13，提前到 7.1 之前）：伙伴侧条目先求安全过手牌。
-        # 找不出 → 该花色出局（放弃）；找得到 → 用过手牌代表该花色参与后续。
-        # （对侧引牌只是模拟确认"有飞牌结构"，不可用于排序/真实出牌——真实出牌
-        #   是下一墩的事，两者 DDS 结果完全不同。）
         excluded = (result.get("full_output") or {}).get("_probe_suits") or ()
-        for s, info in list(finesse_struct.items()):
-            if info.get("侧") == "伙伴侧":
-                act = self._partner_overhand_action(
-                    state, s, info.get("对象"), info.get("引牌", "?"),
-                    candidates, "", excluded_suits=excluded)
-                if act is None:
-                    print(f"[过手预检] {s} 无法安全过手，出局")
-                    del finesse_struct[s]
-                else:
+        # 过手预检（v1.89：逐条目弹栈，失败只删该条目，其余备胎保留）
+        for s, entries in list(struct_stack.items()):
+            alive = []
+            for info in entries:
+                if info.get("侧") == "伙伴侧":
+                    act = self._partner_overhand_action(
+                        state, s, info.get("对象"), info.get("引牌", "?"),
+                        candidates, "", excluded_suits=excluded)
+                    if act is None:
+                        print(f"[过手预检] {s} 动作Δ{info.get('Δ')} 无法安全过手，弹栈")
+                        continue
                     info["过手牌"] = act[0]
-        if not finesse_struct:
+                alive.append(info)
+            if alive:
+                struct_stack[s] = alive
+            else:
+                del struct_stack[s]
+        if not struct_stack:
             return None
-
-        # 7.1 引擎一致：榜首花色 ∈ 候选池 → 尊重引擎（不飞）
-        if cur_str and any(cur_str[0] == s for s in finesse_struct):
+        # 动作池：每条目 → 真实出牌动作（必须存在于引擎候选池才有评估值）。
+        # 模板法条目（αμ 无 probe）无"引牌"字段 → 用该花色最小飞张小牌兜底，
+        # 与原"直接飞小牌"回退同语义；探针法条目直接取引牌/过手牌。
+        actions = []  # (动作牌, 条目, 花色)
+        for s, entries in struct_stack.items():
+            for info in entries:
+                act = info.get("过手牌") if info.get("侧") == "伙伴侧" else info.get("引牌")
+                if info.get("侧") != "伙伴侧" and not act:
+                    small = [c for c in candidates
+                             if c.get("card") and c["card"][0] == s
+                             and self._FINESSE_R2V.get(c["card"][1:], 0) <= 9]
+                    if small:
+                        act = min(small, key=lambda c: self._FINESSE_R2V.get(c["card"][1:], 0))["card"]
+                if act and any(c.get("card") == act for c in candidates):
+                    actions.append((act, info, s))
+        if not actions:
             return None
-
-        # 7.2 结构排序（2026-09-13 用户口径）：代表动作（本侧=探针引牌 /
-        # 伙伴侧=真实过手牌）的候选决策值为主、Δ 平局决胜——伙伴侧按过手牌
-        # 价值排序，不用对侧引牌的模拟价值。
-        def _rep_val(s, info):
-            rep = info.get("过手牌") or info.get("引牌")
-            if not rep:
-                return 0.0
-            for c in candidates:
-                if c.get("card") == rep:
-                    return (c.get("scoring_val")
-                            if c.get("scoring_val") is not None
-                            else c.get("avg_tricks", 0.0))
-            return 0.0
-
-        # 决策值按 0.02 粒度取档量化（_VAL_QUANT）：做成率差在一档以内视为
-        # 打平，由 Δ 决胜；跨档一律高档胜。注意此"取档"与探针的东/西分桶
-        # （位置敏感度）无关，只是量化容差。
-        _VAL_QUANT = 0.02
-        ordered = sorted(
-            finesse_struct.items(),
-            key=lambda kv: (-round((_rep_val(kv[0], kv[1]) / _VAL_QUANT)),
-                            -(kv[1].get("Δ") or 0.0)))
-        for s, info in ordered:
-            obj = info["对象"]
-            suit_cands = [c for c in candidates if c.get("card") and c["card"][0] == s]
-            if not suit_cands:
-                continue  # 领出方无该花色可出
-            # 启动退让门控（2026-09-10）：探针识别出结构（Δ≥FINESSE_PROBE_DELTA）
-            # 只是"位置敏感"信号，不等于"此刻该主动启动"。是否值得主动改出该花色
-            # 由 _finesse_launch_worthwhile 判定（契约必要/失败安全/比值尚可，稳成线
-            # 分流）；不满足则退让（尊重引擎）。将牌不豁免
-            # ——与边花同判据。一旦启动，流程内动作（砸顶张/直飞小牌）必须
-            # 完成；启动说明携带判据（如"失败安全（下沿12≥12）→直接飞小牌"）。
-            worth, gate_why = self._finesse_launch_worthwhile(state, s, candidates)
+        # 逐动作门控：过闸的动作进入终选池
+        passed = []
+        for act, info, s in actions:
+            worth, gate_why = self._finesse_launch_worthwhile(state, act, candidates)
             if not worth:
-                print(f"[启动退让] {s}：{gate_why}")
+                print(f"[启动退让] {s} 动作{act}：{gate_why}")
                 continue
-            # 启动前打印比率诊断（2026-09-12）：飞牌候选 vs 引擎榜首的决策值与
-            # 做成率，便于实测确认比值退让是否合理介入
-            _top0 = candidates[0] if candidates else None
-            _fin0 = next((c for c in candidates
-                          if c.get("card") and c["card"][0] == s), None)
-            if _top0 and _fin0:
-                _tv = (_top0.get("scoring_val") if _top0.get("scoring_val") is not None
-                       else _top0.get("avg_tricks", 0.0))
-                _fv = (_fin0.get("scoring_val") if _fin0.get("scoring_val") is not None
-                       else _fin0.get("avg_tricks", 0.0))
-                print(f"[启动比率] 改飞{s}({_fin0.get('card')} 值{_fv:.3f}) "
-                      f"vs 榜首{_top0.get('card')}(值{_tv:.3f}) 比值"
-                      f"{_fv / _tv:.2f}（{gate_why}）")
-            # 7.4 执行按侧分派
-            if info.get("侧") == "伙伴侧":
-                # 过手牌已由预检确定；出过手牌给对侧，不标记飞牌开始（不写 flow），
-                # 下一墩由完整流程重新探测决策
-                pick = info.get("过手牌")
-                if pick and any(c.get("card") == pick for c in candidates):
-                    why = f"出过手牌{pick}给队友引飞（引牌{info.get('引牌','?')}）"
-                    return pick, f"{gate_why}；动作：{why}"
+            passed.append((act, info, s))
+        if not passed:
+            return None
+        # 终选（v1.89）：过闸动作作为候选子集，完全复用引擎选牌判据选最优
+        allowed = {a for a, _i, _s in passed}
+        best = self._subset_select(state, candidates, allowed)
+        if best is None:
+            return None
+        pick = str(best.get("card"))
+        for act, info, s in passed:
+            if act != pick:
                 continue
-            # 本侧：探针引牌直出，标记飞牌开始（写 flow）
-            pick = info.get("引牌")
-            if pick and any(c.get("card") == pick for c in suit_cands):
-                self._register_finesse_flow(state, s, obj, info)
-                why = f"按探针引牌直出{pick}"
-                return pick, f"{gate_why}；动作：{why}"
-            # 引牌不可出（间张已被消耗等）→ 飞该花色最小飞张小牌（≤9，写 flow）。
-            # 9砸（顶张兑现）已由 _garrison_lead 分支先行裁定，此处只飞不砸；
-            # 方向由探针确认保证（引牌侧对侧有 G 才进候选池）。
-            small = [c for c in suit_cands
-                     if self._FINESSE_R2V.get(c["card"][1:], 0) <= 9]
-            if not small:
-                continue
-            pick = min(small,
-                       key=lambda c: self._FINESSE_R2V.get(c["card"][1:], 0))["card"]
-            why = "直接飞小牌"
+            obj = info.get("对象")
             self._register_finesse_flow(state, s, obj, info)
-            return pick, f"{gate_why}；动作：{why}"
+            if info.get("侧") == "伙伴侧":
+                why = f"出过手牌{pick}给队友引飞（引牌{info.get('引牌', '?')}）"
+            else:
+                why = f"按探针引牌直出{pick}"
+            return pick, f"终选·池内最优（{why}）"
         return None
+
+    def _subset_select(self, state: PlayState,
+                       candidates: List[Dict[str, Any]],
+                       allowed: set) -> Optional[Dict[str, Any]]:
+        """终选（v1.89）：对候选子集（过闸飞牌动作）完全复用引擎选牌判据。
+
+        与 dd_search._finalize_decision 同判据：计分制决策值（make_rate 下
+        做成率主、avg_tricks 平局决胜），_compare_candidates 定序。
+        引擎候选的 scores 已含全部 playable 的评估，飞牌动作必在其中，
+        故只须按子集重排，无需重新 search。
+        """
+        from bridge.mcts import dd_search as _ds
+        is_decl = state.current_player in (state.contract.declarer, state.dummy)
+        _dds = getattr(self, "dd_search", None)
+        mode = (_dds.scoring_mode if _dds is not None else None) or "make_rate"
+        need = state.contract.tricks_needed
+        best = None
+        best_blended = None
+        best_scores = None
+        for cc in candidates:
+            if str(cc.get("card")) not in allowed:
+                continue
+            scores = cc.get("scores") or []
+            if not scores:
+                continue
+            if mode == "make_rate":
+                mk = _ds._make_rate_value(scores, need)
+                blended = mk * 10000.0 + (cc.get("avg_tricks") or 0.0)
+            else:
+                v = cc.get("scoring_val")
+                blended = v if v is not None else cc.get("avg_tricks", 0.0)
+            rv = _ds._card_rank_val(str(cc.get("card") or ""))
+            if (best is None
+                    or _ds._compare_candidates(blended, scores, rv,
+                                               best_blended, best_scores,
+                                               0, is_decl) > 0):
+                best, best_blended, best_scores = cc, blended, scores or []
+        return best
 
     def _finesse_commit_check(self, state: PlayState,
                               finesse_struct: Dict[str, Any]) -> Optional[Tuple[str, str]]:
@@ -2500,12 +2529,15 @@ class PlayService:
         """
         if (self.dd_majority_votes if hasattr(self, "dd_majority_votes")
                 else DD_MAJORITY_VOTES) <= 1:
+            print(f"[VOTE-DBG] 票数≤1关闭 mv={getattr(self, 'dd_majority_votes', '<absent>')} cfg={DD_MAJORITY_VOTES}")
             return None
         card = result.get("card")
         if card is None or engine_card is None or card != engine_card:
+            print(f"[VOTE-DBG] 前置拦截 card={card} eng={engine_card} mv={getattr(self,'dd_majority_votes','<absent>')} cfg={DD_MAJORITY_VOTES}")
             return None  # 飞牌已改选/无牌：飞牌优先，不票选
         cands = (result.get("full_output") or {}).get("mcts_stats", {}).get("candidates") or []
         if len(cands) < 2:
+            print(f"[VOTE-DBG] 候选数<2 ncand={len(cands)}")
             return None
 
         # ── 等价分组：逐世界 scores 全等视为同一组（代表=第一张遇到的）──
@@ -2525,6 +2557,7 @@ class PlayService:
             if not placed:
                 groups.append([cc])
         if len(groups) < 2:
+            print(f"[VOTE-DBG] 全部等价 ngroups={len(groups)}")
             return None  # 全部等价：无对手可比较，不触发
 
         def grp_make(g):
@@ -2536,6 +2569,8 @@ class PlayService:
         by_avg = sorted(groups, key=lambda g: -grp_avg(g))
         top_make_cards = {str(cc["card"]) for cc in by_make[0]}
         top_avg_cards = {str(cc["card"]) for cc in by_avg[0]}
+        print(f"[VOTE-DBG] ngroups={len(groups)} make_top={top_make_cards} avg_top={top_avg_cards} "
+              f"scores全等组数={len(groups)}")
         if top_make_cards == top_avg_cards:
             return None  # 两口径一致：做成率高者也赢墩高，无需票选
 

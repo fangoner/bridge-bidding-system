@@ -239,6 +239,95 @@ def t15_commit_top1_diff_suit():
     return got is True, f"榜首异花色 → 走比值判定（got {got}, 期望 True）"
 
 
+def _probe_entry(suit, obj, lead, delta, side="本侧"):
+    return {"花色": suit, "对象": obj, "对象牌": {13: "K", 12: "Q", 11: "J"}.get(obj, "?"),
+            "引牌": lead, "Δ": delta, "侧": side, "来源": "probe",
+            "废弃对象": [], "全": []}
+
+
+def t16_partner_overhand_fail_back_to_local():
+    st = mk_state({"♣": "A2", "♥": "Q"}, {"♣": "43"})
+    cands = [cand("♥Q", 0.5), cand("♣2", 0.48)]
+    base = {"♣": [_probe_entry("♣", 13, "♣2", 0.5),
+                  _probe_entry("♣", 13, "♣9", 0.9, side="伙伴侧")]}
+    res = mk_result(Card("♥", "Q"), cands)
+    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
+    ok = (got is not None and got[0] == "♣2"
+          and st.finesse_flow.get("♣") == 13)
+    return ok, (f"过手失败弹栈→回退本侧直飞♣2+登记（got {got}, flow={st.finesse_flow}）")
+
+
+def t17_all_rejected():
+    st = mk_state({"♣": "A2", "♥": "Q"}, {"♣": "43"})
+    cands = [cand("♥A", 0.9), cand("♣2", 0.4)]
+    base = {"♣": [_probe_entry("♣", 13, "♣2", 0.5)]}
+    res = mk_result(Card("♥", "A"), cands)
+    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
+    return got is None, f"全被否（0.44<0.70）→ 尊重引擎（got {got}）"
+
+
+def t18_multi_action_final_select():
+    st = mk_state({"♣": "A2", "♦": "Q3", "♥": "Q"}, {"♣": "43", "♦": "65"})
+    cands = [cand("♥Q", 0.5), cand("♣2", 0.5), cand("♦2", 0.49)]
+    base = {"♣": [_probe_entry("♣", 13, "♣2", 0.4)],
+            "♦": [_probe_entry("♦", 11, "♦2", 0.2)]}
+    res = mk_result(Card("♥", "Q"), cands)
+    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
+    ok = (got is not None and got[0] == "♣2"
+          and st.finesse_flow.get("♣") == 13)
+    return ok, f"两花色均过闸→终选引擎判据选♣2 登记♣（got {got}, flow={st.finesse_flow}）"
+
+
+def t19_stable_exit_no_touch():
+    st = mk_state({"♣": "A2", "♥": "Q3"}, {"♣": "43", "♥": "J4"})
+    cands = [cand("♥3", 1.0, scores=[8] * 10), cand("♣2", 0.9, scores=[8] * 10)]
+    res = mk_result(Card("♥", "3"), cands)
+    res["full_output"]["finesse_probe"] = {
+        "♣": {"对象": "K", "Δ": 0.5, "引牌": "♣2",
+              "全": [{"对象": "K", "Δ": 0.5, "引牌": "♣2"}]}}
+    out = ps_new()._finesse_lead(st, res, 0.75)
+    fo = out.get("full_output") or {}
+    ok = (str(out["card"]) == "♥3"
+          and not getattr(st, "finesse_flow", {})
+          and fo.get("领出飞牌", {}).get("说明") == "稳成≥95%，提前退让")
+    return ok, (f"稳成≥95%→提前退让不登记（card={out['card']}, "
+                f"flow={getattr(st, 'finesse_flow', None)}, 说明={fo.get('领出飞牌', {}).get('说明')}）")
+
+
+def t20_stable_but_engine_leading_finesse():
+    st = mk_state({"♣": "A2", "♥": "Q3"}, {"♣": "43", "♥": "J4"})
+    cands = [cand("♣2", 0.9, scores=[8] * 10), cand("♥3", 1.0, scores=[8] * 10)]
+    res = mk_result(Card("♣", "2"), cands)
+    res["full_output"]["finesse_probe"] = {
+        "♣": {"对象": "K", "Δ": 0.5, "引牌": "♣2",
+              "全": [{"对象": "K", "Δ": 0.5, "引牌": "♣2"}]}}
+    out = ps_new()._finesse_lead(st, res, 0.75)
+    fo = out.get("full_output") or {}
+    ok = (str(out["card"]) == "♣2"
+          and st.finesse_flow.get("♣") == 13
+          and fo.get("领出飞牌", {}).get("引发") is True)
+    return ok, f"稳成但引擎在飞牌花色→仍登记接应（flow={st.finesse_flow}）"
+
+
+def t21_delta_not_in_select():
+    st = mk_state({"♣": "AQ2", "♥": "Q"}, {"♣": "43"})
+    cands = [cand("♥Q", 0.5), cand("♣2", 0.48), cand("♣5", 0.47)]
+    base = {"♣": [_probe_entry("♣", 13, "♣2", 0.3),
+                  _probe_entry("♣", 12, "♣5", 0.9)]}
+    res = mk_result(Card("♥", "Q"), cands)
+    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
+    ok = (got is not None and got[0] == "♣2")
+    return ok, f"Δ只当门票：Δ0.9 的♣5 未胜出，引擎判据选价值高的♣2（got {got}）"
+
+
+def t22_vote_switch_off():
+    st = mk_state({"♠": "AK", "♥": "Q3"}, {"♠": "32", "♥": "J4"})
+    cands = [cand("♠A", 0.6, scores=[6] * 10), cand("♥Q", 0.4, scores=[4] * 5 + [8] * 5)]
+    res = mk_result(Card("♠", "A"), cands)
+    got = ps_new()._dd_maybe_majority_vote(st, res, Card("♠", "A"))
+    return got is None, f"DD_MAJORITY_VOTES=1（默认关）→ 不触发票选（got {got}）"
+
+
 CASES = [
     t01_garrison_scan_hit,
     t02_garrison_scan_aq_case,
@@ -255,6 +344,13 @@ CASES = [
     t13_akq_no_garrison,
     t14_commit_top1_same_suit,
     t15_commit_top1_diff_suit,
+    t16_partner_overhand_fail_back_to_local,
+    t17_all_rejected,
+    t18_multi_action_final_select,
+    t19_stable_exit_no_touch,
+    t20_stable_but_engine_leading_finesse,
+    t21_delta_not_in_select,
+    t22_vote_switch_off,
 ]
 
 

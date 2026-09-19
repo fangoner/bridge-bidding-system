@@ -396,30 +396,32 @@ def _finalize_finesse_probe(probe):
                 if delta >= _dd_config.FINESSE_PROBE_DELTA:
                     entries.append({"对象": m, "Δ": round(delta, 2), "引牌": card_str})
         if not entries:
-            # 组合飞探测门（2026-09-13）：双飞（KQ）时"分家 vs 同家"的真实敏感
-            # 性被单对象位置稀释（各自 Δ<阈值但合计显著）。该花色 ≥2 个对象且
-            # 各对象自身最高 Δ 加和 ≥ 阈值 → 保留较高对象（如 K），将其 Δ 改写为
-            # 加和值参与后续流程，其余对象废弃（记入 废弃对象 供 _probe_finesse_ok
-            # 与接应威胁计算排除，否则被废弃对象会抬高威胁/最大防家牌导致不确认
-            # 或选不出接应牌）。
+            # 双飞探测门（v1.90，用户定调）：桥牌不存在同花色"三飞"——组合
+            # 飞语义就是双飞（一次引牌可同时飞两个缺失大牌，如 KQ/QJ/AQ 双飞）
+            # 只取 Δ 最大的两个对象加和：多个互相独立的弱信号叠加≠真双墩敏感
+            # （如 A/K/Q 三个 ~0.15 噪声堆出 0.44 的假结构），而 KQ 分家/同家
+            # 加总显著才是双飞的真实敏感。保 rank 较高者（AQ 双飞保 A、KQ 保 K），
+            # 另一个记废弃对象供 _probe_finesse_ok 威胁计算排除。
             per_obj = {}
             for e in raw:
                 prev = per_obj.get(e["对象"])
                 if prev is None or e["Δ"] > prev["Δ"]:
                     per_obj[e["对象"]] = e
             if len(per_obj) >= 2:
-                total = sum(e["Δ"] for e in per_obj.values())
+                top2 = sorted(per_obj.items(), key=lambda kv: -kv[1]["Δ"])[:2]
+                total = top2[0][1]["Δ"] + top2[1][1]["Δ"]
                 if total >= _dd_config.FINESSE_PROBE_DELTA:
-                    keep_m = max(per_obj.keys(), key=lambda r: RANK_ORDER.get(r, 0))
+                    keep_m = max([m for m, _ in top2],
+                                 key=lambda r: RANK_ORDER.get(r, 0))
                     keep = dict(per_obj[keep_m])
                     combined = round(total, 2)
-                    print(f"[组合飞探测] {suit} 对象[{('/'.join(per_obj.keys()))}] "
+                    print(f"[双飞探测] {suit} 对象[{('/'.join(m for m, _ in top2))}] "
                           f"Δ加和={combined}（单条均<阈值），保留较高对象"
                           f"{keep['对象']}，Δ改为{combined}，废弃"
-                          f"{[m for m in per_obj if m != keep_m]}")
+                          f"{[m for m, _ in top2 if m != keep_m]}")
                     keep["Δ"] = combined
                     keep["组合飞"] = True
-                    keep["废弃对象"] = sorted(m for m in per_obj if m != keep_m)
+                    keep["废弃对象"] = sorted(m for m, _ in top2 if m != keep_m)
                     entries = [keep]
         if entries:
             entries.sort(key=lambda e: e["Δ"], reverse=True)

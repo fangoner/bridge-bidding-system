@@ -488,7 +488,7 @@ export const undoPlay = async () => {
 };
 
 // AI出牌
-export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null, ddScoringMode = null, onProgress = null) => {
+export const aiPlay = async (playModel = null, useReasoning = false, playEngine = null, ddSampleCount = null, signal = null, ddScoringMode = null, onProgress = null, ddMajorityVotes = null, alphaMuParticles = null, alphaMuM = null) => {
   const requestData = {
     use_reasoning: useReasoning,
     session_id: PLAY_SESSION_ID,
@@ -505,6 +505,15 @@ export const aiPlay = async (playModel = null, useReasoning = false, playEngine 
   }
   if (ddScoringMode) {
     requestData.dd_scoring_mode = ddScoringMode;
+  }
+  if (ddMajorityVotes != null) {
+    requestData.dd_majority_votes = ddMajorityVotes;
+  }
+  if (alphaMuParticles != null) {
+    requestData.alpha_mu_particles = alphaMuParticles;
+  }
+  if (alphaMuM != null) {
+    requestData.alpha_mu_m = alphaMuM;
   }
 
   try {

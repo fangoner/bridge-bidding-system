@@ -580,6 +580,32 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 
 ## 版本历史
 
+### v1.90b（2026-09-19）运行时配置系统性修复：数值型请求携带 + 全局开关落盘
+- **背景**：票数实测不触发 → 根因是配置加载链路缺陷——所有运行时可调配置=localStorage+刷新时启动同步，后端重启即回默认、不刷新即错。定调两条路线
+- **数值型请求携带**：`PlayAIRequest` 增 `dd_majority_votes`/`alpha_mu_particles`/`alpha_mu_m`，`_execute_ai_play` 即时 setattr/传递；`_alpha_mu_play` 拆 wrapper+inner 临时覆盖搜索器（同 `_dd_play.dd_samples` finally 恢复）；前端 aiPlay 增参+App 传递。`dd_scoring_mode`/`dd_sample_count` 本就是请求携带（确认无病）
+- **全局开关落盘**：`runtime_config.json`（.gitignore 已加）存 6 项（DD_FINESSE_ENABLE/DD_USE_CONSTRAINTS/DD_KEEP_*×3/FINESSE_PROBE_DELTA）；模块加载 `_load_runtime_overrides` 恢复；set 端点 `_save_runtime_overrides` 写盘
+- **前端**：useModelSettings 启动同步移除 dd_majority_votes（改请求携带）
+- **验证**：22/22+8/8；持久化闭环（delta 0.45→重启→0.45→还原）；票数请求携带用户实测触发（5票 3:2）
+- 投递：api/main.py, bridge/play_service.py, web/src/{services/api.js,App.jsx,hooks/useModelSettings.js}, .gitignore, CHANGELOG.md, DEVELOPMENT.md
+
+### v1.90（2026-09-19）组合飞探测门收紧为双飞：Δ 最大两对象加和
+- **背景**：用户实测探针误检出"♠A,Δ0.44"假结构（A 0.12/K 0.16/Q 0.16 全未达标，旧组合飞门全量加和 0.44 且保 rank 最高 A）。用户定调：**桥牌不存在同花色三飞，组合飞语义就是双飞**
+- **双飞门**（`_finalize_finesse_probe`）：`per_obj` 取 Δ 最大的 2 个对象加和 ≥ `FINESSE_PROBE_DELTA` 才达标；保 rank 高者（AQ 双飞保 A、KQ 保 K），另一个记 `废弃对象`——**对象 A 不排除**（缺 AQ 持 KJ 引小是标准双飞 AQ）
+- 日志 `[组合飞探测]`→`[双飞探测]`；`组合飞`/`废弃对象` 字段名保留下游兼容
+- **验证**：22/22 + 8/8；本例 A/K/Q → top2 加和 0.32<0.4 无结构；后端重启健康
+- 投递：bridge/mcts/dd_search.py, CHANGELOG.md, DEVELOPMENT.md
+
+### v1.89（2026-09-19）飞牌介入选牌流程重构：稳成前置 + 留栈回退 + 逐动作门控 + 终选复用引擎
+- **背景**（讨论定稿，用户逐条定调）：确认三缺陷——① ③式 Δ 剪枝丢弃"Δ 小但价值高"动作（Δ 只代表位置敏感性=进池门票，不该当选牌判据）；② 伙伴侧过手失败整花色出局无回退；③ 门控 first-fit（第一个过闸即启动）。另确认 Δ 语义：探针层组合飞"保大对象"维持现状；引擎 top1 只当门控分母不进终选池；门控保留且设计为纯判据函数（将来做对象级阈值/风险闸/策略注入的文章入口）；票选机制预留初始关闭（`DD_MAJORITY_VOTES`=1）
+- **改动C·稳成前置**（`_finesse_lead` 入口，`_stable_make`≥0.95）：直接退让，省伙伴侧完整 DD search（`_probe_partner_finesse_struct` 是最大开销）；仅引擎 top1 恰在本侧飞牌花色时登记本墩接应（稳成不挡流程内接应）
+- **改动A·留栈**：`finesse_struct` 单条目 → `struct_stack[s]`（Δ 降序全条目），不再剪枝
+- **改动B·过手预检逐条目**：失败只删该条目弹栈回退，动作统一为真实出牌；⑤ 引擎一致收紧为"top1==本侧引牌"才尊重+登记（同花色顶张不再整体退让，交给门控）
+- **门控逐动作**（`_finesse_launch_worthwhile` 改 `action_card` 判据）：分子=动作牌价值（非花色最优候选，修顶张虚高），稳成分支删除（已前置）；契约必要 0.50 / 比值闸 0.70
+- **终选 `_subset_select`**：过闸动作子集完全复用引擎选牌判据（`dd_search._compare_candidates`，make_rate 下做成率主+avg 决胜），等价于"引擎选牌流程 + 飞牌池收窄"，出第一名 + 登记 flow
+- **模板法**（αμ 无 probe）：动作池兜底生成最小飞张小牌（与删掉的"直接飞小牌"同语义）
+- **验证**：t16-t22 新增（过手失败回退/全被否/多花色终选/稳成退让/稳成仍登记/Δ 不进选牌/票选关闭）22/22；test_probe_finesse 8/8；真实 DDSearch 冒烟（4 花色结构共存 + 组合飞字段透传登记）通过
+- 投递：bridge/play_service.py, tests/test_finesse_pipeline.py, CHANGELOG.md, DEVELOPMENT.md
+
 ### v1.88（2026-09-18）打牌约束开关：设置面板可切换是否使用约束
 - **背景**：BM Level 2 B25（`2-B25`）约束生成不合理锁死采样分布做不成，关闭约束做成——需运行时开关即时切换，便于横向对比约束合理性
 - **`config.py`**：`DD_USE_CONSTRAINTS = True`（运行时）；关闭后 `_get_bid_constraints`（play_service.py 入口）直接返回 `{}`，LLM/DD/完美DD 统一无约束均匀采样

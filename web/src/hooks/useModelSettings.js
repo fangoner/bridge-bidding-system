@@ -281,7 +281,8 @@ export function useModelSettings() {
       dd_particles: parseInt(localStorage.getItem(DD_SAMPLE_COUNT_KEY)) || undefined,
       alpha_mu_particles: parseInt(localStorage.getItem(ALPHA_MU_PARTICLES_KEY)) || undefined,
       alpha_mu_m: parseInt(localStorage.getItem(ALPHA_MU_M_KEY)) || undefined,
-      dd_majority_votes: parseInt(localStorage.getItem(DD_MAJORITY_VOTES_KEY)) || undefined,
+      // 注：dd_majority_votes 不在此启动同步——票数随每次 ai-play 请求携带
+      // （api.js aiPlay → PlayAIRequest.dd_majority_votes），避免启动覆盖/刷新漂移
     }).catch(() => {})
     // 以前端 localStorage 为准推送样本类别开关到后端
     syncDdWorldFilter()

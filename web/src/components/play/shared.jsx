@@ -152,10 +152,11 @@ export function FinesseStamps({ fullOutput }) {
     .filter(k => FINESSE_KEYS.includes(k) && fullOutput[k] != null && fullOutput[k] !== '')
   if (!items.length) return null
 
-  // 印章配色：启动类橙色、续飞/接应类紫色、原则类绿色
+  // 印章配色：启动类橙色、续飞/接应类紫色、原则类绿色、票选类蓝色
   const stampColors = {
     '窗口期启动': '#e65100', '继续飞牌': '#e65100', '飞牌续': '#e65100', '9砸回手': '#e65100',
     '飞牌接应': '#7b1fa2', '领出飞牌': '#7b1fa2', '飞牌迁移': '#6a1b9a', '八九原则': '#2e7d32',
+    '多数投票': '#1565c0',
   }
 
   const fmt = (label, val) => {
@@ -173,6 +174,8 @@ export function FinesseStamps({ fullOutput }) {
       if (val['改选']) parts.push(`改出${val['改选']}`)
       if (val['原选']) parts.push(`原选${val['原选']}`)
       if (val['领出']) parts.push(`领出${val['领出']}`)
+      if (val['票数'] != null && val['票数'] !== '') parts.push(`${val['票数']}票`)
+      if (val['结果']) parts.push(`结果${val['结果']}`)
       if (val['说明'] && val['说明'] !== 'true' && val['说明'] !== 'false') parts.push(val['说明'])
       return parts.join(' · ') || JSON.stringify(val)
     }

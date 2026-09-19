@@ -2360,7 +2360,7 @@ const handleReviewCompletedPlay = async () => {
     try {
       const pm = parseModelValue(playModel)
       const t0 = performance.now()
-      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, ddScoringMode, (msg) => setAiProgress(msg))
+      const result = await aiPlay(pm.model, pm.reasoning, playEngine, ddSampleCount, controller.signal, ddScoringMode, (msg) => setAiProgress(msg), ddMajorityVotes, alphaMuParticles, alphaMuM)
       if (controller.signal.aborted) return
       // 撤销序号守卫：AI 出牌在途期间用户点了撤销 → 丢弃本次响应，以后端撤销后的真实状态为准
       if (undoSeqRef.current !== seqAtStart) {
