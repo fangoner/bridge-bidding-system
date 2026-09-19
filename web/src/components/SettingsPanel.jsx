@@ -372,7 +372,7 @@ function SettingsPanel({
           {playEngine === 'dd' && (
             <>
             <RangeSlider label="样本数" value={ddSampleCount}
-              min={ddParticlesRange.min} max={ddParticlesRange.max} step={250} width={72}
+              min={ddParticlesRange.min} max={ddParticlesRange.max} step={100} width={72}
               onCommit={handleDDSampleCountChange} />
             <RangeSlider label="多数投票" value={ddMajorityVotes}
               min={1} max={20} step={1} width={56}
