@@ -1,13 +1,13 @@
 # 桥牌叫牌练习系统
 
-一个基于 AI 的桥牌叫牌与打牌练习工具，支持双人/四人叫牌练习，内置 JF 叫牌约定知识库，并集成多种打牌引擎（DD、MCTS、αμ、LLM 及 DD-αμ-LLM 主力引擎）。
+一个基于 AI 的桥牌叫牌与打牌练习工具，支持双人/四人叫牌练习，内置 JF 叫牌约定知识库，并集成多种打牌引擎（DD、αμ、完美 DD、LLM）。
 
 ## 功能特点
 
 - 🃏 **双人/四人叫牌模式** - 支持不同位置的叫牌练习
 - 🤖 **AI 叫牌决策** - 基于 DeepSeek 大模型 + JF 约定知识库
 - 🔍 **约束导向采样** - 按牌型/点力约束生成可能的牌局，支持负向推断与动态收窄
-- 🎯 **多引擎打牌** - 集成 DD 蒙地卡罗、MCTS、αμ 搜索、LLM 及主力引擎 DD-αμ-LLM
+- 🎯 **多引擎打牌** - 集成 DD 蒙地卡罗、αμ Pareto 搜索、完美 DD 与 LLM 引擎
 - 🧠 **LLM 分组审查** - 引擎给出候选后，由 LLM 按战术意图分组复核并制定打牌计划
 - 🖼️ **图片识别** - 支持从截图/图片识别牌局（豆包视觉）
 - 📊 **Deep Finesse 集成** - 定约可行性双明手分析
@@ -19,12 +19,12 @@
 
 | 引擎 | 说明 |
 |------|------|
-| **DD-αμ-LLM**（主力） | 中盘 DD 搜索 + 残局 αμ 搜索，均叠加 LLM 分组审查；按剩余牌数分界切换 |
-| DD | 蒙地卡罗采样 + 双明手分析 |
-| MCTS | 蒙特卡洛树搜索 |
-| αμ | 论文实现的 αμ 搜索（OutcomeVector / ParetoFront / Root Cut） |
-| LLM | 纯大模型打牌 |
+| **DD**（默认） | 蒙地卡罗采样 + DirectDDS 双明手评估；支持 IMP／做成率／平均赢墩三种计分制 |
+| αμ | 论文实现的 αμ Pareto 搜索（OutcomeVector / ParetoFront / Root Cut），解决 PIMC 的 strategy fusion 缺陷 |
 | 完美 DD | 全知双明手最佳出牌（需四家完整手牌） |
+| LLM | 纯大模型推理出牌 |
+
+> 已下线：MCTS（2026-09-07 移除）、Tiered、DD-αμ-LLM（`dd_alphamu_llm`）。引擎列表以 `config.py` 的 `DEFAULT_PLAY_ENGINE` 与 `api/main.py` 的 `KNOWN_PLAY_ENGINES` 为准。
 
 ## 安装
 
@@ -131,7 +131,7 @@ bridge-bidding-system/
 │   ├── play_service.py  # 打牌服务（多引擎分发）
 │   ├── play_engine.py   # 打牌引擎
 │   ├── bidding.py       # 叫牌逻辑
-│   ├── mcts/            # 搜索算法（DD / MCTS / αμ / 采样）
+│   ├── mcts/            # 搜索算法（DD / αμ / 采样 / DirectDDS）
 │   └── dealer.py        # 发牌
 ├── knowledge/           # JF 约定知识库加载
 ├── llm/                 # LLM 调用（DeepSeek / 豆包视觉）

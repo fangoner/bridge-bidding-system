@@ -1,5 +1,9 @@
 # αμ+LLM 引擎开发记录
 
+> ⚠️ **历史文档（已过时，勿作为现状依据）** — 2026-09-20 标注。
+> 本文记录的 αμ+LLM（`dd_alphamu_llm`）引擎**已下线**；文中 `_llm_group_review` / `_dd_llm_play` / `_alphamu_llm_play` 等函数在源码中已不存在。
+> 现状以 `CLAUDE.md` 与代码为准；审计记录见 `docs/开发文档整理_发现清单_20260920.md`。
+
 > **开发日期**: 2026-07-12
 > **核心文件**: `bridge/play_service.py`
 > **测试文件**: `tests/test_vector_grouping.py`, `tests/test_grouping_examples.py`

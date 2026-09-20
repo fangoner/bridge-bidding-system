@@ -1,5 +1,150 @@
 # 开发日志
 
+> **本文件的结构与权威性（2026-09-20 整理时标注）**
+>
+> - **权威性**：本文件是**逐版本叙事的第一手记录**（背景 / 动机 / 改动 / 教训 / 测试）。`DEVELOPMENT.md` 的「版本历史」段只是面向当前状态的**摘要**，冲突时以本文件为准。
+> - **条目命名**：以**日期**为一级标题（`## YYYY-MM-DD`）。同一开发日内可能合并多个小版本，故标题中的版本号是 **best-effort 标注**，并非每条都带。
+> - **已知缺口（不打算回填）**：约 70 个早期条目标题**不含版本号**，且正文也无版本线索（多为研究/讨论/修复类），因此**版本号→条目**的可靠对应关系无法完整重建；历史版本级摘要在 `DEVELOPMENT.md` 的「版本历史」段。**请勿凭猜测回填版本号**。
+> - **历史条目中的 `docs/` 路径可能已归档**（2026-09-20 整理）。为保留叙事原貌，正文**未逐条改写**；遇到指向已归档文档的路径，按此映射换算：
+>   `飞牌优化讨论与修改记录_20260830.md` / `飞牌讨论与修改记录_20260911.md` / `_20260912.md` / `_20260913.md` → `docs/archive/飞牌日志原始_<同一日期>.md`，且已汇编为顶层 `docs/飞牌系统演化全程_20260830-20260920.md`；
+>   `飞牌介入系统审查与修复_20260917.md`（v1.85）与 `叫牌约束提取优化方案.md`（v1.65）→ 均在 `docs/archive/` 下同名文件（v1.85 的内容亦已并入演化全程「第五部分」）；
+>   其余 `docs/*.md` 若不在 `docs/` 顶层，请到 `docs/archive/` 查找；顶层现状与归档清单见 `docs/README.md`。
+> - **已修复的结构问题**（2026-09-20）：两处日期倒序（`2026-06-15/06-17`、`2026-05-03/05-05`）已按降序重排；v1.92 / v1.93 / v1.94 / v1.94b·v1.95 由 v1.96 条目内的 bullet 提升为独立条目；补记了 MCTS / Tiered / DD-αμ-LLM 三个引擎的下线（此前有引入无移除）。
+> - 完整审计与治理记录见 `docs/开发文档整理_发现清单_20260920.md`。
+
+## 2026-09-20（DD 默认计分制改 make_rate + 稳成线改口径降阈值：引擎 top1 ≥85% 退让）
+
+**背景**: 讨论"稳成线合理不合理"时发现两处实质问题——① **口径错配**：稳成线 `_stable_make` 与比值退让 `_finesse_ratio_ok` 都以「做成率 = scores ≥ tricks_needed 的世界占比」度量，而 `DD_SCORING_MODE` 默认却是 `"imp"`，引擎可能为追超墩/宕分深浅而选做成率更低的路线，与规则层打架；② **语义不一致**：`config.py` 注释写"做成率 ≥ 此值"，代码取的是**全体候选最高**做成率，两者在"引擎实际要走 top1 只有 70%、另有一条 95% 路线"时给出相反结论。
+
+**改进**:
+- **DD 默认计分制 `imp` → `make_rate`**（用户定调）：三处口径统一到做成率——引擎选牌（make_rate 下 `blended = 做成率×10000 + 平均赢墩`，赢墩仅作近似平局的决胜）、飞牌比值退让、稳成线。前端 `useModelSettings.js` 默认值同步；**localStorage 键改名 `bridge_dd_scoring_mode` → `_v2`**（旧键存着 `'imp'`，不换键则新默认永远读不到——同 `ddFinesseDelta` 的处理方式）
+- **稳成线改为「引擎 top1 做成率」**（用户定调）：`_stable_make` → **`_top1_make`**，只取 `candidates[0]` 的做成率。旧口径（v1.84 FIX-7）"全体候选最高"的理由是"榜首可能被位置信息误导，另有一条稳成路线时不应砸/飞"；新口径改为**对齐引擎实际要走的路线**——若引擎自己选的路线都已高成约，再改飞牌是负期望。同时使实现与 config 注释语义一致，问题②消除
+- **阈值 0.95 → 0.85**：更早退让。三处挂载统一（`_garrison_lead` 扫描 / `_garrison_follow` / `_finesse_lead` 入口前置短路）；**连拔不受稳成线约束**（已启动流程的完成动作，豁免维持）
+- 文档同步：`config.py` 注释、`docs/飞牌介入管线图解.md`（§三 A / §4.1 / §五 / §七 / 速查表 / 阈值表）、`CLAUDE.md`、`DEVELOPMENT.md` 配置表
+
+**教训（口径纪律）**: 一个决策里**不能让两种度量打架**——引擎按 A 口径优化、规则层按 B 口径裁决，就会在最接近临界的地方产生互相抵消的干预。本次先把引擎口径对齐到规则层（make_rate），再改规则本身。
+
+**修改文件**: config.py, bridge/play_service.py, web/src/hooks/useModelSettings.js, tests/test_finesse_pipeline.py（t11 改写为 top1 语义 + t19 文案断言放宽为子串）, tests/test_finesse_doc_sync.py（符号改名）, docs/飞牌介入管线图解.md, CLAUDE.md, DEVELOPMENT.md
+
+**测试验证**: `test_finesse_pipeline` 29/29（t11 改为验证"top1=0.3、次选=1.0 时返回 0.3"，即**不再**被次选拉高）；`test_probe_finesse` 8/8；`test_finesse_doc_sync` 3/3；`_top1_make` 边界单验（0.85 触发 / 0.84 不触发 / top1 低而次选高时不拉高 / 无候选与空 scores 返回 1.0 不拦截）；DD 直连冒烟（3NT 例）返回 `scoring_mode=make_rate`、决策值 0.77。生效需**重启后端 + 刷新前端**。
+
+## 2026-09-20（追溯补记：MCTS / Tiered / DD-αμ-LLM 三个打牌引擎的下线）
+
+**补记原因**: 本次文档审计发现——这三个引擎的**引入**在 CHANGELOG 里记录详尽（Tiered 见 `## 2026-06-15` 前后条目、DD-αμ-LLM 与 LLM 审查开关见 v1.55 条目、Tiered 引入见更早条目），但**移除从未在本文件留下任何条目**，唯一记录是一句 git 提交标题（`2c2541f … MCTS 引擎彻底移除 v1.70`）。这是"有引入无移除"型漂移的直接源头：README/CLAUDE.md/DEVELOPMENT.md 三份根文档因此至今仍在描述这三个引擎。
+
+**实际状态**（代码为唯一依据）:
+- 引擎白名单：`api/main.py` → `KNOWN_PLAY_ENGINES = {"llm", "dd", "perfect", "alphamu"}`（其上一行注释明写"tiered/alphamu_llm/dd_alphamu_llm 旧名已下线"）
+- `config.py` → `DEFAULT_PLAY_ENGINE = "dd"`，注释"可选 `\"llm\" | \"dd\" | \"perfect\" | \"alphamu\"`"；旧注释残留"MCTS 引擎已移除（能力弱，代码不再保留）"
+- `bridge/play_service.py` → `get_ai_play()` 仅保留 `use_dd` / `use_perfect` / `use_alphamu` 三个标志，LLM 为无标志兜底分支；`_dd_alphamu_llm_play` / `_dd_llm_play` / `_alphamu_llm_play` / `_llm_group_review` 等函数已删除
+- 前端 `SettingsPanel.jsx` 引擎下拉仅 4 项；`PlayContext.jsx` 白名单同为 4 项
+- 代码中不存在任何 `use_mcts` / `use_tiered` / `use_alphamu_llm` 标识符；`bridge/mcts/search.py`、`rollout.py`、`bridge/game_manager.py` 文件已删除
+
+**下线时间线（据 git 提交与代码注释还原）**:
+| 引擎 | 下线时点 | 依据 |
+|---|---|---|
+| Tiered（分层自动调度） | v1.70 前后 | 提交 `2c2541f`（2026-09-08）"批量提交——MCTS 引擎彻底移除 + 飞牌启动重构 v1.70"；更早已有 DD-αμ-LLM 取代其主力地位 |
+| DD-αμ-LLM（`dd_alphamu_llm`，中盘 DD + 残局 αμ + LLM 审查） | v1.70 前后 | 提交 `ea9fa50`"αμ样本生成共用 + αμ禁用飞牌介入 + **下线DD-αμ-LLM**" |
+| MCTS（确定化 + UCT 树搜索） | 2026-09-07 | `config.py` 注释"2026-09-07：MCTS 引擎已移除（能力弱，代码不再保留）"；`play_service.py`"MCTS 引擎分支已移除（2026-09-07，能力弱）" |
+
+**影响与善后**: README.md、CLAUDE.md、DEVELOPMENT.md 的引擎章节已在 2026-09-20 同步修正为 4 引擎口径；`DEVELOPMENT.md` 配置表删除全部 `MCTS_*` / `TIERED_*` 行；完整审计见 `docs/开发文档整理_发现清单_20260920.md`。
+
+**教训**: 引入与移除必须成对记录。缺移除记录时，文档会长期"承诺"已不存在的功能，且因为文档之间互相转述而自我强化——本次审计中三份根文档同时错在同一处即为明证。
+
+## 2026-09-20（探针 Δ 口径换血：赢墩均值差 → 做成率差 v1.92 · 补记）
+
+**补记原因**: v1.92 当时未写日志，其改动随 v1.93~v1.96 批次一并提交，此前只能从 `config.py` 注释还原。
+
+**背景**: 探针 Δ 原口径为"缺失大牌在东/西两桶的**整手赢墩均值差**"。该口径存在结构性盲区——**信号上限 = 做成率差 × 生死线墩差**，因此临界定约（满贯生死线常为 1 墩）在赢墩口径下**必然失明**：两个世界一个做成一个打宕，赢墩均值可能只差零点几，Δ 永远够不到阈值。
+
+**改进**:
+- **Δ 改为做成率差**（`_finalize_finesse_probe`）：`east_rate = |{t ≥ tricks_needed}| / |east|`，`west_rate` 同理，`Δ = |east_rate − west_rate|`——直接以"这手牌能否做成"为度量，与生死线对齐，消除赢墩口径的失明区
+- **新增"方向"与"押桶成"键**：Δ 取幅值（沿用"位置敏感性"语义作进池门票与结构排序），另存 `方向`（哪侧桶做成率高 = 押哪侧飞）与 `押桶成`（该侧做成率）——修复旧 `abs()` 丢方向导致**选错飞牌路线**的缺陷
+- **探针原始日志改为做成率口径**：`[探针原始] ♦ 对象Q 引♦2 东成0.413(n218) 西成0.493(n207) Δ0.08 押西 未达标`
+- **阈值同步由 0.15 降至 0.10**（v1.93 同批定）：425 世界桶 n≈200 的采样噪声约 ±5pt，真信号（如小♦ 引牌 14.8pt）曾骑在 15pt 上两测 16.1/13.5 摇摆漏检
+
+**影响**: Δ 口径是后续 v1.93 同花采信收紧、v1.94 路线对决、v1.96 三层判据的共同数据基础；本次口径变更后，"押对方向"首次成为可用信号。
+
+**修改文件**: bridge/mcts/dd_search.py, config.py, bridge/play_service.py
+
+**注**: 本条为补记，与新补的 v1.93/v1.94 条目及 v1.96 条目同属 v1.92~v1.96 批次（该批次当时集中在一天内迭代完成）。
+
+## 2026-09-20（同花色采信收紧 v1.93）
+
+**背景**: v1.87 的"引擎榜首与强制接应牌同花色即采信 top1"过于粗糙——6NT 案中引擎榜首 ♦A（顶张兑现）与强制牌 ♦J（飞张）同花色，但**语义相反**：采信 ♦A 等于用顶张替掉飞张，飞牌被吃掉。
+
+**改进**: `_finesse_commit_ratio_ok` 的"同花色采信"分支增加 rank 判据：
+- 引擎榜首同花色 **且榜首 rank < 对象**（间张，引擎也在飞）→ 采信 top1（意图一致，强制改选会破坏引擎规划）
+- 引擎榜首同花色 **且榜首 rank ≥ 对象**（顶张/盖张，引擎在兑现而非飞）→ **不采信**，落比值退让裁决
+
+**验证**: `test_finesse_pipeline` t23（两个用例：0.8≥0.75 维持强制 / 0.5<0.75 退让）。
+
+**修改文件**: bridge/play_service.py, config.py, tests/test_finesse_pipeline.py
+
+## 2026-09-20（启动端反向路线对决 v1.94）
+
+**背景**: 同一花色可能存在**两条方向相反**的飞牌路线（南引小押西 vs 北引 J 押东）。此前各路线各自过门控、终选依赖引擎混合值，结果可能选中**弱方向**且无法察觉。
+
+**改进**（保留）:
+- **反向路线对决前置**到门控之前（日志 `[路线对决]`）：同花色按方向（押东/押西）分派，各派取押桶成最高的代表**正面对决**，**败派整派淘汰**；胜派内同侧多条动作**不互杀**，全部保留到门控与终选。无方向条目（模板法兜底）不参与对决
+- **两侧探针统一样本**：`dd_search.search()` 新增 `preset_worlds` 参数 + 实例暂存 `last_worlds`（入口/早退置 None 防串味），伙伴侧探针复用主搜索世界——消除两次独立采样导致的桶分裂（226/199 vs 210/215）引发的**方向抖动**，并省去一次采样
+- **门控分子两侧同秤**：统一取"引牌押注方向半桶做成率"（`押桶成`）。引擎混合值被非押注世界的死值稀释（6NT 案 ♦4 混合 45.9% vs 押桶 55.3%），会系统性低估飞牌线
+- **e_info 方向逐条覆盖**：`方向` / `押桶成` 随 `全` 列表逐条透传到结构池
+
+**验证**: `test_finesse_pipeline` t24（路线对决：押西 0.553 > 押东 0.405 → 淘汰押东派）、t25（本侧分子=押桶成 0.8 过闸）。
+
+**修改文件**: bridge/play_service.py, bridge/mcts/dd_search.py, tests/test_finesse_pipeline.py
+
+## 2026-09-20（接应端三轮试错 v1.94b / v1.95 —— 全部回退）
+
+> 本节记录**已回退**的尝试，保留教训。最终口径见 v1.96。
+
+- **v1.94b**：把"押桶成"用作接应比值判据的**分子**
+- **v1.95**：改为**同桶对决** + **零分母特判**
+- **三轮全部撤销**，接应回到 v1.93 口径（同花色采信分流 + 引擎混合比值 0.75）
+
+**根因（B26 教训）**: "桶内完胜比"在**"不飞仍活"**的世界里是**假信号**。B26 案押对世界（西）里引擎榜首 ♦A 桶内做成率 0.542——**不飞仍活**，此时"Q/A = 1.0/0.542 = 1.85"看似完胜，实则全局期望 Q 47.4% < A 53.1%（K 在东的概率更大 + Q 押错即死）。而 6NT 案押对世界 A=0（**不飞即死**），桶内完胜才是真信号。**两案的区分判据 = 押对世界榜首桶内值是否为零**——v1.96 的三层判据正是此分界的阈值化。
+
+**方法教训**: 修改判据前，先在两个**同构反例**（6NT 要强制 / B26 要退让）上验证新判据给出的方向相反，再动手。本轮三轮试错均未做此预检。
+
+**修改文件**: bridge/play_service.py（全部回退，无净变更）
+
+## 2026-09-20（接应判据三轮迭代收敛 v1.96：三层判据 + 启动端路线对决 + 接应试错回退）
+
+**背景**: 6NT 缺♦Q 实测定位两条独立缺陷链：① 接应端——南引小♦启动飞牌后北家接应出 ♦A 不出 ♦J（强制飞张被顶张替代，v1.87 同花采信过粗：榜首 ♦A 与强制 ♦J 同花色即采信但语义相反）；② 启动端——同花色两条反向飞牌路线（南引小押西 vs 北引 J 押东）未正面对决，终选依赖引擎混合值选弱方向。另 BM2000 2-B26 要求与 6NT 相反的接应行为（北家应退让引擎出 ♦A），两案同构、数据分界在"押对世界桶内引擎最优替代牌做成率"。
+
+**改进**:
+> v1.93（同花采信收紧）、v1.94（启动端反向路线对决）、v1.94b/v1.95（接应端三轮试错，全部回退）已各自独立成条，见上方对应条目；本节只记 v1.96 定稿部分。
+
+- **v1.96 三层接应判据（定稿）**: `_finesse_commit_ratio_ok` 前插三层判定，数据源 = 跟牌接应探针 `full_output["finesse_probe_follow"]`（按登记对象在东/西余手分桶，全部候选牌桶内做成率，零额外 DDS 蹭主搜索世界）。榜首 = 非强制牌的引擎最优候选 top_alt，b_bucket = top_alt 在登记方向桶内做成率：
+  - b_bucket ≤ 0.05（`FINESSE_COMMIT_DIE_PCT`，不飞即死，6NT 型西桶 ♦A=0）→ 强制接应
+  - b_bucket ≥ 0.40（`FINESSE_COMMIT_ALIVE_PCT`，定约不依赖飞牌，B26 型西桶 ♦A=0.542）→ 退让引擎
+  - 灰色区 / 桶数据缺失 / 双零死局（b=0 且强制牌桶内也=0）→ 维持 v1.93 口径兜底；tier-1 双查 a_bucket>0
+  - 配套：`_register_finesse_flow` 恢复方向登记写入 `finesse_flow_extra[花色]["方向"]`
+
+**已决策（2026-09-20，不再改）**: 重打 6NT 第 3 墩（剩 44 张，南持 ♦KT432 北持 ♦AJ3）复测：南引小♦（2/3/4）对 Q 的 Δ=0.08 < 0.10 门票未进池 → 押西派仅 ♦T（押桶成 0.314）应战，路线对决输给押东 ♦J（0.372）→ 南出 ♣2 过手给北引 ♦J。Δ=0.08 经交叉验证计算无误（引擎混合 45.2% = 两桶按世界数加权精确吻合）。根因：Δ 是位置敏感性非方向价值——北持 ♦AJ 双保护（J 被盖 A 兜底）下引小牌做成率对 Q 位置天然不敏感（东 0.413/西 0.493），做成率口径被其他临界花色稀释；该副牌小牌 Δ 真实区间 0.08~0.14 骑在 0.10 阈值上，采样波动决定成败。曾评估两方案——A 阈值降至 0.05（治标）/ B 进池资格换 `_probe_finesse_ok` 结构判定（确定性、Δ 只作排序）——**用户定调 A、B 均不采纳，`FINESSE_PROBE_DELTA` 维持 0.10，按"已知且接受的代价"结案**（详见 `docs/飞牌现行口径_接应判据与Δ门票_20260920.md` §三 决策记录）。后续遇同类 Δ 卡阈值现象直接归档，不重复立项
+
+**教训**:
+1. 统计性阈值（Δ/押桶成）骑在信号真实区间上会随机翻车——确定性结构判定与统计信号要分工：结构定资格、统计定方向（**注**：Δ 门票本身经决策维持现状不改，本条保留为认知原则，见上"已决策"）
+2. 桶内完胜比值在"不飞仍活"世界是假信号，区分判据 = 押对世界榜首桶内值是否为零（v1.96 三层判据即此分界的阈值化）
+3. 接应端三轮试错全回退——修改前先在两个同构反例（6NT/B26）上验证判据方向相反时再动手，避免盲改
+
+**修改文件**: config.py, bridge/mcts/dd_search.py, bridge/play_service.py, tests/test_finesse_pipeline.py, docs/飞牌现行口径_接应判据与Δ门票_20260920.md, CHANGELOG.md, DEVELOPMENT.md
+
+**测试验证**: test_finesse_pipeline 29/29（新增 t23 同花采信收紧 / t24-t25 路线对决 / t26-t29 三层判据：强制/退让/灰色区/缺失兜底）；test_probe_finesse 8/8；αμ 全量全过；follow 探针端到端验证跑通；后端 8003 重启健康（jf_segments_loaded=127）。6NT/B26 实测验证因 Δ 骑线问题未达预期，待遗留问题定调后复测
+
+## 2026-09-19（确认定约与首攻弹窗支持手动编辑约束 v1.91 · 补记）
+
+**背景**: "确认定约与首攻"弹窗的约束区此前只读（由约束转换 LLM 生成后展示）。实测遇到约束不合理（如 v1.88 的 BM 2-B25 案例）时无法就地修正，只能整轮重生成。
+
+**改进**:
+- **display 格式逆向解析**：新增 `POST /api/constraints/parse`——接收用户在弹窗手动编辑的约束文本（即 `_format_constraints_for_display` 的 display 格式），反解为各家 `BidConstraint` payload 返回；空文本 = 全部无约束（便于测试无约束随机采样）
+- **`PlayService.parse_constraints_text`**（+108 行）：display 行 → `BidConstraint`，与既有 `_format_constraints_for_display` 构成"A 生成展示 ↔ B 解析回读"闭环
+- **前端**：弹窗约束区改为可编辑文本框 + "恢复自动生成"按钮；`api.parseConstraints` 透传解析结果，确认时随 payload 传给 `/api/play/init` 的 `_seed_constraints`
+
+**修改文件**: api/main.py, bridge/play_service.py, web/src/App.jsx, web/src/services/api.js
+
+**注**: 本条为补记——v1.91 有独立提交（`40e5774`, 2026-09-19 22:56）但当时漏写日志。v1.92（探针 Δ 口径换血）同样漏记，已另补独立条目（见上）；v1.93/v1.94/v1.94b·v1.95 亦已补标题独立成条。
+
 ## 2026-09-19（运行时配置系统性修复：请求携带数值型 + 全局开关落盘 v1.90b）
 
 **背景**: 排查"多数投票滑块=5 但实测不触发"牵出系统性缺陷——所有"运行时可调"配置都走"前端 localStorage + **刷新时**启动同步重推"，后端一重启服务端全回默认，**不刷新页面就一直错**（本次票数反复踩坑，根因链：滑块值未持久化 → 启动同步不推票数 → 后端=1 → 票选入口拦截）。定调两条修复路线。
@@ -1621,6 +1766,66 @@ def _compare_candidates(a_avg, a_rank_val, b_avg, b_rank_val, is_declarer_side, 
 - **Tiered 引擎**：残局阶段优先 αμ（解决 strategy fusion），不可用回退 DD 枚举（≤6张）；首攻阶段 DD+LLM 融合；中盘三信号检测升级 LLM
 - **Perfect DD 引擎**：不受影响（全知双明手，无采样）
 
+## 2026-06-17
+
+### Tiered 分层引擎重做：DD 替代 MCTS 中盘
+
+**背景**:
+v1.39 的 Tiered 引擎中盘使用 MCTS 树搜索，但 MCTS 在信息不完全条件下噪声大，采样效率不如 DD 蒙特卡洛。DD 每次求解 `solve_board` 可直接评估候选期望墩数。
+
+**改进**:
+- **中盘引擎从 MCTS 改为 DD** (`bridge/play_service.py`): 中盘阶段改用 DD 采样 + `solve_board`，速度快、统计更可靠
+- **阶段简化** (5→4): 去掉"第一墩收尾"LLM 阶段，首攻→明手亮开→残局→中盘
+- **残局阈值放宽**: `TIERED_ENDGAME_CARDS` 4→6，更早进入精确枚举
+- **关键决策阈值收紧**: 庄家方 0.5→0.2，防守方 0.8→0.3（DD 统计比 MCTS 更可靠，阈值可更严格）
+- **新增 `_llm_play_with_dd_hint()`**: 不确定时升级 LLM，注入 DD 候选信息，LLM 选择明显偏离 DD 最优时自动否决
+- **移除 Hybrid 引擎**: 不再维护独立 hybrid 分支，Tiered 自动混合已覆盖
+- **endplay 不可用回退**: 无 endplay 时自动回退 MCTS 路径
+- **新增 `_is_critical_decision_mcts()`**: MCTS 回退路径的独立关键决策检测
+
+**配置**:
+- `TIERED_ENDGAME_CARDS`: 6 (原 4)
+- `TIERED_CRITICAL_SPREAD_DECLARER`: 0.2 (原 0.5)
+- `TIERED_CRITICAL_SPREAD_DEFENDER`: 0.3 (原 0.8)
+- `TIERED_MIN_SAMPLES`: 30 — DD 有效样本少于此值不升级
+- `TIERED_OVERRIDE_THRESHOLD`: 1.5 — LLM 与 DD 最优差超此墩数时否决 LLM
+
+### Perfect DD 引擎 + 人类 DD 提示
+
+**改进**:
+- **`search_perfect()` 方法** (`bridge/mcts/dd_search.py`): 全知双明手搜索，AI 可访问四家完整手牌，一次 `solve_board` 得所有候选精确分
+- **`/api/play/dd-hints` 端点** (`api/main.py`): 人类回合获取可选牌的完美 DD 提示（`+N`/`=`/`-N`），基于后台完整四家手牌
+- **DD 提示默认开启** (`PlayDetailPanel.jsx`): `showDDHints` 默认 `true`，`localStorage` 持久化偏好，人类回合自动显示每张可选牌的 DD 预测
+- 眼睛图标一键切换，所有引擎模式 (LLM/MCTS/DD/Tiered) 均可使用
+- SettingsPanel 中 "完美DD (全知)" 引擎仅限发牌练习（AI 不应在模拟实战中获取未揭示手牌信息）
+
+### 视觉识别深化
+
+**改进**:
+- **`parse_hand_with_suits()`** (`api/main.py`): 按花色符号 (♠♥♦♣) 解析手牌，正确保留缺门花色用 `-` 占位，不再粗暴删除花色符号导致缺门丢失
+- **图片压缩** (`llm/doubao_client.py`): 长边 >1920px 等比缩至 1920，转 JPEG quality 85%，大幅减少传输量
+- VISION_PROMPT: 明确要求缺门用 `-` 占位，四花色必须全部列出
+
+### 前端多项改进
+
+- **校验警告展示** (`App.jsx`): 新增 `warning` 状态，图片/截屏识别后的校验警告显示为黄色 Alert
+- **编辑叫牌对话框**: 📋 按钮预填叫牌序列文本，支持 `(位置)叫品-` 格式解析
+- **手牌编辑**: 🖊 按钮预填当前手牌（带花色符号格式），编辑后走相同解析流程
+- **首攻重置**: 首攻解析失败后可重新输入
+- **定约解析增强**: 支持 `4HX`/`4HXX` 内联加倍格式
+
+**修改文件**:
+- `api/main.py` — dd-hints 端点 + parse_hand_with_suits + perfect 引擎 + 耗时日志
+- `bridge/play_service.py` — tiered 重做 (DD 中盘) + perfect + _llm_play_with_dd_hint + 否决机制
+- `bridge/mcts/dd_search.py` — search_perfect 全知双明手
+- `config.py` — 新阈值/配置项
+- `llm/doubao_client.py` — 图片压缩 + VISION_PROMPT + timeout
+- `web/src/App.jsx` — warning/编辑/首攻重置/手牌编辑/定约解析
+- `web/src/components/PlayDetailPanel.jsx` — DD 提示默认开启 + localStorage 持久化
+- `web/src/components/CardTable.jsx` — 花色颜色 + Tooltip
+- `web/src/components/SettingsPanel.jsx` — perfect 引擎限制
+- `web/src/services/api.js` — getDDHints API
+
 ## 2026-06-15
 
 ### 截屏/图片识别全面优化
@@ -1709,66 +1914,6 @@ def _compare_candidates(a_avg, a_rank_val, b_avg, b_rank_val, is_declarer_side, 
 - `web/src/App.css` — 移动端叫牌表格字体增大
 - `AGENTS.md` — 新增
 
-## 2026-06-17
-
-### Tiered 分层引擎重做：DD 替代 MCTS 中盘
-
-**背景**:
-v1.39 的 Tiered 引擎中盘使用 MCTS 树搜索，但 MCTS 在信息不完全条件下噪声大，采样效率不如 DD 蒙特卡洛。DD 每次求解 `solve_board` 可直接评估候选期望墩数。
-
-**改进**:
-- **中盘引擎从 MCTS 改为 DD** (`bridge/play_service.py`): 中盘阶段改用 DD 采样 + `solve_board`，速度快、统计更可靠
-- **阶段简化** (5→4): 去掉"第一墩收尾"LLM 阶段，首攻→明手亮开→残局→中盘
-- **残局阈值放宽**: `TIERED_ENDGAME_CARDS` 4→6，更早进入精确枚举
-- **关键决策阈值收紧**: 庄家方 0.5→0.2，防守方 0.8→0.3（DD 统计比 MCTS 更可靠，阈值可更严格）
-- **新增 `_llm_play_with_dd_hint()`**: 不确定时升级 LLM，注入 DD 候选信息，LLM 选择明显偏离 DD 最优时自动否决
-- **移除 Hybrid 引擎**: 不再维护独立 hybrid 分支，Tiered 自动混合已覆盖
-- **endplay 不可用回退**: 无 endplay 时自动回退 MCTS 路径
-- **新增 `_is_critical_decision_mcts()`**: MCTS 回退路径的独立关键决策检测
-
-**配置**:
-- `TIERED_ENDGAME_CARDS`: 6 (原 4)
-- `TIERED_CRITICAL_SPREAD_DECLARER`: 0.2 (原 0.5)
-- `TIERED_CRITICAL_SPREAD_DEFENDER`: 0.3 (原 0.8)
-- `TIERED_MIN_SAMPLES`: 30 — DD 有效样本少于此值不升级
-- `TIERED_OVERRIDE_THRESHOLD`: 1.5 — LLM 与 DD 最优差超此墩数时否决 LLM
-
-### Perfect DD 引擎 + 人类 DD 提示
-
-**改进**:
-- **`search_perfect()` 方法** (`bridge/mcts/dd_search.py`): 全知双明手搜索，AI 可访问四家完整手牌，一次 `solve_board` 得所有候选精确分
-- **`/api/play/dd-hints` 端点** (`api/main.py`): 人类回合获取可选牌的完美 DD 提示（`+N`/`=`/`-N`），基于后台完整四家手牌
-- **DD 提示默认开启** (`PlayDetailPanel.jsx`): `showDDHints` 默认 `true`，`localStorage` 持久化偏好，人类回合自动显示每张可选牌的 DD 预测
-- 眼睛图标一键切换，所有引擎模式 (LLM/MCTS/DD/Tiered) 均可使用
-- SettingsPanel 中 "完美DD (全知)" 引擎仅限发牌练习（AI 不应在模拟实战中获取未揭示手牌信息）
-
-### 视觉识别深化
-
-**改进**:
-- **`parse_hand_with_suits()`** (`api/main.py`): 按花色符号 (♠♥♦♣) 解析手牌，正确保留缺门花色用 `-` 占位，不再粗暴删除花色符号导致缺门丢失
-- **图片压缩** (`llm/doubao_client.py`): 长边 >1920px 等比缩至 1920，转 JPEG quality 85%，大幅减少传输量
-- VISION_PROMPT: 明确要求缺门用 `-` 占位，四花色必须全部列出
-
-### 前端多项改进
-
-- **校验警告展示** (`App.jsx`): 新增 `warning` 状态，图片/截屏识别后的校验警告显示为黄色 Alert
-- **编辑叫牌对话框**: 📋 按钮预填叫牌序列文本，支持 `(位置)叫品-` 格式解析
-- **手牌编辑**: 🖊 按钮预填当前手牌（带花色符号格式），编辑后走相同解析流程
-- **首攻重置**: 首攻解析失败后可重新输入
-- **定约解析增强**: 支持 `4HX`/`4HXX` 内联加倍格式
-
-**修改文件**:
-- `api/main.py` — dd-hints 端点 + parse_hand_with_suits + perfect 引擎 + 耗时日志
-- `bridge/play_service.py` — tiered 重做 (DD 中盘) + perfect + _llm_play_with_dd_hint + 否决机制
-- `bridge/mcts/dd_search.py` — search_perfect 全知双明手
-- `config.py` — 新阈值/配置项
-- `llm/doubao_client.py` — 图片压缩 + VISION_PROMPT + timeout
-- `web/src/App.jsx` — warning/编辑/首攻重置/手牌编辑/定约解析
-- `web/src/components/PlayDetailPanel.jsx` — DD 提示默认开启 + localStorage 持久化
-- `web/src/components/CardTable.jsx` — 花色颜色 + Tooltip
-- `web/src/components/SettingsPanel.jsx` — perfect 引擎限制
-- `web/src/services/api.js` — getDDHints API
-
 ## 2026-06-14
 
 ### 分层打牌引擎 (Tiered Play Engine)
@@ -1826,31 +1971,6 @@ v1.39 的 Tiered 引擎中盘使用 MCTS 树搜索，但 MCTS 在信息不完全
 
 **测试**:
 - `test_tiered_engine.py` — 阶段判定 + DD枚举 + 关键决策检测验证通过
-
----
-
-## 2026-05-03
-
-### DD打牌引擎方向反转Bug修复
-
-**背景**:
-DD引擎（蒙特卡洛+DDS双明手）打牌效果差，柱状图上不同出牌赢墩数完全相同或极端偏差，等于随机出牌。根因是`solve_board`返回值的赢墩方向被误判。
-
-**改进**:
-- `solve_board`返回的是`deal.curplayer`（当前出牌人）所在方的赢墩数，而非`deal.first`（领出者）。修复后用`PLAYER_TO_POSITION`映射`deal.curplayer`来判断方向，第2/4家时不再反转
-- Rank偏置修复：防守方`-(avg+rank_bonus)`替代`-(avg-rank_bonus)`，正确偏好小牌保留实力
-- score_map key加固：显式映射`_DENOM_TO_SUIT/_RANK_TO_CHAR`替代`.abbr`，消除对`use_unicode`全局设置的静默依赖
-- 柱状图防守方`avg_tricks`逆序排列，让最优出牌排最前
-- `state_utils.py`新增`PLAYER_TO_POSITION`反向映射
-
-**修改文件**:
-- `bridge/mcts/dd_search.py` — solve_board方向修复 + rank偏置 + key加固 + 逆序
-- `bridge/mcts/state_utils.py` — 新增PLAYER_TO_POSITION
-
-**测试验证**:
-- `test_solve_board.py`验证`solve_board`返回值方向确认
-- MCTS约束测试9/9全部通过
-- DD/Hybrid模式打牌验证效果良好
 
 ---
 
@@ -2025,6 +2145,31 @@ AI提供商选择器（DeepSeek/Doubao切换）已不再需要。
 
 **修改文件**:
 - `web/src/components/PlayDetailPanel.jsx` — 外层容器 overflow 条件判断
+
+---
+
+## 2026-05-03
+
+### DD打牌引擎方向反转Bug修复
+
+**背景**:
+DD引擎（蒙特卡洛+DDS双明手）打牌效果差，柱状图上不同出牌赢墩数完全相同或极端偏差，等于随机出牌。根因是`solve_board`返回值的赢墩方向被误判。
+
+**改进**:
+- `solve_board`返回的是`deal.curplayer`（当前出牌人）所在方的赢墩数，而非`deal.first`（领出者）。修复后用`PLAYER_TO_POSITION`映射`deal.curplayer`来判断方向，第2/4家时不再反转
+- Rank偏置修复：防守方`-(avg+rank_bonus)`替代`-(avg-rank_bonus)`，正确偏好小牌保留实力
+- score_map key加固：显式映射`_DENOM_TO_SUIT/_RANK_TO_CHAR`替代`.abbr`，消除对`use_unicode`全局设置的静默依赖
+- 柱状图防守方`avg_tricks`逆序排列，让最优出牌排最前
+- `state_utils.py`新增`PLAYER_TO_POSITION`反向映射
+
+**修改文件**:
+- `bridge/mcts/dd_search.py` — solve_board方向修复 + rank偏置 + key加固 + 逆序
+- `bridge/mcts/state_utils.py` — 新增PLAYER_TO_POSITION
+
+**测试验证**:
+- `test_solve_board.py`验证`solve_board`返回值方向确认
+- MCTS约束测试9/9全部通过
+- DD/Hybrid模式打牌验证效果良好
 
 ---
 

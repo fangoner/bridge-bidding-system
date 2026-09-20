@@ -6,7 +6,7 @@
 
 系统包含两大模块：
 - **叫牌系统**：双人/四人叫牌练习，JF约定知识库检索，5路径fallback机制
-- **打牌系统**：7种打牌引擎（LLM/MCTS/DD/Perfect DD/Tiered/αμ纯引擎/αμ+LLM），αμ搜索解决PIMC缺陷
+- **打牌系统**：4种打牌引擎（LLM/DD/Perfect DD/αμ纯引擎），αμ搜索解决PIMC缺陷
 
 历史开发文档见 [DEVELOPMENT_HISTORY.md](DEVELOPMENT_HISTORY.md)。
 
@@ -33,7 +33,7 @@ Bidding System/
 ├── main.py                 # CLI应用入口
 ├── api/main.py             # FastAPI Web后端
 ├── config.py               # 集中配置管理
-├── endplay_integration.py  # endplay双明手分析集成
+├── dd_analysis.py          # 双明手分析（DirectDDS calc_dd_table，20 组合）
 ├── .env                    # 环境变量（API密钥）
 ├── bridge/
 │   ├── dealer.py           # 发牌和手牌管理
@@ -43,7 +43,7 @@ Bidding System/
 │   ├── output_format.py    # 输出格式生成
 │   ├── play_types.py       # 打牌数据类型
 │   ├── play_engine.py      # 打牌引擎（规则状态机）
-│   ├── play_service.py     # 打牌服务（7种引擎调度）
+│   ├── play_service.py     # 打牌服务（4种引擎调度）
 │   └── mcts/               # 打牌搜索引擎
 │       ├── alpha_mu.py     # αμ Pareto搜索引擎
 │       ├── belief.py       # 信念工具（void检测/信号证据）
@@ -53,9 +53,7 @@ Bidding System/
 │       ├── dd_search.py    # DD引擎（蒙特卡洛+DirectDDS）
 │       ├── direct_dds.py   # ctypes直接DDS库封装
 │       ├── llm_validator.py # LLM出牌校验层
-│       ├── rollout.py      # MCTS rollout策略
 │       ├── sampler.py      # 手牌采样器
-│       ├── search.py       # MCTS搜索引擎
 │       ├── signals.py      # 防守信号模型
 │       └── state_utils.py  # 共享工具函数
 ├── knowledge/loader.py     # JF约定文档加载和检索
@@ -215,17 +213,16 @@ JF文档统计：
 
 ### 引擎架构
 
-打牌系统支持7种引擎，通过 `PlayService.get_ai_play()`（[bridge/play_service.py](bridge/play_service.py)）调度：
+打牌系统支持 **4 种引擎**，通过 `PlayService.get_ai_play()`（[bridge/play_service.py](bridge/play_service.py)）调度：
 
 | 引擎 | 标志 | 说明 |
 |------|------|------|
-| LLM | `use_llm`（默认） | DeepSeek API大模型推理 |
-| MCTS | `use_mcts` | 确定化 + UCT树搜索 |
-| DD | `use_dd` | 纯蒙特卡洛 + DirectDDS双明手评估 |
+| LLM | 无标志（兜底分支） | DeepSeek API大模型推理 |
+| DD | `use_dd` | 纯蒙特卡洛 + DirectDDS双明手评估（**默认引擎**，`DEFAULT_PLAY_ENGINE = "dd"`） |
 | Perfect DD | `use_perfect` | 全知双明手，一次solve得所有候选 |
-| Tiered | `use_tiered` | 分层自动调度（首攻/中盘/残局） |
 | αμ纯引擎 | `use_alphamu` | αμ Pareto搜索，开局到残局全覆盖 |
-| αμ+LLM | `use_alphamu_llm` | αμ搜索 + LLM策略审查 |
+
+> **已下线**：MCTS（2026-09-07 移除，能力弱）、Tiered（分层调度）、αμ+LLM / DD-αμ-LLM（`dd_alphamu_llm`）。`use_llm`/`use_mcts`/`use_tiered`/`use_alphamu_llm` 参数与 `MCTS_*`/`TIERED_*` 配置常量均已不存在；LLM 是无标志的兜底分支（`get_ai_play` 末尾 `return`）。引擎白名单见 `api/main.py` 的 `KNOWN_PLAY_ENGINES`。
 
 **引擎选择**：前端 SettingsPanel 下拉框，API `play_engine` 参数控制，或 `DEFAULT_PLAY_ENGINE` 配置。
 
@@ -252,13 +249,14 @@ success_rate = sum(effective_value) / n
 
 #### 自适应参数
 
-统一入口 `_alpha_mu_play` 按剩余牌数自适应：
-- ≤4张：深度4，8s，5000 DDS预算
-- ≤8张：深度4，12s，8000预算
-- ≤10张：深度2，20s，15000预算
-- >10张：深度1，30s，20000预算
+统一入口 `_alpha_mu_play` 按剩余牌数取**时间与 DDS 预算（五档）**——注意：**档位只控预算，"深度"不随牌数变化**（早期文档曾写"深度4/2/1"，代码中无此概念）：
+- ≤4张：8.0s，5000 DDS预算（世界数上限 100×缩放）
+- ≤6张：18.0s，8000（上限 60×缩放）
+- ≤8张：32.0s，12000（上限 30×缩放）
+- ≤10张：50.0s，15000（上限 20×缩放）
+- >10张：60.0s，20000（上限 = base）
 
-**M参数自适应**：cards > 8时强制 M=1（PIMC），cards ≤ 8时使用配置的 `ALPHA_MU_M`（默认2）。
+**M 参数不随牌数降级**：`M_value` 取设置面板值（`self.alpha_mu_search.M`），未初始化时用 `ALPHA_MU_M`（默认2）——**全程不降级**（早期文档曾写"cards>8 强制 M=1"，与代码相反）。αμ 的 M 递减只发生在**迭代加深内部**（从 M=1 递增到 M）。
 
 #### 关键优化
 
@@ -299,12 +297,12 @@ BidConstraint:
 
 #### 约束分类
 
-| 类型 | 说明 | 违反后果 |
+| 类型 | 说明 | 处理方式 |
 |------|------|---------|
-| 硬约束 | 约定叫/叫品含义 | 采样权重=0 |
-| 软约束 | 负推断（pass→≤7HCP）、点力守恒 | 软加权惩罚 |
+| 硬约束 | 约定叫/叫品含义 | 硬校验，不满足则该世界按分级回退链处理 |
+| 软约束 | 负推断（pass→≤7HCP）等 | 同样逐一硬校验——**无软加权机制** |
 
-**inference_source 优先级**：convention > negative_inference > hcp_conservation > hard_coded
+**`inference_source` 不参与过滤**：v1.79 起约束**不再按来源分级**（`_HARD_SOURCE_PREFIXES` / `is_hard_source` / `is_ignored_source` / `filter_hard_constraints` 已整体删除）；`inference_source` 仅作来源标记与诊断保留。早期文档写的四级优先级 `convention > negative_inference > hcp_conservation > hard_coded` **不存在**。
 
 #### 约束分级验证
 
@@ -386,13 +384,14 @@ BidConstraint:
 
 `bridge/mcts/dd_search.py` 的 `DDSearch` 实现纯蒙特卡洛 + DirectDDS 双明手评估。
 
-#### 选牌三层分层比较（`_compare_candidates`）
+#### 选牌判据（`_compare_candidates`）
 
-1. **第一层**：avg差 > 显著性阈值 → 按方向（庄家取高/防守取低）
-2. **第二层**：rank不同 → 小牌优先（保留大牌结构）
-3. **第三层**：rank相同 → 回退原始avg方向
+**单值比较，无分层、无显著性检验**：完全按决策值方向决定（庄家方取高 / 防守方取低），平局返回 0。
 
-**显著性阈值**：`threshold = Z × std_diff / √N`（配对差值检验，Z=1.0，std_diff为同world配对差值样本标准差）
+- 仅 `make_rate` 计分制下做混合决胜：`scoring_val × 10000 + avg_tricks`（做成率相同时取赢墩多者）
+- **无"小牌优先"**（v1.55 已取消）：不再为保留大牌结构而在平局时选小牌
+- **无显著性阈值**：`Z × std_diff / √N` 配对差值检验已删除（`_paired_diff_stats` / `_Z_SCORE` 全仓 0 命中；仅 `dd_search.py` 残留一句历史注释）
+- **等价判定**：逐世界 `scores` **完全相等**即视为等价；当"做成率榜 top 组"与"赢墩榜 top 组"不一致时，按 `DD_MAJORITY_VOTES`（默认 1 = 关闭）触发多数投票（`_dd_maybe_majority_vote`）
 
 #### DirectDDS
 
@@ -403,13 +402,20 @@ BidConstraint:
 
 ### LLM校验层
 
-`bridge/mcts/llm_validator.py` 规则化校验 LLM 推荐出牌：
+`bridge/mcts/llm_validator.py` 规则化校验 LLM 推荐出牌，共 **9 组**检查：
 
-1. **规则1**：推荐牌必须在 `playable` 中（基本合法性）
-2. **规则2**：第四家"能赢却出小牌输墩"检测
-3. **规则3**：第二家"小牌盖大牌"错误检测
+1. 推荐牌合法性（在 `playable` 中）
+2. 垫牌保护（`_check_discard`）
+3. 不将吃同伴的赢墩（`_check_ruff_partner`）
+4. 第二家（`_check_second_hand`）
+5. 第三家（`_check_third_hand`）
+6. 第四家"能赢却出小牌输墩"（`_check_fourth_hand`）
+7. 领出（`_check_lead`）
+8. 通用·赢墩时用最小牌（内联，warning 级）
+9. 通用·将吃用最小足够将牌（`_check_min_trump`）
 
-校验失败时回退到 `_select_best_card`。
+**回退路径**：仅 `critical` / `error` 级别才纠正，回退到 `validation.suggested_card`，否则 `suggest_rule_based_play()`；`warning` 级保留 LLM 的选择。
+（`_select_best_card` 是另一条"LLM 不可用"时的回退路径，本身也委托 `suggest_rule_based_play()`——不要把它写成 llm_validator 的校验失败回退。）
 
 ### 打牌交互流程
 
@@ -542,28 +548,32 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
 | `DEFAULT_DEAL_SYSTEM` | `2D/2H/2S：自然阻击` | 阻击叫体系，影响关键字提取 |
-| `DEFAULT_PLAY_ENGINE` | `dd_alphamu_llm` | 默认打牌引擎（可选 llm/mcts/dd/perfect/alphamu/dd_alphamu_llm） |
+| `DEFAULT_PLAY_ENGINE` | `dd` | 默认打牌引擎（可选 llm/dd/perfect/alphamu） |
 | `DEFAULT_MAIN_PROMPT_MODEL` | `deepseek-flash` | 主提示词模型 |
 | `DEFAULT_FALLBACK_MODEL` | `deepseek-flash` | 备用提示词模型 |
 | `MAIN_PROMPT_TEMPERATURE` | 0.2 | 主提示词温度 |
 | `FALLBACK_PROMPT_TEMPERATURE` | 0.5 | 备用提示词温度 |
-| `MAIN_PROMPT_MAX_RETRIES` | 2 | 主提示词合规性重试次数 |
-| `FALLBACK_PROMPT_MAX_RETRIES` | 1 | 备用提示词重试次数 |
-| `MCTS_ITERATIONS` | 5000 | MCTS最大迭代数 |
-| `MCTS_TIME_LIMIT` | 10.0 | MCTS时间限制（秒） |
+| `MAIN_PROMPT_MAX_RETRIES` | 2 | 主提示词合规性重试次数（定义于 `bridge/bidding_service.py`，**不在 config.py**） |
+| `FALLBACK_PROMPT_MAX_RETRIES` | 1 | 备用提示词重试次数（同上，定义于 `bridge/bidding_service.py`） |
+| `DEFAULT_PLAY_ENGINE` | `dd` | 默认打牌引擎（可选 `llm`/`dd`/`perfect`/`alphamu`） |
 | `DD_NUM_SAMPLES` | 200 | DD采样数 |
 | `DD_TIME_LIMIT` | 30.0 | DD时间限制（秒） |
+| `DD_SCORING_MODE` | `make_rate` | DD 决策计分制（make_rate/imp/avg_tricks；2026-09-20 由 imp 改为 make_rate，与飞牌规则层统一到做成率口径） |
+| `DD_MAJORITY_VOTES` | 1 | DD 多数投票票数（1 = 关闭） |
+| `DD_USE_CONSTRAINTS` | True | 打牌是否使用叫牌约束（运行时开关） |
 | `ALPHA_MU_ENABLE` | True | 启用αμ引擎 |
 | `ALPHA_MU_ENDGAME_CARDS` | 8 | αμ触发牌数阈值 |
 | `ALPHA_MU_NUM_WORLDS` | 20 | αμ possible worlds数 |
-| `ALPHA_MU_M` | 2 | αμ Max递归层数 |
+| `ALPHA_MU_M` | 2 | αμ Max递归层数（1~3，**不随牌数降级**） |
 | `ALPHA_MU_TIME_LIMIT` | 60.0 | αμ时间限制（秒） |
 | `DD_PARTICLES_MIN` | 100 | DD 采样数下限 |
 | `DD_PARTICLES_MAX` | 2000 | DD 采样数上限 |
-| `MCTS_PARTICLES_MIN` | 300 | MCTS 迭代数下限 |
-| `MCTS_PARTICLES_MAX` | 1000 | MCTS 迭代数上限 |
-| `ALPHA_MU_WORLDS_MIN` | 30 | αμ world 数下限 |
-| `ALPHA_MU_WORLDS_MAX` | 500 | αμ world 数上限 |
+| `ALPHA_MU_WORLDS_MIN` | 10 | αμ world 数下限 |
+| `ALPHA_MU_WORLDS_MAX` | 100 | αμ world 数上限 |
+| `FINESSE_PROBE_DELTA` | 0.10 | 飞牌探针 Δ 阈值（**做成率差**口径，非赢墩均值差） |
+| `FINESSE_RATIO` | 0.75 | 飞牌干预统一比值 |
+| `FINESSE_COMMIT_DIE_PCT` | 0.05 | 三层接应判据下界（不飞即死 → 强制接应） |
+| `FINESSE_COMMIT_ALIVE_PCT` | 0.40 | 三层接应判据上界（定约不依赖飞牌 → 退让引擎） |
 | `SIGNAL_MIN_RANK` | 8 | 防守高牌信号最低 rank |
 
 ### 端口约定
@@ -579,6 +589,42 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 3. 启动前端：`cd web && npm run dev`
 
 ## 版本历史
+
+> **分工声明（2026-09-20 定）**：本段只记**版本摘要**——面向"当前状态速查"，每个版本一行到数行。
+> **过程性内容（背景/动机/教训/测试明细/修改文件清单）以 [`CHANGELOG.md`](CHANGELOG.md) 为唯一权威**，本段不重复展开。
+> 改动代码时：CHANGELOG 记全过程；本段只在需要更新"当前状态"认知时补一条摘要。
+> 2026-09-20 之前的版本历史曾与本文件重复约 76KB，治理记录见 `docs/开发文档整理_发现清单_20260920.md`。
+
+### v1.97（2026-09-20）DD 默认计分制改 make_rate + 稳成线改口径降阈值
+- **DD 默认计分制 `imp` → `make_rate`**：统一引擎选牌 / 比值退让 / 稳成线三处口径到"做成率"，消除"引擎按 imp 优化、规则层按做成率裁决"的口径错配；前端默认值同步 + localStorage 键改 `_v2`（旧键 `'imp'` 会覆盖新默认）
+- **稳成线改口径**：`_stable_make`（全体候选最高做成率）→ **`_top1_make`**（只取引擎 top1 做成率），使实现与 `config` 注释语义一致，且判据对齐引擎实际要走的路线
+- **阈值 0.95 → 0.85**：`FINESSE_NEC_MAKE_HIGH`；三处挂载（9砸 扫描 / 9砸 跟牌 / 飞牌领出入口前置短路）统一；**连拔豁免维持**
+- **验证**：飞牌三件套 29/29 + 8/8 + doc-sync 3/3；`_top1_make` 边界单验；DD 直连冒烟 `scoring_mode=make_rate`
+- 投递：config.py, bridge/play_service.py, web/src/hooks/useModelSettings.js, tests/test_finesse_pipeline.py, tests/test_finesse_doc_sync.py, docs/飞牌介入管线图解.md, CLAUDE.md, DEVELOPMENT.md
+
+### v1.96（2026-09-20）接应三层判据 + 启动端 v1.94 路线对决 + 接应试错三轮回退
+- **背景**：6NT 缺♦Q 两缺陷链（接应端强制飞张被顶张替代 + 启动端反向路线未对决）；BM2000 2-B26 要求相反接应行为（退让引擎），两案同构、分界 = 押对世界桶内引擎最优替代牌做成率
+- **v1.93 同花采信收紧**：接应时引擎榜首同花色且 rank<对象（间张，引擎也在飞）→采信 top1；rank≥对象（顶张兑现）→落比值退让
+- **v1.94 启动端（保留）**：`[路线对决]` 同花色按方向分派押桶成对决、败派整派淘汰（胜派内同侧多动作不互杀）；`search(preset_worlds)`+`last_worlds` 两侧统一样本（消桶分裂抖动+省一次采样）；门控分子统一押桶成；e_info 方向逐条覆盖
+- **v1.94b/v1.95 接应端（全部回退）**：押桶成分子→同桶对决→零分母特判三轮试错撤销，回 v1.93 口径。B26 教训：榜首桶内 0.542（不飞仍活）时桶内完胜 1.85 是假信号；6NT 桶内 0（不飞即死）才是真信号——区分判据=押对世界榜首桶内值是否为零
+- **v1.96 三层判据（定稿）**：`_finesse_commit_ratio_ok` 前插——b_bucket（押对方向桶内引擎最优替代牌成率）≤`FINESSE_COMMIT_DIE_PCT`(0.05) 强制接应 / ≥`FINESSE_COMMIT_ALIVE_PCT`(0.40) 退让引擎 / 灰色区与桶数据缺失走 v1.93 兜底；配套 follow 探针 `finesse_probe_follow`（dd_search 采集端，全部候选牌入桶、零额外 DDS）+ `_register_finesse_flow` 方向登记恢复
+- **已决策（不再改）**：6NT 小牌 Δ=0.08 卡 0.10 门票（Δ=位置敏感性非方向价值，北持 ♦AJ 双保护稀释敏感性；真实区间 0.08~0.14 骑线）→ 方案 A 降阈值 0.05 / B 门票换 `_probe_finesse_ok` 结构判定 **均不采纳**，阈值维持 0.10、按"已知且接受的代价"结案（`docs/飞牌现行口径_接应判据与Δ门票_20260920.md` §三 决策记录）
+- **验证**：29/29（+t23~t29）+ 探针 8/8 + αμ 全过 + follow 探针端到端；后端重启健康
+- 投递：config.py, bridge/mcts/dd_search.py, bridge/play_service.py, tests/test_finesse_pipeline.py, docs/飞牌现行口径_接应判据与Δ门票_20260920.md, CHANGELOG.md, DEVELOPMENT.md
+
+### v1.92（2026-09-19）探针 Δ 口径换血：赢墩均值差 → 做成率差 + 方向键
+- **改口径**：`_finalize_finesse_probe` 的 Δ 由"缺失大牌在东/西两桶的**整手赢墩均值差**"改为"**做成率差**"（整手总墩 ≥ `tricks_needed` 的世界占比）——原赢墩口径的信号上限 = 做成率差 × 生死线墩差，**临界定约（满贯生死线常 1 墩）在赢墩口径必失明**
+- **新增"方向"键**：Δ 取幅值（进池门票/结构排序沿用"位置敏感性"语义），另有 `方向`（哪侧桶做成率高=押哪侧飞）与 `押桶成`；修复旧 `abs()` 丢方向导致选错飞牌路线的缺陷
+- **阈值**：`FINESSE_PROBE_DELTA` 0.15 → 0.10（v1.93 同批）：425 世界桶 n≈200 采样噪声约 ±5pt，真信号（小♦ 引牌 14.8pt）曾骑在 15pt 上两测 16.1/13.5 摇摆漏检
+- 投递：bridge/mcts/dd_search.py, config.py, bridge/play_service.py
+- **注**：本条为**补记**——v1.92 当时未写入版本历史，仅有 `config.py` 注释可考（原始改动已并入 v1.93~v1.96 的未提交批次）
+
+### v1.91（2026-09-19）确认定约与首攻弹窗支持手动编辑约束
+- **display 格式逆向解析**：新增 `POST /api/constraints/parse`——把用户在弹窗里手动编辑的约束文本（display 格式）反解为各家约束 payload；空文本 = 全部无约束（用于测试无约束随机采样）
+- **`PlayService.parse_constraints_text`**（+108 行）：display 格式 → `BidConstraint`，供"手动编辑 → 确认"闭环；配套 `_format_constraints_for_display` 回显
+- **前端**：弹窗约束区改为可编辑 + "恢复自动生成"；`api.parseConstraints` 透传
+- 投递：api/main.py, bridge/play_service.py, web/src/App.jsx, web/src/services/api.js
+- **注**：本条为**补记**——v1.91 有独立提交（`40e5774`）但漏写版本历史
 
 ### v1.90b（2026-09-19）运行时配置系统性修复：数值型请求携带 + 全局开关落盘
 - **背景**：票数实测不触发 → 根因是配置加载链路缺陷——所有运行时可调配置=localStorage+刷新时启动同步，后端重启即回默认、不刷新即错。定调两条路线
@@ -768,7 +814,7 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 - 投递：bridge/play_service.py, bridge/play_types.py, docs/飞牌讨论与修改记录_20260911.md（新增）
 
 ### v1.72（2026-09-10）
-- **飞牌多结构启动：两侧探针合并 + Δ 降序过门控**（详见 `docs/飞牌优化讨论与修改记录_20260830.md`）
+- **飞牌多结构启动：两侧探针合并 + Δ 降序过门控**（详见 `docs/飞牌系统演化全程_20260830-20260920.md`）
   - **背景/决策**：多飞牌结构并存时启动顺序需按位置敏感度排序（Δ 高者优先）；"本侧判空才兜底伙伴侧"的机制割裂两侧结果。用户定调：**所有探测结果合池 → 按 Δ 降序 → 逐花色过退让门控 → 启动第一个通过的花色**（最高的也要过门控，不过再试次高）；**不加假结构过滤**（QT 飞 K、"T 在 Q 后"是真实位置飞，Δ>0.45 是其特征量级——本次不干预，只排序）
   - **两侧探针合并**：`_apply_lead_finesse_check` 探测本侧（`_detect_finesse_struct`）+ 新 helper `_probe_partner_finesse_struct`（仅庄/明手领出时以队友为领出方真跑 DD 评估，探针 Δ≥0.4 同门槛），同花色保留 Δ 高者成统一结构池
   - **Δ 降序过门控**：`_probe_lead_finesse_prefer` 循环 `sorted(key=Δ, reverse=True)` 逐花色过 `_finesse_launch_worthwhile` 四道闸，启动第一个通过的（顶张方回手/非顶张方直飞小牌）；9砸后 `nine_suits` 同步 Δ 降序
@@ -776,7 +822,7 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 - 投递：bridge/play_service.py
 
 ### v1.71（2026-09-09~10）
-- **接应判据收敛 + 探针门控修正 + DD 飞牌开关与 Δ 滑块**（详见 `docs/飞牌优化讨论与修改记录_20260830.md`；3NT 坐庄让过问题另见 `docs/坐庄决策_双明手全知偏差与单明手精修方案.md`）
+- **接应判据收敛 + 探针门控修正 + DD 飞牌开关与 Δ 滑块**（详见 `docs/飞牌系统演化全程_20260830-20260920.md`；3NT 坐庄让过问题另见 `docs/坐庄决策_双明手全知偏差与单明手精修方案.md`）
   - **可飞性校验删除**（`_probe_struct_playable` 整体移除）：探针 Δ≥0.4 即采纳为结构；误出防护由执行层承接（接应威胁比较制"选不出牌就尊重引擎"）
   - **接应尊重引擎唯一判据**：`_finesse_commit_check` 返回 None（本家无牌可压威胁/对象已现身/同伙未引飞）才尊重引擎；比值退让删除（采样口径不能否决结构动作）、AK 双顶张判据维持删除
   - **跟牌接应 flow 补构撤销**：严格只信当墩探针，判空即无结构不接应；流程延续（finesse_flow）只管下一墩领出，不与接应判据混层
@@ -787,7 +833,7 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 - 投递：bridge/play_service.py, bridge/mcts/dd_search.py, config.py, api/main.py, web/src/App.jsx, web/src/components/SettingsPanel.jsx, web/src/hooks/useModelSettings.js, web/src/services/api.js, tests/_tmp_follow_probe_gate.py（新增）
 
 ### v1.70（2026-09-08）
-- **飞牌启动重构：拖延废弃 + 窗口期主动启动 + 顶张侧过手 + 探针滑动窗口与可飞性校验**（详见 `docs/飞牌优化讨论与修改记录_20260830.md`、`docs/飞牌策略总整理.md`）
+- **飞牌启动重构：拖延废弃 + 窗口期主动启动 + 顶张侧过手 + 探针滑动窗口与可飞性校验**（详见 `docs/飞牌系统演化全程_20260830-20260920.md`）
   - **拖延策略整体废弃**：单步贪心不会因拖延换花色获得信息改判，拖延只有代价无收益；删除 `_defer_candidates`/`_is_danger_suit`/`_is_finesse_struct_card` 及入口领出拖延分支与配置（`FINESSE_RATIO_RISK`/`FINESSE_LOSE_TRIGGER`/`FINESSE_DEFER_WIN_MIN`）
   - **窗口期主动启动**（`_probe_lead_finesse_prefer`）：探针识别出结构（Δ≥0.4）即窗口期，领出方为庄/明手且引擎榜首是其他花色时主动改出该花色启动；门槛用探针结构本身（跨墩度量），不走 0.95 单步比值（单步贪心看不到跨墩飞牌收益）；9张以上砸/飞分流，<9张只飞不砸，顶张方无稳赢回手不强制
   - **顶张侧过手启动**（`_apply_lead_transfer`）：当前侧探针无结构时以队友为领出方真跑 DD 评估（`dd_search.search` 新增 `perspective`/`actual_turn` 覆盖），队友侧探针同一 Δ≥0.4 门槛；当前方是顶张方 → `_cash_reentry` 过手给队友首引飞，写 finesse_flow
@@ -810,7 +856,7 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
   - 验证脚本保留在 `scripts/_verify_*.py`（5个：dd_make/dd_global/make_rate/trump32_subset/global_intervention）
 
 ### v1.69
-- **飞牌策略体系：识别/接应/拖延/8飞9砸/9砸后续 + DD世界过滤**（方案见 `docs/单套结构飞牌总谱.md`、`docs/飞牌优化讨论与修改记录_20260830.md`）
+- **飞牌策略体系：识别/接应/拖延/8飞9砸/9砸后续 + DD世界过滤**（方案见 `docs/单套结构飞牌总谱.md`、`docs/飞牌系统演化全程_20260830-20260920.md`）
   - `_detect_finesse_struct`（方法B·静态间张）：合并庄家+明手各花色找可飞对象 M（K/Q/J），有上方控制张+下方≥T飞张+合计≥4张 → 可飞；仅当前出牌方 ∈ (庄家,明手) 触发，防守方不干预
   - `_apply_finesse_tactics` 统一干预管线（DD/αμ 共用）：领出判引发飞牌+可拖延换花色；跟牌强制接应+8飞9砸；垫牌不处理
   - 8飞9砸（含将牌普遍适用）：≤8张 → 榜首砸张且候选飞张比值≥0.95 → 改飞；≥9张 → 榜首飞张且候选顶张≥0.95 → 改砸；比值<0.95 尊重引擎
@@ -1127,18 +1173,24 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 ## 依赖项
 
 ### Python依赖
+
+`requirements.txt` 实际内容（4 个包）：
 ```
-openai
-python-dotenv
-python-docx
-pyautogui
-pyscreeze
-pillow
+openai>=1.0.0
+python-docx>=0.8.11
+volcengine-python-sdk>=1.0.0
+pyinstaller>=6.0.0
 ```
 
+**运行时实际需要但未列入 `requirements.txt`**（干净环境必须手动安装，否则功能降级或直接启动失败）：
+- `python-dotenv` — `config.py` **模块级**导入，缺失即启动失败
+- `endplay` — 见下（打牌引擎必需）
+- `pillow` — `utils/screenshot.py` 惰性导入，用于剪贴板截屏图像读取
+
+> 已移除/幽灵依赖：`pyautogui`、`pyscreeze`（全仓 0 引用，此前文档误列）、`mss`（全仓 0 处 import，截屏实际用 `subprocess` + PIL）。`volcengine-python-sdk` 虽在 requirements.txt 内，但全仓 0 处 import（豆包走 `openai` SDK 打端点）。
+
 ### 可选依赖
-- `endplay`：双明手分析（`endplay_integration.py`，v1.50后DD引擎不再依赖）
-- `mss`：截屏功能
+- `endplay`：**打牌引擎运行时必需**（不在 requirements.txt）——`bridge/mcts/direct_dds.py` 的 `_load_dll()` 通过 `import endplay._dds` 定位 `dds.dll`；缺失时 `is_dds_available()` 为 False，DD/Perfect DD/αμ 全部降级为规则选牌。另 `dd_analysis.py`（原 `endplay_integration.py`，已删）用它做 20 组合双明手分析表
 
 ### 前端依赖
 - React 19 + Vite + MUI

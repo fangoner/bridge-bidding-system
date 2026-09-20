@@ -21,13 +21,29 @@ In `llm/deepseek_client.py`, `chat()` and `chat_json()` accept a `thinking: bool
 
 Default disabled is intentional: DeepSeek V4 with thinking=enabled is 3-5x slower (60-90s instead of 14-19s for bidding), which is undesirable for most calls. The exception is the αμ+LLM engine's "思考模式" (reasoning mode), which explicitly passes `thinking=True` for deeper play analysis. Never change the default to True.
 
-### `endplay` is an optional dependency (v1.50: DD engine no longer depends on it)
-`endplay_integration.py` still uses the `endplay` Python library for batch double-dummy analysis (CLI menu option 9). It is NOT in `requirements.txt`. Install separately: `pip install endplay`. Code that uses it should guard with try/except ImportError.
+### `endplay` is NOT in requirements.txt, but DDS still needs it at runtime
+`requirements.txt` lists only `openai`, `python-docx`, `volcengine-python-sdk`, `pyinstaller`. `endplay` is missing from it, yet `bridge/mcts/direct_dds.py` still uses it — `_load_dll()` does `import endplay._dds` purely to locate `dds.dll` on disk (`direct_dds.py` `_load_dll`, ~L56). Without `endplay` installed, `is_dds_available()` returns False and every DD/perfect/αμ decision silently degrades to rule-based card selection. So in a clean environment: `pip install endplay` is effectively required for the play engines, despite the file's own docstring claiming the dependency was removed.
 
-**v1.50 change**: `bridge/mcts/dd_search.py` (DD engine) has removed endplay dependency entirely, switching to `bridge/mcts/direct_dds.py` (ctypes direct DDS C library wrapper). `direct_dds.py` provides `solve_all_boards_raw()` and `solve_all_boards_bits()`, ~6x faster than the endplay path.
+**Batch double-dummy analysis** lives in `dd_analysis.py` → `analyze_all_contracts()`, built on `direct_dds.calc_dd_table` (4 declarers × 5 strains = 20 combos). CLI: 定约分析 menu → option 2 (display label still says "（endplay）", which is stale). It does NOT use the `endplay` high-level API, only the DLL path lookup above. Note `endplay_integration.py` does **not exist** in this repo (removed long ago) — do not reference it.
+
+`direct_dds.py` provides `solve_all_boards_raw()` and `solve_all_boards_bits()`, which bypass endplay's PBN/Deal conversion entirely (~6x faster than the old endplay path).
 
 ### Tests are standalone scripts, not pytest
-Each file in `tests/` is run directly: `python tests/test_1c_1d.py`. No test runner, no pytest, no conftest.
+Each file in `tests/` is run directly: `python tests/test_finesse_pipeline.py`. No test runner, no pytest, no conftest.
+
+> **Convenience runner**: `run_finesse_tests.bat` (project root) runs the three finesse scripts in sequence (doc-sync → pipeline → probe), prints `>> PASS` / `>> FAILED` per script and a final `RESULT:` line, and returns exit code 0 / 1 (the `.bat` itself prints ASCII only, because this machine's console codepage is GBK and Chinese text in batch output would garble; the Python scripts print proper UTF-8). Double-click it, or `run_finesse_tests.bat` from a terminal.
+>
+> It does **not** run automatically: there is no test runner and no git hook (`.git/hooks` holds only samples), so it runs only when invoked.
+
+### 飞牌文档必须与代码同步（v1.96 起）
+改动 `bridge/play_service.py` 的飞牌相关代码（`_intervene` / `_garrison_*` / `_finesse_*` / `_probe_*`）或 `config.py` 的 `FINESSE_*` 常量后，**必须**：
+
+1. 跑 `python tests/test_finesse_doc_sync.py` —— 它比对 `docs/飞牌介入管线图解.md` 声明的**函数/常量符号**（29 个）与**阈值数值**（8 个）是否仍与代码一致；不一致会退出码 1 并逐项列出。
+2. 若该脚本报错，**同步更新图解**（以代码为准）——尤其是阈值表（`docs/飞牌介入管线图解.md` 第九节），它要求"反引号常量名 + 紧随其后的数值"格式，脚本据此解析。
+3. 该脚本**测不出**分支顺序调换、新增分支、判据内部逻辑改动——**这些仍需人工核对图解**。
+
+> 背景：该图第一版按 v1.71 写就，代码重写 20 多个版本后仍被当作现状（引用的 9 个函数全部不存在），最终只能归档。此约定即为防止同类漂移复发。
+> 文档角色：`docs/飞牌现行口径_接应判据与Δ门票_20260920.md`＝现行规则条文；`docs/飞牌介入管线图解.md`＝流程图；`docs/飞牌系统演化全程_20260830-20260920.md`＝决策史。**代码永远是对的。**
 
 ### No Python lint/typecheck configured
 There is no ruff, mypy, or pyright config. The web frontend has `npm run lint` (eslint). For Python changes, just verify code runs.
@@ -48,14 +64,15 @@ Start backend with `uvicorn api.main:app --host 0.0.0.0 --port 8003` (no `--relo
 
 ## Configuration
 
-`config.py` is the single source of truth. All MCTS, DD, model, temperature, and path settings are there. Do not create separate config files.
+`config.py` is the single source of truth for DD/αμ/model/temperature/path/finesse settings. Do not create separate config files.
 
-Key non-obvious settings:
-- `DEFAULT_PLAY_ENGINE = "dd_alphamu_llm"` — options: `"llm"`, `"mcts"`, `"dd"`, `"perfect"`, `"alphamu"`, `"dd_alphamu_llm"`
-- `MCTS_SEARCH_MODE = "mcts"` — options: `"mcts"` (tree+rollout) or `"dd"` (pure Monte Carlo + double-dummy)
-- `DEFAULT_DEAL_SYSTEM = "2D/2H/2S：自然阻击"` — affects keyword extraction for opening bids
+Key non-obvious settings (verified against `config.py`):
+- `DEFAULT_PLAY_ENGINE = "dd"` — options: `"llm"`, `"dd"`, `"perfect"`, `"alphamu"`. There is **no** `mcts` / `dd_alphamu_llm` / `tiered` engine any more (MCTS removed 2026-09-07; `dd_alphamu_llm` retired earlier).
+- `DEFAULT_DEAL_SYSTEM = "自然阻击"` — affects keyword extraction for opening bids
 - `SHOW_FULL_LLM_OUTPUT = True`
-- `MAIN_PROMPT_MAX_RETRIES = 2` / `FALLBACK_PROMPT_MAX_RETRIES = 1` — bidding compliance retry counts
+- `FINESSE_PROBE_DELTA = 0.10` / `FINESSE_RATIO = 0.75` — finesse intervention thresholds (the old 0.4 / 0.95 values are stale; Δ is a **made-contract-rate difference**, not a trick-average difference)
+- `DD_MAJORITY_VOTES = 1` (1 = majority voting off), `DD_USE_CONSTRAINTS = True`
+- Bidding-compliance retry counts are **not** in `config.py` — they live in `bridge/bidding_service.py`: `MAIN_PROMPT_MAX_RETRIES = 2` / `FALLBACK_PROMPT_MAX_RETRIES = 1` (imported by `api/main.py`). Edit those constants, not `config.py`.
 
 ## Bidding system gotchas
 

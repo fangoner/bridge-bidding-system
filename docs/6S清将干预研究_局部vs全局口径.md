@@ -49,7 +49,7 @@
 1. **不干预引擎**——DDMC 不选清将恰恰是全局最优的体现，教条式清将反而损害整副成功率。
 2. 无干预在可成子集已达 97.5%（双明手上限 99.9%），引擎几乎把该成的都打成了。
 3. 失败局那 2.5% 是引擎单盲采样承担 4-1/5-0 分布风险的概率性代价，属于"长期期望正确"的固有支出，不改引擎补偿。
-4. 原 [trump-control-heuristic.md](../../.trae/documents/trump-control-heuristic.md) 清将启发层方案**正式作废**。
+4. 原 [trump-control-heuristic.md](../.trae/documents/trump-control-heuristic.md) 清将启发层方案**正式作废**。
 
 ## 教训（口径纪律）
 

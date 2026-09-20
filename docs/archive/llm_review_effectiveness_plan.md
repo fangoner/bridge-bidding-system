@@ -1,5 +1,9 @@
 # LLM 分组审查功能有效性研究 & 整体优化方案
 
+> ⚠️ **历史文档（已过时，勿作为现状依据）** — 2026-09-20 标注。
+> 本文围绕 `_llm_group_review` / `_dd_llm_play` / `_alphamu_llm_play` / `_dd_alphamu_llm_play` 展开，而这些函数**在源码中已全部不存在**（αμ+LLM / DD-αμ-LLM 引擎已下线）。
+> 现状以 `CLAUDE.md` 与代码为准；审计记录见 `docs/开发文档整理_发现清单_20260920.md`。
+
 > 2026-08-08 调研。范围：`bridge/play_service.py` 的 `_llm_group_review` 及其调用链（`_dd_llm_play` / `_alphamu_llm_play` / `_dd_alphamu_llm_play`）。
 > **核心目标：提高打牌水平（做庄 + 防守），而非加快出牌速度。**
 > 前置约束：思考/非思考、模型选择由用户手动控制，程序不做默认干预。

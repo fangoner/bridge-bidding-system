@@ -3093,7 +3093,7 @@ async def set_dd_use_constraints(request: DdUseConstraintsRequest):
 
 # ── DD 探针 Δ 阈值（运行时动态，无需重启后端）──
 
-FINESSE_DELTA_MIN = 0.2
+FINESSE_DELTA_MIN = 0.05
 FINESSE_DELTA_MAX = 0.5
 
 
@@ -3104,13 +3104,13 @@ class DdFinesseDeltaRequest(BaseModel):
 
 @app.get("/api/play/dd-finesse-delta")
 async def get_dd_finesse_delta(session_id: str = Query("default")):
-    """获取 DD 探针 Δ 阈值（Δ≥该值判为飞牌结构，默认 0.4）"""
+    """获取 DD 探针 Δ 阈值（做成率口径，Δ≥该值判为飞牌结构，默认 0.10）"""
     return {"delta": float(config.FINESSE_PROBE_DELTA)}
 
 
 @app.post("/api/play/dd-finesse-delta")
 async def set_dd_finesse_delta(request: DdFinesseDeltaRequest):
-    """设置 DD 探针 Δ 阈值（运行时即时生效，钳制在 0.2~0.5）"""
+    """设置 DD 探针 Δ 阈值（做成率口径，运行时即时生效，钳制在 0.05~0.5）"""
     if request.delta is not None:
         config.FINESSE_PROBE_DELTA = max(FINESSE_DELTA_MIN, min(FINESSE_DELTA_MAX, float(request.delta)))
     _save_runtime_overrides()

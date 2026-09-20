@@ -1,273 +1,251 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file is the canonical reference for working in this repository: architecture, data structures, and workflows.
+
+> **文档纪律（重要）**：本文件于 2026-09-20 依代码逐条重写——此前它长期滞后（曾同时描述 7 个打牌引擎、已删除的 `search.py`/`rollout.py`/`endplay_integration.py`，以及多个不存在的配置常量）。
+> 改动代码时**必须同步本文件**；凡涉及模块/函数/配置常量名，**以代码为准，不要引用本文件的记忆**。漂移成因与治理记录见 `docs/开发文档整理_发现清单_20260920.md`。
 
 ## Overview
 
-Bridge bidding and card play practice system with AI integration. Bidding: two-player/four-player using JF conventions, DeepSeek API for AI decisions, 5-path fallback mechanism with keyword extraction from JF convention document. Card play: full trick-taking state machine with 7 engines — LLM, MCTS (determinization + UCT tree search), DD (Monte Carlo + DirectDDS), Perfect DD (full-info double-dummy), Tiered (multi-engine auto-scheduling), αμ (Pareto search solving PIMC defects), and αμ+LLM (αμ + LLM strategy review). Also uses Doubao Vision API for screenshot recognition, Deep Finesse (external exe) and endplay (Python library) for contract analysis.
+Bridge bidding and card play practice system with AI integration.
+
+- **Bidding**: two-player / four-player practice using JF conventions (plus an alternative 新睿/XR 二盖一 system), DeepSeek API for AI decisions, main-prompt / fallback-prompt mechanism with keyword extraction from the JF convention document.
+- **Card play**: full trick-taking state machine with **4 engines** — LLM, DD (Monte Carlo + DirectDDS), Perfect DD (full-info double-dummy), αμ (Pareto search solving PIMC defects) — plus a finesse-intervention rule layer that sits on top of the engine result.
+- Also uses Doubao Vision API for screenshot recognition, and Deep Finesse (external exe) / DDS for contract analysis.
 
 ## Development Commands
 
 ### Installation
+
 ```bash
 pip install -r requirements.txt
 cd web && npm install
 ```
 
+> `requirements.txt` is **incomplete**. `python-dotenv` (imported at module level by `config.py`), `endplay` (used by `direct_dds._load_dll()` to locate `dds.dll`) and `pillow` (screenshot) are needed at runtime but are not listed. Without `endplay`, `is_dds_available()` returns False and every DD / Perfect DD / αμ decision silently degrades to rule-based card selection.
+
 ### Running the CLI Application
+
 ```bash
 python main.py
 ```
-Main menu: deal hands, settings, run bidding, analyze contracts, view history, test bidding sequences.
+
+Main menu: deal hands, settings, run bidding, analyze contracts, view history, test bidding sequences. Batch double-dummy analysis is 主菜单 `5 定约分析` → `2` (the label still says "（endplay）" but the implementation is `dd_analysis.py` + DirectDDS).
 
 ### Running the Web API Backend
+
 ```bash
-cd api
-uvicorn main:app --host 127.0.0.1 --port 8003
+uvicorn api.main:app --host 0.0.0.0 --port 8003
 ```
-Or use convenience scripts: `start_backend.bat` (backend only), `start_web.bat` (frontend only), or chain both.
+
+Do **not** use `--reload` (it may crash when several files change in succession). Convenience scripts: `start_backend.bat` (backend only), `start_web.bat` (**starts both** backend and frontend — note it still passes `--reload`, a legacy inconsistency), `start_services.ps1`.
 
 ### Running the Web Frontend
+
 ```bash
 cd web && npm run dev
 ```
-Frontend runs on `http://localhost:5173` (Vite). Requires backend API on port 8003.
+
+Frontend runs on `http://localhost:5173` (Vite, `strictPort: true`, `/api` proxied to `localhost:8003`).
 
 ### Testing
-- **Bidding sequence test** (menu option 7): Tests keyword extraction, JF retrieval, and preprocessing interactively.
-- **Unit tests**: ~30 individual scripts in `tests/`, covering bidding sequences (openings, responses, 1NT, 2D, third-fourth seat, etc.), keyword extraction, tree navigation, and preprocessing. E.g. `python tests/test_1c_1d.py`.
-- **API tests**: `python test_api.py` (requires running backend).
-- **endplay test**: `python endplay_integration.py`.
+
+- **Unit tests**: standalone scripts in `tests/`, run directly — e.g. `python tests/test_finesse_pipeline.py`. **No pytest, no conftest, no test runner.**
+  Current state: 21 top-level files (13 `test_*`, 8 `debug_*`/`verify_*`). The bidding-sequence corpus (~31 files, e.g. `test_1c_1d.py`) has been **archived to `tests/_stale/`** and is no longer maintained; `tests/README.md` is stale.
+- **Finesse pipeline** (main regression for the play rule layer): `tests/test_finesse_pipeline.py` (29 cases), `tests/test_probe_finesse.py` (8 cases).
+- **Finesse doc-sync guard**: `python tests/test_finesse_doc_sync.py` — verifies `docs/飞牌介入管线图解.md` still matches the code (29 function/constant symbols + 8 `FINESSE_*` threshold values). **Run it after any finesse-code or `FINESSE_*` change**; it exits 1 and lists each mismatch. It cannot detect branch reordering, new branches, or internal predicate changes — those still need a manual read of the diagram.
+- **One-shot runner for all three finesse checks**: `run_finesse_tests.bat` (project root) — runs doc-sync + `test_finesse_pipeline.py` + `test_probe_finesse.py`, prints a per-script PASS/FAIL and a final `RESULT:` line, exits 0/1. Nothing invokes it automatically (no test runner, no git hooks installed).
+- **Bidding sequence test** (CLI menu option 7): interactive keyword extraction / JF retrieval / preprocessing check.
+- **API tests**: `python test_api.py` — that file **no longer exists**; exercise the running backend instead.
 
 ### Packaging
-- **Quick build**: `build.bat` or `pyinstaller build.spec --clean`
-- **Update release**: `update_release.bat` (copies to `release_桥牌叫牌练习/`)
-- **Installer**: Inno Setup with `installer.iss`
-- Details in `DEVELOPMENT.md`.
 
-### Using Claude Code with DeepSeek
-```bash
-claude-deepseek.bat
-```
-Sets `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL` (`deepseek-flash`), `API_TIMEOUT_MS` (600000ms).
-
-## Getting Started
-### Prerequisites
-- Python 3.x, Node.js 18+
-- DeepSeek API key (for AI bidding)
-- Doubao Vision API key (optional, for screenshot recognition)
-- Deep Finesse 2014 v2 executable (optional, for contract analysis)
-- JF convention document (`JF实战_标准自然 - Rev 3.2.docx`) in project root
-
-### Environment Setup (`.env`)
-```env
-DEEPSEEK_API_KEY=your_deepseek_api_key
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DOUBAO_API_KEY=your_doubao_api_key
-DOUBAO_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
-DOUBAO_VISION_ENDPOINT=your_vision_endpoint_id
-DOUBAO_SEED_ENDPOINT=your_seed_endpoint_id
-```
+Build/packaging scripts (`build.bat`, `build.spec`, `update_release.bat`, `installer.iss`) are **not in the working tree** — they survive only under `backups/backup_*/` history snapshots. `DEVELOPMENT.md` no longer documents packaging.
 
 ## Project Architecture
 
 ### Directory Structure
+
 ```
 ├── main.py                 # CLI application entry point
-├── api/main.py             # FastAPI web backend (1320 lines, 25+ endpoints)
+├── api/main.py             # FastAPI web backend (~3380 lines, 61 routes)
 ├── config.py               # Centralized configuration
+├── dd_analysis.py          # Batch double-dummy analysis (DirectDDS calc_dd_table, 20 combos)
 ├── bridge/                 # Core bridge logic
-│   ├── dealer.py           # Hand generation, HCP, distribution
+│   ├── dealer.py           # Hand generation, HCP, distribution, DealMode
 │   ├── bidding.py          # Bidding sequence parsing, keyword extraction
-│   ├── bidding_service.py  # AI bidding service wrapper
+│   ├── bidding_service.py  # AI bidding service (main/fallback switching, retries)
 │   ├── play_types.py       # Card, Trick, Contract, PlayState dataclasses
 │   ├── play_engine.py      # Card play state machine (rules, undo)
-│   ├── play_service.py     # AI play service (declarer/defender prompts)
+│   ├── play_service.py     # AI play service (engine dispatch + finesse layer) (~3150 lines)
+│   ├── play_strategies.py  # Lead/signal scheme registry — NOT wired into the system
 │   ├── deep_finesse.py     # Deep Finesse external exe integration
-│   ├── output_format.py    # Graphical/compact/DF output generation
-│   └── mcts/               # MCTS/DD/αμ play engines (determinization + search)
-│       ├── __init__.py      # Exports MctsSearch, DealSampler, HeuristicRollout, RandomizedRollout, DDSearch
-│       ├── search.py        # MCTS determinization + UCT tree search
-│       ├── dd_search.py     # Monte Carlo + DirectDDS evaluation, endgame enumeration
-│       ├── alpha_mu.py      # αμ Pareto search engine (2019 Cazenave & Ventos)
-│       ├── direct_dds.py    # ctypes direct DDS C library wrapper (v1.50)
-│       ├── sampler.py       # DealSampler: uniform sampling with level-based constraint validation
-│       ├── rollout.py       # HeuristicRollout + RandomizedRollout: fast playout
-│       ├── constraints.py   # BidConstraint: constraint validation (L1/L2/L0 levels)
-│       ├── bid_constraint_library.py  # Bidding constraint definitions
+│   ├── output_format.py    # Graphical / compact / DF output generation
+│   └── mcts/               # Search engines and sampling
+│       ├── __init__.py      # Exports only `DDSearch`
+│       ├── dd_search.py     # Monte Carlo + DirectDDS, endgame enumeration
+│       ├── alpha_mu.py      # αμ Pareto search engine
+│       ├── direct_dds.py    # ctypes direct DDS C library wrapper
+│       ├── sampler.py       # DealSampler: uniform sampling + level-based validation
+│       ├── constraints.py   # BidConstraint validation (L0-L3 levels)
+│       ├── bid_constraint_library.py  # DEPRECATED (v1.79) — research asset, not imported
 │       ├── bit_hands.py     # Bit-level hand representation for DDS
-│       ├── belief.py        # Utility functions: void detection, signal evidence collection
-│       ├── signals.py       # Defense signal models (attitude/count/suit preference)
-│       ├── llm_validator.py # LLM play validation layer (rule-based checks)
-│       └── state_utils.py   # Shared utilities: hand cloning, card application, PBN/endplay conversion
+│       ├── belief.py        # Utilities: collect_voids(), collect_signal_evidence()
+│       ├── signals.py       # Defense signal models (attitude / count / suit preference)
+│       ├── llm_validator.py # LLM play validation layer (9 rule checks)
+│       └── state_utils.py   # Shared utilities
 ├── knowledge/
-│   └── loader.py           # JF document parsing, tree retrieval
+│   ├── loader.py           # JF document parsing (split on >=2 blank paragraphs) + tree retrieval
+│   └── xr_retriever.py     # 新睿 (XR) retriever over scripts/xr_data/md_tables.json
 ├── llm/
-│   ├── prompts.py          # System/fallback/human/play prompts (~590 lines)
+│   ├── prompts.py          # Shared-template system / fallback / human / play prompts (~790 lines)
+│   ├── xr_prompts.py       # XR prompts, built from the same shared templates
 │   ├── deepseek_client.py  # DeepSeek API via OpenAI SDK
-│   └── doubao_client.py    # Doubao Vision API client
+│   └── doubao_client.py    # Doubao Vision / Seed client
 ├── utils/
 │   ├── history.py          # JSON-based bidding history storage
-│   └── screenshot.py       # Screen capture via MSS
-├── endplay_integration.py  # Batch double dummy analysis via endplay library
+│   └── screenshot.py       # Screen capture (subprocess + PIL)
 └── web/                    # React frontend (React 19 + Vite + MUI)
-    ├── src/App.jsx         # Main app with all game state (~2375 lines)
-    ├── src/components/     # 14+ React components + layout/ subdir
-    ├── src/context/        # 3 context providers (BiddingContext, PlayContext, GameContext)
-    ├── src/hooks/          # 7 custom hooks
-    ├── src/services/       # API service layer (api.js)
-    ├── src/theme/          # Theme system (colorSchemes.js, dark mode)
-    ├── src/constants/      # Shared constants (suits.js)
-    ├── src/utils/          # Frontend utilities (biddingUtils.js)
-    └── src/styles/         # Separated style modules
+    └── src/
+        ├── App.jsx         # Main app (~3770 lines)
+        ├── components/     # 14 components + features/ layout/ mobile/ play/ ui/ subdirs
+        ├── context/        # 4 providers (Game, Play, Bidding, AIProgress)
+        ├── hooks/          # 7 custom hooks
+        ├── services/       # API service layer (api.js)
+        ├── theme/          # Theme system (index.js only)
+        ├── layouts/  store/  styles/  constants/  utils/
 ```
 
+> **`bridge/play_strategies.py`** defines `LeadScheme` / `SignalScheme` plus `lead_scheme()`, `signal_scheme()` and `register_*()`. **Nothing outside the file references it** — its only coupling is the unused `config.LEAD_SIGNAL_SCHEME` constant. Treat it as an un-wired reserved module (a v1.66 deliverable), not a live mechanism, and do not document it as active.
+
 ### Core Modules
-- **`bridge/dealer.py`**: `BridgeDealer` class, `Hand` dataclass (HCP, distribution), `DealMode` enum, manual input parsing, `Position` enum.
-- **`bridge/bidding.py`**: `extract_retrieval_keyword()` - maps sequence to JF keyword; structural convention judgment (opening/two-bid/third-fourth seat vs fallback); partner position logic; consecutive pass detection.
-- **`bridge/bidding_service.py`**: `BiddingService` class - orchestrates keyword extraction, JF retrieval, main/fallback prompt switching, bid meanings accumulation.
-- **`knowledge/loader.py`**: `JFLoader` loads docx, segments by headings; `JFRetriever` matches keywords, builds tree from indentation (`│----`), `navigate_tree_by_bids()` for multi-bid decomposition and preprocessing.
-- **`bridge/play_engine.py`**: `PlayEngine` - state machine for card play with lead/dummy_reveal/playing/complete phases; card following rules; undo support (per-card and per-trick).
-- **`bridge/play_service.py`**: `PlayService` - AI card play logic. Supports 7 engines: LLM, MCTS, DD, Perfect DD, Tiered, αμ, αμ+LLM. Engine selected via `play_engine` param. v1.50: BeliefTracker removed, uniform sampling with level-based constraint validation.
-- **`bridge/mcts/search.py`**: `MctsSearch` - Single-dummy MCTS with determinization. Each iteration samples unknown hands, then runs Selection→Expansion→Simulation→Backpropagation using UCT. Adaptive iteration scaling based on remaining unknown cards.
-- **`bridge/mcts/dd_search.py`**: `DDSearch` - Pure Monte Carlo + DirectDDS (v1.50). Uniform samples, batch DDS via `solve_all_boards_raw()`, 3-layer tie-breaking. Supports `search()` (MC), `search_perfect()` (full-info DD), endgame enumeration. v1.50 removed endplay dependency entirely.
-- **`bridge/mcts/sampler.py`**: `DealSampler` - Uniform random sampling (v1.50) with level-based constraint validation fallback chain. `_sample_uniform()` shuffles unknown pool and distributes per remaining counts. Attempt chain (number = order): L0 (MH repair) → L1 (master-soft) → L2 (relaxed, 50 retries) → L3 (voids only, 20) → final least-violating. Removed BeliefTracker and old 3-step biased generation.
-- **`bridge/mcts/rollout.py`**: `HeuristicRollout` (deterministic) and `RandomizedRollout` (stochastic weighted) for MCTS simulation to hand completion.
-- **`bridge/mcts/constraints.py`**: `BidConstraint` dataclass; source-based classification (`is_hard_source`, `is_ignored_source`); verification fns `validate_hard()` / `validate_relaxed()` / `validate_voids_only()`; `compute_sample_violation_score()` retained for diagnostics only.
-- **`bridge/mcts/direct_dds.py`**: ctypes direct DDS library wrapper (v1.50). `solve_all_boards_raw()` (Card-based) and `solve_all_boards_bits()` (bitmap-based) bypass endplay PBN/Deal conversion. ~6x faster than endplay path.
-- **`bridge/mcts/alpha_mu.py`**: `AlphaMuSearch` - Pareto search engine (2019 Cazenave & Ventos). Implements all 5 optimizations from 2021 paper (v1.50): Cut on Win, Maintaining Useful Worlds, World Cuts, Deep Alpha Cut, Empty Entry, Leaf Parallelization. Uses OutcomeVector/ParetoFront data structures, iterative deepening M=1..M, transposition table, DirectDDS bitmap leaf evaluation.
-- **`bridge/mcts/belief.py`**: Utility functions only (v1.50). `collect_voids()` for void detection, `collect_signal_evidence()` for LLM prompt injection. BeliefTracker class removed.
-- **`bridge/mcts/bid_constraint_library.py`**: Bid constraint definitions — maps bidding sequences to HCP/suit length/control constraints for sample validation.
-- **`bridge/mcts/bit_hands.py`**: Bit-level hand representation for efficient DDS board construction.
-- **`bridge/mcts/signals.py`**: Defense signal models — attitude (high=welcome/low=not), count, suit preference. `collect_all_signals()` gathers evidence from tricks; `format_partner_signals_for_prompt()` injects into LLM defense prompts.
-- **`bridge/mcts/llm_validator.py`**: Rule-based LLM play validation. Checks: (1) card legality, (2) 4th seat "can win but plays small", (3) 2nd seat "small covers big". Falls back to `_select_best_card` on validation failure.
-- **`bridge/deep_finesse.py`**: Integration with Deep Finesse 2014 v2 executable for contract analysis.
-- **`bridge/output_format.py`**: Three display formats (graphic, compact, Deep Finesse) generated programmatically without LLM calls.
-- **`llm/prompts.py`**: All prompt templates (bidding main/fallback/human, play declarer/defender/common rules).
-- **`endplay_integration.py`**: Batch double dummy analysis using `endplay` library; analyzes all 20 declarer-trump combinations; formats into compact table.
+
+- **`bridge/dealer.py`**: `BridgeDealer`, `Hand` (HCP, distribution), `DealMode` enum (**自由发牌 / 南北进局 / 南北满贯** — deal *strength* modes, not input sources), manual input parsing, `Position` enum.
+- **`bridge/bidding.py`**: `extract_retrieval_keyword()` — maps a sequence to a JF keyword; structural-convention judgement; partner-position logic; consecutive-pass detection.
+- **`bridge/bidding_service.py`**: `BiddingService` — keyword extraction, JF/XR retrieval, main/fallback switching, bid-meaning accumulation, compliance retries. `MAIN_PROMPT_MAX_RETRIES = 2` / `FALLBACK_PROMPT_MAX_RETRIES = 1` are defined **here**, not in `config.py`.
+- **`knowledge/loader.py`**: `JFLoader` loads the docx and splits it on **≥2 consecutive empty paragraphs** (not on headings); `JFRetriever` matches keywords, builds trees from `│----` indentation, and `navigate_tree_by_bids()` handles preprocessing.
+- **`bridge/play_engine.py`**: `PlayEngine` — phases `lead` / `dummy_reveal` / `playing` / `complete`; follow-suit rules; per-card and recursive per-trick undo.
+- **`bridge/play_service.py`**: `PlayService` — AI play logic. Dispatch in `get_ai_play(use_reasoning, use_dd, use_perfect, use_alphamu, dd_samples, dd_scoring_mode, amu_worlds, amu_m)`: `use_perfect` → `use_dd` → `use_alphamu` → LLM (fall-through, **no flag**). Default engine is `dd`. Also hosts the finesse-intervention layer and bid-constraint parsing/merging.
+- **`bridge/mcts/dd_search.py`**: `DDSearch` — Monte Carlo + DirectDDS. `search()` (MC; supports `perspective` / `actual_turn` / `preset_worlds`), `search_perfect()`, endgame enumeration. Candidate comparison is a **plain single-pass decision-value comparison** (declarer takes the higher, defenders the lower) — **no small-card preference and no significance threshold**; only `make_rate` mode blends `scoring_val*10000 + avg_tricks` as a tiebreak. Equivalence = exact per-world `scores` equality; when the make-rate leader and the trick leader disagree, `DD_MAJORITY_VOTES` (default 1 = off) triggers majority voting.
+- **`bridge/mcts/alpha_mu.py`**: `AlphaMuSearch` — Pareto search (Cazenave & Ventos). `OutcomeVector` / `ParetoFront`, iterative deepening `range(1, M+1)`, transposition table (key excludes M), bound reuse, root cut, plus the 2021-paper optimizations — **6 of them**: Cut on Win, Maintaining Useful Worlds, World Cuts, Deep Alpha Cut, Empty Entry, Leaf Parallelization. `_time_up()` must stay enabled.
+- **`bridge/mcts/sampler.py`**: `DealSampler` — uniform sampling with level-based constraint validation. `_sample_uniform()` is a **module-level function**; `DealSampler._sample_one` runs the chain L0 (MH repair) → L1 (master-soft) → L2 (relaxed, 50 retries) → L3 (voids only, 20) → L4 (least-violating).
+- **`bridge/mcts/constraints.py`**: `BidConstraint` dataclass; `inference_source` is a **diagnostic label only** — source grading (`is_hard_source` / `is_ignored_source` / `filter_hard_constraints`) and `compute_sample_violation_score()` were **deleted in v1.79**, and all constraints are validated uniformly through `validate_hard()` / `validate_relaxed()` / `validate_voids_only()`. `suit_controls` / `min_keycards` are extracted and merged but **skipped** in `_check_constraint` (deferred until defense play is studied).
+- **`bridge/mcts/direct_dds.py`**: ctypes DDS wrapper — `solve_all_boards_raw()` / `solve_all_boards_bits()` / `calc_dd_table()`, batching ≤200 boards, all solves serialized behind a lock. `_load_dll()` locates `dds.dll` via `import endplay._dds`, so **endplay is a runtime dependency of the play engines**, despite the module docstring's "bypasses endplay" phrasing (it bypasses endplay's PBN/Deal conversion, not the DLL lookup).
+- **`bridge/mcts/llm_validator.py`**: rule-based validation with **9 checks** (legality, discard protection, don't ruff partner's winner, 2nd / 3rd / 4th hand, lead, cheapest winner, cheapest sufficient trump). Only `critical` / `error` severities are corrected, falling back to `validation.suggested_card` → `suggest_rule_based_play()`; `warning` keeps the LLM's choice. (`_select_best_card` is a separate LLM-unavailable path.)
+- **`bridge/mcts/signals.py`**: `collect_all_signals()`, `format_partner_signals_for_prompt()` — attitude / count / suit-preference evidence for LLM defense prompts.
+- **`dd_analysis.py`**: `analyze_all_contracts()` — 4 declarers × 5 strains = 20 combos via `calc_dd_table`, formatted as the "小房子" table.
+- **`llm/prompts.py`**: all prompt templates. The main / fallback / human prompts are generated from shared `_SHARED_*` templates through `_make_prompt(template, system_tag, deal_system_block, no_valid_bid)`, parameterized for JF vs 新睿 (XR).
+- **`llm/deepseek_client.py`**: schemas — `BIDDING_SCHEMA` **6** fields, `BIDDING_FALLBACK_SCHEMA` **13** fields, `HUMAN_BID_SCHEMA` **5** fields, `PLAY_SCHEMA` 4 fields.
 
 ### Web Architecture
-- **Backend** (FastAPI, `api/main.py`, 1320 lines): 25+ REST endpoints organized by function:
-  - Game: `POST /api/deal`, `/api/custom-deal`, `/api/image-deal`, `/api/screenshot-deal`, `/api/read-clipboard`
-  - Bidding: `POST /api/bid`, `/api/human-bid`, `/api/analyze`, `/api/reload-jf`
-  - Output: `POST /api/output-formats`, `/api/analyze-contract`
-  - Play: `POST /api/play/init`, `/api/play/card`, `/api/play/ai-play`, `/api/play/undo`, `/api/play/update-roles`, `GET /api/play/state`
-  - Analysis: `POST /api/double-dummy`
-  - Config: `GET/POST /api/fallback-model`, `/api/ai-provider`, `GET /api/health`
-- **Frontend** (React 19 + Vite + MUI, `web/`): 14+ components in `src/components/` (plus `layout/` and `mobile/` subdirs), 6 custom hooks in `src/hooks/`. State managed via `useBiddingState` and `useBridgeRecords` hooks. Dark mode via `theme/colorSchemes.js` with local storage persistence. API calls centralized in `services/api.js`. Error boundary via `ErrorBoundary.jsx`.
-- **Shared logic**: CLI and web API both use `BiddingService` for bidding, `PlayService` for card play.
+
+- **Backend** (FastAPI, `api/main.py`, ~3380 lines, **61 routes**): game setup (`/api/deal`, `/api/custom-deal`, `/api/bm-deal`, `/api/image-deal`, `/api/trigger-screenshot`, `/api/single-hand-image`, `/api/read-clipboard`, `/api/read-hand-clipboard`, `/api/bidding-image`, `/api/read-bidding-clipboard`, `/api/diag-clipboard`), bidding (`/api/bid`, `/api/bid-async`, `/api/tasks/{id}`, `/api/tasks/{id}/cancel`, `/api/human-bid`, `/api/analyze`, `/api/constraints`, `/api/constraints/parse`, `/api/reload-jf`), output / analysis (`/api/output-formats`, `/api/analyze-contract`, `/api/double-dummy`), play (`/api/play/init`, `/api/play/card`, `/api/play/ai-play`, `/api/play/ai-play-async`, `/api/play/undo`, `/api/play/set-hand`, `/api/play/update-roles`, `/api/play/state`, `/api/play/dd-hints`, `/api/play/dd-hints-review`), play tuning (`/api/play/particle-settings`, `/api/play/dd-world-filter`, `/api/play/dd-finesse`, `/api/play/dd-finesse-delta`, `/api/play/dd-constraints`), records (`/api/records/index`, `/api/records/full/{id}`, `/api/records/backup`, `/api/records/upsert`, `/api/records/export`, `/api/records/delete`, `/api/records/note`), config (`/api/fallback-model`, `/api/ai-provider`, `/api/vision-provider`, `/api/time-budgets`, `/api/health`).
+  This list is a guide, not exhaustive — **`api/main.py` is the source of truth** for routes.
+  There is **no** `/api/screenshot-deal` (it is `/api/trigger-screenshot`) and **no** `/api/play/config`.
+- **Frontend** (React 19 + Vite + MUI, `web/`): 14 components in `src/components/` plus `features/`, `layout/`, `mobile/`, `play/`, `ui/` subdirs; 7 hooks in `src/hooks/`; 4 context providers (`GameContext`, `PlayContext`, `BiddingContext`, `AIProgressContext`); theme in `src/theme/index.js` (there is **no** `theme/colorSchemes.js`); API calls centralized in `src/services/api.js`; `ErrorBoundary.jsx`; eslint via `npm run lint`.
 
 ### Key Data Structures
+
 - `Hand`: HCP, distribution string, display string.
-- `Position`: Enum (North, East, South, West).
-- `DealMode`: Enum (free, manual, screenshot, Deep Finesse input).
-- `BiddingGame`: Main state machine holding hands, sequence, dealer, mode, AI clients.
-- `BiddingService`: Service wrapper for LLM calls, fallback switching, bid meanings.
-- `Card`: suit + rank, with comparison (rank_value, suit_order).
-- `Contract`: level, suit, declarer, doubled/redoubled, tricks_needed.
-- `Trick`: cards list, leader, trump, winner detection, AI metadata.
-- `PlayState`: complete game state - hands, contract, tricks, current_player, phase, declarer/defender trick counts.
-- `PlayPhase`: Enum (lead, dummy_reveal, playing, complete).
+- `Position`: Enum (North / East / South / West → 北 / 东 / 南 / 西).
+- `DealMode`: Enum (`自由发牌`, `南北进局`, `南北满贯`).
+- `BiddingGame`: main CLI state machine (hands, sequence, dealer, mode, AI clients).
+- `BiddingService`: LLM calls, fallback switching, bid meanings.
+- `Card`: suit + rank, with `rank_value` / `suit_order`.
+- `Contract`: level, suit, declarer, doubled / redoubled, `tricks_needed`.
+- `Trick`: cards, leader, trump, `winner()`, AI metadata, **`dd_hints`**.
+- `PlayState`: hands, contract, tricks, `current_player`, phase, declarer / defender trick counts, **`finesse_flow`**, **`finesse_flow_ends`**. Finesse also uses dynamically attached attributes (`finesse_flow_extra`, `finesse_windows`, `nine_cash_bank`) which are **not** declared fields.
+- `PlayPhase`: Enum (lead / dummy_reveal / playing / complete).
 
 ### Bidding Flow
-1. **Deal**: Random generation or manual/screenshot/DF input.
-2. **Bidding Loop**: For each position, extract keyword → retrieve JF content → preprocess subsequent bids → call AI (or human).
-3. **AI Decision**: Main prompt (structural conventions) or fallback prompt (no JF match). Fallback triggered when preprocessing returns empty or main prompt outputs "JF无合格叫品".
-4. **End**: Three consecutive passes end the auction.
-5. **Output**: Generate graphical/compact/Deep Finesse formatted results.
+
+1. **Deal**: random / manual / screenshot / image / BM2000 import / Deep Finesse input.
+2. **Bidding loop**: for each position — extract keyword → retrieve JF/XR content → preprocess subsequent bids → call AI or human.
+3. **AI decision**: main prompt (structural conventions) or fallback prompt. Fallback triggers when preprocessing returns empty or the main prompt outputs "JF无合格叫品".
+4. **End**: three consecutive passes.
+5. **Output**: graphical / compact / Deep Finesse formats.
 
 ### Card Play Flow
-1. **Init**: After bidding, `PlayService.initialize()` creates `PlayState` with contract, hands, player roles.
-2. **Lead phase**: Opening lead from left of declarer.
-3. **Dummy reveal**: After opening lead, dummy's hand is revealed (visible to all).
-4. **Playing**: 4-player trick-taking with follow-suit rules. AI decisions via one of seven engines:
-   - **LLM** ("llm"): Uses declarer/defender prompts with played cards tracking, defense signals, and trump-cleared detection.
-   - **MCTS** ("mcts"): Determinization + UCT tree search. Samples unknown hands, builds search tree over legal plays, runs heuristic rollouts to evaluate leaf nodes.
-   - **DD** ("dd"): Pure Monte Carlo + DirectDDS. Uniform samples, batch DDS via `solve_all_boards_raw()`, 3-layer tie-breaking (avg significance → small card preference → avg fallback).
-   - **Perfect DD** ("perfect"): Full-info double-dummy. Single `solve_board` gives exact tricks for all legal cards. Only in deal-practice mode.
-   - **Tiered** ("tiered"): Multi-engine auto-scheduling. Opening lead → DD+LLM fusion, midgame → DD+tiered LLM upgrade, endgame (≤6 cards) → αμ or DD enumeration.
-   - **αμ** ("alphamu"): Pareto search (Cazenave & Ventos 2019). OutcomeVector + ParetoFront, solves PIMC strategy fusion/non-locality defects. Adaptive depth by remaining cards.
-   - **αμ+LLM** ("alphamu_llm"): αμ search + LLM strategy review. Groups candidate cards by suit+rank tier, triggers LLM when groups are close in success rate.
-   - Engine selection via `play_engine` API param or `DEFAULT_PLAY_ENGINE` config.
-5. **Undo**: Supports per-card undo (restores hand, phase, current_player). Recursive undo across completed tricks.
-6. **Complete**: After 13 tricks, result calculated (made/undertricks).
+
+1. **Init**: `PlayService.initialize()` builds `PlayState` from the contract and hands.
+2. **Lead**: opening lead from declarer's left-hand opponent.
+3. **Dummy reveal**: after the opening lead.
+4. **Playing**: follow-suit enforced. AI decisions come from `get_ai_play()` (4 engines).
+5. **Finesse intervention**: after the engine returns candidates, a rule layer (`_intervene`, with the `_garrison_*` branches first and then the `_finesse_*` branches) may rewrite the chosen card. Structure recognition is a deterministic predicate (`_probe_finesse_ok`: there exists a card G with `obj > G > every defender card except obj`); the DD probe's Δ — a **made-contract-rate difference** with threshold `FINESSE_PROBE_DELTA = 0.10` — is an entry ticket and sort key, not the sole gate. The cross-trick continuation state machine (removed v1.77) and the "顶张方" (top-honor-holder) concept are **gone**; `finesse_flow` registration now lives within a single trick. The acceptance-side three-tier rule: `FINESSE_COMMIT_DIE_PCT = 0.05` (must finesse) / `FINESSE_COMMIT_ALIVE_PCT = 0.40` (defer to engine) / grey zone falls back to the ratio rule (`FINESSE_RATIO = 0.75`).
+   → **Branch-by-branch flowchart: `docs/飞牌介入管线图解.md`** (current-state diagram; run `python tests/test_finesse_doc_sync.py` after changing finesse code). Historical rationale: `docs/飞牌系统演化全程_20260830-20260920.md`. Current rule text: `docs/飞牌现行口径_接应判据与Δ门票_20260920.md`. Code is always the source of truth.
+6. **Undo**: per-card, recursively across completed tricks.
+7. **Complete**: after 13 tricks the result is computed.
 
 ## AI Integration Details
 
 ### Retrieval Keyword Extraction
-- Bidding sequences stored as `(S)1H-(W)pass-(N)2C-`.
-- `extract_retrieval_keyword()` in `bridge/bidding.py` extracts keywords based on sequence length, position, and deal system.
-- **Structural conventions** (use main prompt): Opening bids, two-bid keywords (`1D-1H`), third-fourth seat opening of 1-major.
-- **Non-structural** (use fallback prompt): Everything else including section numbers like `12.3.x`.
-- **Specialized extraction**: 1NT/1C/1D/1-major opening after opponent intervention (handles double, overalls, multi-Landy based on `deal_system`).
+
+- Sequences are stored as `(S)1H-(W)pass-(N)2C-`.
+- `extract_retrieval_keyword()` in `bridge/bidding.py` keys off sequence length, position and deal system.
+- **Structural conventions** (main prompt): opening bids, two-bid keywords (`1D-1H`), third/fourth-seat 1-major openings.
+- **Non-structural** (fallback): everything else, including section numbers such as `12.3.x`.
+- Specialized extraction handles 1NT / 1C / 1D / 1-major openings after intervention (double, overcalls, multi-Landy) based on `deal_system`.
 
 ### Tree-Structured Retrieval and Preprocessing
-- `parse_content_to_tree()` converts convention segments to trees based on `│----` indentation.
-- `navigate_tree_by_bids()` navigates tree by bidding sequence, auto-skipping opening bid root nodes.
-- Multi-bid lines with "/" decomposed into parallel bids (e.g., "2S/3C/D/H").
-- Single letters (C, D, H, S) auto-inferred as 3-level bids.
-- Empty preprocessing auto-falls back to "成局与满贯" (game and slam) keyword.
+
+- `parse_content_to_tree()` builds trees from `│----` indentation.
+- `navigate_tree_by_bids()` navigates by bidding sequence, auto-skipping opening root nodes.
+- Multi-bid lines with `/` are decomposed (e.g. `2S/3C/D/H`); single letters (C/D/H/S) are inferred as 3-level bids.
+- Empty preprocessing falls back to the "成局与满贯" keyword.
 
 ### Prompt System
-- **Main Prompt** (`BIDDING_SYSTEM_PROMPT`): 12 output fields. Must output "JF无合格叫品" when no valid bid. Cannot choose bid independently when preprocessing and partner suggestions are both empty.
-- **Fallback Prompt** (`BIDDING_FALLBACK_PROMPT`): 19 output fields (adds fit suits, shape points, game judgment). Always returns valid bid.
-- **Human Prompt** (`HUMAN_BID_PROMPT`): Context for human players with preprocessing results.
-- **Play Prompts** (`PLAY_DECLARER_PROMPT`, `PLAY_DEFENDER_PROMPT`, `PLAY_COMMON_RULES`, `PLAY_COMMON_SITUATION`): Declarer gets global plan + per-trick planning; defender gets per-position plans; both get trump-cleared detection.
-- **All prompts** forbid exposing actual hand info (HCP, distribution, specific cards).
+
+- **Main Prompt** (`BIDDING_SYSTEM_PROMPT`): structural conventions, **6 output fields**; must output "JF无合格叫品" when nothing qualifies.
+- **Fallback Prompt** (`BIDDING_FALLBACK_PROMPT`): **13 output fields** (adds fit-suit count, shape points, game/slam judgement, stoppers, cue-bid controls, key cards). Always returns a bid.
+- **Human Prompt** (`HUMAN_BID_PROMPT`): context for human players, **5 fields**.
+- **Play Prompts**: `PLAY_DECLARER_PROMPT`, `PLAY_DEFENDER_PROMPT`, `PLAY_COMMON_RULES`, `PLAY_COMMON_SITUATION`.
+- All prompts forbid exposing actual hand information (HCP, distribution, specific cards).
 
 ### AI Client
+
 - `DeepSeekClient` in `llm/deepseek_client.py`: OpenAI SDK with JSON schema validation.
-- Dual provider support: DeepSeek (`deepseek-flash`) or Doubao Seed API.
-- Separate model selection for main prompt (default `deepseek-flash`) and fallback prompt (default `deepseek-flash`), each configurable to chat or reasoner model.
-- Temperature: 0.2 for main prompt, 0.5 for fallback prompt.
-- Config keys in `config.py`: `DEFAULT_MAIN_PROMPT_MODEL`, `DEFAULT_FALLBACK_MODEL`, `DEFAULT_AI_PROVIDER`, `SHOW_FULL_LLM_OUTPUT`.
+- Dual provider: DeepSeek (`deepseek-flash`) or Doubao Seed.
+- Separate models for main and fallback prompts, each switchable to a reasoning variant (`::reasoning` suffix).
+- Temperature 0.2 (main) / 0.5 (fallback).
+- Play-side `thinking=True` comes from the **LLM engine** plus a `::reasoning` model selection — the old αμ+LLM "思考模式" engine is retired.
 
 ### Play Engine Configuration
-- `DEFAULT_PLAY_ENGINE`: "dd_alphamu_llm" (default; options: "llm", "mcts", "dd", "perfect", "alphamu", "dd_alphamu_llm").
-- `MCTS_ITERATIONS`: Max iterations per play decision (default 5000).
-- `MCTS_TIME_LIMIT`: Hard time cap per decision in seconds (default 10.0).
-- `MCTS_EXPLORATION_CONSTANT`: UCT exploration weight (default 1.414).
-- `ROLLOUT_GREEDY_PROB`: Heuristic play probability (default 0.80).
-- `DD_NUM_SAMPLES`: Max samples per DD decision (default 200). Adaptively scaled.
-- `DD_MIN_SAMPLES`: Floor for adaptive sample scaling (default 15).
-- `DD_TIME_LIMIT`: Time cap for DD decisions (default 30.0).
-- `DD_MAXIMIN_ENABLE`: Maximin card selection (default True). Mixes avg and min to prefer stable cards.
-- `DD_ENDGAME_CARD_THRESHOLD`: Cards/hand ≤ this triggers enumeration (default 4).
-- `ALPHA_MU_ENABLE`: Enable αμ engine (default True).
-- `ALPHA_MU_NUM_WORLDS`: Worlds per αμ search (default 20).
-- `ALPHA_MU_M`: Max recursion depth (default 2; forced to 1 when >8 cards remain).
-- `ALPHA_MU_TIME_LIMIT`: Time cap per αμ decision (default 60.0).
-- `ALPHA_MU_ENDGAME_CARDS`: Cards/hand ≤ this triggers αμ in Tiered engine (default 8).
-- `DD_PARTICLES_MIN/MAX`: DD sample count bounds for API config (100/2000).
-- `MCTS_PARTICLES_MIN/MAX`: MCTS iteration bounds for API config (300/1000).
-- `ALPHA_MU_WORLDS_MIN/MAX`: αμ world count bounds for API config (30/500).
-- `SIGNAL_MIN_RANK`: Minimum rank for high-card defense signal (default 8).
-- `TIERED_ENDGAME_CARDS`, `TIERED_*`: Tiered engine thresholds (see config.py).
+
+- `DEFAULT_PLAY_ENGINE = "dd"` — options `"llm" | "dd" | "perfect" | "alphamu"`. **No** `mcts` / `tiered` / `dd_alphamu_llm`.
+- DD: `DD_NUM_SAMPLES` 200, `DD_MIN_SAMPLES` 15, `DD_TIME_LIMIT` 30.0, `DD_SCORING_MODE = "make_rate"` (default since 2026-09-20; `"imp"` / `"avg_tricks"` still selectable), `DD_KEEP_SURE_WIN/CRITICAL/SURE_LOSE`, `DD_MAJORITY_VOTES = 1`, `DD_USE_CONSTRAINTS = True`, `DD_ENDGAME_CARD_THRESHOLD` 4.
+- αμ: `ALPHA_MU_ENABLE` True, `ALPHA_MU_ENDGAME_CARDS` 8, `ALPHA_MU_NUM_WORLDS` 20, `ALPHA_MU_M` 2 (panel-adjustable 1–3, **not** reduced by card count), `ALPHA_MU_TIME_LIMIT` 60.0.
+- API validation bounds: `DD_PARTICLES_MIN/MAX` 100/2000, `ALPHA_MU_WORLDS_MIN/MAX` **10/100**.
+- Finesse: `FINESSE_DEFER_ENABLE`, `DD_FINESSE_ENABLE` (DD-only runtime switch), `FINESSE_EIGHT_NINE_ENABLE`, `FINESSE_RATIO` 0.75, `FINESSE_PROBE_DELTA` 0.10, `FINESSE_COMMIT_DIE_PCT` 0.05, `FINESSE_COMMIT_ALIVE_PCT` 0.40.
+- Launch gate / 稳成线: `FINESSE_NEC_MAKE` 0.50, `FINESSE_NEC_MIN_RATIO` 0.50, `FINESSE_NEC_RATIO` 0.70, and **`FINESSE_NEC_MAKE_HIGH` 0.85** — the 稳成线 is evaluated by `_top1_make()`, i.e. the **engine top-1 candidate's** make rate (changed 2026-09-20 from "max over all candidates" at 0.95). At/above it the whole finesse layer defers to the engine (the 9砸 branch included), except the 连拔 continuation step.
+- `LEAD_SIGNAL_SCHEME = "standard"` — consumed only by the un-wired `play_strategies.py`.
+- **Removed constants** (do not reference): `MCTS_ITERATIONS`, `MCTS_TIME_LIMIT`, `MCTS_EXPLORATION_CONSTANT`, `MCTS_SEARCH_MODE`, `MCTS_PARTICLES_MIN/MAX`, `ROLLOUT_GREEDY_PROB`, `DD_MAXIMIN_ENABLE`, `TIERED_*`.
 
 ### Double Dummy Analysis
-- **endplay integration** (`endplay_integration.py`): Batch analysis of all 20 declarer-trump combos via `calc_dd_table()`.
-- Results formatted as compact table (rows: S/H/D/C/NT, columns: N/E/S/W).
-- Also supports single contract analysis via `solve_board()`.
-- Web API: `POST /api/double-dummy`.
-- CLI: Menu option 9 (requires `pip install endplay`).
-- **Deep Finesse** (`bridge/deep_finesse.py`): External executable integration for contract analysis. Web "检验定约" button auto-focuses DF window.
+
+- **Batch** (`dd_analysis.py`): all 20 declarer-strain combos via `direct_dds.calc_dd_table`. Web: `POST /api/double-dummy`. CLI: 主菜单 5 → 2.
+- **Deep Finesse** (`bridge/deep_finesse.py`): external exe integration; the web "检验定约" button focuses the DF window.
+- The former `endplay_integration.py` **no longer exists** — do not reference it.
 
 ## Important Conventions
-- **Bidding sequence format**: `(S)1H-(W)pass-(N)2C-` (position prefix + bid, hyphen separated).
-- **Bid priority**: At same level, higher-ranking suits (S > H > D > C) over NT.
-- **Partner consecutive pass**: In four-player bidding, when both partners have passed consecutively after first substantive bid, they auto-pass (no AI calls).
-- **Terminology**: "发牌人" (dealer) for first bidder; "庄家" (declarer) for final contract display.
-- **Config**: Centralized in `config.py` - includes AI provider, main/fallback models, temperatures, DF paths, deal system default, output modes.
-- **Output formats**: Three display formats (graphic, compact, Deep Finesse) generated without LLM calls.
+
+- **Bidding sequence format**: `(S)1H-(W)pass-(N)2C-`.
+- **Bid priority**: at the same level, S > H > D > C; NT outranks S at the same level.
+- **Partner consecutive pass**: once both partners have passed consecutively after the first substantive bid, they auto-pass (no AI calls).
+- **Terminology**: "发牌人" (dealer) for the first bidder; "庄家" (declarer) for the final contract display.
+- **Config**: centralized in `config.py` — except the two bidding retry constants, which live in `bridge/bidding_service.py`.
+- **Output formats**: generated programmatically, without LLM calls.
 
 ## Code Style
-- Python type hints and dataclasses where appropriate.
-- Module-level constants in UPPERCASE.
-- Chinese in user-facing strings and comments; English for technical identifiers.
-- Follow patterns in `bridge/dealer.py` and `bridge/bidding.py` for new code.
+
+- Chinese for user-facing strings and comments; English for technical identifiers, class names and functions.
+- Python type hints and dataclasses where appropriate; module-level constants in UPPERCASE.
+- Follow the patterns in `bridge/dealer.py` and `bridge/bidding.py` for new code.
 
 ## References
-- `AGENTS.md` — companion file with critical gotchas, alpha cut rules, DeepSeek thinking mode, and non-obvious behaviors
-- `DEVELOPMENT.md` — detailed development notes, version history, and architecture deep-dives
-- `.env.example` — environment template
-- `CHANGELOG.md` — version history
+
+- `AGENTS.md` — companion file: critical gotchas and non-obvious behaviours.
+- `DEVELOPMENT.md` — current architecture / mechanism documentation plus per-version **summaries**.
+- `DEVELOPMENT_HISTORY.md` — archived historical development documentation.
+- `CHANGELOG.md` — the authoritative per-version narrative (background, lessons, tests). **Process detail lives here, not in `DEVELOPMENT.md`.**
+- `docs/开发文档整理_发现清单_20260920.md` — documentation-drift audit: what was stale, why, and the cleanup record.
+- `.env.example` — environment template.

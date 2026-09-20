@@ -364,7 +364,7 @@ function SettingsPanel({
               sx={{ fontSize: '0.65rem' }}
             />
             <RangeSlider label="Δ阈值" value={ddFinesseDelta}
-              min={0.2} max={0.5} step={0.05} width={64}
+              min={0.05} max={0.5} step={0.05} width={64}
               onCommit={handleDdFinesseDeltaChange} />
             </>
           )}

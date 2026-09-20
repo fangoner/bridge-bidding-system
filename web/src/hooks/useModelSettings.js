@@ -8,13 +8,13 @@ const DD_SAMPLE_COUNT_KEY = 'bridge_dd_sample_count'
 const DD_PARTICLES_KEY = 'bridge_dd_particles'
 const ALPHA_MU_PARTICLES_KEY = 'bridge_alpha_mu_particles'
 const ALPHA_MU_M_KEY = 'bridge_alpha_mu_m'
-const DD_SCORING_MODE_KEY = 'bridge_dd_scoring_mode'
+const DD_SCORING_MODE_KEY = 'bridge_dd_scoring_mode_v2'  // v2：默认改 make_rate，旧键遗留 'imp' 会覆盖新默认
 const DD_KEEP_WIN_KEY = 'bridge_dd_keep_sure_win'
 const DD_KEEP_CRIT_KEY = 'bridge_dd_keep_critical'
 const DD_KEEP_LOSE_KEY = 'bridge_dd_keep_sure_lose'
 const DD_FINESSE_ENABLE_KEY = 'bridge_dd_finesse_enable'
-const DD_FINESSE_DELTA_KEY = 'bridge_dd_finesse_delta'
-const DD_FINESSE_DELTA_DEFAULT = 0.4
+const DD_FINESSE_DELTA_KEY = 'bridge_dd_finesse_delta_v2'
+const DD_FINESSE_DELTA_DEFAULT = 0.10
 const DD_USE_CONSTRAINTS_KEY = 'bridge_dd_use_constraints'
 const DD_MAJORITY_VOTES_KEY = 'bridge_dd_majority_votes'
 const VISION_PROVIDER_KEY = 'bridge_vision_provider'
@@ -108,11 +108,15 @@ export function useModelSettings() {
   const [alphaMuParticlesRange, setAlphaMuParticlesRange] = useState({ min: 10, max: 100 })
 
   // DD 决策计分制（localStorage 持久化），随 aiPlay 请求下发到后端 DD 引擎
+  // 默认 make_rate（2026-09-20 由 imp 改）：与飞牌规则层（稳成线/比值退让）
+  // 统一到"做成率"口径。键名带 v2 后缀——旧键里存着历史遗留的 'imp'，
+  // 不换键的话默认值改了也读不到（本文件 ddFinesseDelta 用同法处理过）。
+  const DD_SCORING_MODE_DEFAULT = 'make_rate'
   const [ddScoringMode, setDdScoringMode] = useState(() => {
-    try { return localStorage.getItem(DD_SCORING_MODE_KEY) || 'imp' } catch { return 'imp' }
+    try { return localStorage.getItem(DD_SCORING_MODE_KEY) || DD_SCORING_MODE_DEFAULT } catch { return DD_SCORING_MODE_DEFAULT }
   })
   const handleDdScoringModeChange = useCallback((value) => {
-    const v = ['imp', 'make_rate', 'avg_tricks'].includes(value) ? value : 'imp'
+    const v = ['imp', 'make_rate', 'avg_tricks'].includes(value) ? value : DD_SCORING_MODE_DEFAULT
     setDdScoringMode(v)
     try { localStorage.setItem(DD_SCORING_MODE_KEY, v) } catch {/* empty */}
   }, [])
@@ -193,12 +197,12 @@ export function useModelSettings() {
   const [ddFinesseDelta, setDdFinesseDeltaState] = useState(() => {
     try {
       const v = Number(localStorage.getItem(DD_FINESSE_DELTA_KEY))
-      if (!Number.isNaN(v) && v >= 0.2 && v <= 0.5) return v
+      if (!Number.isNaN(v) && v >= 0.05 && v <= 0.5) return v
     } catch {/* empty */}
     return DD_FINESSE_DELTA_DEFAULT
   })
   const handleDdFinesseDeltaChange = useCallback(async (delta) => {
-    const clamped = Math.min(0.5, Math.max(0.2, Math.round(delta * 100) / 100))
+    const clamped = Math.min(0.5, Math.max(0.05, Math.round(delta * 100) / 100))
     setDdFinesseDeltaState(clamped)
     try { localStorage.setItem(DD_FINESSE_DELTA_KEY, String(clamped)) } catch {/* empty */}
     try {
@@ -294,7 +298,7 @@ export function useModelSettings() {
     const storedDelta = (() => {
       try {
         const v = Number(localStorage.getItem(DD_FINESSE_DELTA_KEY))
-        if (!Number.isNaN(v) && v >= 0.2 && v <= 0.5) return v
+        if (!Number.isNaN(v) && v >= 0.05 && v <= 0.5) return v
       } catch {/* empty */}
       return DD_FINESSE_DELTA_DEFAULT
     })()
