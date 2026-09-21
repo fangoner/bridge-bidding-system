@@ -1,7 +1,9 @@
 import os
+import time
 import random
 import copy
 import math
+import threading
 from typing import Dict, List, Set, Optional, Tuple
 
 from bridge.play_types import Card, PlayState, PlayPhase, POSITION_ORDER
@@ -9,7 +11,7 @@ from bridge.mcts.state_utils import SUIT_DISPLAY_ORDER, RANK_DESC
 from bridge.mcts.constraints import (
     BidConstraint, validate_sample,
     HCP_MAP, CONTROL_MAP,
-    validate_hard, validate_relaxed, validate_voids_only,
+    validate_relaxed, validate_voids_only,
     _is_balanced, _check_constraint,
 )
 from bridge.mcts.belief import collect_voids
@@ -406,6 +408,7 @@ def _sample_mh_repair(
     known_info: dict,
     active_constraints: Dict[str, "BidConstraint"],
     max_swaps: int = 300,
+    stall_limit: int = 60,
     beta: float = 1.0,
 ) -> Tuple[Dict[str, List[Card]], bool]:
     """MH 修复：从一次均匀发牌出发，用引导式提案 + Metropolis 接受率逼近满足 L1 的手牌。
@@ -414,11 +417,14 @@ def _sample_mh_repair(
     min(1, exp(-beta * Δscore)) 接受/拒绝，在加速收敛的同时对分布做校正。
     β 越小越接近均匀探索，β 越大越激进逼近硬约束。只交换未知位置，不碰已知手牌。
     返回 (world, ok)。
+
+    打分=0 与 validate_hard 通过严格等价（违反任一条件都会使分数>0），故循环内
+    只用分数判停，省掉每步重复的完整约束校验（旧实现每步还会先生态一次必然
+    False 的 validate_hard，纯浪费）；连续 stall_limit 步无改进即提前退出，
+    避免不可行局面烧光 max_swaps 预算（不等价收敛仍在预算内完成，语义不变）。
     """
     world = _sample_uniform(known_info)
     if not active_constraints:
-        return world, True
-    if validate_hard(world, active_constraints):
         return world, True
     known_positions = set(known_info.get("result", {}).keys())
     swap_positions = [p for p in world if p not in known_positions]
@@ -432,9 +438,10 @@ def _sample_mh_repair(
         )
 
     current_score = total_score()
+    if current_score == 0:
+        return world, True
+    no_improve = 0
     for _ in range(max_swaps):
-        if current_score == 0 or validate_hard(world, active_constraints):
-            return world, True
         proposal = _propose_swap(world, active_constraints, swap_positions)
         if proposal is None:
             return world, current_score == 0
@@ -448,10 +455,13 @@ def _sample_mh_repair(
         accept_prob = min(1.0, math.exp(-beta * (new_score - current_score)))
         if random.random() < accept_prob:
             current_score = new_score
-            if validate_hard(world, active_constraints):
+            if current_score == 0:
                 return world, True
         else:
             hand_v[i], hand_d[j] = hand_d[j], hand_v[i]
+        no_improve = 0 if current_score == 0 else no_improve + 1
+        if current_score != 0 and no_improve >= stall_limit:
+            break
     return world, current_score == 0
 
 
@@ -492,7 +502,15 @@ def _sample_master_soft(
         key=lambda p: _master_priority(active_constraints[p]),
         reverse=True,
     )
+    remaining_counts = known_info.get("remaining_counts", {})
+    unknown_pool = known_info.get("unknown_pool", [])
     for master in ordered[:max_masters]:
+        # 单位置可满足性预检：HCP/花色与剩余牌池必然冲突的主位直接跳过，
+        # 不给 MH 修复留空转机会（非充分检查，仅跳过必然不可行者）
+        if not _position_hcp_feasible(
+            active_constraints[master], unknown_pool, remaining_counts.get(master, 0)
+        ):
+            continue
         world, ok = _sample_mh_repair(
             known_info, {master: active_constraints[master]}
         )
@@ -745,9 +763,19 @@ def _reduce_constraint_for_played(
     return reduced
 
 
+_fallback_last_ts: Dict[str, float] = {}
+_fallback_lock = threading.Lock()
+_FALLBACK_MIN_INTERVAL = 0.5  # 同一级回退日志最小写间隔（秒），防止逐世界刷盘
+
+
 def _warn_fallback(level: str, known_info: dict, constraints: dict) -> None:
-    """记录约束降级日志。"""
+    """记录约束降级日志（按级别节流，避免每个世界都往调试日志追加一行）。"""
     try:
+        with _fallback_lock:
+            now = time.monotonic()
+            if now - _fallback_last_ts.get(level, 0.0) < _FALLBACK_MIN_INTERVAL:
+                return
+            _fallback_last_ts[level] = now
         pos_list = [p for p in POSITION_ORDER if p not in known_info.get("result", {})]
         srcs = {}
         for p in pos_list:
