@@ -133,6 +133,7 @@ export function useDealing({ clearBiddingDraft }) {
     setUseFallback,
     setReadonlyMode,
     setImageOpeningLead,
+    setBmExplanation,
   } = useGame()
 
   const {
@@ -187,7 +188,7 @@ export function useDealing({ clearBiddingDraft }) {
 
   // 公共：发牌/识别后重置牌局状态
   const resetGameState = useCallback((opts = {}) => {
-    const { directPlayInfo = null, imageOpeningLead = null } = opts
+    const { directPlayInfo = null, imageOpeningLead = null, bmExplanation = null } = opts
     setBiddingSequence([])
     setBidSuggestion(null)
     setAiBiddingHistory([])
@@ -211,6 +212,7 @@ export function useDealing({ clearBiddingDraft }) {
     setLastCompletedTrick(null)
     setDirectPlayContractInfo(directPlayInfo)
     setImageOpeningLead(imageOpeningLead)
+    setBmExplanation(bmExplanation)
   }, [
     dealer, setBiddingSequence, setBidSuggestion, setAiBiddingHistory,
     setCurrentBidder, setBiddingStarted, setStopBidding, setPassedAIPositions,
@@ -218,6 +220,7 @@ export function useDealing({ clearBiddingDraft }) {
     setBiddingHistory, setHistoryIndex, setReadonlyMode, setShowPlayPanel,
     setPlayState, setAiPlayHistory, setIsPlayPaused, setLoadedPlayRecord,
     setLastCompletedTrick, setDirectPlayContractInfo, setImageOpeningLead,
+    setBmExplanation,
   ])
 
   // 1. 发牌
@@ -313,6 +316,7 @@ export function useDealing({ clearBiddingDraft }) {
         resetGameState({
           directPlayInfo: buildDirectPlayInfo(data),
           imageOpeningLead: data.opening_lead || null,
+          bmExplanation: data.explanation || null,
         })
         const parsedBidding = parseBiddingSequenceStr(data.bidding_sequence)
         setBiddingSequence(parsedBidding)

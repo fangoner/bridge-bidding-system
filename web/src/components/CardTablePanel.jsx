@@ -57,6 +57,7 @@ function CardTablePanel({
     positionRoles,
     readonlyMode, mode,
     imageOpeningLead,
+    bmExplanation,
     dealMode,
     fallbackModel, playModel,
   } = useGame()
@@ -463,6 +464,7 @@ function CardTablePanel({
           readonlyMode={readonlyMode}
           mode={mode}
           imageOpeningLead={imageOpeningLead}
+          bmExplanation={bmExplanation}
           addBid={addBid}
           isBiddingCompleteFn={isBiddingComplete}
           onHandCardClick={onHandCardClick}

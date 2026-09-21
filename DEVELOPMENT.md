@@ -602,6 +602,15 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 - **v2.02 押注桶统一口径**（"严峻"名废弃）：押注方向=几何常数（引牌侧=领出者下家 / 接应侧=接应者上家）；押注桶=被飞对象**全部命中押注方向**的世界做成率（单飞=对象在下家 / 双飞=登记+废弃都在押注方向）；门控分子/终选排序/接应判据一律以押注桶成为据
 - **v2.03 终选较大领出牌决胜**：`_subset_select` 键 `(a_make, blended)` → `(a_make, big, blended, rankpos)`。押桶成平票后偏好"领出牌 牌点 > min(对象, *废弃对象)"（避开被较小/第二飞牌对象白吃；不区分单双飞）。跨墩：双飞不靠登记继承，K/9 均未现身时每墩重探测仍合并，出 ♦Q 是双飞大牌规则第二轮的表现；9 被人后对象窗滑落才退化单飞
 
+### v2.04（2026-09-21）BM 牌局讲解导入：中心面板显示整篇讲解
+- **背景**：用户希望把 BM2000 的牌局讲解（做庄教学文案）导入系统，读入 BM 牌局开始打牌时在打牌桌面中心面板显示
+- **tools/bm_import.py**：新增 `extract_explanation()`——拼接段内全部 `at|` 讲解令牌为整篇文本，`@HK`/`@cQ` 卡牌引用统一转花色符号（`♥K`/`♣Q`，兼容大小写），写 bm_deals.json 的 `explanation` 字段；537 副全覆盖、0 残留未转换引用
+- **api/main.py**：`ImageDealResponse` 加 `explanation` 字段，`/api/bm-deal` 透传
+- **前端**：GameContext 新增 `bmExplanation` state；useDealing `handleBmDeal` 随牌局存入；CardTable 中心面板打牌视图下方渲染讲解卡片（半透明圆角、maxHeight 45% 可滚动、明暗适配，讲解存在时打牌区自动压缩）
+- **修复**：useDealing 的 useGame() 解构漏 `setBmExplanation` 导致白屏（`ReferenceError: setBmExplanation is not defined`）——补回解构
+- **注意**：C9 系列为 BM 多线路教学课，讲解 28-36KB 为数据本身完整分支
+- 投递：tools/bm_import.py, bm_deals.json, api/main.py, GameContext.jsx, useDealing.js, CardTablePanel.jsx, CardTable.jsx
+
 ### v1.97（2026-09-20）DD 默认计分制改 make_rate + 稳成线改口径降阈值
 - **DD 默认计分制 `imp` → `make_rate`**：统一引擎选牌 / 比值退让 / 稳成线三处口径到"做成率"，消除"引擎按 imp 优化、规则层按做成率裁决"的口径错配；前端默认值同步 + localStorage 键改 `_v2`（旧键 `'imp'` 会覆盖新默认）
 - **稳成线改口径**：`_stable_make`（全体候选最高做成率）→ **`_top1_make`**（只取引擎 top1 做成率），使实现与 `config` 注释语义一致，且判据对齐引擎实际要走的路线

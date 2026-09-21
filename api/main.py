@@ -1370,6 +1370,7 @@ class ImageDealResponse(BaseModel):
     contract_doubled: Optional[bool] = None
     contract_redoubled: Optional[bool] = None
     opening_lead: Optional[str] = None
+    explanation: Optional[str] = None
     page_type: Optional[str] = None
     vulnerability: Optional[str] = None
 
@@ -1494,6 +1495,7 @@ async def bm_deal(deck_id: str = Query(..., description="牌局id，如 2-89 / 2
             contract_doubled=deal.get("doubled", False),
             contract_redoubled=deal.get("redoubled", False),
             opening_lead=deal.get("opening_lead"),
+            explanation=deal.get("explanation"),
             page_type="BM2000",
             vulnerability=None
         )

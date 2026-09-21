@@ -180,6 +180,16 @@ def extract_lead(hands, leader, after_md):
                     return (3, (su, list(rks)[0]))
     return None
 
+def extract_explanation(after_md):
+    parts = []
+    for m in re.finditer(rb"at\|([^|]*)\|", after_md):
+        t = m.group(1).decode("latin1").strip()
+        if t:
+            parts.append(t)
+    text = " ".join(parts)
+    return re.sub(r"@([SHDCshdc])([AKQJT98765432]?)",
+                  lambda mm: f"{SUIT_CN[mm.group(1).upper()]}{mm.group(2)}", text)
+
 def bids_from_after(after_md):
     cut = after_md.find(b"ha|")
     seg = after_md[:cut] if cut >= 0 else after_md
@@ -264,6 +274,7 @@ def render_deal(level, hands, mbs, after_md, dealer):
     if lead:
         lsu, lrk = lead
         r["opening_lead"] = f"{POS_CN[NEXT[dec]]}:{SUIT_CN[lsu]}{lrk}"
+    r["explanation"] = extract_explanation(after_md)
     return r
 
 def build_library():

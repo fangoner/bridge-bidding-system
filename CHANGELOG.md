@@ -12,6 +12,21 @@
 > - **已修复的结构问题**（2026-09-20）：两处日期倒序（`2026-06-15/06-17`、`2026-05-03/05-05`）已按降序重排；v1.92 / v1.93 / v1.94 / v1.94b·v1.95 由 v1.96 条目内的 bullet 提升为独立条目；补记了 MCTS / Tiered / DD-αμ-LLM 三个引擎的下线（此前有引入无移除）。
 > - 完整审计与治理记录见 `docs/开发文档整理_发现清单_20260920.md`。
 
+## 2026-09-21（BM 牌局讲解导入：中心面板显示整篇讲解 v2.04）
+
+**背景**: 用户希望把 BM2000 的牌局讲解（做庄教学文案）也导入系统，在读入 BM 牌局开始打牌时，于打牌桌面中心面板显示。
+
+**改进**:
+- **数据层**（tools/bm_import.py）：新增 `extract_explanation()`——拼接段内全部 `at|` 讲解令牌为整篇文本，`@HK`/`@cQ` 等卡牌引用统一转花色符号（`♥K`/`♣Q`，兼容大小写），写入 bm_deals.json 的 `explanation` 字段；537 副全部覆盖、0 残留未转换引用
+- **后端**（api/main.py）：`ImageDealResponse` 加 `explanation` 字段，`/api/bm-deal` 透传
+- **前端**：GameContext 新增 `bmExplanation` state；useDealing `handleBmDeal` 随牌局存入；CardTable 中心面板打牌视图下方渲染讲解卡片（半透明圆角、maxHeight 45% 可滚动、明暗模式适配，讲解存在时打牌区自动压缩）
+- **bug 修复**：useDealing 的 useGame() 解构漏 `setBmExplanation` 导致 `ReferenceError: setBmExplanation is not defined` 页面白屏——补回解构并重新构建
+- C9 系列为 BM 多线路教学课，讲解 28-36KB 为数据本身完整分支，面板可滚动
+
+**修改文件**: tools/bm_import.py, bm_deals.json（重生成）, api/main.py, web/src/context/GameContext.jsx, web/src/hooks/useDealing.js, web/src/components/CardTablePanel.jsx, web/src/components/CardTable.jsx, CHANGELOG.md, DEVELOPMENT.md
+
+**测试验证**: 537 副全部有讲解（min 233/max 36379 字节）；后端 API 与 5173 代理均返回 explanation；前端生产构建通过；页面白屏修复后重新构建通过
+
 ## 2026-09-21（v2.00→v2.03：飞牌启动/终选简化 · 押注桶统一口径 · 终选较大领出牌决胜）
 
 **背景**: v1.97~v1.99+ 后同一花色多候选引牌的裁决仍在小牌/大牌间漂移。重打 6NT 局触发双飞 ♦K/9，第三条引牌 ♦3/♦J/♦2 全中桶押桶成全部饱和 1.0，押桶成/引擎 blended 均无法分层，平票落小牌误出 ♦3。子代理 3000 全中样本验证静态桶（押桶成/桶内 avg_tricks 均 9.046 恒定）无法分层——全中桶 ♦ 分布机械固定 ＋ DDS 双明手全知吸收处理差异。

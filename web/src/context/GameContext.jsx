@@ -87,6 +87,7 @@ export function GameProvider({ children }) {
   const [imagePath, setImagePath] = useState('')
   const [imageFile, setImageFile] = useState(null)
   const [imageOpeningLead, setImageOpeningLead] = useState(null)
+  const [bmExplanation, setBmExplanation] = useState(null)
   const [mode, setMode] = useState('practice') // 'practice' | 'simulated'
   const [readonlyMode, setReadonlyMode] = useState(false)
 
@@ -131,6 +132,7 @@ export function GameProvider({ children }) {
       imagePath, setImagePath,
       imageFile, setImageFile,
       imageOpeningLead, setImageOpeningLead,
+      bmExplanation, setBmExplanation,
       mode, setMode,
       readonlyMode, setReadonlyMode,
     }),
@@ -143,7 +145,7 @@ export function GameProvider({ children }) {
       fallbackModel, playModel,
       apiStatus, currentRecordId, showDraftBanner,
       customDealOpen, imageDealOpen, imagePath, imageFile,
-      imageOpeningLead, mode, readonlyMode,
+      imageOpeningLead, bmExplanation, mode, readonlyMode,
     ],
   )
 
