@@ -323,7 +323,8 @@ def _honor_missing_of_state(state):
 
 
 def _accumulate_finesse_probe(score_map, playable, state, hands,
-                              probe, remaining_tricks, curplayer_is_declarer):
+                              probe, remaining_tricks, curplayer_is_declarer,
+                              actual_turn=None):
     """把一个世界的候选赢墩按缺失大牌 M 的位置分桶累加进 probe。
 
     probe: {花色: {M: {"东": {card_str: [tricks]}, "西": {...}}}}。
@@ -340,6 +341,17 @@ def _accumulate_finesse_probe(score_map, playable, state, hands,
         for c in hands.get("西", []):
             west_has.setdefault(c.suit, set()).add(c.rank)
         decl_tricks = state.declarer_tricks
+        # 押注方向（几何常数，用户定调）：引牌侧=引牌者的**下家**（南→西、
+        # 北→东）。伙伴侧探测（过手）actual_turn=partner，用实际出牌人而非
+        # state.current_player 推导。押注桶=被飞对象全部命中押注方向的世界
+        # 做成率（单飞=对象在下家；双飞=两对象都在下家）。全中（原"严峻"
+        # 名已废弃）以单键记入。
+        _down = None
+        _cp = actual_turn or getattr(state, "current_player", None)
+        if _cp == "南":
+            _down = "西"
+        elif _cp == "北":
+            _down = "东"
         for suit, miss_list in missing.items():
             side_of = {}
             for m in miss_list:
@@ -351,6 +363,9 @@ def _accumulate_finesse_probe(score_map, playable, state, hands,
                     continue  # 此世界 M 不在东西（不该发生，防御）
             if not side_of:
                 continue
+            # 全中世界（用户定义）：同花色**所有**被飞对象都在押注方向侧——飞牌
+            # 前提成立、押注命中的世界，双飞等处所有决胜以该桶做成率为依据。
+            full = bool(_down) and all(s == _down for s in side_of.values())
             for card in playable:
                 if card.suit != suit:
                     continue
@@ -360,8 +375,12 @@ def _accumulate_finesse_probe(score_map, playable, state, hands,
                 total = decl_tricks + (target if curplayer_is_declarer
                                        else remaining_tricks - target)
                 for m, side in side_of.items():
-                    probe.setdefault(suit, {}).setdefault(m, {}).setdefault(
-                        side, {}).setdefault(str(card), []).append(total)
+                    entry = probe.setdefault(suit, {}).setdefault(m, {})
+                    bucket = entry.setdefault(side, {})
+                    bucket.setdefault(str(card), []).append(total)
+                    if full:
+                        entry.setdefault("全中", {}).setdefault(
+                            str(card), []).append(total)
     except Exception:
         pass
 
@@ -373,16 +392,16 @@ def _accumulate_finesse_probe_follow(score_map, playable, state, hands,
     累加全部候选牌的整手总墩到对应侧桶。
 
     probe_follow: {花色: {"对象": obj, "东": {card_str: [total]},
-    "西": {card_str: [total]}, 可选 "{side}·严峻": {card_str: [total]}}}。
+    "西": {card_str: [total]}, 可选 "{side}·全中": {card_str: [total]}}}。
     对象取自 state.finesse_flow（领出方启动飞牌时登记）；对象已现身的世界其
     不在东/西余手 → 该花色自然无数据。全部候选牌（不限飞牌花色）都累计
     ——消费端要读"引擎榜首替代牌"在押注方向桶内的做成率，榜首可能是
     任意花色的牌。
-    严峻子桶（v1.98，双飞场景）：flow_extra 登记有废弃对象（v1.97 双飞
-    合并的小对象）时桶键细化——废弃对象与登记对象同侧的世界记入
-    "{side}·严峻"，异侧世界照旧记入"{side}"。出A后双威胁同侧存活、
-    各拿一墩必宕的正是严峻世界；Q 异侧（被迫跌落/被A顺吃）的意外
-    收益不再稀释桶值。单飞无废弃对象零影响。
+    押注桶统一口径（v2.02，"严峻"名废弃）：接应侧押注方向=接应者的**上家**
+    （南领出北大时=西，几何常数），与引牌侧"领出者下家"是同一位置。双飞
+    场景读 {side}·全中——废弃对象与登记对象同侧（即两对象都在押注方向）
+    的世界；出A后双威胁同侧存活各拿一墩必宕的正是这些世界，Q 异侧（被迫
+    跌落/被A顺吃）的意外收益不再稀释桶值。单飞无废弃对象零影响。
     """
     try:
         flow = getattr(state, "finesse_flow", None) or {}
@@ -414,7 +433,7 @@ def _accumulate_finesse_probe_follow(score_map, playable, state, hands,
                 for d in disc:
                     dv = RANK_ORDER.get(d) if isinstance(d, str) else d
                     if dv is not None and (suit, dv) in side_ranks:
-                        key = f"{side}·严峻"
+                        key = f"{side}·全中"
                         break
             entry = probe_follow.setdefault(suit, {"对象": obj})
             bucket = entry.setdefault(key, {})
@@ -429,7 +448,26 @@ def _accumulate_finesse_probe_follow(score_map, playable, state, hands,
         pass
 
 
-def _finalize_finesse_probe(probe, tricks_needed):
+def _full_hit_rate(probe, suit, keep_m, discard, lead_str,
+                   tricks_needed, fallback):
+    """合并后押桶成优先读全中桶（押注桶子键，用户定调"严峻"名废弃）。
+
+    押注桶（统一口径）：被飞对象全部命中押注方向的世界的做成率——引牌侧
+    押注方向=领出者下家；单飞=对象在下家，双飞=登记与废弃两对象都在押注
+    方向。_accumulate_finesse_probe 已把这类世界以单键 "全中" 记入每个
+    对象；此处优先读该桶做成率。全中桶空（被飞对象不全在押注方向）或引牌
+    无数据 → 回退普通押桶成。单飞（无废弃对象）直接回退。
+    """
+    if not discard or not lead_str:
+        return fallback
+    keep_sides = probe.get(suit, {}).get(keep_m, {}) if probe else {}
+    totals = (keep_sides.get("全中") or {}).get(lead_str) or []
+    if not totals:
+        return fallback
+    return round(sum(1 for t in totals if t >= tricks_needed) / len(totals), 3)
+
+
+def _finalize_finesse_probe(probe, tricks_needed, lead_direction=None):
     """把分桶原始计数转成 play_service 可消费的结构。
 
     返回 {花色: {"对象": M, "Δ": 桶间做成率差, "方向": 押哪侧, "引牌": card_str,
@@ -439,8 +477,11 @@ def _finalize_finesse_probe(probe, tricks_needed):
     Δ 口径（v1.92）：缺失大牌在东/西两桶的做成率差（整手总墩 ≥ tricks_needed
     的世界占比），替代赢墩均值差——赢墩口径信号上限 = 做成率差 × 生死线墩差，
     临界定约（满贯生死线常 1 墩）在赢墩口径必失明；Δ 取幅值（进池门票/
-    结构排序沿用敏感性语义），"方向" 记录哪侧桶做成率高（押哪侧飞），
-    修复旧 abs 丢方向导致选错飞牌路线的缺陷。
+    结构排序沿用敏感性语义）。"方向"= 押注侧（v2.03 几何定调，用户确认）：
+    押注方向=引牌者下家=当前位置下家（南→西、北→东，几何常数），不再是
+    "哪侧桶做成率高押哪侧"（旧 v1.92 动态估计会让同花色多对象方向矛盾，
+    如 K 押西/9 押东）；lead_direction 由 search() 按 current_player 推导。
+    押桶成 = 押注侧桶做成率（单飞读几何侧半桶；双飞合并后读全中桶）。
     无有效分桶数据时返回 {}。
     """
     out = {}
@@ -459,8 +500,10 @@ def _finalize_finesse_probe(probe, tricks_needed):
                 west_rate = sum(1 for t in wv if t >= tricks_needed) / len(wv)
                 signed = east_rate - west_rate
                 delta = abs(signed)
-                direction = "东" if signed > 0 else "西"
-                bet_rate = east_rate if signed > 0 else west_rate
+                # 押注方向=几何下家（用户定调）；lead_direction 缺省（测试
+                # 直调）时回退旧动态估计，实局由 search() 恒传几何下家。
+                direction = lead_direction or ("东" if signed > 0 else "西")
+                bet_rate = east_rate if direction == "东" else west_rate
                 print(
                     f"[探针原始] {suit} 对象{m} 引牌{card_str} "
                     f"东成{round(east_rate, 3)}(n{len(ev)}) "
@@ -490,16 +533,20 @@ def _finalize_finesse_probe(probe, tricks_needed):
                 if total >= _dd_config.FINESSE_PROBE_DELTA:
                     keep_m = max([m for m, _ in top2],
                                  key=lambda r: RANK_ORDER.get(r, 0))
-                    keep = dict(per_obj[keep_m])
+                    discard = sorted(m for m, _ in top2 if m != keep_m)
                     combined = round(total, 3)
                     print(f"[双飞探测] {suit} 对象[{('/'.join(m for m, _ in top2))}] "
                           f"Δ加和={combined}（单条均<阈值），保留较高对象"
-                          f"{keep['对象']}，Δ改为{combined}，废弃"
-                          f"{[m for m, _ in top2 if m != keep_m]}")
-                    keep["Δ"] = combined
-                    keep["组合飞"] = True
-                    keep["废弃对象"] = sorted(m for m, _ in top2 if m != keep_m)
-                    entries = [keep]
+                          f"{keep_m}，Δ改为{combined}，废弃{discard}")
+                    # 保留 keep_m 的全部引牌候选（不折叠成单条）——终选按
+                    # 押桶成主排序，同 Δ 引牌（如 ♦3/2/J）必须全体进池
+                    entries = []
+                    for e in [en for en in raw if en["对象"] == keep_m]:
+                        ne = dict(e, Δ=combined, 组合飞=True, 废弃对象=discard)
+                        ne["押桶成"] = _full_hit_rate(
+                            probe, suit, keep_m, discard, ne.get("引牌"),
+                            tricks_needed, ne.get("押桶成"))
+                        entries.append(ne)
         elif len({e["对象"] for e in entries}) >= 2:
             # 双飞合并·强信号（v1.97，用户定调）：做成率口径下单对象 Δ 普遍
             # 达标（v1.92 改口径的后果），上方"单条均<阈值"弱信号门很少触发，
@@ -508,6 +555,7 @@ def _finalize_finesse_probe(probe, tricks_needed):
             # K 在敌），必然双双判废。同花色 ≥2 达标对象同样合并：保大对象
             # 先飞（K），小对象记废弃（供威胁计算排除），Δ 取加和（双飞总
             # 敏感，排序压过普通单飞）；G 判定不过仍照常判废，不会误启动。
+            orig_entries = list(entries)
             per_obj = {}
             for e in entries:
                 prev = per_obj.get(e["对象"])
@@ -521,9 +569,24 @@ def _finalize_finesse_probe(probe, tricks_needed):
             print(f"[双飞合并] {suit} 对象[{('/'.join(m for m, _ in top2))}] "
                   f"Δ加和={total}（单条均≥阈值），保留较高对象"
                   f"{keep_m}，Δ改为{total}，废弃{discard}")
-            entries = [dict(e, Δ=total, 组合飞=True, 废弃对象=discard)
-                      for e in entries if e["对象"] == keep_m]
+            # 保留 keep_m 的全部达标引牌候选（不折叠成单条）——per_obj 只留
+            # Δ 最大一条，同 Δ 引牌会被严格 > 砍掉（♦3/2/J Δ 全等仅剩 ♦3）；
+            # 终选按押桶成主排序，全体引牌必须进池
+            entries = []
+            for e in [en for en in orig_entries if en["对象"] == keep_m]:
+                ne = dict(e, Δ=total, 组合飞=True, 废弃对象=discard)
+                ne["押桶成"] = _full_hit_rate(probe, suit, keep_m, discard,
+                                                    ne.get("引牌"),
+                                                    tricks_needed,
+                                                    ne.get("押桶成"))
+                entries.append(ne)
         if entries:
+            # 终选口径打印：各引牌候选的押桶成（v2.02 押注桶统一口径——
+            # 双飞合并后=全中桶做成率，普通单飞=押注方向半桶）
+            dbg = "; ".join(f"{e['引牌']}押{e.get('押桶成')}"
+                            f"({'组合' if e.get('组合飞') else '单'})"
+                            for e in entries)
+            print(f"[探针终选] {suit} {dbg}")
             entries.sort(key=lambda e: e["Δ"], reverse=True)
             best = entries[0]
             out[suit] = {
@@ -537,21 +600,22 @@ def _finalize_finesse_probe_follow(probe_follow, tricks_needed):
     """跟牌接应探针汇总（v1.96）：把各侧桶原始总墩转成做成率。
 
     返回 {花色: {"对象": obj, "东": {牌: 成率}, "西": {牌: 成率},
-    可选 "东·严峻"/"西·严峻": {牌: 成率}}}；两侧均无数据的花色剔除
-    （对象已现身/登记被清的世界集）。严峻子桶（v1.98）= 双飞废弃对象
-    与登记对象同侧的世界子集，消费端三层判据优先读取。
+    可选 "东·全中"/"西·全中": {牌: 成率}}}；两侧均无数据的花色剔除
+    （对象已现身/登记被清的世界集）。全中子键（v2.02，原"严峻"名废弃）
+    = 双飞废弃对象与登记对象同在押注方向（接应上家）的世界子集，
+    消费端三层判据优先读取。
     """
     out = {}
     for suit, entry in probe_follow.items():
         finalized = {"对象": entry.get("对象")}
-        for side in ("东", "西", "东·严峻", "西·严峻"):
+        for side in ("东", "西", "东·全中", "西·全中"):
             finalized[side] = {}
             for card_str, totals in (entry.get(side) or {}).items():
                 if not totals:
                     continue
                 rate = sum(1 for t in totals if t >= tricks_needed) / len(totals)
                 finalized[side][card_str] = round(rate, 3)
-        if any(finalized[s] for s in ("东", "西", "东·严峻", "西·严峻")):
+        if any(finalized[s] for s in ("东", "西", "东·全中", "西·全中")):
             out[suit] = finalized
     return out
 
@@ -581,7 +645,7 @@ def _dd_eval_one_world(world, all_played, trick_cards, trick_leader,
         if finesse_probe is not None:
             _accumulate_finesse_probe(score_map, playable, state, hands,
                                       finesse_probe, remaining_tricks,
-                                      curplayer_is_declarer)
+                                      curplayer_is_declarer, actual_turn)
         if finesse_probe_follow is not None:
             _accumulate_finesse_probe_follow(score_map, playable, state, hands,
                                              finesse_probe_follow,
@@ -694,7 +758,7 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
                 if finesse_probe is not None:
                     _accumulate_finesse_probe(score_map, playable, state, _hands,
                                               finesse_probe, remaining_tricks,
-                                              curplayer_is_declarer)
+                                              curplayer_is_declarer, actual_turn)
                 if finesse_probe_follow is not None:
                     _accumulate_finesse_probe_follow(score_map, playable, state, _hands,
                                                      finesse_probe_follow,
@@ -730,7 +794,7 @@ def _solve_batch(samples, all_played, trick_cards, trick_leader,
                 if finesse_probe is not None:
                     _accumulate_finesse_probe(score_map, playable, state, hands,
                                               finesse_probe, remaining_tricks,
-                                              curplayer_is_declarer)
+                                              curplayer_is_declarer, actual_turn)
                 if finesse_probe_follow is not None:
                     _accumulate_finesse_probe_follow(score_map, playable, state, hands,
                                                      finesse_probe_follow,
@@ -1149,8 +1213,14 @@ class DDSearch:
                 },
                 # 飞牌后果敏感性探针：{花色: {对象, Δ, 方向, 引牌}}，缺失大牌
                 # 位置分桶的做成率差；play_service 依此判定飞牌结构。
+                # 全中桶（v2.02 押注桶统一口径，"严峻"名废弃）在 accumulate 内
+                # 按领出者几何方位写入单键"全中"（被飞对象全在押注方向=下家）。
+                # 押注方向（v2.03 用户定调）=引牌者下家（几何）：本侧=当前出牌
+                # 人下家，伙伴侧（过手探测 actual_turn=partner）=伙伴下家；
+                # 用 actual_turn 推导，不再动态估计。
                 "finesse_probe": _finalize_finesse_probe(
-                    finesse_probe or {}, state.contract.tricks_needed),
+                    finesse_probe or {}, state.contract.tricks_needed,
+                    {"南": "西", "北": "东"}.get(actual_turn)),
                 "finesse_probe_follow": _finalize_finesse_probe_follow(
                     finesse_probe_follow or {}, state.contract.tricks_needed),
                 "mcts_stats": {

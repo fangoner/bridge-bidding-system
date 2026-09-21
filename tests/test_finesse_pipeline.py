@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from bridge.play_types import Card, Contract, PlayState, PlayPhase, Trick
 from bridge.play_service import PlayService
 from bridge.mcts.dd_search import (_finalize_finesse_probe,
+                                   _accumulate_finesse_probe,
                                    _accumulate_finesse_probe_follow,
                                    _finalize_finesse_probe_follow)
 
@@ -518,10 +519,10 @@ def t32_follow_severe_bucket_force():
     res["full_output"]["finesse_probe_follow"] = {
         "♠": {"对象": 13,
               "东": {"♠A": 0.745, "♠8": 0.91, "♠T": 0.91},
-              "东·严峻": {"♠A": 0.0, "♠8": 0.353}}}
+              "东·全中": {"♠A": 0.0, "♠8": 0.353}}}
     got = ps_new()._finesse_commit_ratio_ok(st, res, "♠8", 0.75,
                                             finesse_struct={"♠": {"对象": 13}})
-    return got is True, (f"双飞KQ同东：严峻桶引擎最优♠A成0（Q干扰剔除）"
+    return got is True, (f"双飞KQ同东：全中桶引擎最优♠A成0（Q干扰剔除）"
                          f"→ 强制接应♠8（旧口径普通桶top_alt=♠T成0.91"
                          f"误判退让；got {got}, 期望 True）")
 
@@ -536,7 +537,7 @@ def t33_follow_severe_missing_falls_back():
         "♠": {"对象": 13, "东": {"♠A": 0.542, "♠8": 1.0}}}
     got = ps_new()._finesse_commit_ratio_ok(st, res, "♠8", 0.75,
                                             finesse_struct={"♠": {"对象": 13}})
-    return got is False, (f"Q异侧（K东Q西）：严峻桶空落回普通东桶，"
+    return got is False, (f"Q异侧（K东Q西）：全中桶空落回普通东桶，"
                           f"♠A成0.542≥0.40 → 退让引擎（got {got}, 期望 False）")
 
 
@@ -556,15 +557,15 @@ def t34_accumulate_follow_severe_key():
     same = run({"♠": "KQ", "♥": "2"}, {"♠": "6", "♥": "3"}, ["Q"])
     opp = run({"♠": "K", "♥": "2"}, {"♠": "Q6", "♥": "3"}, ["Q"])
     solo = run({"♠": "K", "♥": "2"}, {"♠": "Q6", "♥": "3"}, [])
-    ok = (list((same.get("♠") or {}).keys()) == ["对象", "东·严峻"]
-          and same["♠"]["东·严峻"].get("♠A") == [10]
-          and same["♠"]["东·严峻"].get("♠8") == [11]
+    ok = (list((same.get("♠") or {}).keys()) == ["对象", "东·全中"]
+          and same["♠"]["东·全中"].get("♠A") == [10]
+          and same["♠"]["东·全中"].get("♠8") == [11]
           and list((opp.get("♠") or {}).keys()) == ["对象", "东"]
           and list((solo.get("♠") or {}).keys()) == ["对象", "东"])
     fin = _finalize_finesse_probe_follow(same, 11)
-    ok = ok and fin.get("♠", {}).get("东·严峻") == {"♠A": 0.0, "♠8": 1.0}
-    return ok, (f"严峻子桶键判定：KQ同东记'东·严峻'、Q异侧记'东'、"
-                f"单飞无废弃对象记'东'；finalize输出严峻成率"
+    ok = ok and fin.get("♠", {}).get("东·全中") == {"♠A": 0.0, "♠8": 1.0}
+    return ok, (f"全中子桶键判定：KQ同东记'东·全中'、Q异侧记'东'、"
+                f"单飞无废弃对象记'东'；finalize输出全中成率"
                 f"（same={same.get('♠')}, fin={fin.get('♠')}）")
 
 
@@ -583,8 +584,8 @@ def t35_final_select_bucket_rank():
 
 
 def t36_engine_already_leading_finesse_register():
-    """早退分支（v1.99+）：引擎 top1 恰为本侧引牌且未稳成时，不再无条件服从，
-    走 _subset_select 押桶成终选后登记。单条目场景=尊重引擎引牌+登记接应。"""
+    """早退分支已删（v2.00 简化）：引擎 top1 恰为本侧引牌时同样落入全局
+    押桶成榜首决策——榜首（♦Q）过门控即登记，与"引擎在飞"旧分支同结果。"""
     st = mk_state({"♦": "Q32", "♥": "Q5"}, {"♦": "AJ6", "♥": "J4"})
     cands = [cand("♦Q", 0.4, scores=[6] * 10), cand("♥Q", 0.5, scores=[7] * 5 + [9] * 5)]
     res = mk_result(Card("♦", "Q"), cands)
@@ -594,13 +595,102 @@ def t36_engine_already_leading_finesse_register():
                       "押桶成": 0.9}]}}
     out = ps_new()._finesse_lead(st, res, 0.75)
     fo = out.get("full_output") or {}
+    ws = fo.get("窗口期启动") or {}
     ok = (str(out["card"]) == "♦Q"
           and st.finesse_flow.get("♦") == 13
-          and fo.get("领出飞牌", {}).get("引发") is True
-          and "押桶成" in (fo.get("领出飞牌", {}).get("说明") or ""))
-    return ok, (f"引擎已在飞牌花色（非稳成）：押桶成终选保留引擎引牌+登记接应"
+          and "押桶成" in (ws.get("说明") or "")
+          and ws.get("花色") == "♦")
+    return ok, (f"引擎已在飞牌花色（非稳成）：全局押桶成榜首保留引擎引牌+登记"
                 f"（card={out['card']}, flow={st.finesse_flow}, "
-                f"说明={fo.get('领出飞牌', {}).get('说明')}）")
+                f"窗口期启动={ws.get('说明')}）")
+
+
+def t37_global_top_bucket_wins():
+    """v2.00 简化：全局押桶成排序取榜首，榜首单独过门控。两花色各有结构，
+    押桶成高的花色（♦）胜出并登记，Δ 只当门票不参与裁决。"""
+    st = mk_state({"♣": "A2", "♦": "QJ2", "♥": "Q"}, {"♣": "43", "♦": "75"})
+    cands = [cand("♥Q", 0.5, scores=[8] * 10),
+             cand("♦J", 0.48), cand("♣2", 0.47)]
+    base = {"♦": [_probe_entry("♦", 13, "♦J", 0.2, direction="西", bucket=0.85)],
+            "♣": [_probe_entry("♣", 13, "♣2", 0.9, direction="西", bucket=0.80)]}
+    res = mk_result(Card("♥", "Q"), cands)
+    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
+    ok = (got is not None and got[0] == "♦J"
+          and st.finesse_flow.get("♦") == 13 and "♣" not in st.finesse_flow)
+    return ok, (f"全局押桶成榜首：♦J押桶0.85胜过Δ0.9的♣2（押桶0.80）"
+                f"→ 选♦J登记♦（got {got}, flow={st.finesse_flow}）")
+
+
+def t38_lead_full_hit_bucket():
+    """领出端全中桶（押注桶统一口径，"严峻"名废弃）：被飞对象都在押注方向
+    （=领出者下家）记单键"全中"。南领出（下家西=押注方向）；K9 都在西 →
+    K 记"西"+"全中"；东侧无对象不记东。"""
+    st = mk_state({"♠": "A", "♦": "J32", "♥": "Q"}, {"♠": "K", "♦": "AQ654", "♥": "J"})
+    st.hands["东"] = mk_hand({"♠": "2", "♦": "87", "♥": "2"})
+    st.hands["西"] = mk_hand({"♠": "3", "♦": "K9", "♥": "3"})
+    st.current_player = "南"  # 下家=西（押注方向）
+    score_map = {("♦", "J"): 8, ("♦", "3"): 8, ("♦", "2"): 5, ("♠", "A"): 7}
+    playable = [Card("♦", "J"), Card("♦", "3"), Card("♦", "2"), Card("♠", "A")]
+    probe = {}
+    _accumulate_finesse_probe(score_map, playable, st, st.hands, probe, 12, True)
+    k_keys = list((probe.get("♦") or {}).get("K", {}).keys())
+    nine_keys = list((probe.get("♦") or {}).get("9", {}).keys())
+    ok = "西" in k_keys and "全中" in k_keys and "东" not in k_keys
+    debug = f"K 子桶={k_keys}, 9 子桶={nine_keys}"
+    return ok, f"K9都在西（下家=押注方向）→ K 记西+全中（{debug}）"
+
+
+def t39_full_hit_bucket_passes_to_finalize():
+    """押注桶统一口径（v2.02，"严峻"名废弃）：全中=被飞对象都在押注方向
+    （=领出下家西，几何）。K 普通西桶 0.70（K 在西所有世界）/全中桶 0.40
+    （K9 都在西）——合并后 ♦J 押桶成读全中 0.40；全中桶无数据/单飞 →
+    回退普通押桶成。"""
+    def bucket(rate, n=20):
+        return [10] * int(rate * n) + [9] * (n - int(rate * n))
+    probe = {"♦": {
+        "K": {"东": {"J": bucket(0.30)}, "西": {"J": bucket(0.70)},
+              "全中": {"J": bucket(0.40)}},
+        "9": {"东": {"J": bucket(0.10)}, "西": {"J": bucket(0.35)},
+              "全中": {"J": bucket(0.40)}},
+    }}
+    out = _finalize_finesse_probe(probe, 10)
+    info = out.get("♦") or {}
+    all_e = info.get("全") or []
+    ok = (info.get("对象") == "K" and len(all_e) == 1
+          and all_e[0].get("押桶成") == 0.4
+          and all_e[0].get("废弃对象") == ["9"])
+    fallback = _finalize_finesse_probe({"♦": {"K": probe["♦"]["K"]}}, 10)
+    f_e = ((fallback.get("♦") or {}).get("全") or [])[0]
+    ok = ok and f_e.get("押桶成") == 0.7  # 单飞无废弃对象 → 回退普通
+    return ok, (f"K普通西0.70/全中0.40 → 合并后0.40"
+                f"（got {all_e[0].get('押桶成') if all_e else None}）；"
+                f"单飞回退普通0.7（got {f_e.get('押桶成')}）")
+
+
+def t40_combo_big_lead_on_saturated():
+    """双飞组合·本侧·较大被飞对象（K）未现 → 较大领出牌优先（♦J）。
+
+    复现实局：双飞 K/9 对象、三候选引牌 ♦3/♦J/♦2 的全中桶押桶成全部饱和 1.0，
+    blended 亦无法分层。按 v2.03 用户定调：押桶成平局之后，偏好"领出牌 牌点
+    > 较小飞牌对象"（min(对象K=13, 废弃9) = 9；♦J=11 > 9）的较大牌，即 ♦J。
+    """
+    st = mk_state({"♠": "A", "♥": "Q", "♦": "J32", "♣": "K"},
+                  {"♠": "2", "♣": "A"})
+    cands = [cand("♥Q", 0.5, scores=[8] * 6 + [2] * 4),
+             cand("♦J", 1.0), cand("♦3", 1.0), cand("♦2", 1.0)]
+    def combo(lead):
+        e = _probe_entry("♦", 13, lead, 0.5, side="本侧", direction="西",
+                         bucket=1.0)
+        e["组合飞"] = True
+        e["废弃对象"] = [9]
+        return e
+    base = {"♦": [combo("♦3"), combo("♦J"), combo("♦2")]}
+    res = mk_result(Card("♥", "Q"), cands)
+    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
+    ok = (got is not None and got[0] == "♦J"
+          and st.finesse_flow.get("♦") == 13)
+    return ok, (f"组合双飞全中饱和：三引牌押桶成均1.0平票 → 较大领出♦J"
+                f"（got {str(got[0]) if got else None}, flow={st.finesse_flow}）")
 
 
 CASES = [
@@ -640,6 +730,10 @@ CASES = [
     t34_accumulate_follow_severe_key,
     t35_final_select_bucket_rank,
     t36_engine_already_leading_finesse_register,
+    t37_global_top_bucket_wins,
+    t38_lead_full_hit_bucket,
+    t39_full_hit_bucket_passes_to_finalize,
+    t40_combo_big_lead_on_saturated,
 ]
 
 

@@ -1800,13 +1800,13 @@ class PlayService:
 
     def _finesse_lead(self, state: PlayState, result: Dict[str, Any],
                       ratio: float) -> Dict[str, Any]:
-        """飞牌介入分支·领出侧（v1.89：稳成前置 → 探测 → 留栈 → 逐动作门控 → 终选）。
+        """飞牌介入分支·领出侧（v2.00 简化：稳成前置 → 探测 → 押桶成榜首 → 榜首门控）。
 
         9砸 已独立为 _garrison_lead 分支先行裁定（未命中才进入本函数）。
         0c 稳成前置：**引擎 top1** 做成率 ≥85% 直接退让，不做探测/过手预检
         （省伙伴侧 DD search）；仅保留"引擎已在飞牌花色"的本墩登记。
-        引擎榜首恰为该结构本侧引牌（正在飞）→ 尊重 + 登记本墩接应；
-        其余局面由逐动作门控 + 终选（复用引擎选牌流程）裁决。
+        其余局面（含引擎 top1 恰为该结构本侧引牌"正在飞"）统一由
+        _probe_lead_finesse_prefer 全局押桶成榜首 + 榜首单独门控裁决。
         """
         full_output = result.get("full_output", {})
         candidates = (full_output.get("mcts_stats") or {}).get("candidates") or []
@@ -1900,48 +1900,11 @@ class PlayService:
         mcts_stats = full_output.get("mcts_stats") or {}
         candidates = mcts_stats.get("candidates") or []
         # 多花色结构池（2026-09-12）：全部通过测试的探针花色都保留。
-        # 引牌选择（2026-09-15 用户规则，v1.99+ 口径改押桶成）：同一
-        # (花色, 对象, 侧) 下的多条达标引牌（如 ♦K 引♦2/♦Q 均达标）按
-        # "押桶成取档量化（0.02 粒度，同档视为打平）、Δ 平局决胜"定代表；
-        # 与门控/终选同口径——引擎值掺非押注世界死值，不再作引牌裁决。
-        # 模板法条目（无探针押桶成）回退引擎值档。
-        _VAL_QUANT = 0.02
-
-        def _lead_val(card_str):
-            if not card_str:
-                return 0.0
-            for c in candidates:
-                if c.get("card") == card_str:
-                    v = c.get("scoring_val")
-                    return v if v is not None else c.get("avg_tricks", 0.0)
-            return 0.0
-
-        def _lead_bucket(card_str):
-            return round(_lead_val(card_str) / _VAL_QUANT)
-
-        def _entry_bucket(info):
-            bm = info.get("押桶成")
-            if bm is not None:
-                return round(float(bm) / _VAL_QUANT)
-            return _lead_bucket(info.get("引牌"))
-
-        by_key = {}
-        for s, info in pool:
-            key = (s, info.get("对象"), info.get("侧"))
-            cur = by_key.get(key)
-            if cur is None:
-                by_key[key] = info
-                continue
-            bi = _entry_bucket(info)
-            bc = _entry_bucket(cur)
-            if (bi > bc
-                    or (bi == bc and (info.get("Δ") or 0) > (cur.get("Δ") or 0))):
-                by_key[key] = info
-        # 留栈（v1.89 改动A）：同一花色下的代表条目全部保留（Δ 降序），
-        # 不再按 Δ 剪枝为单条——"位置敏感"只是进池门票，价值裁决交给
-        # 逐动作门控 + 终选（引擎流程），避免 Δ 大但动作价值低的结构垄断。
+        # v2.00 简化（用户定调）：不再按同 (花色,对象,侧) 取档压缩代表——
+        # 全局押桶成排序取榜首（_probe_lead_finesse_prefer）天然让最高
+        # 押桶成引牌胜出，提前压缩反而可能拦掉押桶成更高的备选。
         struct_stack: Dict[str, List[Dict[str, Any]]] = {}
-        for (s, _o, _side), info in by_key.items():
+        for s, info in pool:
             struct_stack.setdefault(s, []).append(info)
         for s in struct_stack:
             struct_stack[s].sort(key=lambda i: -(i.get("Δ") or 0))
@@ -1949,51 +1912,35 @@ class PlayService:
             full_output["伙伴探针"] = partner
         if confirm:
             full_output["_probe_confirm"] = confirm
+        # 全部引牌候选明细（2026-09-21 用户要求：打牌结果显示所有候选引牌的
+        # 押桶成，不只胜出的榜首）：{花色: [{引牌, 对象, 押桶成, 方向, Δ,
+        # 组合飞, 过手牌, 侧}]}，依探测通过顺序原样记录。
+        cand_detail: Dict[str, List[Dict[str, Any]]] = {}
+        for s, info in pool:
+            cand_detail.setdefault(s, []).append({
+                "引牌": info.get("引牌", ""),
+                "对象": info.get("对象牌"),
+                "押桶成": info.get("押桶成"),
+                "方向": info.get("方向"),
+                "Δ": info.get("Δ"),
+                "组合飞": bool(info.get("组合飞")),
+                "过手牌": info.get("过手牌"),
+                "侧": info.get("侧", "本侧"),
+            })
+        if cand_detail:
+            full_output["探针候选"] = cand_detail
         if not struct_stack:
             # 本侧+队友侧均无结构：Δ 是采样量，探针判空即无飞牌结构，
             # 尊重引擎（2026-09-13：跨墩续飞已移除，不再有"流程延续"路径）。
             full_output["领出飞牌"] = {"引发": False, "说明": "无飞牌结构"}
             result["full_output"] = full_output
             return result
-        # 引擎已在飞牌花色（top1 恰为本侧引牌，正在飞）→ 不再无条件服从：
-        # 该花色全部本侧未现身条目按押桶成终选（_subset_select，v1.99 同口径），
-        # 引擎引牌押桶成最优则尊重+登记，否则改出押桶成更高的引牌（v1.99+ 用户定调）。
+        # v2.00 简化：不再有"引擎已在飞牌花色"早退分支——引擎 top1 恰为
+        # 引牌时同样落入全局押桶成榜首决策（_probe_lead_finesse_prefer），
+        # 由其统一裁决登记/改出；对象已现身花色经探测端窗口滑动自然排除。
         cur_str = str(result.get("card") or "")
-        if cur_str:
-            suit_entries = [
-                info for info in struct_stack.get(cur_str[0], [])
-                if info.get("侧") == "本侧"
-                and not self._finesse_obj_played(state, cur_str[0],
-                                                 info.get("对象"))
-                and str(info.get("引牌") or "") in
-                {str(c.get("card")) for c in candidates}
-            ]
-            if suit_entries and any(str(info.get("引牌") or "") == cur_str
-                                    for info in suit_entries):
-                best = self._subset_select(
-                    state, candidates,
-                    [(str(info.get("引牌") or ""), info, cur_str[0])
-                     for info in suit_entries])
-                if best and best[0]:
-                    pick, info, s = best
-                    self._register_finesse_flow(state, s, info.get("对象"), info)
-                    a_mk = info.get("押桶成")
-                    mk_txt = f"押桶成{a_mk:.0%}" if a_mk is not None else "引擎值"
-                    if pick != cur_str:
-                        result["card"] = Card(pick[0], pick[1:])
-                        cur_str = pick
-                        note = f"引擎已在该花色，押桶成更高引牌为{pick}，改出"
-                    else:
-                        note = "引擎引牌押桶成最优，尊重"
-                    full_output["领出飞牌"] = {"引发": True, "花色": pick[0],
-                                               "对象": info.get("对象"),
-                                               "Δ": info.get("Δ"), "领出": cur_str,
-                                               "说明": f"{note}（{mk_txt}），登记供本墩接应"}
-                    result["full_output"] = full_output
-                    return result
-        # 逐动作门控 + 终选（v1.99）：_probe_lead_finesse_prefer 内部对全部
-        # 飞牌动作逐个过启动门控（契约必要/比值闸），过闸动作按押桶成
-        # 排序终选（与门控同口径），改出第一名并登记。
+        # 榜单决策（v2.00）：_probe_lead_finesse_prefer 全局押桶成排序取
+        # 榜首 + 榜首单独过门控（比值单调性论证），改出榜首并登记。
         if candidates:
             prefer = self._probe_lead_finesse_prefer(
                 state, struct_stack, candidates, ratio, result)
@@ -2008,8 +1955,9 @@ class PlayService:
                 result["reasoning"] = f"{hint4}\n{reasoning}"
                 full_output["推荐出牌"] = pick
                 full_output["核心逻辑"] = hint4 + "\n" + full_output.get("核心逻辑", "")
-                full_output["窗口期启动"] = {"花色": pick[0], "原选": org_str,
-                                             "改选": pick, "说明": why}
+                full_output["窗口期启动"] = {
+                    "花色": pick[0], "原选": org_str, "改选": pick,
+                    "说明": why}
                 result["full_output"] = full_output
                 return result
         # 未介入：尊重引擎（全被门控否决 / 无动作可出 / 未领出飞牌花色）
@@ -2303,15 +2251,15 @@ class PlayService:
     def _probe_lead_finesse_prefer(self, state: PlayState, struct_stack: Dict[str, List[Dict[str, Any]]],
                                    candidates: List[Dict[str, Any]], ratio: float,
                                    result: Dict[str, Any]) -> Optional[Tuple[str, str]]:
-        """窗口期主动启动飞牌（v1.89 重构：过手预检 → 逐动作门控 → 终选引擎流程）。
+        """窗口期主动启动飞牌（v2.00 简化：过手预检 → 押桶成榜首 → 榜首单独门控）。
 
         输入为以花色为键、Δ 降序的条目栈（探测已全部通过引牌测试，组合飞
         字段透传）。过手预检：伙伴侧条目逐个求安全过手牌，失败只删该条目
         （不再整花色出局）；动作统一为真实出牌（本侧=引牌 / 伙伴侧=过手牌）。
-        逐动作过启动门控（契约必要/比值闸；稳成已由 _finesse_lead 入口短路）：
-        比值分子 = 动作牌价值（不再是"花色最优候选"，避免顶张虚高）。
-        过闸动作按押桶成主排序终选（_subset_select，与门控分子同口径，
-        引擎决策值决胜），改出第一名并登记。全被否 / 无动作可出 → None（尊重引擎）。
+        全局押桶成排序保留榜首（_subset_select）：同花色方向对决与逐动作
+        门控的集合语义，可由"门控比值单调于押桶成 → 榜首即唯一候选"替代，
+        故只对榜首单独过门控（_finesse_launch_worthwhile，判据不变），
+        通过即登记终选；被否 / 无动作可出 → None（尊重引擎）。
         """
         if not FINESSE_DEFER_ENABLE:
             return None
@@ -2335,93 +2283,56 @@ class PlayService:
                 del struct_stack[s]
         if not struct_stack:
             return None
-        # 动作池：每条目 → 真实出牌动作（必须存在于引擎候选池才有评估值）。
-        # 模板法条目（αμ 无 probe）无"引牌"字段 → 用该花色最小飞张小牌兜底，
-        # 与原"直接飞小牌"回退同语义；探针法条目直接取引牌/过手牌。
+        # 动作池：每条目 → 真实出牌动作（探针法必有引牌/过手牌，必须存在
+        # 于引擎候选池才有评估值；模板法条目不经介入层，无兜底）。
         actions = []  # (动作牌, 条目, 花色)
         for s, entries in struct_stack.items():
             for info in entries:
                 act = info.get("过手牌") if info.get("侧") == "伙伴侧" else info.get("引牌")
-                if info.get("侧") != "伙伴侧" and not act:
-                    small = [c for c in candidates
-                             if c.get("card") and c["card"][0] == s
-                             and self._FINESSE_R2V.get(c["card"][1:], 0) <= 9]
-                    if small:
-                        act = min(small, key=lambda c: self._FINESSE_R2V.get(c["card"][1:], 0))["card"]
                 if act and any(c.get("card") == act for c in candidates):
                     actions.append((act, info, s))
         if not actions:
             return None
-        # 反向路线对决（v1.94 用户规则：同一花色只能有一个方向进门控，
-        # 同花色同侧的动作全部保留到终选）：同花色按方向（押东/押西）分派，
-        # 各派押桶成最高的代表正面对决，败派整派淘汰。无方向条目（模板法
-        # 兜底）不参与对决，原样保留。
-        _by_dir: Dict[str, Dict[Any, list]] = {}
-        for act, info, s in actions:
-            _by_dir.setdefault(s, {}).setdefault(info.get("方向"), []).append((act, info))
-        _kept = []
-        for s, sides in _by_dir.items():
-            _e = sides.get("东") or []
-            _w = sides.get("西") or []
-            if _e and _w:
-                _eb = max((i.get("押桶成") or 0.0) for _a, i in _e)
-                _wb = max((i.get("押桶成") or 0.0) for _a, i in _w)
-                if _wb >= _eb:
-                    _win, _lose_dir = _w, "东"
-                else:
-                    _win, _lose_dir = _e, "西"
-                print(f"[路线对决] {s} 押东最高{_eb:.3f} vs 押西最高{_wb:.3f} "
-                      f"→ 淘汰押{_lose_dir}派")
-                _kept.extend((a, i, s) for a, i in _win)
-            else:
-                _kept.extend((a, i, s) for a, i in _e + _w)
-            _kept.extend((a, i, s) for a, i in (sides.get(None) or []))
-        actions = _kept
-        if not actions:
-            return None
-        # 逐动作门控：过闸的动作进入终选池。分子统一 = 引牌押注方向半桶
-        # 做成率（v1.94 两侧同秤：启动飞牌后非押注方向世界无意义，条件
-        # 价值按押注桶计；本侧引擎混合值被非押注世界稀释，不再作分子）
-        passed = []
-        for act, info, s in actions:
-            a_make = info.get("押桶成")
-            worth, gate_why = self._finesse_launch_worthwhile(state, act, candidates,
-                                                             action_make=a_make)
-            if not worth:
-                print(f"[启动退让] {s} 动作{act}：{gate_why}")
-                continue
-            passed.append((act, info, s))
-        if not passed:
-            return None
-        # 终选（v1.99）：过闸动作按押桶成主排序（与门控分子同口径，
-        # 引擎混合值被非押注世界稀释），引擎决策值决胜，改出第一名并登记
-        best = self._subset_select(state, candidates, passed)
+        # 全局押桶成排序，保留榜首（v2.00 用户定调：路线对决的"同花色单方向"
+        # 与逐动作门控的集合语义，皆因"门控比值单调于押桶成"而被榜首取代）
+        best = self._subset_select(state, candidates, actions)
         if best is None:
             return None
         pick, info, s = best
+        # 榜首单独过门控（同一判据）：通过即终选登记；被否 → 尊重引擎
+        a_make = info.get("押桶成")
+        worth, gate_why = self._finesse_launch_worthwhile(state, pick, candidates,
+                                                         action_make=a_make)
+        if not worth:
+            print(f"[启动退让] {s} 榜首{pick}：{gate_why}")
+            return None
         obj = info.get("对象")
+        obj_name = self._finesse_obj_name(obj) if obj is not None else "?"
         self._register_finesse_flow(state, s, obj, info)
         a_mk = info.get("押桶成")
         mk_txt = f"押桶成{a_mk:.0%}" if a_mk is not None else "引擎值"
+        combo = "双飞组合" if info.get("组合飞") else "单飞"
         if info.get("侧") == "伙伴侧":
-            why = f"出过手牌{pick}给队友引飞（引牌{info.get('引牌', '?')}，{mk_txt}）"
+            why = (f"飞{obj_name}({combo})过手{pick}给队友引飞"
+                   f"（引牌{info.get('引牌', '?')}，{mk_txt}）")
         else:
-            why = f"{mk_txt}直出{pick}"
-        return pick, f"终选·池内最优（{why}）"
+            why = f"飞{obj_name}({combo}){mk_txt}直出{pick}"
+        return pick, f"终选·押桶成榜首（{why}）"
 
     def _subset_select(self, state: PlayState,
                        candidates: List[Dict[str, Any]],
                        passed: List[Tuple[str, Dict[str, Any], str]],
                        ) -> Optional[Tuple[str, Dict[str, Any], str]]:
-        """终选（v1.99）：过闸动作按押桶成主排序，引擎决策值决胜。
+        """押桶成榜首选择：全部动作按押桶成主排序，平票用较大领出牌决胜。
 
-        主键 = 条目"押桶成"（与 v1.94 门控分子同口径：启动飞牌后非押注
-        方向世界无意义，引牌价值按押注方向半桶做成率计；引擎混合值掺入
-        非押注世界的死值，会稀释同花色多张过闸引牌的排序）。押桶成缺失
-        （模板法条目无探针数据）回退引擎全样本做成率，与门控 action_make
-        为 None 时的回退同语义。决胜键 = 引擎决策值（make_rate 下
-        blended=做成率×10000+平均赢墩，其余模式 scoring_val/avg_tricks），
-        押桶成平票时裁决。启动方必为庄家方，统一取高。
+        主键 = 条目"押桶成"（与门控分子同口径：启动飞牌后非押注方向世界
+        无意义，引牌价值按押注方向半桶做成率计）。押桶成缺失（模板法条目
+        无探针数据）回退引擎全样本做成率。平票决胜（v2.03 用户定调，押桶成
+        平局之后）：偏好"领出牌 牌点 > 较小飞牌对象"（min(对象, *废弃对象)）
+        的较大牌——不区分单双飞：单飞仅一对象=min对象，领出牌必小于对象
+        → 大牌判据失效；双飞 K/9 → min=9，♦J/♦Q 牌点>9 即判大牌优先。
+        再平票降级到引擎决策值（make_rate 下 blended=做成率×10000+平均
+        赢墩），最后 rankpos（同为大牌时的最大牌）。启动方必为庄家方，统一取高。
         """
         from bridge.mcts import dd_search as _ds
         if not passed:
@@ -2446,7 +2357,28 @@ class PlayService:
                 a_make = _ds._make_rate_value(scores, need) if scores else 0.0
             else:
                 a_make = float(a_make)
-            key = (a_make, blended)
+            # 平票决胜先于引擎值：倾向"牌点 > 较小飞牌对象"的较大领出牌
+            # （v2.03 用户定调，押桶成平局之后；不区分单双飞，见 docstring）
+            lead = info.get("引牌") or act
+            lead_rv = self._FINESSE_R2V.get(lead[1] if len(lead) >= 2 else lead, 0)
+            def _rv(v):
+                return v if isinstance(v, int) else self._FINESSE_R2V.get(v[-1] if v else "", 0)
+            obj_vals = []
+            _obj = info.get("对象")
+            if _obj is not None:
+                obj_vals.append(_rv(_obj))
+            for _d in (info.get("废弃对象") or []):
+                obj_vals.append(_rv(_d))
+            obj_vals = [v for v in obj_vals if v > 0]
+            min_obj = min(obj_vals) if obj_vals else None
+            big = 1.0 if (min_obj is not None and lead_rv > min_obj) else 0.0
+            rankpos = lead_rv / 14.0
+            key = (a_make, big, blended, rankpos)
+            print(f"[终选] 动作{act} 花色{s} 押桶成{a_make} "
+                  f"大牌big={big:.0f} 领出{lead}(牌点{lead_rv}) "
+                  f"min对象{min_obj} 引擎blended={round(blended, 2)} "
+                  f"(做成率{mk if mode=='make_rate' and scores else '—'}"
+                  f" avg={cc.get('avg_tricks')})")
             if best is None or key > best_key:
                 best, best_key = (act, info, s), key
         return best
@@ -2643,11 +2575,11 @@ class PlayService:
            b_bucket ≥ FINESSE_COMMIT_ALIVE_PCT
              → 定约不依赖飞牌，退让引擎（B26 型：西桶 ♦A=0.542、♦Q=1.0）；
            灰色区 / 桶数据缺失 / 双零死局 → 维持 v1.93 口径。
-        v1.98 修正一（严峻子桶）：双飞登记有废弃对象（Q）时桶键细化为
-        "方向·严峻"（Q 与登记对象 K 同侧的世界），优先读取——出A后双
-        威胁同侧存活各拿一墩必宕正是严峻世界，Q 异侧（被迫跌落/被A
-        顺吃）的意外收益不再稀释 b_bucket；严峻桶空（该方向无同侧
-        世界）落回普通桶。
+        v1.98 修正一 → v2.02 全中子桶（"严峻"名废弃）：双飞登记有废弃
+        对象（Q）时桶键细化为"{direction}·全中"（Q 与登记对象 K 同侧，
+        即两对象都在押注方向=接应上家的世界），优先读取——出A后双威胁
+        同侧存活各拿一墩必宕正是这些世界，Q 异侧（被迫跌落/被A顺吃）的
+        意外收益不再稀释 b_bucket；全中桶空（该方向无同侧世界）落回普通桶。
         v1.98 修正二（top_alt 排除等价组）：与强制牌逐世界 scores 全等
         的候选是同一动作（接应小牌组），拿它算 b_bucket 是评估"接应
         自己"（6NT 双飞案误判根因），跳过取真正的大牌替代（♠A）。
@@ -2670,9 +2602,9 @@ class PlayService:
             e_suit = extra.get(forced_card[0])
             direction = e_suit.get("方向") if isinstance(e_suit, dict) else None
             if direction in ("东", "西"):
-                severe = follow.get(f"{direction}·严峻")
-                bucket = severe or follow.get(direction) or {}
-                b_name = f"{direction}·严峻" if severe else direction
+                full_hit = follow.get(f"{direction}·全中")
+                bucket = full_hit or follow.get(direction) or {}
+                b_name = f"{direction}·全中" if full_hit else direction
                 forced_scores = next((c.get("scores") for c in cands
                                       if str(c.get("card")) == forced_card), None)
                 top_alt = None
