@@ -276,9 +276,12 @@ def _accumulate_world_totals(score_map, playable, state, curplayer_is_declarer,
 # 复用 search() 现有采样世界：每个世界已知四家手牌，因此对每个"缺失大牌
 # M"（庄家+明手+已打出未现的 A/K/Q/J/T/9/8），可确定 M 落在东家还是西家。
 # 按此分桶累计"候选出牌在该花色"的整手赢墩均值的桶间差 Δ；
-# 探针监控窗口（2026-09-13 修正）：3 张滑动窗口，AKQ 起步、出一个向下补一个，
+# 探针监控窗口（2026-09-22 用户定调）：2 张滑动窗口，AK 起步、出一个向下补一个，
 # 逐次下移至 AKQJT98（最低 8），不一次性全包。任何花色统一滑动——残局阶段
 # 才能识别飞 J/T/9/8 的低位间张结构（如 T7 对防家 95 → 飞 9）。
+# 窗口 3→2：A 是单花色最大值、_probe_finesse_ok 永远判 False（需 obj > G > max_enemy，
+# 不存在 G > A），占窗口名额纯浪费；双飞合并只要求 ≥2 对象（组合飞=双飞语义），
+# 2 张窗口完全覆盖 K/Q、K/9、Q/J 全部双飞组合，省约 1/3 探针分桶计算。
 # 下限 8：9/8 仍有飞牌意义，7/6 及以下（7/6...）位置敏感假阳性风险高，不做。
 _FINESSE_WINDOW_BASE = ["A", "K", "Q", "J", "T", "9", "8"]
 
@@ -286,10 +289,10 @@ _FINESSE_WINDOW_BASE = ["A", "K", "Q", "J", "T", "9", "8"]
 def _honor_missing_of_state(state):
     """返回 {花色: [缺失大牌...]}：庄家方现手未持有的监控窗口大牌。
 
-    每个花色单独维护 3 张滑动窗口（持久于 state.finesse_windows，AKQ 起步）：
+    每个花色单独维护 2 张滑动窗口（持久于 state.finesse_windows，AK 起步）：
     每次检测探针时更新——先剔除"己方现手持有"的大牌（己方手里的大牌不是
     可飞对象，不占窗口名额，窗口自然下移），再取 AKQJT98 中该花色
-    "未打出"的前 3 张（出一个向下补一个，下限 8，不全包），各花色互不干扰。
+    "未打出"的前 2 张（出一个向下补一个，下限 8，不全包），各花色互不干扰。
     对象 = 窗口内 ⇒ 未打出且不在我方手中 ⇒ 必在防守方（东/西），分桶依据。
     """
     known = set()
@@ -315,7 +318,7 @@ def _honor_missing_of_state(state):
     for suit in ("♠", "♥", "♦", "♣"):
         unplayed = [h for h in _FINESSE_WINDOW_BASE if h not in played.get(suit, set())]
         cands = [h for h in unplayed if (suit, h) not in known]
-        window = cands[:3]
+        window = cands[:2]
         windows[suit] = window
         if window:
             missing[suit] = window
