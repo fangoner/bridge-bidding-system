@@ -1800,44 +1800,18 @@ class PlayService:
 
     def _finesse_lead(self, state: PlayState, result: Dict[str, Any],
                       ratio: float) -> Dict[str, Any]:
-        """飞牌介入分支·领出侧（v2.00 简化：稳成前置 → 探测 → 押桶成榜首 → 榜首门控）。
+        """飞牌介入分支·领出侧（v2.03 顺序定调：结构探测确认 → 稳成检测 → 押桶成榜首）。
 
         9砸 已独立为 _garrison_lead 分支先行裁定（未命中才进入本函数）。
-        0c 稳成前置：**引擎 top1** 做成率 ≥85% 直接退让，不做探测/过手预检
-        （省伙伴侧 DD search）；仅保留"引擎已在飞牌花色"的本墩登记。
-        其余局面（含引擎 top1 恰为该结构本侧引牌"正在飞"）统一由
-        _probe_lead_finesse_prefer 全局押桶成榜首 + 榜首单独门控裁决。
+        执行顺序（2026-09-21 用户定调"先确认后稳成"）：
+          ① 结构探测（本侧+伙伴侧）→ _probe_finesse_ok 逐条确认 → 确认结构池
+          ② 稳成检测：引擎 top1 做成率 ≥85% → 用**已确认**池判断引擎领出
+             是否在飞牌花色（在则仅登记本墩接应，不在则提前退让）
+          ③ 未稳成 → _probe_lead_finesse_prefer 全局押桶成榜首 + 榜首门控
+        稳成检测必须后置于结构确认：未确认探针（如防家仍有更大牌的对象）
+        不能作为"引擎 top1 是否在飞牌花色"的判断依据。
         """
         full_output = result.get("full_output", {})
-        candidates = (full_output.get("mcts_stats") or {}).get("candidates") or []
-        # 0c 稳成前置（v1.89 改动C；口径与阈值 2026-09-20 调整）：引擎 top1 做成率
-        # ≥85% → 不再探测/启动。
-        # 窗口期"位置敏感"信号失去意义，直接尊重引擎；仅引擎已在飞牌花色
-        # 时登记本墩接应（稳成不影响流程内接应）。
-        if candidates and self._top1_make(state, candidates) >= FINESSE_NEC_MAKE_HIGH:
-            cur_str = str(result.get("card") or "")
-            if cur_str:
-                local = self._detect_finesse_struct(state, result)
-                suit = cur_str[0]
-                if suit in local:
-                    info = local[suit]
-                    obj = info.get("对象")
-                    if obj is not None and not self._finesse_obj_played(state, suit, obj):
-                        self._register_finesse_flow(state, suit, obj, info)
-                        full_output["领出飞牌"] = {"引发": True, "花色": suit,
-                                                   "对象": obj, "Δ": info.get("Δ"),
-                                                   "领出": cur_str,
-                                                   "说明": "稳成且引擎已在飞牌花色，登记供本墩接应"}
-                    else:
-                        full_output["领出飞牌"] = {"引发": True, "花色": suit,
-                                                   "对象": obj, "Δ": info.get("Δ"),
-                                                   "领出": cur_str,
-                                                   "说明": "稳成，引擎领出飞牌花色，尊重引擎"}
-                    result["full_output"] = full_output
-                    return result
-            full_output["领出飞牌"] = {"引发": False, "说明": "稳成（引擎top1成约≥85%），提前退让"}
-            result["full_output"] = full_output
-            return result
         # 结构探测（2026-09-10）：本侧 + 队友侧（仅领出方为庄/明手时探测）全部
         # 汇聚；每个探针先过"引牌测试"（_probe_finesse_ok 单花色推演，非 DDS）——
         # 引牌打出后对象在防家两侧结果相同 ⇒ 不能飞，废弃该探针。保留的探针
@@ -1912,6 +1886,33 @@ class PlayService:
             full_output["伙伴探针"] = partner
         if confirm:
             full_output["_probe_confirm"] = confirm
+        # 稳成检测（v2.03 定调·后置于结构确认）：引擎 top1 做成率 ≥85% 直接
+        # 退让，不做榜单改出。与**已确认**结构池对比（结构探测+_probe_finesse_ok
+        # 已先行完成）——仅当引擎领出牌花色在该确认池中才登记本墩接应，杜绝
+        # 未确认探针（如防家仍有更大牌的对象）被借用于登记（2026-09-21 用户
+        # 指出：未确认探针不能作为"top1 是否在飞牌花色"的判断依据）。
+        if candidates and self._top1_make(state, candidates) >= FINESSE_NEC_MAKE_HIGH:
+            cur_str = str(result.get("card") or "")
+            if cur_str and cur_str[0] in struct_stack:
+                suit = cur_str[0]
+                info = struct_stack[suit][0]
+                obj = info.get("对象")
+                if obj is not None and not self._finesse_obj_played(state, suit, obj):
+                    self._register_finesse_flow(state, suit, obj, info)
+                    full_output["领出飞牌"] = {"引发": True, "花色": suit,
+                                               "对象": obj, "Δ": info.get("Δ"),
+                                               "领出": cur_str,
+                                               "说明": "稳成且引擎已在飞牌花色（结构已确认），登记供本墩接应"}
+                else:
+                    full_output["领出飞牌"] = {"引发": True, "花色": suit,
+                                               "对象": obj, "Δ": info.get("Δ"),
+                                               "领出": cur_str,
+                                               "说明": "稳成，引擎领出飞牌花色（结构已确认），尊重引擎"}
+                result["full_output"] = full_output
+                return result
+            full_output["领出飞牌"] = {"引发": False, "说明": "稳成（引擎top1成约≥85%），提前退让"}
+            result["full_output"] = full_output
+            return result
         # 全部引牌候选明细（2026-09-21 用户要求：打牌结果显示所有候选引牌的
         # 押桶成，不只胜出的榜首）：{花色: [{引牌, 对象, 押桶成, 方向, Δ,
         # 组合飞, 过手牌, 侧}]}，依探测通过顺序原样记录。

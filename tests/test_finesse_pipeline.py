@@ -310,18 +310,20 @@ def t19_stable_exit_no_touch():
 
 
 def t20_stable_but_engine_leading_finesse():
-    st = mk_state({"♣": "A2", "♥": "Q3"}, {"♣": "43", "♥": "J4"})
-    cands = [cand("♣2", 0.9, scores=[8] * 10), cand("♥3", 1.0, scores=[8] * 10)]
-    res = mk_result(Card("♣", "2"), cands)
+    # 真飞结构：南♣A3 / 北♣Q2，防家 ♣K(对象)+J，对侧 G=北 Q=12
+    # 满足 K(13) > Q(12) > max_enemy J(11) — 过 _probe_finesse_ok 确认
+    st = mk_state({"♣": "A3", "♥": "Q3"}, {"♣": "Q2", "♥": "J4"})
+    cands = [cand("♣3", 0.9, scores=[8] * 10), cand("♥3", 1.0, scores=[8] * 10)]
+    res = mk_result(Card("♣", "3"), cands)
     res["full_output"]["finesse_probe"] = {
-        "♣": {"对象": "K", "Δ": 0.5, "引牌": "♣2",
-              "全": [{"对象": "K", "Δ": 0.5, "引牌": "♣2"}]}}
+        "♣": {"对象": "K", "Δ": 0.5, "引牌": "♣3",
+              "全": [{"对象": "K", "Δ": 0.5, "引牌": "♣3"}]}}
     out = ps_new()._finesse_lead(st, res, 0.75)
     fo = out.get("full_output") or {}
-    ok = (str(out["card"]) == "♣2"
+    ok = (str(out["card"]) == "♣3"
           and st.finesse_flow.get("♣") == 13
           and fo.get("领出飞牌", {}).get("引发") is True)
-    return ok, f"稳成但引擎在飞牌花色→仍登记接应（flow={st.finesse_flow}）"
+    return ok, f"稳成且引擎在已确认飞牌花色→登记接应（flow={st.finesse_flow}）"
 
 
 def t21_delta_not_in_select():
