@@ -22,8 +22,13 @@ from config import (
     FINESSE_RATIO, FINESSE_NEC_MAKE, FINESSE_NEC_MAKE_HIGH,
     FINESSE_NEC_MIN_RATIO, FINESSE_NEC_RATIO,
     FINESSE_COMMIT_DIE_PCT, FINESSE_COMMIT_ALIVE_PCT,
+    FINESSE_PROBE_DELTA,
     DD_MAJORITY_VOTES,
 )
+
+# 无损清将（介入·段2）参数：Top-N 候选做成率趋同极差阈值（<此值才介入，
+# 引擎已有明确最优路线时不动；防受限式修正在非趋同局面强改）
+_CLEAR_TRUMP_EPS = 0.03
 
 
 class PlayService:
@@ -1487,25 +1492,29 @@ class PlayService:
 
     def _intervene(self, state: PlayState, result: Dict[str, Any],
                    ratio: float) -> Dict[str, Any]:
-        """介入层总入口（v1.84 架构）：引擎结果之上的并列规则分支，按序裁定，
-        先命中先赢。分支独立、互不依赖，未来分支（忍让等）同接口并列加入。
+        """介入层总入口（v2.06 五段顺序，2026-09-22 用户逐项定调）：先命中先赢。
 
-          分支1 _garrison_*（9砸，完全独立于飞牌介入，2026-09-17 用户定调）：
-            判据自含（联手张数+持张+对象未现+稳成线），零探针依赖——满手大牌
-            场景探针 Δ 天然趋零（DD 完美防守下大牌位置互偿），而 9砸 判据
-            本就不需要位置信息，故独立裁定。砸完 AK/A 即退出，交回引擎和
-            飞牌介入（无回手/继续飞等后续强制干预）。
-          分支2 _finesse_*（飞牌介入）：探针探测→启动门控→过手/引牌；跟牌
-            接应。Δ 的语义是"引牌方向探测"（飞张在对象身前出才敏感）。
+          段1 稳成判定：引擎 top1 做成率 ≥100% → 介入闭嘴（清将/9砸/飞牌全退让）。
+          段2 无损清将判定（仅限有将定约；NT 自然退化跳过）：做成率趋同门 +
+              飞牌探针 delta 不达标门 + 逐世界 DD 墩数比较（_clear_trump_lead）
+              ——全部世界 diff≥0 且去飞角依赖世界才选最小将牌清将。
+          段3 _garrison_*（9砸，顶张兑现）：放无损清将之后——9砸 若动将牌，
+              对方合计仅 4 张极可能被将吃，故动将牌的 9砸 须先过段2（旁套
+              9砸 不受影响、仍独立裁定）。
+          段4 _finesse_*（飞牌介入）：探针 delta 门。
+          段5 多数投票（_dd_maybe_majority_vote，_dd_play 内兜底，不在本函数）。
 
-        九砸标记（flow_extra"九砸"）为跨分支本墩通信：9砸 分支引小时写入，
-        飞牌介入的接应消费（顶张超吃）。登记只存活本墩（领出=新墩清空）；
-        nine_cash_bank 为 9砸 分支私有跨墩状态（顺序砸 AK 连拔）。
+        领出=新墩清空登记；分段互斥、命中即返回。NT：段2 跳过 → 稳成→9砸→飞牌。
         """
         if state.current_player not in (state.contract.declarer, state.dummy):
             return result
         if self._is_discarding(state):
             return result  # 垫牌：直接信任引擎推荐
+        full_output = result.get("full_output") or {}
+        # 段1 稳成判定：top1 成约 100% 才闭嘴（85~100% 区间交段2/段4 精修）
+        cands0 = (full_output.get("mcts_stats") or {}).get("candidates") or []
+        if cands0 and self._top1_make(state, cands0) >= FINESSE_NEC_MAKE_HIGH:
+            return result
         if self._is_leading(state):
             # 领出=新墩开始：上一墩的登记已完成接应使命，作废（组合飞
             # 废弃对象随登记同灭）；随后重新探测+重过门控。
@@ -1513,15 +1522,22 @@ class PlayService:
             extra = getattr(state, "finesse_flow_extra", None)
             if extra:
                 extra.clear()
-            # 分支1：9砸 先裁定（门控只管"飞"不管"砸"；稳成线两分支同口径）
+            # 段2 无损清将（仅限有将定约；NT 退化直接到 段3/段4）
+            if state.contract.suit != "NT":
+                hit = self._clear_trump_lead(state, result)
+                if hit is not None:
+                    return hit
+            # 段3 9砸（顶张兑现，放无损清将之后）
             if FINESSE_EIGHT_NINE_ENABLE:
                 hit = self._garrison_lead(state, result)
                 if hit is not None:
                     return hit
+            # 段4 飞牌介入
             if not FINESSE_DEFER_ENABLE:
                 return result
             return self._finesse_lead(state, result, ratio)
         # 跟牌：9砸 判据先行（9张套顶张兑现优先于接应选牌）；不满足则接应。
+        # 无损清将仅领出侧适用（跟牌是回应已领之花色，无"选择先清将"余地）。
         # 结构识别以当墩探针为准，但探针门控只在领出侧生效（跟牌时
         # trick_cards 非空 → 探针必然判空），故并入本墩登记
         # （finesse_flow，含组合飞废弃对象）作为跟牌侧的结构来源。
@@ -1538,19 +1554,135 @@ class PlayService:
             result, _committed = self._apply_finesse_commit(state, result, fs, ratio)
         return result
 
+    def _clear_trump_lead(self, state: PlayState,
+                          result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """无损清将判定（介入·段2，仅领出侧；调用方保证为有将定约）。
+
+        前置双门（2026-09-22 用户定调）：
+          门A 做成率趋同：Top-N 候选做成率极差 < _CLEAR_TRUMP_EPS，否则引擎
+            已有明确最优路线，不改出（防受限式修正在非趋同局面强改）。
+          门B 飞牌探针 delta 不达标：将牌花色不构成清晰飞牌结构（finesse_probe
+            对将牌 Δ < FINESSE_PROBE_DELTA）；若将牌是缺 KQ 需飞的"飞角型
+            清将" → 交段4 飞牌层，本层不抢。
+        触发判据（2026-09-22 成约率口径，用户定调）：清将线与基准线（引擎
+          最优不清将候选）都只在保留世界（剔除"清将依赖飞角牌"的世界——敌持
+          联手缺的将牌 K/Q，含全知飞牌增益不可信）上求做成率（拿墩≥需求墩的
+          世界占比），清将线做成率 ≥ 基准线做成率 即无损、改出最小将牌。
+          旧"逐世界 diff=清将墩−基准墩 全≥0"判据把超墩差当损失，同做成率的
+          牌面随采样种子在 0%~50% 负世界率间摇摆，导致清将触发不稳定（C7
+          实证：♠3 98.9% vs ♦A 97.3% 做成率，墩差却有 45.9% 世界为负）。
+        """
+        trump = state.contract.suit
+        full_output = result.get("full_output") or {}
+        cands = (full_output.get("mcts_stats") or {}).get("candidates") or []
+        if not cands:
+            return None
+        # 门B：将牌是否关键飞对象（Δ≥探针阈值 → 飞角型，交段4 飞牌层）
+        probe = full_output.get("finesse_probe") or {}
+        t_info = probe.get(trump) or {}
+        if (t_info.get("Δ") or 0) >= FINESSE_PROBE_DELTA:
+            return None
+        r2v = self._FINESSE_R2V
+        trump_cards = [c for c in cands if c.get("card")
+                       and str(c["card"])[0] == trump]
+        if not trump_cards:
+            return None
+        clear = min(trump_cards,
+                    key=lambda c: r2v.get(str(c["card"])[1:], 0))
+        base = next((c for c in cands if c.get("card")
+                     and str(c["card"])[0] != trump), None)
+        if base is None or not clear.get("scores") or not base.get("scores"):
+            return None
+        clear_scores, base_scores = clear["scores"], base["scores"]
+        if len(clear_scores) != len(base_scores):
+            return None
+        cur = result.get("card")
+        if cur is not None and str(cur) == str(clear["card"]):
+            return None  # 引擎已选最小将牌，无需改写
+        need = state.contract.tricks_needed
+
+        def mk(sc: List[int]) -> float:
+            return (sum(1 for x in sc if x >= need) / len(sc)) if sc else 0.0
+
+        # 门A：Top-N 做成率趋同
+        with_sc = [c for c in cands if c.get("scores")]
+        if not with_sc:
+            return None
+        rates = [mk(c["scores"]) for c in with_sc[:4]]
+        if (max(rates) - min(rates)) > _CLEAR_TRUMP_EPS:
+            return None  # 引擎已有明确最优路线，不改出
+        # 剔除依赖飞角牌的世界（敌持缺飞对象将牌 K/Q），在保留世界上求做成率
+        combined = set()
+        for p in (state.contract.declarer, state.dummy):
+            for c in state.hands.get(p, []):
+                if c.suit == trump:
+                    combined.add(r2v.get(c.rank, 0))
+        missing_fly = {rv for rv in (13, 12) if rv not in combined}
+        opps = [p for p in state.hands if p not in (state.contract.declarer,
+                                                    state.dummy)]
+        worlds = getattr(self.dd_search, "last_worlds", None) or []
+
+        def skip(i: int) -> bool:
+            if not worlds or i >= len(worlds):
+                return False
+            if not missing_fly:
+                return False
+            w = worlds[i]
+            for p in opps:
+                for c in w.get(p, []):
+                    if c.suit == trump and r2v.get(c.rank, 0) in missing_fly:
+                        return True
+            return False
+
+        kept_idx = [i for i in range(len(clear_scores)) if not skip(i)]
+        if not kept_idx:
+            return None
+        if len(kept_idx) < 0.5 * len(clear_scores):
+            return None  # 依赖飞角牌世界占比过半 → 交段4 飞牌层
+        make_clear = sum(1 for i in kept_idx if clear_scores[i] >= need) / len(kept_idx)
+        make_base = sum(1 for i in kept_idx if base_scores[i] >= need) / len(kept_idx)
+        if make_clear < make_base:
+            return None  # 清将减做成率 → 交还引擎（尊重引擎/段3/段4）
+        # 触发：选最小将牌
+        suit0, rank0 = str(clear["card"])[0], str(clear["card"])[1:]
+        delta = t_info.get("Δ") or 0
+        spread = max(rates) - min(rates)
+        hint = (f"[无损清将] {trump} 出最小将牌{suit0}{rank0}清将："
+                f"top-N趋同(极差{spread:.4f})，探针Δ={delta:.3f}<阈值，"
+                f"清将不减做成率({make_clear:.1%}≥{make_base:.1%}，"
+                f"保留{len(kept_idx)}/{len(clear_scores)}世界)")
+        print(hint)
+        result["card"] = Card(suit0, rank0)
+        result["reasoning"] = hint + "\n" + result.get("reasoning", "")
+        fo = result.get("full_output") or {}
+        fo["推荐出牌"] = str(clear["card"])
+        fo["核心逻辑"] = hint + "\n" + fo.get("核心逻辑", "")
+        fo["无损清将"] = {"花色": trump, "改选": str(clear["card"]),
+                           "基线": str(base["card"]),
+                           "趋同极差": round(spread, 4),
+                           "探针Δ": round(delta, 3),
+                           "成约率": {"清将": round(make_clear, 4),
+                                     "基准": round(make_base, 4),
+                                     "保留": len(kept_idx),
+                                     "总数": len(clear_scores)}}
+        result["full_output"] = fo
+        return result
+
     def _top1_make(self, state: PlayState,
                    candidates: List[Dict[str, Any]]) -> float:
-        """稳成线口径（2026-09-20 用户定调）：**引擎 top1 候选**的做成率。
+        """稳成线口径（介入·段1，2026-09-20 用户定调）：**引擎 top1 候选**的做成率。
 
-        规则：引擎结果 top1 做成率 ≥ FINESSE_NEC_MAKE_HIGH(0.85) → 退让给引擎，
-        不做飞牌介入（9砸 分支同口径）。
+        规则：引擎结果 top1 做成率 ≥ FINESSE_NEC_MAKE_HIGH(1.00) → 退让给引擎，
+        介入闭嘴（无损清将/9砸/飞牌全不介入，段3/段4 同口径）。
 
         变更沿革：
           · v1.84（FIX-7）原口径为「全体候选最高做成率」——理由是"榜首可能被
             位置信息误导，另有一条稳成路线时不应砸/飞"。
           · 2026-09-20 改为「top1 做成率」并下调阈值 0.95→0.85：使实现与
             config 注释（"做成率 ≥ 此值"）语义一致，且退让判据对齐**引擎实际
-            要走的路线**——若引擎自己选的路线都已 ≥85% 成约，再改飞牌是负期望。
+            要走的路线**——引擎自己选的路线若已成约，再介入（清将/飞牌）是负期望。
+          · 2026-09-22 阈值 0.85→1.00（用户改 100%）：只有板上钉钉才让介入闭嘴，
+           85~100% 区间交给无损清将/飞牌精修（例：4♠ top1=99.8% 不被挡）。
         无样本数据时返回 1.0（不拦截）。
         """
         need = state.contract.tricks_needed
@@ -1670,7 +1802,7 @@ class PlayService:
                 # 本方无可出（无 K 无小牌）→ 保留登记下墩再试
         # ② 独立扫描（不依赖探针结构池）
         if self._top1_make(state, cands9) >= FINESSE_NEC_MAKE_HIGH:
-            return None  # 稳成线退让（引擎top1成约≥85%）：不砸也成，尊重引擎（连拔不受此限）
+            return None  # 稳成线退让（引擎top1成约≥100%）：不砸也成，尊重引擎（连拔不受此限）
         declarer = state.contract.declarer
         dummy = state.dummy
         suits_by_len = sorted("♠♥♦♣",
@@ -1805,7 +1937,7 @@ class PlayService:
         9砸 已独立为 _garrison_lead 分支先行裁定（未命中才进入本函数）。
         执行顺序（2026-09-21 用户定调"先确认后稳成"）：
           ① 结构探测（本侧+伙伴侧）→ _probe_finesse_ok 逐条确认 → 确认结构池
-          ② 稳成检测：引擎 top1 做成率 ≥85% → 用**已确认**池判断引擎领出
+          ② 稳成检测：引擎 top1 做成率 ≥100% → 用**已确认**池判断引擎领出
              是否在飞牌花色（在则仅登记本墩接应，不在则提前退让）
           ③ 未稳成 → _probe_lead_finesse_prefer 全局押桶成榜首 + 榜首门控
         稳成检测必须后置于结构确认：未确认探针（如防家仍有更大牌的对象）
@@ -1886,7 +2018,7 @@ class PlayService:
             full_output["伙伴探针"] = partner
         if confirm:
             full_output["_probe_confirm"] = confirm
-        # 稳成检测（v2.03 定调·后置于结构确认）：引擎 top1 做成率 ≥85% 直接
+        # 稳成检测（v2.03 定调·后置于结构确认）：引擎 top1 做成率 ≥100% 直接
         # 退让，不做榜单改出。与**已确认**结构池对比（结构探测+_probe_finesse_ok
         # 已先行完成）——仅当引擎领出牌花色在该确认池中才登记本墩接应，杜绝
         # 未确认探针（如防家仍有更大牌的对象）被借用于登记（2026-09-21 用户
@@ -1910,7 +2042,7 @@ class PlayService:
                                                "说明": "稳成，引擎领出飞牌花色（结构已确认），尊重引擎"}
                 result["full_output"] = full_output
                 return result
-            full_output["领出飞牌"] = {"引发": False, "说明": "稳成（引擎top1成约≥85%），提前退让"}
+            full_output["领出飞牌"] = {"引发": False, "说明": "稳成（引擎top1成约≥100%），提前退让"}
             result["full_output"] = full_output
             return result
         # 全部引牌候选明细（2026-09-21 用户要求：打牌结果显示所有候选引牌的
@@ -2831,12 +2963,12 @@ class PlayService:
             full_output["最新约束"] = self._format_latest_constraints_for_display(state, constraints)
             self._inject_played_stats(full_output, state)
             full_output["engine_phase"] = "midgame_dd"
-            # 介入层（v1.84：独立于引擎的统一管线，传入 DD 比值）。
-            # 9砸 与飞牌介入为并列规则分支，按序裁定、先命中先赢。
-            # DD 单独开关（运行时切换，不影响 αμ）：DD_FINESSE_ENABLE=False 时
-            # DD 引擎不带任何介入——9砸/窗口期启动/接应全不介入，仅按引擎得分选牌。
+            # 介入层（v2.06：五段顺序，独立于引擎的统一管线，传入 DD 比值）。
+            # 段1 稳成判定→段2 无损清将→段3 9砸→段4 飞牌介入，先命中先赢。
+            # DD 单独介入开关（运行时切换，不影响 αμ）：DD_INTERVENE_ENABLE=False 时
+            # DD 引擎不带任何介入——无损清将/9砸/窗口期启动/接应全不介入，仅按引擎得分选牌。
             import config as _svc_config
-            if _svc_config.DD_FINESSE_ENABLE:
+            if _svc_config.DD_INTERVENE_ENABLE:
                 result = self._intervene(state, result, FINESSE_RATIO)
             card = result.get("card")
             # 平局多数投票（2026-09-16 方案乙）：飞牌优先——飞牌已改选则

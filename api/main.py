@@ -3009,7 +3009,7 @@ async def set_dd_world_filter(request: DdWorldFilterRequest):
 # 覆盖 config 模块级属性的运行时可调项，写入 runtime_config.json；
 # 模块加载（服务启动）时读取恢复。前端刷新只是读取侧，改的是这里。
 
-_RUNTIME_OVERRIDABLE = ("DD_FINESSE_ENABLE", "DD_USE_CONSTRAINTS",
+_RUNTIME_OVERRIDABLE = ("DD_INTERVENE_ENABLE", "DD_USE_CONSTRAINTS",
                         "DD_KEEP_SURE_WIN", "DD_KEEP_CRITICAL", "DD_KEEP_SURE_LOSE",
                         "FINESSE_PROBE_DELTA")
 
@@ -3057,17 +3057,17 @@ class DdFinesseEnableRequest(BaseModel):
 
 @app.get("/api/play/dd-finesse")
 async def get_dd_finesse_enable(session_id: str = Query("default")):
-    """获取 DD 引擎飞牌管理开关（true=DD 引入窗口期启动/接应/流程/8飞9砸）"""
-    return {"enable": bool(config.DD_FINESSE_ENABLE)}
+    """获取 DD 介入总开关（true=DD 引入五段介入：稳成→无损清将→9砸→飞牌→多数投票）"""
+    return {"enable": bool(config.DD_INTERVENE_ENABLE)}
 
 
 @app.post("/api/play/dd-finesse")
 async def set_dd_finesse_enable(request: DdFinesseEnableRequest):
-    """设置 DD 引擎飞牌管理开关（运行时即时生效；αμ 引擎不受影响）"""
+    """设置 DD 介入总开关（运行时即时生效；αμ 引擎不受影响）"""
     if request.enable is not None:
-        config.DD_FINESSE_ENABLE = bool(request.enable)
+        config.DD_INTERVENE_ENABLE = bool(request.enable)
     _save_runtime_overrides()
-    return {"success": True, "enable": bool(config.DD_FINESSE_ENABLE)}
+    return {"success": True, "enable": bool(config.DD_INTERVENE_ENABLE)}
 
 
 # ── 打牌约束开关（运行时动态，无需重启后端）──

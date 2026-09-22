@@ -1151,9 +1151,9 @@ class DDSearch:
         # 门控（2026-09-09 修正）：仅"本家正在领出"才探测——跟牌/垫牌时探针
         # 会因滑动窗口下移发明新对象（如飞Q时Q刚出，探针滑到"飞T"），把本应
         # 放小的接应误判成必须盖T。领出方为庄/明手才探测（对方领出不探测）。
-        # DD 飞牌管理开关（DD_FINESSE_ENABLE=False）时探测一并关闭，输出空。
+        # DD 介入总开关（DD_INTERVENE_ENABLE=False）时探测一并关闭，输出空。
         _probe_ok = (not trick_cards) and (actual_turn in (declarer, dummy))
-        finesse_probe = {} if (_probe_ok and _dd_config.DD_FINESSE_ENABLE) else None
+        finesse_probe = {} if (_probe_ok and _dd_config.DD_INTERVENE_ENABLE) else None
         # 跟牌接应探针（v1.96）：本墩我方领出且已登记飞牌流程（领出方启动
         # 飞牌）时，按登记对象在东/西的位置分桶累计全部候选的桶内做成率，
         # 供接应端三层判据读取"引擎榜首替代牌在押注方向桶的成率"。
@@ -1163,7 +1163,7 @@ class DDSearch:
                       and any(s in _flow for s in _lead_suits)
                       and actual_turn in (declarer, dummy)
                       and trick_leader in (declarer, dummy))
-        finesse_probe_follow = {} if (_follow_ok and _dd_config.DD_FINESSE_ENABLE) else None
+        finesse_probe_follow = {} if (_follow_ok and _dd_config.DD_INTERVENE_ENABLE) else None
 
         samples_done, _solve_times, _solve_total, _solve_max = self._solve_worlds(
             worlds, all_played, trick_cards, trick_leader,
