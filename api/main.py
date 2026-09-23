@@ -1497,7 +1497,7 @@ async def bm_deal(deck_id: str = Query(..., description="牌局id，如 2-89 / 2
             opening_lead=deal.get("opening_lead"),
             explanation=deal.get("explanation"),
             page_type="BM2000",
-            vulnerability=None
+            vulnerability=None,
         )
     except Exception as e:
         print(f"[ERROR] 读取BM牌局失败: {str(e)}")
@@ -3057,7 +3057,7 @@ class DdFinesseEnableRequest(BaseModel):
 
 @app.get("/api/play/dd-finesse")
 async def get_dd_finesse_enable(session_id: str = Query("default")):
-    """获取 DD 介入总开关（true=DD 引入五段介入：稳成→无损清将→9砸→飞牌→多数投票）"""
+    """获取 DD 介入总开关（true=DD 引入介入：稳成→无损清将→飞牌→多数投票）"""
     return {"enable": bool(config.DD_INTERVENE_ENABLE)}
 
 
@@ -3095,7 +3095,7 @@ async def set_dd_use_constraints(request: DdUseConstraintsRequest):
 
 # ── DD 探针 Δ 阈值（运行时动态，无需重启后端）──
 
-FINESSE_DELTA_MIN = 0.05
+FINESSE_DELTA_MIN = 0.0   # 允许 0：把门票无效化（任何 Δ≥0 都进池），用于测试"纯确认层"效果
 FINESSE_DELTA_MAX = 0.5
 
 

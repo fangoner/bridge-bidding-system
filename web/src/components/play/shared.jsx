@@ -204,7 +204,7 @@ export function FinesseStamps({ fullOutput }) {
 // 探针结果：本侧 finesse_probe（位置：本侧）+ 伙伴侧 伙伴探针（位置：对侧）。
 // 每个位置一行，引牌用分号连排；片段格式：花色 · 对象 · Δ · 引牌 · ✓飞/✗未确认
 export function FinesseProbeView({ fullOutput }) {
-  const { isDark, colorMuted } = usePanelColors()
+  const { colorMuted } = usePanelColors()
   const rankName = { 14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: 'T', 9: '9', 8: '8' }
   const suitOrder = { '♠': 0, '♥': 1, '♦': 2, '♣': 3 }
   const confirmMap = (fullOutput && fullOutput._probe_confirm) || {}
@@ -222,7 +222,7 @@ export function FinesseProbeView({ fullOutput }) {
       if (!info || typeof info !== 'object') continue
       const all = Array.isArray(info.全) && info.全.length ? info.全 : [info]
       for (const e of all) {
-        rows.push({ label, s, obj: e.对象, delta: e.Δ, lead: e.引牌, combo: !!e.组合飞 })
+        rows.push({ label, s, obj: e.对象, delta: e.Δ, lead: e.引牌, combo: !!e.组合飞, rate: e.押桶成 })
       }
     }
   }
@@ -267,7 +267,11 @@ export function FinesseProbeView({ fullOutput }) {
                     {Number(r.delta).toFixed(2)}
                   </Box>
                 ) : Number(r.delta).toFixed(2)}
-                {`,${r.lead},`}
+                {r.rate != null ? (
+                  <Box component="span" sx={{ fontWeight: 600, color: '#00695c' }}>
+                    {`,${r.lead}押${Math.round(r.rate * 100)}%`}
+                  </Box>
+                ) : `,${r.lead},`}
                 {confirmed === true && (
                   <Box component="span" sx={{ fontWeight: 700, color: '#2e7d32' }}>✓</Box>
                 )}

@@ -25,8 +25,18 @@ def relax_constraint(c: "BidConstraint") -> "BidConstraint":
     if c.min_keycards is not None:
         relaxed.min_keycards = max(0, c.min_keycards - 1)
     relaxed.suit_min = {s: max(1, n // 2) for s, n in c.suit_min.items()}
-    # suit_max / exact_suit / specific_cards / suit_controls / balanced 放宽时不保留
+    # suit_max / exact_suit / specific_cards / suit_controls / balanced / length_above 放宽时不保留
     return relaxed
+
+
+_RANK_ORDER = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"]
+
+
+def _rank_value_of(rank: str) -> int:
+    try:
+        return _RANK_ORDER.index(rank)
+    except ValueError:
+        return -1
 
 
 @dataclass
@@ -49,6 +59,13 @@ class BidConstraint:
     specific_cards: Set[Tuple[str, str]] = field(default_factory=set)
     suit_controls: Set[str] = field(default_factory=set)  # 有控制的花色（A/K 或单/缺，来自扣叫承诺）
     min_keycards: Optional[int] = None  # 关键张数量（4NT/5NT 问叫答叫承诺）
+    length_above: Dict[str, Tuple[str, int]] = field(default_factory=dict)
+    """该花色中点数大于基准牌的牌至少 n 张（长四首攻协议专用）。
+
+    键=花色，值=(基准牌面, 至少张数)。如 ("♠",("8",3)) = 黑桃中
+    大于 8 的牌至少 3 张（攻 8 意味该花色第 4 大是 8，比它大有 3 张）。
+    只约束防守方采样；放宽/中局扣减路径按 specific_cards 同类处理。
+    """
     inference_source: str = "hard_coded"
 
 
@@ -123,6 +140,11 @@ def _check_constraint(cards: List[Card], constraint: "BidConstraint") -> bool:
             return False
     for (suit, rank) in constraint.specific_cards:
         if not any(c.suit == suit and c.rank == rank for c in cards):
+            return False
+    for suit, (base_rank, need_n) in constraint.length_above.items():
+        above = sum(1 for c in cards if c.suit == suit
+                    and c.rank_value > _rank_value_of(base_rank))
+        if above < need_n:
             return False
     # v1.68 决策：扣叫（suit_controls）与关键张（min_keycards）约束
     # 只看手牌实际张数校验，对庄家/明手（手牌已知）无意义，只对防守方采样有价值；

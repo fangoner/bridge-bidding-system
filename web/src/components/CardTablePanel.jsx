@@ -229,6 +229,11 @@ function CardTablePanel({
               <ToggleButton value="bidding" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 40 }}>
                 叫牌过程
               </ToggleButton>
+              {bmExplanation && (
+                <ToggleButton value="bm" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 40 }}>
+                  BM说明
+                </ToggleButton>
+              )}
               {allHandsComplete && (
                 <ToggleButton value="result" sx={{ px: 1, py: 0, fontSize: '0.75rem', minWidth: 40 }}>
                   小房子

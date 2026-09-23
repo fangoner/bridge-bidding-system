@@ -360,11 +360,11 @@ function SettingsPanel({
                 />
               }
               label="DD飞牌管理"
-              title="DD引擎是否引入飞牌管理（窗口期启动/接应/流程/8飞9砸）；关闭后DD仅按引擎得分选牌，αμ引擎不受影响。运行时即时生效"
+              title="DD引擎是否引入飞牌介入（接口三闸：稳成→无损清将→飞牌探针；关闭后仅按引擎得分选牌，αμ引擎不受影响）。运行时即时生效"
               sx={{ fontSize: '0.65rem' }}
             />
             <RangeSlider label="Δ阈值" value={ddFinesseDelta}
-              min={0.05} max={0.5} step={0.05} width={64}
+              min={0} max={0.5} step={0.05} width={64}
               onCommit={handleDdFinesseDeltaChange} />
             </>
           )}

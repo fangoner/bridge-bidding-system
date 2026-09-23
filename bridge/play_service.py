@@ -18,7 +18,7 @@ from config import (
     DD_ENDGAME_CARD_THRESHOLD, DD_ENDGAME_MAX_ENUMERATIONS,
     ALPHA_MU_ENABLE, ALPHA_MU_ENDGAME_CARDS, ALPHA_MU_NUM_WORLDS,
     ALPHA_MU_MAX_DEPTH, ALPHA_MU_TIME_LIMIT, ALPHA_MU_M,
-    FINESSE_DEFER_ENABLE, FINESSE_EIGHT_NINE_ENABLE,
+    FINESSE_DEFER_ENABLE,
     FINESSE_RATIO, FINESSE_NEC_MAKE, FINESSE_NEC_MAKE_HIGH,
     FINESSE_NEC_MIN_RATIO, FINESSE_NEC_RATIO,
     FINESSE_COMMIT_DIE_PCT, FINESSE_COMMIT_ALIVE_PCT,
@@ -583,6 +583,16 @@ class PlayService:
             merged.min_keycards = max(c1.min_keycards or 0, c2.min_keycards or 0)
         merged.specific_cards = c1.specific_cards.union(c2.specific_cards)
         merged.suit_controls = c1.suit_controls.union(c2.suit_controls)
+        # 首攻长四：同花色取值更大的张数（单调收紧），不同花色合入
+        for suit in set(list(c1.length_above.keys()) + list(c2.length_above.keys())):
+            e1 = c1.length_above.get(suit)
+            e2 = c2.length_above.get(suit)
+            if e1 is not None and e2 is not None:
+                if e1[0] != e2[0]:
+                    continue  # 基准牌不一致的同一花色约束冲突：不合并（放弃弱约束）
+                merged.length_above[suit] = (e1[0], max(e1[1], e2[1]))
+            else:
+                merged.length_above[suit] = e1 if e1 is not None else e2
         return merged
 
     def _format_constraints_for_display(self, constraints: Dict[str, BidConstraint]) -> str:
@@ -629,6 +639,10 @@ class PlayService:
             if c.specific_cards:
                 sc = ", ".join(f"{s}{r}" for s, r in c.specific_cards)
                 parts.append(f"必持:{sc}")
+            # 长四首攻：该花色 >基准牌 至少 n 张
+            if c.length_above:
+                for s, (base_r, n) in c.length_above.items():
+                    parts.append(f"{s}>{base_r}≥{n}")
             # 来源
             src = c.inference_source or ""
             if "convention" in src:
@@ -1081,6 +1095,55 @@ class PlayService:
             self.bid_constraints = {}
         return self.bid_constraints
 
+    def _build_opening_lead_constraint(self, state: PlayState) -> Optional[BidConstraint]:
+        """NT 防家首攻小牌 → 长四协议约束（仅首攻方）。
+
+        攻小牌意味着该花色第 4 大是此牌：花色长度 ≥4，且至少 3 张
+        同花色大于首攻牌。返回针对首攻方的约束，与叫牌约束单调合并
+        （_merge_constraints 只缩不放）。首攻牌已打出，剩余部分的
+        扣减由现有 _reduce_constraint_for_played 统一承接，后续演化
+        与普通叫牌约束完全一致。
+        """
+        import config as _cfg
+        if not _cfg.DD_USE_CONSTRAINTS or not _cfg.DD_LEAD_LONG_FOUR_ENABLE:
+            return None
+        if state.contract.suit != "NT":
+            return None
+        lead_card_info = None
+        for trick in state.tricks:
+            if trick.cards:
+                lead_card_info = trick.cards[0]
+                break
+        if lead_card_info is None and state.current_trick.cards:
+            lead_card_info = state.current_trick.cards[0]
+        if lead_card_info is None:
+            return None
+        leader, lead_card = lead_card_info
+        if leader in (state.contract.declarer, state.dummy):
+            return None  # 仅防家首攻；庄/明手领出不符合长四协议
+        if lead_card.rank not in _cfg.DD_LEAD_SMALL_RANKS:
+            return None  # 顶张/大牌领出非长四
+        return BidConstraint(
+            position=leader,
+            suit_min={lead_card.suit: 4},
+            length_above={lead_card.suit: (lead_card.rank, 3)},
+            inference_source="opening_lead_long4",
+        )
+
+    def _merge_opening_lead_constraint(self, state: PlayState,
+                                       constraints: Dict[str, BidConstraint]) -> Dict[str, BidConstraint]:
+        """把首攻长四约束并入现有约束集（新 dict，不回写缓存）。"""
+        lead_con = self._build_opening_lead_constraint(state)
+        if lead_con is None:
+            return constraints
+        merged = dict(constraints)
+        pos = lead_con.position
+        if pos in merged:
+            merged[pos] = self._merge_constraints(merged[pos], lead_con)
+        else:
+            merged[pos] = lead_con
+        return merged
+
     @staticmethod
     def _rebuild_bid_constraints(payload: dict) -> Dict[str, BidConstraint]:
         """将接口返回的家约束 payload 重建为 BidConstraint 字典。"""
@@ -1190,6 +1253,7 @@ class PlayService:
 
         # 创建临时搜索器（复用 dd_search 的 sampler + 约束）
         constraints = self._get_bid_constraints()
+        constraints = self._merge_opening_lead_constraint(state, constraints)
         if constraints:
             self._apply_constraints(constraints)
 
@@ -1220,7 +1284,7 @@ class PlayService:
         full_output["叫牌约束"] = self._format_constraints_for_display(constraints)
         full_output["最新约束"] = self._format_latest_constraints_for_display(state, constraints)
         self._inject_played_stats(full_output, state)
-        # αμ 引擎完全不引入飞牌管理（含 8飞9砸）：αμ 多世界联合评估已含
+        # αμ 引擎完全不引入飞牌管理：αμ 多世界联合评估已含
         # 飞牌位置考量，飞牌门控依赖的 scores/scoring_val 字段 αμ 也不产出，
         # 额外覆盖只会用 avg_tricks 误判升级。纯 αμ / αμ+LLM / DD-αμ-LLM
         # 残局阶段均经此函数，一并关闭（2026-09-12）。
@@ -1349,7 +1413,7 @@ class PlayService:
                 if m in (14, 11):
                     continue  # 缺A无控制；仅缺J（A/K/Q齐全）无需飞，连砸AKQ三轮即可处理
                 # 控制张/飞张基于 present（手牌 ∪ 已出）：A 已兑现（先砸后飞）
-                # 时仍是上方控制，K 未现则缺 K 结构继续成立，供 9砸后续保护间张
+                # 时仍是上方控制，K 未现则缺 K 结构继续成立，供后续保护间张
                 above = [r for r in present if r > m]
                 # 飞张只计"当前仍在我方手中"的间张（≥T 且 < 对象）：敌方打出/持有的
                 # T/J 不是我们的飞张，不能据此判定该花色"可飞"（如 ♥K32+A65 缺 Q
@@ -1477,7 +1541,7 @@ class PlayService:
     def _is_discarding(self, state: PlayState) -> bool:
         """当前出牌方是否在垫牌：本墩已有人领出，且手中无领出花色的牌（只能垫）。
 
-        垫牌时不做任何飞牌处理（延迟/8飞9砸/9砸后续/强制接应），
+        垫牌时不做任何飞牌处理（延迟/飞牌介入/强制接应），
         飞牌策略只作用于能正常出牌（领出或跟牌）的时刻。
         """
         lead_suit = None
@@ -1492,19 +1556,18 @@ class PlayService:
 
     def _intervene(self, state: PlayState, result: Dict[str, Any],
                    ratio: float) -> Dict[str, Any]:
-        """介入层总入口（v2.06 五段顺序，2026-09-22 用户逐项定调）：先命中先赢。
+        """介入层总入口（v2.07 三段顺序，2026-09-22 用户逐项定调）：先命中先赢。
 
-          段1 稳成判定：引擎 top1 做成率 ≥100% → 介入闭嘴（清将/9砸/飞牌全退让）。
+          段1 稳成判定：引擎 top1 做成率 ≥100% → 介入闭嘴（清将/飞牌全退让）。
           段2 无损清将判定（仅限有将定约；NT 自然退化跳过）：做成率趋同门 +
-              飞牌探针 delta 不达标门 + 逐世界 DD 墩数比较（_clear_trump_lead）
-              ——全部世界 diff≥0 且去飞角依赖世界才选最小将牌清将。
-          段3 _garrison_*（9砸，顶张兑现）：放无损清将之后——9砸 若动将牌，
-              对方合计仅 4 张极可能被将吃，故动将牌的 9砸 须先过段2（旁套
-              9砸 不受影响、仍独立裁定）。
-          段4 _finesse_*（飞牌介入）：探针 delta 门。
-          段5 多数投票（_dd_maybe_majority_vote，_dd_play 内兜底，不在本函数）。
+              飞牌探针 delta 不达标门 + 成约率比较（_clear_trump_lead）
+              ——清将线做成率 ≥ 基准线做成率 即选最小将牌清将。
+          段3 _finesse_*（飞牌介入）：探针 delta 门。
+          段4 多数投票（_dd_maybe_majority_vote，_dd_play 内兜底，不在本函数）。
+           9砸 分支已于 2026-09-22 移除（DD 成约率口径已覆盖抓 Q/顶张兑现，
+          规则式 9砸 属受限式修正被卸除）。
 
-        领出=新墩清空登记；分段互斥、命中即返回。NT：段2 跳过 → 稳成→9砸→飞牌。
+        领出=新墩清空登记；分段互斥、命中即返回。NT：段2 跳过 → 稳成→飞牌。
         """
         if state.current_player not in (state.contract.declarer, state.dummy):
             return result
@@ -1522,29 +1585,19 @@ class PlayService:
             extra = getattr(state, "finesse_flow_extra", None)
             if extra:
                 extra.clear()
-            # 段2 无损清将（仅限有将定约；NT 退化直接到 段3/段4）
+            # 段2 无损清将（仅限有将定约；NT 退化直接到 段3）
             if state.contract.suit != "NT":
                 hit = self._clear_trump_lead(state, result)
                 if hit is not None:
                     return hit
-            # 段3 9砸（顶张兑现，放无损清将之后）
-            if FINESSE_EIGHT_NINE_ENABLE:
-                hit = self._garrison_lead(state, result)
-                if hit is not None:
-                    return hit
-            # 段4 飞牌介入
+            # 段3 飞牌介入
             if not FINESSE_DEFER_ENABLE:
                 return result
             return self._finesse_lead(state, result, ratio)
-        # 跟牌：9砸 判据先行（9张套顶张兑现优先于接应选牌）；不满足则接应。
-        # 无损清将仅领出侧适用（跟牌是回应已领之花色，无"选择先清将"余地）。
-        # 结构识别以当墩探针为准，但探针门控只在领出侧生效（跟牌时
-        # trick_cards 非空 → 探针必然判空），故并入本墩登记
+        # 跟牌：接应链。无损清将仅领出侧适用（跟牌是回应已领之花色，无
+        # "选择先清将"余地）。结构识别以当墩探针为准，但探针门控只在领出侧
+        # 生效（跟牌时 trick_cards 非空 → 探针必然判空），故并入本墩登记
         # （finesse_flow，含组合飞废弃对象）作为跟牌侧的结构来源。
-        if FINESSE_EIGHT_NINE_ENABLE:
-            hit = self._garrison_follow(state, result)
-            if hit is not None:
-                return hit
         if not FINESSE_DEFER_ENABLE:
             return result
         fs = self._detect_finesse_struct(state, result)
@@ -1673,7 +1726,7 @@ class PlayService:
         """稳成线口径（介入·段1，2026-09-20 用户定调）：**引擎 top1 候选**的做成率。
 
         规则：引擎结果 top1 做成率 ≥ FINESSE_NEC_MAKE_HIGH(1.00) → 退让给引擎，
-        介入闭嘴（无损清将/9砸/飞牌全不介入，段3/段4 同口径）。
+        介入闭嘴（无损清将/飞牌全不介入）。
 
         变更沿革：
           · v1.84（FIX-7）原口径为「全体候选最高做成率」——理由是"榜首可能被
@@ -1693,249 +1746,11 @@ class PlayService:
             return 1.0
         return sum(1 for x in scores if x >= need) / len(scores)
 
-    def _garrison_target(self, state: PlayState, suit: str,
-                         candidates: List[Dict[str, Any]]) -> Optional[Tuple[int, int, bool]]:
-        """9砸 判据（独立分支核心，零探针依赖）：仅两种情况（用户定调）。
-
-          AK缺Q（A、K 在手，Q 未现）→ 砸 A 后连拔 K
-          AQ缺K（A、Q 在手，K 未现）→ 砸 A
-        其他一律不走 9砸（如 AKQ 在手顶张齐全，交回引擎自然兑现）。
-        "未现" = 不在联手现手且未打出。返回 (对象, 联手张数, True)，
-        对象供连拔检查（对象是否已现）与跟牌侧间张判定；不满足返回 None。
-        """
-        combined = self._combined_suit_count(state, suit)
-        if combined < 9:
-            return None
-        declarer = state.contract.declarer
-        dummy = state.dummy
-        own = set()
-        seen = set()
-        for p in (declarer, dummy):
-            for c in state.hands.get(p, []):
-                if c.suit == suit:
-                    own.add(self._FINESSE_R2V.get(c.rank, 0))
-        for t in state.tricks:
-            for _, c in t.cards:
-                if c and c.suit == suit:
-                    seen.add(self._FINESSE_R2V.get(c.rank, 0))
-        for _, c in state.current_trick.cards:
-            if c and c.suit == suit:
-                seen.add(self._FINESSE_R2V.get(c.rank, 0))
-        seen |= own
-        if 14 in own and 13 in own and 12 not in seen:
-            return 12, combined, True
-        if 14 in own and 12 in own and 13 not in seen:
-            return 13, combined, True
-        return None
-
-    def _garrison_lead(self, state: PlayState,
-                       result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """9砸 分支·领出侧（v1.84，完全独立于飞牌介入）。
-
-        ① 连拔检查（nine_cash_bank）：上墩砸 A（缺Q/J 持 A+K）登记的
-           "顺序砸"续接——本墩领出且对象未现 → 本方可出 K → 连拔 K；
-           K 在对侧 → 引最小小牌 + 九砸标记（伙伴第三家超吃 K 完成连拔）。
-           连拔是已启动流程的完成动作，不受稳成线约束。
-        ② 独立扫描全部花色（按联手张数降序）：稳成线退让 → 9砸 判据
-           （≥9张+缺K持AQ/缺Q持AK+对象未现）→ A 在领出方手直接砸
-           （缺Q持AK 登记 cash_bank 下墩连拔 K）；A 在伙伴手 → 引最小
-           小牌 + 九砸标记（伙伴超吃 A，缺Q持AK 由接应补登记连拔）。
-        命中返回改选后 result；未命中返回 None（交回飞牌介入分支）。
-        """
-        full_output = result.get("full_output") or {}
-        mcts9 = full_output.get("mcts_stats") or {}
-        cands9 = mcts9.get("candidates") or []
-        # ① 连拔检查（规则优先，不受稳成线约束）
-        bank9 = getattr(state, "nine_cash_bank", None)
-        if bank9:
-            for s, bk in list(bank9.items()):
-                obj9 = bk.get("obj")
-                rv9 = bk.get("rv")
-                if obj9 is None or rv9 is None:
-                    del bank9[s]
-                    continue
-                if self._finesse_obj_played(state, s, obj9):
-                    del bank9[s]  # 对象已现身，无需再连拔
-                    continue
-                tgt9 = next((c for c in cands9 if c.get("card")
-                             and c["card"][0] == s
-                             and self._FINESSE_R2V.get(c["card"][1:], 0) == rv9), None)
-                if tgt9:
-                    hint9b = (f"[9砸连拔] {s} 对象{self._finesse_obj_name(obj9)}未现，"
-                              f"连拔{self._finesse_obj_name(rv9)}")
-                    print(hint9b)
-                    result["card"] = Card(s, self._finesse_obj_name(rv9))
-                    result["reasoning"] = hint9b + "\n" + result.get("reasoning", "")
-                    fo9 = result.get("full_output") or {}
-                    fo9["推荐出牌"] = tgt9["card"]
-                    fo9["核心逻辑"] = hint9b + "\n" + fo9.get("核心逻辑", "")
-                    fo9["八九原则"] = {"花色": s, "缺": self._finesse_obj_name(obj9),
-                                        "原则": "9砸连拔", "改选": tgt9["card"]}
-                    del bank9[s]
-                    return result
-                small9 = [c for c in cands9 if c.get("card")
-                          and c["card"][0] == s
-                          and 2 <= self._FINESSE_R2V.get(c["card"][1:], 0) <= 9]
-                if small9:
-                    pick9 = min(small9,
-                                key=lambda c: self._FINESSE_R2V.get(c["card"][1:], 0))
-                    hint9c = (f"[9砸连拔] {s} 对象{self._finesse_obj_name(obj9)}未现，"
-                              f"连拔{self._finesse_obj_name(rv9)}在对侧，"
-                              f"引{pick9['card']}让伙伴超吃")
-                    print(hint9c)
-                    result["card"] = Card(pick9["card"][0], pick9["card"][1:])
-                    result["reasoning"] = hint9c + "\n" + result.get("reasoning", "")
-                    fo9 = result.get("full_output") or {}
-                    fo9["推荐出牌"] = pick9["card"]
-                    fo9["核心逻辑"] = hint9c + "\n" + fo9.get("核心逻辑", "")
-                    fo9["八九原则"] = {"花色": s, "缺": self._finesse_obj_name(obj9),
-                                        "原则": "9砸连拔(顶张在对侧)",
-                                        "改选": pick9["card"]}
-                    self._register_finesse_flow(state, s, obj9, None)
-                    extra9 = getattr(state, "finesse_flow_extra", None)
-                    if extra9 is None:
-                        extra9 = {}
-                        setattr(state, "finesse_flow_extra", extra9)
-                    extra9.setdefault(s, {})["九砸"] = True
-                    del bank9[s]
-                    return result
-                # 本方无可出（无 K 无小牌）→ 保留登记下墩再试
-        # ② 独立扫描（不依赖探针结构池）
-        if self._top1_make(state, cands9) >= FINESSE_NEC_MAKE_HIGH:
-            return None  # 稳成线退让（引擎top1成约≥100%）：不砸也成，尊重引擎（连拔不受此限）
-        declarer = state.contract.declarer
-        dummy = state.dummy
-        suits_by_len = sorted("♠♥♦♣",
-                              key=lambda s2: -self._combined_suit_count(state, s2))
-        for suit in suits_by_len:
-            tgt = self._garrison_target(state, suit, cands9)
-            if tgt is None:
-                continue
-            obj, combined, _should = tgt
-            cur_str = str(result.get("card")) if result.get("card") else ""
-            # A 在领出方手 → 直接砸 A
-            bank = [c for c in cands9 if c.get("card")
-                    and c["card"][0] == suit
-                    and self._FINESSE_R2V.get(c["card"][1:], 0) == 14]
-            if bank:
-                hint = (f"[9砸] {suit} 联手{combined}张缺{self._finesse_obj_name(obj)}"
-                        f"持{'AQ' if obj == 13 else 'AK'}应砸A（9砸独立分支）")
-                print(hint)
-                result["card"] = Card(suit, "A")
-                result["reasoning"] = hint + "\n" + result.get("reasoning", "")
-                fo = result.get("full_output") or {}
-                fo["推荐出牌"] = suit + "A"
-                fo["核心逻辑"] = hint + "\n" + fo.get("核心逻辑", "")
-                fo["八九原则"] = {"花色": suit, "缺": self._finesse_obj_name(obj),
-                                  "联手张数": combined, "原则": "9砸",
-                                  "榜首": cur_str, "改选": suit + "A"}
-                fo["领出飞牌"] = {"引发": False, "说明": "9砸独立分支（顶张在手，出A砸）"}
-                # 缺Q/J 持 AK：A 砸后 K 仍在联手 → 登记连拔（下墩顺序砸 K）
-                if (obj != 13
-                        and not self._finesse_obj_played(state, suit, 13)
-                        and any(self._FINESSE_R2V.get(c.rank, 0) == 13
-                                for p in (declarer, dummy)
-                                for c in state.hands.get(p, [])
-                                if c.suit == suit)):
-                    nb9 = getattr(state, "nine_cash_bank", None)
-                    if nb9 is None:
-                        nb9 = {}
-                        setattr(state, "nine_cash_bank", nb9)
-                    nb9[suit] = {"obj": obj, "rv": 13}
-                return result
-            # A 在伙伴手（本方无 A 可出）→ 引最小小牌 + 九砸标记（伙伴超吃 A）
-            small = [c for c in cands9 if c.get("card")
-                     and c["card"][0] == suit
-                     and 2 <= self._FINESSE_R2V.get(c["card"][1:], 0) <= 9]
-            if small:
-                pick = min(small,
-                           key=lambda c: self._FINESSE_R2V.get(c["card"][1:], 0))
-                hint = (f"[9砸] {suit} 联手{combined}张缺{self._finesse_obj_name(obj)}"
-                        f"应砸A（顶张在对侧）：引{pick['card']}让伙伴A超吃")
-                print(hint)
-                result["card"] = Card(pick["card"][0], pick["card"][1:])
-                result["reasoning"] = hint + "\n" + result.get("reasoning", "")
-                fo = result.get("full_output") or {}
-                fo["推荐出牌"] = pick["card"]
-                fo["核心逻辑"] = hint + "\n" + fo.get("核心逻辑", "")
-                fo["八九原则"] = {"花色": suit, "缺": self._finesse_obj_name(obj),
-                                  "联手张数": combined, "原则": "9砸(顶张在对侧)",
-                                  "榜首": cur_str, "改选": pick["card"]}
-                fo["领出飞牌"] = {"引发": False, "说明": "9砸独立分支（顶张在对侧，引小让A砸）"}
-                self._register_finesse_flow(state, suit, obj, None)
-                extra9 = getattr(state, "finesse_flow_extra", None)
-                if extra9 is None:
-                    extra9 = {}
-                    setattr(state, "finesse_flow_extra", extra9)
-                extra9.setdefault(suit, {})["九砸"] = True
-                return result
-        return None
-
-    def _garrison_follow(self, state: PlayState,
-                         result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """9砸 分支·跟牌侧（v1.84）：所跟花色满足 9砸 判据 → A 替代间张。
-
-        介入口径：引擎当前决策牌为该花色"低于对象的间张"（10 ≤ rv < 对象，
-        拟飞/拟盖的间张牌）时改出 A——9张套的顶张兑现优先；引擎已选 A/小牌
-        （保结构、接应已胜）不干预。A 须在当前跟牌方手。缺Q/J 持 AK 且 K 在
-        联手未出 → 出 A 后登记 cash_bank（下墩连拔 K）。稳成线退让。
-        """
-        trick = getattr(state, "current_trick", None)
-        lead_suit = trick.get_lead_suit() if trick else None
-        if not lead_suit:
-            return None
-        cur_card = result.get("card")
-        cur_str = str(cur_card) if cur_card else ""
-        if not cur_str or cur_str[0] != lead_suit:
-            return None
-        full_output = result.get("full_output") or {}
-        candidates = (full_output.get("mcts_stats") or {}).get("candidates") or []
-        tgt = self._garrison_target(state, lead_suit, candidates)
-        if tgt is None:
-            return None
-        obj, combined, _should = tgt
-        cur_rv = self._FINESSE_R2V.get(cur_str[1:], 0)
-        if not (10 <= cur_rv < obj):
-            return None  # 引擎未选间张（已选A/小牌）→ 不干预
-        my_cards = [c for c in state.hands.get(state.current_player, [])
-                    if c.suit == lead_suit]
-        if not any(self._FINESSE_R2V.get(c.rank, 0) == 14 for c in my_cards):
-            return None  # A 不在本方手 → 跟牌无法砸
-        if self._top1_make(state, candidates) >= FINESSE_NEC_MAKE_HIGH:
-            return None  # 稳成线退让
-        declarer = state.contract.declarer
-        dummy = state.dummy
-        hint = (f"[9砸] {lead_suit} 联手{combined}张缺{self._finesse_obj_name(obj)}"
-                f"跟牌应砸A：榜首{cur_str} → 改出{lead_suit}A")
-        print(hint)
-        result["card"] = Card(lead_suit, "A")
-        result["reasoning"] = hint + "\n" + result.get("reasoning", "")
-        fo = result.get("full_output") or {}
-        fo["推荐出牌"] = lead_suit + "A"
-        fo["核心逻辑"] = hint + "\n" + fo.get("核心逻辑", "")
-        fo["八九原则"] = {"花色": lead_suit, "缺": self._finesse_obj_name(obj),
-                          "联手张数": combined, "原则": "9砸(跟牌)",
-                          "榜首": cur_str, "改选": lead_suit + "A"}
-        # 缺Q/J 持 AK：K 在联手未出 → 登记 cash_bank（下墩连拔）
-        if (obj != 13
-                and not self._finesse_obj_played(state, lead_suit, 13)
-                and any(self._FINESSE_R2V.get(c.rank, 0) == 13
-                        for p in (declarer, dummy)
-                        for c in state.hands.get(p, [])
-                        if c.suit == lead_suit)):
-            nb9 = getattr(state, "nine_cash_bank", None)
-            if nb9 is None:
-                nb9 = {}
-                setattr(state, "nine_cash_bank", nb9)
-            nb9[lead_suit] = {"obj": obj, "rv": 13}
-        return result
-
     def _finesse_lead(self, state: PlayState, result: Dict[str, Any],
                       ratio: float) -> Dict[str, Any]:
         """飞牌介入分支·领出侧（v2.03 顺序定调：结构探测确认 → 稳成检测 → 押桶成榜首）。
 
-        9砸 已独立为 _garrison_lead 分支先行裁定（未命中才进入本函数）。
-        执行顺序（2026-09-21 用户定调"先确认后稳成"）：
+                执行顺序（2026-09-21 用户定调"先确认后稳成"）：
           ① 结构探测（本侧+伙伴侧）→ _probe_finesse_ok 逐条确认 → 确认结构池
           ② 稳成检测：引擎 top1 做成率 ≥100% → 用**已确认**池判断引擎领出
              是否在飞牌花色（在则仅登记本墩接应，不在则提前退让）
@@ -2246,23 +2061,6 @@ class PlayService:
             return None
         return best[0], best[1]
 
-    def _combined_suit_count(self, state: PlayState, suit: str) -> int:
-        """联手（庄家+明手）该花色总张数 = 当前在手 + 我方已打出的该花色牌
-        （含垫牌/跟牌/本墩已出，与 9砸判据同口径）。"""
-        declarer = state.contract.declarer
-        dummy = state.dummy
-        cnt = sum(1 for p in (declarer, dummy)
-                  for c in state.hands.get(p, []) if c.suit == suit)
-        for t in state.tricks:
-            for p, c in t.cards:
-                if c and p in (declarer, dummy) and c.suit == suit:
-                    cnt += 1
-        for p, c in state.current_trick.cards:
-            if c and p in (declarer, dummy) and c.suit == suit:
-                cnt += 1
-        return cnt
-
-    @staticmethod
     def _percentile_int(vals: List[int], pct: float) -> int:
         """最近秩百分位（升序第 ⌊pct%·n⌋ 个，越界夹到端点）。"""
         if not vals:
@@ -2572,25 +2370,6 @@ class PlayService:
         )
         covers = [c for c in suit_cards if self._FINESSE_R2V[c.rank] > obj]
         below = [c for c in suit_cards if self._FINESSE_R2V[c.rank] < obj]
-        # 9砸（顶张在对侧）：同伙引小、起 launch 于登记（flow_extra"九砸"）——
-        # 持 A 方（第三家）强制用最大顶张超吃完成砸，规则优先于威胁判定
-        extra9 = getattr(state, "finesse_flow_extra", None) or {}
-        if isinstance(extra9.get(suit), dict) and extra9[suit].get("九砸"):
-            if covers:
-                pick9 = max(covers, key=lambda c: self._FINESSE_R2V[c.rank])
-                # 超吃顶张后补登记连拔（FIX-10）：缺Q/J 持 AK 场景，A 超吃
-                # 完成后 K 仍 > 对象且在联手未出 → 登记 cash_bank 下墩连拔。
-                if obj != 13:
-                    own_ranks = {self._FINESSE_R2V.get(c.rank)
-                                 for p in (declarer, dummy)
-                                 for c in state.hands.get(p, []) if c.suit == suit}
-                    if 13 in own_ranks:
-                        bank9 = getattr(state, "nine_cash_bank", None)
-                        if bank9 is None:
-                            bank9 = {}
-                            setattr(state, "nine_cash_bank", bank9)
-                        bank9[suit] = {"obj": obj, "rv": 13}
-                return str(pick9), "9砸（同伙引小，持顶张超吃）"
         if enemy_top >= obj:
             # 敌方本墩已出对象 → 用最小顶张盖（此时对象"现身"是盖牌动作，必须处理）
             if not covers:
@@ -2935,8 +2714,9 @@ class PlayService:
     def _dd_play(self, state: PlayState, dd_samples: int = None, dd_scoring_mode: str = None) -> Dict[str, Any]:
         """DD搜索打牌（纯蒙特卡洛 + 双明手评估，由asyncio.to_thread调用）"""
         constraints = self._get_bid_constraints()
+        constraints = self._merge_opening_lead_constraint(state, constraints)
         if constraints:
-            print(f"[DD] 约束已应用: {len(constraints)}家, { {p: f'HCP[{c.min_hcp}-{c.max_hcp}] suits={c.suit_min}' for p, c in constraints.items()} }")
+            print(f"[DD] 约束已应用: {len(constraints)}家, { {p: f'HCP[{c.min_hcp}-{c.max_hcp}] suits={c.suit_min} above={c.length_above}' for p, c in constraints.items()} }")
             self._apply_constraints(constraints)
         else:
             print(f"[DD] 无约束 (bid_history={'空' if not self.bid_history else repr(self.bid_history[:80])})")
@@ -2964,9 +2744,9 @@ class PlayService:
             self._inject_played_stats(full_output, state)
             full_output["engine_phase"] = "midgame_dd"
             # 介入层（v2.06：五段顺序，独立于引擎的统一管线，传入 DD 比值）。
-            # 段1 稳成判定→段2 无损清将→段3 9砸→段4 飞牌介入，先命中先赢。
+            # 段1 稳成判定→段2 无损清将→段3 飞牌介入，先命中先赢。
             # DD 单独介入开关（运行时切换，不影响 αμ）：DD_INTERVENE_ENABLE=False 时
-            # DD 引擎不带任何介入——无损清将/9砸/窗口期启动/接应全不介入，仅按引擎得分选牌。
+            # DD 引擎不带任何介入——无损清将/飞牌探针/接应全不介入，仅按引擎得分选牌。
             import config as _svc_config
             if _svc_config.DD_INTERVENE_ENABLE:
                 result = self._intervene(state, result, FINESSE_RATIO)

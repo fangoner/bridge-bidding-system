@@ -26,7 +26,7 @@ export function estimateTokens(text) {
 }
 
 export const FIELD_COLORS = ['#e65100', 'text.primary', '#2e7d32', '#1976d2', '#37474f', '#1565c0']
-export const SKIP_KEYS = ['mcts_stats', 'tiered_phase', 'tiered_dd_fallback', 'validation_warning', 'llm_review', 'engine_phase', 'llm_review_status', '叫牌约束', '最新约束', '各家已出统计', 'finesse_probe', '伙伴探针', '_probe_suits', '_probe_confirm', '推荐出牌']
+export const SKIP_KEYS = ['mcts_stats', 'tiered_phase', 'tiered_dd_fallback', 'validation_warning', 'llm_review', 'engine_phase', 'llm_review_status', '叫牌约束', '最新约束', '各家已出统计', 'finesse_probe', '伙伴探针', '_probe_suits', '_probe_confirm', '推荐出牌', '探针候选']
 
 // 飞牌与续飞相关字段：DD 视图提升到核心逻辑前用印章区块展示
 export const FINESSE_KEYS = ['窗口期启动', '继续飞牌', '飞牌续', '9砸回手', '飞牌接应', '八九原则', '领出飞牌', '飞牌迁移', '多数投票']

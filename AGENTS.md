@@ -36,7 +36,7 @@ Each file in `tests/` is run directly: `python tests/test_finesse_pipeline.py`. 
 > It does **not** run automatically: there is no test runner and no git hook (`.git/hooks` holds only samples), so it runs only when invoked.
 
 ### 飞牌文档必须与代码同步（v1.96 起）
-改动 `bridge/play_service.py` 的飞牌相关代码（`_intervene` / `_garrison_*` / `_finesse_*` / `_probe_*`）或 `config.py` 的 `FINESSE_*` 常量后，**必须**：
+改动 `bridge/play_service.py` 的飞牌相关代码（`_intervene` / `_clear_trump_lead` / `_finesse_*` / `_probe_*`）或 `config.py` 的 `FINESSE_*` 常量后，**必须**：
 
 1. 跑 `python tests/test_finesse_doc_sync.py` —— 它比对 `docs/飞牌介入管线图解.md` 声明的**函数/常量符号**（29 个）与**阈值数值**（8 个）是否仍与代码一致；不一致会退出码 1 并逐项列出。
 2. 若该脚本报错，**同步更新图解**（以代码为准）——尤其是阈值表（`docs/飞牌介入管线图解.md` 第九节），它要求"反引号常量名 + 紧随其后的数值"格式，脚本据此解析。

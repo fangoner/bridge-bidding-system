@@ -12,6 +12,79 @@
 > - **已修复的结构问题**（2026-09-20）：两处日期倒序（`2026-06-15/06-17`、`2026-05-03/05-05`）已按降序重排；v1.92 / v1.93 / v1.94 / v1.94b·v1.95 由 v1.96 条目内的 bullet 提升为独立条目；补记了 MCTS / Tiered / DD-αμ-LLM 三个引擎的下线（此前有引入无移除）。
 > - 完整审计与治理记录见 `docs/开发文档整理_发现清单_20260920.md`。
 
+## 2026-09-23（首攻长四约束 v2.10）
+
+**背景**: BM 2-C20（3NT 南庄，西♠AJ987长四攻8 + ♣A）实测发现：DD 引擎按均匀先验全样本做成率选 ♠T（73%），但西攻 8 属长四协议——该花色第 4 大是 8，意味着西该花色≥4 张且**至少 3 张同花色大于 8**。按首攻信息把分布推向 东2-西5 后，小牌 ♠5（82%）反超 ♠T（69%），"按总做成率打并不安全"。且首攻只在整副牌第一张出牌那一刻发生一次，后续买入（第二墩西出7）进一步把分布收敛为唯一可行（东2-西5，西=3大+8+7）。
+
+**用户定调（v2.10 最终口径）**:
+- 首攻=整副牌第一张出牌，不是每墩都有；首攻约束只调整**首攻方**该花色分布，与叫牌约束**单调合并只缩不扩**
+- 仅 NT 定约 + 防家首攻小牌（长四协议）触发；顶张/短套领出不触发
+- 该花色已出一张——首攻牌进入已出牌池后，剩余扣减由现有 `_reduce_constraint_for_played` 统一承接，后续演化与叫牌约束完全一致
+- 本次只实现"长四"这一种首攻情况，信号约束（中局每墩观测）以后再扩
+
+**改进**:
+- `config.py`：`DD_LEAD_LONG_FOUR_ENABLE`（总开关）+ `DD_LEAD_SMALL_RANKS`（视为小牌的牌面 2-T）
+- `constraints.py`：`BidConstraint.length_above` 新字段——`{花色:(基准牌, n)}` = 该花色中 >基准牌 的牌至少 n 张（长四专用）；`_check_constraint` 验证、`relax_constraint` 放宽时丢弃（与 specific_cards 同类）
+- `sampler.py`：约束链三处补齐 `length_above`（`_constraint_violation_score` / `_check_feasible` / `_constraint_trivially_satisfied`）
+- `play_service.py`：`_build_opening_lead_constraint`（NT+防家首攻小牌 → `suit_min={花色:4}` + `length_above={花色:(首攻牌,3)}`）、`_merge_opening_lead_constraint`（单调合并，`_merge_constraints` 同花色取更大张数）、接入 `_dd_play` 与 αμ 装配点、展示层输出 `西: ♠≥4 ♠>8≥3`
+
+**设计取舍**: 首攻约束是"初始13张"的整手约束，与叫牌约束同层——不是新采样器机制，只复用"约束装配入口+现有中局扣减"；`length_above` 精确表达长四（specific_cards 的"至少含"语义表达不了"4 张中恰 3 张/至少 3 张更大"）。
+
+**验证**:
+- 端到端：BM 2-C20 场景（西攻8）约束下引擎改选 ♠5（87%）而非均匀先验 ♠T（83%）
+- 第二墩（西出7）分布确定性收敛：东2-西5 唯一可行；东持A/K（53%世界）时 T/4 均 100% 稳成，引擎选 T 合理（平均墩 9.48 > 4 的 9.24）
+- 采样分布：约束后西家♠仅剩 4-7 张、>8 的黑桃 100% 落在 3-4 张（长四形态）
+- 回归：`test_finesse_pipeline.py` 30/30 通过；8003 后端重启加载新约束
+
+**修改文件**: config.py, bridge/mcts/constraints.py, bridge/mcts/sampler.py, bridge/play_service.py, CHANGELOG.md, DEVELOPMENT.md
+
+**待扩展**: 信号约束未实现（每墩观测注入，需 constraint_layers 分层，后续再说）；`_llm_play` 提示注入暂未同步显示首攻约束
+
+## 2026-09-22（BM 牌局保存带牌号 v2.09）
+
+**背景**: 用户要求从 BM2000 导入的牌，保存打牌/叫牌记录时带上牌号（如 2-B20），便于复盘回看是哪副牌。
+
+**口径（用户定调）**: **只写 note**——系统不是专为 BM 设计的，不引入 BM 专用结构字段，牌号预填进记录 `note`（历史列表本就展示 note，无需新字段/新展示位）。
+
+**改进**:
+- GameContext `bmDeckId`（内部持有牌号）；`handleBmDeal` 导入时 `bmDeckId: deckId` 写入，非 BM 发牌经 resetGameState 自动清空
+- App.jsx 五处 record 构造（打牌进行中/叫牌中/叫牌结束/打牌结束/修正手牌）的 `note` 预填 `[BM {bmDeckId}]`（无牌号时保持空）
+- 后端/记录结构零新增字段；历史列表通过既有 note 展示显形
+
+**修改文件**: web/src/context/GameContext.jsx, web/src/hooks/useDealing.js, web/src/App.jsx, CHANGELOG.md
+
+**测试验证**: 后端编译 + 前端构建通过；8003/5173 重启健康
+
+## 2026-09-22（探针分桶单侧缺失兜底 v2.08）
+
+**背景**: 实测 BM 牌局（4♠ 南庄，西 1NT 15-17 均型、东雅各比转 ♥）发现：南领出 ♠9 时"出 Q 飞 K 没检出"。根因：探针分桶要求对象在东/西**两侧都有样本**，而西 15-17 + ♥/♠限张约束把 ♠K 几乎锁死单侧（另一侧 n=0）→ K 整对象被静默丢弃，只剩假飞目标 J（Δ0.19 达标但 G 判定数学无解）→ 本墩误判"无飞牌结构"、尊重引擎，错过 "♠Q 飞 K" 正着。复现证明：同牌面无约束下 ♠K 引 ♠Q Δ0.245 达标、可组合飞。
+
+**用户定调（v2.08 最终口径）**: 单侧缺失的 Δ 退化为**该侧做成率**（= |p·n−0|/n 的归一化形式）——引牌在该侧仍有真实做成率，不作 0/丢弃处理；门票阈值与确认层/门控照常裁决。
+
+**改进**（bridge/mcts/dd_search.py `_finalize_finesse_probe`）:
+- `if not ev or not wv: continue` 改为：单侧缺失对象按 **Δ=有样本侧做成率** 正常参与门票（阈值）/确认层/门控
+- 双侧有样本维持原 Δ=|p东−p西| 不变；双飞合并 Δ 加和封顶 1.0（单侧缺失 Δ≈p 可达 0.8+，与双侧差量纲混加防溢出）
+- 实测：带约束复现 ♠K 引牌 Δ=0.866 达标 → 双飞合并保 K（Δ1.0 封顶、废弃 J）→ `_intervene` 改选 ♠Q（飞 K）
+
+**修改文件**: bridge/mcts/dd_search.py, docs/飞牌介入管线图解.md, CHANGELOG.md, DEVELOPMENT.md
+
+**测试验证**: doc-sync 通过 + pipeline 30/30 + probe 8/8 + verify 4/4 + py_compile OK；带约束复现 `_intervene → ♠Q（飞K(双飞组合)押89%直出♠Q）`
+
+## 2026-09-22（移除 9砸 分支 v2.07）
+
+**背景**: 用户判断"现在的算法应该能自动处理 9砸 的情况"。段2 无损清将已改为 DD 成约率口径（清将线做成率 ≥ 基准线即触发），抓Q/顶张兑现（AK缺Q/AQ缺K 连拔）数学必然、做成率制下引擎自然首选；若引擎不选说明另有飞/投入线更好，规则硬砸反而是错。9砸（`_garrison_*`，含"差距大也照砸"的规则裁定）是受限式修正在介入层的最后残留，予以卸除（项目铁律一致）。
+
+**删除**:
+- `bridge/play_service.py`：`_garrison_target` / `_garrison_lead` / `_garrison_follow`、`_combined_suit_count`（仅 9砸 使用）全部删除；`_intervene` 由五段改为三段（段1 稳成→段2 无损清将→段3 飞牌介入；多数投票仍在 `_dd_play` 兜底）；`_finesse_commit_check` 删"九砸超吃补登记连拔"分支；`nine_cash_bank` / `finesse_flow_extra["九砸"]` 跨墩与标记状态清除
+- `config.py`：`FINESSE_EIGHT_NINE_ENABLE` 删除；`DD_INTERVENE_ENABLE` 注释改三段
+- `tests/test_finesse_pipeline.py`：删 10 个 9砸 用例（t01-t07/t09/t12/t13），40→30，头注释重写
+- `tests/test_finesse_doc_sync.py`：EXPECTED_SYMBOLS 删 `_garrison_*`（补 `_clear_trump_lead`）、EXPECTED_SWITCHES 删 `FINESSE_EIGHT_NINE_ENABLE`
+- 图解 doc / CLAUDE.md / AGENTS.md / api/main.py / web SettingsPanel 同步
+
+**修改文件**: bridge/play_service.py, config.py, tests/test_finesse_pipeline.py, tests/test_finesse_doc_sync.py, docs/飞牌介入管线图解.md, CLAUDE.md, AGENTS.md, api/main.py, web/src/components/SettingsPanel.jsx, CHANGELOG.md, DEVELOPMENT.md
+
+**测试验证**: doc-sync 通过 + pipeline 30/30 + probe 8/8 + verify 4/4 + py_compile OK
+
 ## 2026-09-22（段2 无损清将改判据：逐世界墩差 → 成约率口径 v2.06b）
 
 **背景**: 真实 DDS 复现 C7（BM2000 level 2 C7，4♠）发现：采样种子一变，♠3 相对 ♦A 的"逐世界墩差"负世界率在 0%~50% 间乱摆（live 精确复现负世界 45.9%，min −2），旧判据"任意 diff<0 即退让"随采样噪声摇摆，导致同牌面上午清将、下午退让。且本手 ♠3 与 ♦A 做成率几乎相同（复现 98.9% vs 97.3%；live 均 99.4%）——墩级 diff 把"做成相同但少个超墩"的世界当损失，超墩差挡了保护型清将的道。

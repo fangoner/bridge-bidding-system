@@ -32,9 +32,7 @@ EXPECTED_SYMBOLS = {
     "_intervene": PLAY_SERVICE,
     "_is_leading": PLAY_SERVICE,
     "_is_discarding": PLAY_SERVICE,
-    "_garrison_lead": PLAY_SERVICE,
-    "_garrison_follow": PLAY_SERVICE,
-    "_garrison_target": PLAY_SERVICE,
+    "_clear_trump_lead": PLAY_SERVICE,
     "_finesse_lead": PLAY_SERVICE,
     "_probe_lead_finesse_prefer": PLAY_SERVICE,
     "_probe_partner_finesse_struct": PLAY_SERVICE,
@@ -76,7 +74,6 @@ EXPECTED_VALUES = [
 EXPECTED_SWITCHES = [
     "FINESSE_DEFER_ENABLE",
     "DD_INTERVENE_ENABLE",
-    "FINESSE_EIGHT_NINE_ENABLE",
 ]
 
 
@@ -88,7 +85,7 @@ def check_symbols():
     """① 文档速查表列出的函数/常量是否都在期望文件里**定义**。
 
     必须匹配真实定义（`def NAME` / `NAME =`），不能用子串匹配——
-    否则 `def _garrison_target` 被改名为 `def _RENAMED_garrison_target` 时，
+    否则 `def _finesse_lead` 被改名为 `def _RENAMED_finesse_lead` 时，
     原名仍是子串，检查会漏报（该漏洞由负向测试发现并已修复）。
     """
     doc = _read(DOC)

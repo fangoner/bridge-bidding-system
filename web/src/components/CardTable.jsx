@@ -671,6 +671,23 @@ function CardTable({
       if (playCenterView === 'bidding') {
         return renderPlayBiddingTable()
       }
+      if (playCenterView === 'bm') {
+        return bmExplanation ? (
+          <Box sx={{
+            width: '100%', height: '100%', overflowY: 'auto', p: 1,
+            bgcolor: isDark ? 'rgba(30,41,59,0.9)' : 'rgba(255,255,255,0.92)',
+            borderRadius: 1, border: '1px solid', borderColor: isDark ? 'rgba(148,163,184,0.3)' : 'rgba(0,0,0,0.12)',
+          }}>
+            <Typography sx={{ fontSize: '0.72rem', lineHeight: 1.5, color: textMuted, whiteSpace: 'pre-wrap' }}>
+              {bmExplanation}
+            </Typography>
+          </Box>
+        ) : (
+          <div style={{ color: textMuted, fontStyle: 'italic', textAlign: 'center', padding: 3 }}>
+            无讲解内容
+          </div>
+        )
+      }
       if (playCenterView === 'result' || showDoubleDummy) {
         return doubleDummyLoading ? (
           renderDDLoading()
@@ -682,24 +699,7 @@ function CardTable({
           </div>
         )
       }
-      const trickView = renderCurrentTrick()
-      if (!bmExplanation) return trickView
-      return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
-          <Box sx={{ flex: '1 1 auto', minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-            {trickView}
-          </Box>
-          <Box sx={{
-            flex: '0 0 auto', maxHeight: '45%', overflowY: 'auto', mx: 0.5, mb: 0.5,
-            bgcolor: isDark ? 'rgba(30,41,59,0.9)' : 'rgba(255,255,255,0.92)',
-            borderRadius: 1, p: 0.8, border: '1px solid', borderColor: isDark ? 'rgba(148,163,184,0.3)' : 'rgba(0,0,0,0.12)',
-          }}>
-            <Typography sx={{ fontSize: '0.68rem', lineHeight: 1.45, color: textMuted, whiteSpace: 'pre-wrap' }}>
-              {bmExplanation}
-            </Typography>
-          </Box>
-        </Box>
-      )
+      return renderCurrentTrick()
     }
     return showDoubleDummy ? (
       doubleDummyLoading ? (

@@ -197,12 +197,12 @@ export function useModelSettings() {
   const [ddFinesseDelta, setDdFinesseDeltaState] = useState(() => {
     try {
       const v = Number(localStorage.getItem(DD_FINESSE_DELTA_KEY))
-      if (!Number.isNaN(v) && v >= 0.05 && v <= 0.5) return v
+      if (!Number.isNaN(v) && v >= 0 && v <= 0.5) return v
     } catch {/* empty */}
     return DD_FINESSE_DELTA_DEFAULT
   })
   const handleDdFinesseDeltaChange = useCallback(async (delta) => {
-    const clamped = Math.min(0.5, Math.max(0.05, Math.round(delta * 100) / 100))
+    const clamped = Math.min(0.5, Math.max(0, Math.round(delta * 100) / 100))
     setDdFinesseDeltaState(clamped)
     try { localStorage.setItem(DD_FINESSE_DELTA_KEY, String(clamped)) } catch {/* empty */}
     try {
@@ -298,7 +298,7 @@ export function useModelSettings() {
     const storedDelta = (() => {
       try {
         const v = Number(localStorage.getItem(DD_FINESSE_DELTA_KEY))
-        if (!Number.isNaN(v) && v >= 0.05 && v <= 0.5) return v
+        if (!Number.isNaN(v) && v >= 0 && v <= 0.5) return v
       } catch {/* empty */}
       return DD_FINESSE_DELTA_DEFAULT
     })()

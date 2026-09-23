@@ -170,6 +170,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
     imagePath, setImagePath,
     imageFile, setImageFile,
     imageOpeningLead, setImageOpeningLead,
+    bmDeckId,
     mode, setMode,
     setReadonlyMode,
     readonlyMode,
@@ -704,7 +705,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           state: stripPlayState(ps),
           ai_play_history: trimPlayHistory(aph),
         },
-        note: ''
+        note: bmDeckId ? `[BM ${bmDeckId}]` : ''
       }
       saveBridgeRecord(record)
       if (!currentRecordId) {
@@ -734,13 +735,13 @@ function AppShell({ darkMode, onToggleDarkMode }) {
         deal_system: dealSystem,
       },
       play: null,
-      note: ''
+      note: bmDeckId ? `[BM ${bmDeckId}]` : ''
     }
     saveBridgeRecord(record)
     if (!currentRecordId) {
       setCurrentRecordId(record.id)
     }
-  }, [hands, biddingSequence, dealer, gameMode, practiceDirection, positionRoles, aiBiddingHistory, dealSystem, currentRecordId, showPlayPanel])
+  }, [hands, biddingSequence, dealer, gameMode, practiceDirection, positionRoles, aiBiddingHistory, dealSystem, currentRecordId, showPlayPanel, bmDeckId])
 
   // ── 发牌流程 hook（发牌/自定义牌局/图片识别/截屏识别/清除手牌）──
   const {
@@ -1487,7 +1488,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
           deal_system: dealSystem,
         },
         play: null,
-        note: ''
+        note: bmDeckId ? `[BM ${bmDeckId}]` : ''
       }
       saveBridgeRecord(record)
       console.log('[自动保存] 叫牌记录已调用保存, id:', record.id)
@@ -1499,7 +1500,7 @@ function AppShell({ darkMode, onToggleDarkMode }) {
       // 获取更多输出格式
       fetchOutputFormats()
     }
-  }, [biddingSequence, hands, dealer])
+  }, [biddingSequence, hands, dealer, bmDeckId])
   
   // 获取更多输出格式
   const fetchOutputFormats = async () => {
@@ -2926,7 +2927,7 @@ const handleReviewCompletedPlay = async () => {
         declarer_tricks: playState.declarer_tricks,
         defender_tricks: playState.defender_tricks,
       },
-      note: ''
+      note: bmDeckId ? `[BM ${bmDeckId}]` : ''
     }
     saveBridgeRecord(record)
     console.log('[自动保存] 打牌记录已调用保存, id:', record.id)
@@ -2934,7 +2935,7 @@ const handleReviewCompletedPlay = async () => {
     if (!currentRecordId) {
       setCurrentRecordId(record.id)
     }
-  }, [playState, hands, biddingSequence, dealer, gameMode, practiceDirection, positionRoles, directPlayContractInfo, aiBiddingHistory, dealSystem, aiPlayHistory, currentRecordId, imageOpeningLead])
+  }, [playState, hands, biddingSequence, dealer, gameMode, practiceDirection, positionRoles, directPlayContractInfo, aiBiddingHistory, dealSystem, aiPlayHistory, currentRecordId, imageOpeningLead, bmDeckId])
 
   // 处理位置角色变化：所有位置全手动设置，无连锁
   const handlePositionRoleChange = useCallback(async (position, role) => {
@@ -3375,7 +3376,7 @@ const handleReviewCompletedPlay = async () => {
               },
               bidding: { ai_bidding_history: [], deal_system: dealSystem },
               play: null,
-              note: '',
+              note: bmDeckId ? `[BM ${bmDeckId}]` : '',
             })
             if (currentRecordId) loadBridgeRecords()
           }} variant="contained" disabled={!customDealText.trim() || loading}>

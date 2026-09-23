@@ -500,6 +500,23 @@ def _finalize_finesse_probe(probe, tricks_needed, lead_direction=None):
                 ev = east.get(card_str) or []
                 wv = west.get(card_str) or []
                 if not ev or not wv:
+                    # 单侧缺失（2026-09-22 用户定调）：对象只在约束世界集的一侧
+                    # 出现（另一侧 n=0）。位置敏感度公式 Δ=|p东−p西| 缺一侧无法
+                    # 直接求，退化为**该侧做成率**作 Δ（= |p·n − 0*0| / n 的
+                    # 归一化形式，即这条飞牌线在约束世界集内的实际做成率）。
+                    # 门票阈值 + 确认层（_probe_finesse_ok）+ 门控照常裁决。
+                    one = ev or wv
+                    p = sum(1 for t in one if t >= tricks_needed) / len(one)
+                    direction = lead_direction or "西"
+                    print(
+                        f"[探针原始] {suit} 对象{m} 引牌{card_str} "
+                        f"单侧缺失(n东{len(ev)}/n西{len(wv)})→Δ={round(p, 3)}(侧成) "
+                        f"{'达标' if p >= _dd_config.FINESSE_PROBE_DELTA else '未达标'}")
+                    raw_entry = {"对象": m, "Δ": round(p, 3), "引牌": card_str,
+                                 "方向": direction, "押桶成": round(p, 3)}
+                    raw.append(raw_entry)
+                    if p >= _dd_config.FINESSE_PROBE_DELTA:
+                        entries.append(dict(raw_entry))
                     continue
                 east_rate = sum(1 for t in ev if t >= tricks_needed) / len(ev)
                 west_rate = sum(1 for t in wv if t >= tricks_needed) / len(wv)
@@ -567,7 +584,9 @@ def _finalize_finesse_probe(probe, tricks_needed, lead_direction=None):
                 if prev is None or e["Δ"] > prev["Δ"]:
                     per_obj[e["对象"]] = e
             top2 = sorted(per_obj.items(), key=lambda kv: -kv[1]["Δ"])[:2]
-            total = round(top2[0][1]["Δ"] + top2[1][1]["Δ"], 3)
+            # 单侧缺失对象 Δ=侧做成率（接近 1），加和与双侧差量纲混加可能 >1 ——
+            # 门票/排序语义封顶 1.0
+            total = round(min(top2[0][1]["Δ"] + top2[1][1]["Δ"], 1.0), 3)
             keep_m = max([m for m, _ in top2],
                          key=lambda r: RANK_ORDER.get(r, 0))
             discard = sorted(m for m, _ in top2 if m != keep_m)

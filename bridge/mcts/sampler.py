@@ -12,7 +12,7 @@ from bridge.mcts.constraints import (
     BidConstraint, validate_sample,
     HCP_MAP, CONTROL_MAP,
     validate_relaxed, validate_voids_only,
-    _is_balanced, _check_constraint,
+    _is_balanced, _check_constraint, _rank_value_of,
 )
 from bridge.mcts.belief import collect_voids
 
@@ -535,6 +535,8 @@ def _constraint_trivially_satisfied(c: "BidConstraint", remaining_count: int) ->
         return False
     if c.specific_cards:
         return False
+    if c.length_above:
+        return False
     if c.balanced is not None:
         return False
     return True
@@ -645,6 +647,11 @@ def _check_feasible(
         for suit, rank in con.specific_cards:
             if (suit, rank) not in pool_cards:
                 return False
+        for suit, (base_rank, need_n) in con.length_above.items():
+            pool_above = [c for c in unknown_pool if c.suit == suit
+                          and c.rank_value > _rank_value_of(base_rank)]
+            if len(pool_above) < need_n:
+                return False
     if sum_min_hcp > total_hcp:
         return False
     if sum_min_controls > total_controls:
@@ -695,6 +702,11 @@ def _constraint_violation_score(cards: List[Card], con: "BidConstraint") -> int:
     for suit, rank in con.specific_cards:
         if not any(c.suit == suit and c.rank == rank for c in cards):
             score += 1
+    for suit, (base_rank, need_n) in con.length_above.items():
+        above = sum(1 for c in cards if c.suit == suit
+                    and c.rank_value > _rank_value_of(base_rank))
+        if above < need_n:
+            score += need_n - above
     return score
 
 

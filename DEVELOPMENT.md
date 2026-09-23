@@ -595,6 +595,13 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 > 改动代码时：CHANGELOG 记全过程；本段只在需要更新"当前状态"认知时补一条摘要。
 > 2026-09-20 之前的版本历史曾与本文件重复约 76KB，治理记录见 `docs/开发文档整理_发现清单_20260920.md`。
 
+### v2.10（2026-09-23）首攻长四约束：DD 采样注入防家首攻协议
+- **背景**：BM 2-C20（3NT 南庄，西♠AJ987 长四攻8 + ♣A）——均匀先验下 ♠T 做成率最高，但攻8 长四协议把分布推向 东2-西5 后小牌反超（82% vs 69%），"按总做成率打不安全"
+- **口径**（用户定调）：首攻=整副牌**第一张出牌**、仅发生一次；仅 **NT + 防家首攻小牌** 触发；约束只作用于首攻方该花色，与叫牌约束**单调合并只缩不扩**；首攻牌已出，剩余扣减由 `_reduce_constraint_for_played` 统一承接，后续演化与叫牌约束一致；信号约束（每墩观测）以后再扩
+- **实现**：`BidConstraint.length_above` 新字段（`{花色:(基准牌,n)}`＝该花色 >基准牌 至少 n 张，长四专用，specific_cards 的"至少含"语义表达不了"至少 3 张更大"）；`_build_opening_lead_constraint`（`suit_min={花色:4}` + `length_above={花色:(首攻牌,3)}`）+ `_merge_opening_lead_constraint` 单调合并接入 `_dd_play`/αμ；config 开关 `DD_LEAD_LONG_FOUR_ENABLE` / `DD_LEAD_SMALL_RANKS`
+- **验证**：约束下 BM 2-C20 改选 ♠5（87%）vs 均匀先验 ♠T（83%）；第二墩西出7 后分布唯一收敛（东2-西5，东持A/K 时 T/4 均 100% 稳成，引擎选 T 合理）；约束采样西♠>8 落 3-4 张；finesse pipeline 30/30
+- 投递：config.py, bridge/mcts/constraints.py, bridge/mcts/sampler.py, bridge/play_service.py, CHANGELOG.md, DEVELOPMENT.md
+
 ### v2.00→v2.03（2026-09-21）飞牌启动/终选简化 · 押注桶统一口径 · 终选较大领出牌决胜
 > 摘要见 CHANGELOG 同日条目（冲突以 CHANGELOG 权威）。已落地；首条兼顾早期未完的 v2.00 简化。
 
@@ -602,6 +609,16 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 - **v2.02 押注桶统一口径**（"严峻"名废弃）：押注方向=几何常数（引牌侧=领出者下家 / 接应侧=接应者上家）；押注桶=被飞对象**全部命中押注方向**的世界做成率（单飞=对象在下家 / 双飞=登记+废弃都在押注方向）；门控分子/终选排序/接应判据一律以押注桶成为据
 - **v2.03 终选较大领出牌决胜**：`_subset_select` 键 `(a_make, blended)` → `(a_make, big, blended, rankpos)`。押桶成平票后偏好"领出牌 牌点 > min(对象, *废弃对象)"（避开被较小/第二飞牌对象白吃；不区分单双飞）。跨墩：双飞不靠登记继承，K/9 均未现身时每墩重探测仍合并，出 ♦Q 是双飞大牌规则第二轮的表现；9 被人后对象窗滑落才退化单飞
 - **v2.03b 执行顺序修正（先确认后稳成）**：稳成检测原为入口前置、用 `_detect_finesse_struct` **未确认**探针判断"引擎 top1 是否在飞牌花色"——未确认探针（防家仍有更大牌的对象，G 判定实为 False）被借用于登记 `finesse_flow`，UI 报假对象（"出♦A还报领出飞牌·对象T"）。重排为：结构探测+`_probe_finesse_ok` 确认 → 建确认结构池 → 稳成检测（与确认池对比，在池才登记本墩接应，否则退让）→ 未稳成才走榜单决策
+
+### v2.08（2026-09-22）探针分桶单侧缺失：Δ=该侧做成率
+- **背景**：4♠ 西15-17 约束下 ♠K锁死单侧（另一侧 n=0）→ 整对象被 `if not ev or not wv: continue` 静默丢弃 → 假飞目标 J 顶包 →"无飞牌结构"误判，错过 ♠Q 飞 K
+- **口径**（用户定调）：差值公式 Δ=|p东−p西| 缺一侧无法直接求，单侧缺失退化为**该侧做成率**作 Δ（= |p·n−0|/n）——引牌在该侧有真实做成率，不作 0/丢弃；双侧样本维持原公式
+- **验证**：带约束复现 ♠K Δ0.866 达标 → 双飞合并保 K → `_intervene → ♠Q（飞K组合）` + 全回归绿
+
+### v2.07（2026-09-22）移除 9砸 分支
+- **背景**：段2 无损清将改 DD 成约率口径后，抓Q/顶张兑现（AK缺Q/AQ缺K 连拔）数学必然、引擎做成率制自然首选；规则式 9砸（"差距大也照砸"）是受限式修正的残留，用户定调卸除
+- **删除**：`_garrison_target/_garrison_lead/_garrison_follow`、`_combined_suit_count`、`nine_cash_bank`、`FINESSE_EIGHT_NINE_ENABLE`；`_intervene` 五段→三段（稳成→无损清将→飞牌；多数投票仍在 `_dd_play`）；`_finesse_commit_check` 删九砸超吃分支
+- **验证**：doc-sync + pipeline 30/30 + probe 8/8 + verify 4/4
 
 ### v2.06b（2026-09-22）段2 无损清将判据：逐世界墩差 → 成约率口径
 - **背景**：真实 DDS 复现 C7 发现"逐世界墩差全≥0"门随采样种子在 0%~50% 负世界率间摇摆（同牌面上午清将、下午退让），且把"做成相同、超墩不同"的世界当损失——♠3 与 ♦A 做成率持平（~99%）却因墩差负世界被拒

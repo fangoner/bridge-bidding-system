@@ -1,22 +1,14 @@
 """介入层管线回归脚本（直接运行，非 pytest）。
 
-v1.84 介入层分支化架构回归：9砸 独立分支（_garrison_lead/_garrison_follow/
-_garrison_target）+ 飞牌介入分支（_finesse_lead/_finesse_commit_check）。
-覆盖方案 12 用例：
-  1-2   9砸 独立扫描命中（缺Q持AK / 缺K持AQ）
-  3     稳成线退让（引擎 top1 做成率 ≥85%）
-  4     跟牌侧 9砸（间张 → 顶张 A）
-  5-7   cash_bank 三态（连拔 K / K 在对侧引小+九砸标记 / 对象已现清除）
-  8     接应领出方校验（BUG-2：防守方领出 → None）
-  9     九砸超吃后补登记 cash_bank（FIX-10）
-  10    A 已砸 K 未现领出 → 无回手/继续飞强制干预（FIX-9）
-  11    _top1_make 只取引擎 top1 做成率（2026-09-20 口径；旧为全体候选最高）
-  12    探针结构池空 → 9砸 仍命中（独立性回归）
-  13    AKQ 在手顶张齐全（对象≤J）→ 不走 9砸（2026-09-18 用户定调）
-  26-29 v1.96 三层接应判据：押对方向桶内引擎最优替代牌成率 b_bucket
-       ≤0.05 强制接应（6NT 型）/ ≥0.40 退让引擎（B26 型）/ 灰色区与
-       数据缺失走 v1.93 兜底
-
+2026-09-22（v2.07）移除 9砸 分支：_garrison_lead/_garrison_follow/
+_garrison_target、nine_cash_bank、FINESSE_EIGHT_NINE_ENABLE 全部删除——
+DD 做成率口径的段2 无损清将 + 段4 飞牌介入已覆盖抓 Q/顶张兑现，规则式
+9砸 属受限式修正被卸除（项目铁律；9砸 曾为"差距大也照砸"的静态规则）。
+剩余用例覆盖：
+  · 段4 飞牌介入：启动/过手/终选/比值退让/稳成退让
+  · 三层接应判据（v1.96）：b_bucket ≤0.05 强制接应（6NT 型）/ ≥0.40
+    退让引擎（B26 型）/ 灰色区与数据缺失走 v1.93 兜底
+  · 多数投票默认关；_top1_make 只取引擎 top1 做成率
 运行: python tests/test_finesse_pipeline.py
 """
 
@@ -74,89 +66,6 @@ def mk_result(card, candidates):
             "full_output": {"mcts_stats": {"candidates": candidates}}}
 
 
-def t01_garrison_scan_hit():
-    st = mk_state({"♠": "AK8765", "♥": "Q32"}, {"♠": "432", "♥": "J54"})
-    cands = [cand("♥Q", 11.0), cand("♠A", 10.0), cand("♠8", 9.0), cand("♥J", 9.0)]
-    res = mk_result(Card("♥", "Q"), cands)
-    out = ps_new()._garrison_lead(st, res)
-    bank = getattr(st, "nine_cash_bank", None)
-    ok = (out is not None and str(out["card"]) == "♠A"
-          and bank == {"♠": {"obj": 12, "rv": 13}})
-    got = str(out["card"]) if out else None
-    return ok, f"9砸扫描命中：♠AK8765/432 缺Q → 改♠A+登记连拔（got {got}, bank={bank}）"
-
-
-def t02_garrison_scan_aq_case():
-    st = mk_state({"♠": "AQ8765", "♥": "Q32"}, {"♠": "432", "♥": "J54"})
-    cands = [cand("♥Q", 11.0), cand("♠A", 10.0)]
-    res = mk_result(Card("♥", "Q"), cands)
-    out = ps_new()._garrison_lead(st, res)
-    bank = getattr(st, "nine_cash_bank", None)
-    ok = (out is not None and str(out["card"]) == "♠A" and not bank)
-    got = str(out["card"]) if out else None
-    return ok, f"缺K持AQ：改♠A、不登记连拔（got {got}, bank={bank}）"
-
-
-def t03_garrison_stable():
-    st = mk_state({"♠": "AK8765", "♥": "Q32"}, {"♠": "432", "♥": "J54"})
-    cands = [cand("♥Q", 11.0, scores=[8] * 10), cand("♠A", 10.0)]
-    res = mk_result(Card("♥", "Q"), cands)
-    out = ps_new()._garrison_lead(st, res)
-    return out is None, f"稳成线（某候选做成率1.0）→ 9砸 退让（got {out is not None}）"
-
-
-def t04_garrison_follow():
-    trick_cards = [("西", Card("♠", "2"))]
-    st = mk_state({"♠": "AQJ86", "♥": "Q32"}, {"♠": "75432", "♥": "J54"},
-                  current="南", trick_cards=trick_cards)
-    cands = [cand("♠J", 11.0)]
-    res = mk_result(Card("♠", "J"), cands)
-    out = ps_new()._garrison_follow(st, res)
-    got = str(out["card"]) if out else None
-    return (out is not None and got == "♠A"), f"跟牌9砸：间张J → 改♠A（got {got}）"
-
-
-def t05_cash_bank_pull():
-    st = mk_state({"♠": "K85", "♥": "Q32"}, {"♥": "J54"})
-    st.nine_cash_bank = {"♠": {"obj": 12, "rv": 13}}
-    cands = [cand("♥Q", 11.0), cand("♠K", 10.0), cand("♠8", 9.0)]
-    res = mk_result(Card("♥", "Q"), cands)
-    out = ps_new()._garrison_lead(st, res)
-    got = str(out["card"]) if out else None
-    ok = (out is not None and got == "♠K" and not st.nine_cash_bank)
-    return ok, f"连拔：登记在、K 在手、对象未现 → 拔♠K 清登记（got {got}）"
-
-
-def t06_cash_bank_k_opposite():
-    st = mk_state({"♠": "853", "♥": "Q32"}, {"♠": "K2", "♥": "J54"})
-    st.nine_cash_bank = {"♠": {"obj": 12, "rv": 13}}
-    cands = [cand("♥Q", 11.0), cand("♠8", 10.0), cand("♠5", 9.0), cand("♠3", 8.0)]
-    res = mk_result(Card("♥", "Q"), cands)
-    out = ps_new()._garrison_lead(st, res)
-    got = str(out["card"]) if out else None
-    extra = getattr(st, "finesse_flow_extra", None) or {}
-    ok = (out is not None and got == "♠3"
-          and st.finesse_flow.get("♠") == 12
-          and isinstance(extra.get("♠"), dict) and extra["♠"].get("九砸")
-          and not st.nine_cash_bank)
-    return ok, f"K 在对侧：引♠3+九砸标记（got {got}, flow={st.finesse_flow}, extra={extra}）"
-
-
-def t07_cash_bank_obj_shown():
-    hist = Trick(trump="NT")
-    hist.add_card("东", Card("♠", "Q"))
-    hist.add_card("南", Card("♠", "A"))
-    hist.add_card("西", Card("♦", "2"))
-    hist.add_card("北", Card("♦", "3"))
-    st = mk_state({"♠": "K85", "♥": "Q32"}, {"♥": "J54"}, tricks=[hist])
-    st.nine_cash_bank = {"♠": {"obj": 12, "rv": 13}}
-    cands = [cand("♥Q", 11.0), cand("♠K", 10.0)]
-    res = mk_result(Card("♥", "Q"), cands)
-    out = ps_new()._garrison_lead(st, res)
-    ok = (out is None and not st.nine_cash_bank)
-    return ok, f"对象已现：清登记不干预（got {out is not None}, bank={st.nine_cash_bank}）"
-
-
 def t08_respond_defender_lead():
     trick_cards = [("西", Card("♠", "3")), ("北", Card("♠", "2")),
                    ("东", Card("♠", "5"))]
@@ -166,20 +75,6 @@ def t08_respond_defender_lead():
     fs = {"♠": {"对象": 13, "对象牌": "K", "废弃对象": []}}
     got = ps_new()._finesse_commit_check(st, fs)
     return got is None, f"防守方领出 → 接应 None（BUG-2，got {got}）"
-
-
-def t09_respond_overcall_bank():
-    trick_cards = [("南", Card("♠", "2")), ("东", Card("♠", "5"))]
-    st = mk_state({"♠": "K8", "♥": "Q32"}, {"♠": "A43", "♥": "J54"},
-                  current="北", trick_cards=trick_cards)
-    st.finesse_flow = {"♠": 12}
-    st.finesse_flow_extra = {"♠": {"九砸": True}}
-    fs = {"♠": {"对象": 12, "对象牌": "Q", "废弃对象": []}}
-    got = ps_new()._finesse_commit_check(st, fs)
-    bank = getattr(st, "nine_cash_bank", None)
-    ok = (got is not None and got[0] == "♠A"
-          and bank == {"♠": {"obj": 12, "rv": 13}})
-    return ok, f"九砸超吃：出♠A+补登记连拔（got {got}, bank={bank}）"
 
 
 def t10_exit_after_cash():
@@ -213,26 +108,6 @@ def t11_top1_make_semantics():
     got = ps_new()._top1_make(st, cands)
     ok = abs(got - 0.3) < 1e-9
     return ok, (f"只取 top1 做成率（got {got}, 期望 0.3；旧口径会返回 1.0）")
-
-
-def t12_probe_empty_garrison_still_works():
-    st = mk_state({"♠": "AK8765", "♥": "Q32"}, {"♠": "432", "♥": "J54"})
-    cands = [cand("♥Q", 11.0), cand("♠A", 10.0)]
-    res = mk_result(Card("♥", "Q"), cands)
-    probe_absent = "finesse_probe" not in (res.get("full_output") or {})
-    out = ps_new()._garrison_lead(st, res)
-    ok = probe_absent and out is not None and str(out["card"]) == "♠A"
-    return ok, f"探针空（蹭线失败模拟）→ 9砸 仍命中（probe_absent={probe_absent}）"
-
-
-def t13_akq_no_garrison():
-    st = mk_state({"♠": "AKQ876", "♥": "Q32"}, {"♠": "543", "♥": "J54"})
-    cands = [cand("♥Q", 11.0), cand("♠A", 10.0)]
-    res = mk_result(Card("♥", "Q"), cands)
-    out = ps_new()._garrison_lead(st, res)
-    bank = getattr(st, "nine_cash_bank", None)
-    ok = out is None and not bank
-    return ok, f"AKQ在手顶张齐全（对象=J）→ 不走9砸（got {out is not None}, bank={bank}）"
 
 
 def t14_commit_top1_same_suit():
@@ -696,19 +571,9 @@ def t40_combo_big_lead_on_saturated():
 
 
 CASES = [
-    t01_garrison_scan_hit,
-    t02_garrison_scan_aq_case,
-    t03_garrison_stable,
-    t04_garrison_follow,
-    t05_cash_bank_pull,
-    t06_cash_bank_k_opposite,
-    t07_cash_bank_obj_shown,
     t08_respond_defender_lead,
-    t09_respond_overcall_bank,
     t10_exit_after_cash,
     t11_top1_make_semantics,
-    t12_probe_empty_garrison_still_works,
-    t13_akq_no_garrison,
     t14_commit_top1_same_suit,
     t15_commit_top1_diff_suit,
     t16_partner_overhand_fail_back_to_local,
