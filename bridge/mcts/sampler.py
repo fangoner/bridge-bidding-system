@@ -257,6 +257,44 @@ def _sample_uniform(known_info: dict,
                                 if c.suit == _ls_suit), None)
                     if idx is not None:
                         result.setdefault(pos, []).append(pool.pop(idx))
+            # lead_shape（顶张大牌白名单）预分配（v2.17）：剔首攻牌后各形态
+            # 大牌集的**交集**＝任一命中形态都必需的大牌（长套攻K → {Q}），
+            # 定向从未知池放入该位置，避免 L0 MH 300 步硬凑"大牌+张数"组合
+            # 失败落放宽链丢约束（实测 6% 无 Q、20% 长度<3 污染 DD 决策）。
+            # 交集为空（混合形态如 KQJ+/KQ+/Kx/K 并存）→ 不预分配，保留
+            # Kx/K 世界多样性。小牌垫底至 max(smin) 张（仅非大牌、不含 T），
+            # 保证剩余张数下限起步满足；池中剩余该花色大牌（如 T）可能回塞
+            # 破坏精确匹配，由 MH 单步剔除（_constraint_violation_score 已
+            # 覆盖 lead_shape，回塞通常只剩一张待交换，远易于原组合硬凑）。
+            if con.lead_shape is not None:
+                _ls_suit, _ls_lead, _ls_entries = con.lead_shape
+                _lead_rv = _rank_value_of(_ls_lead)
+                _inter = None
+                for _eb, _smin, _smax in _ls_entries:
+                    _st = {r for r in _eb if r != _ls_lead}
+                    _inter = set(_st) if _inter is None else (_inter & _st)
+                if _inter:
+                    for _rank in sorted(_inter, key=lambda r: -_rank_value_of(r)):
+                        if any(c.suit == _ls_suit and c.rank == _rank
+                               for c in result.get(pos, [])):
+                            continue
+                        idx = next((k for k, c in enumerate(pool)
+                                    if c.suit == _ls_suit and c.rank == _rank), None)
+                        if idx is None:
+                            continue
+                        result.setdefault(pos, []).append(pool.pop(idx))
+                    _need_small = max((e[1] for e in _ls_entries), default=0)
+                    _have_small = sum(
+                        1 for c in result.get(pos, [])
+                        if c.suit == _ls_suit
+                        and c.rank not in ("A", "K", "Q", "J", "T"))
+                    for _ in range(max(0, _need_small - _have_small)):
+                        idx = next((k for k, c in enumerate(pool)
+                                    if c.suit == _ls_suit
+                                    and c.rank not in ("A", "K", "Q", "J", "T")), None)
+                        if idx is None:
+                            break
+                        result.setdefault(pos, []).append(pool.pop(idx))
     random.shuffle(pool)
     remaining_counts = dict(known_info["remaining_counts"])
     known_voids = known_info["known_voids"]

@@ -515,7 +515,7 @@ def t36_engine_already_leading_finesse_register():
     ws = fo.get("窗口期启动") or {}
     ok = (str(out["card"]) == "♦Q"
           and st.finesse_flow.get("♦") == 13
-          and "押桶成" in (ws.get("说明") or "")
+          and "押90%" in (ws.get("说明") or "")
           and ws.get("花色") == "♦")
     return ok, (f"引擎已在飞牌花色（非稳成）：全局押桶成榜首保留引擎引牌+登记"
                 f"（card={out['card']}, flow={st.finesse_flow}, "
@@ -626,6 +626,45 @@ def t41_follow_double_finesse_press_discard():
         f"保Q废T双飞：威胁=T(10) → 接应选♠J 压T（got {got}, 期望 ('♠J', ...)）")
 
 
+def t42_safe_cash_probe_defer():
+    """探分布动作（2026-09-26 用户定调）：一般情形门控过（比值≥0.85），
+    **引擎顶张（榜首）**是其他花色 A → 先兑现 A、**不登记飞牌流程**（未启动），
+    下墩重新验证；飞牌机会不丢。非顶张的 A/K 不得用于探分布（榜首非 A → 正常启动）。"""
+    st = mk_state({"♣": "QJ2", "♥": "5", "♦": "A"}, {"♣": "AT9", "♥": "43"})
+    cands = [cand("♦A", 0.6, scores=[9] * 6 + [7] * 4),   # 榜首=其他花色 A（引擎顶张）
+             cand("♣Q", 0.6, scores=[9] * 6 + [7] * 4)]   # 飞牌引牌
+    res = mk_result(Card("♣", "Q"), cands)
+    res["full_output"]["finesse_probe"] = {
+        "♣": {"对象": "K", "Δ": 0.5, "引牌": "♣Q", "方向": "东", "押桶成": 0.9,
+              "全": [{"对象": "K", "Δ": 0.5, "引牌": "♣Q", "方向": "东",
+                      "押桶成": 0.9}]}}
+    out = ps_new()._finesse_lead(st, res, 0.75)
+    fo = out.get("full_output") or {}
+    ws = fo.get("窗口期启动") or {}
+    ok = (str(out["card"]) == "♦A"
+          and not st.finesse_flow          # 未登记飞牌流程
+          and "先兑现♦A" in (ws.get("说明") or ""))
+    return ok, (f"门控过且榜首=其他花色A：card={out['card']}, flow={st.finesse_flow}, "
+                f"说明={ws.get('说明')}")
+
+
+def t43_safe_cash_requires_top():
+    """顶张限制（2026-09-26 用户修正）：榜首是飞牌引牌（非 A）时，候选里
+    其他花色 A 是**非顶张**，不得用于探分布 → 正常启动飞牌（登记 flow）。"""
+    st = mk_state({"♣": "QJ2", "♥": "5", "♦": "A"}, {"♣": "AT9", "♥": "43"})
+    cands = [cand("♣Q", 0.6, scores=[9] * 6 + [7] * 4),   # 榜首=飞牌引牌
+             cand("♦A", 0.6, scores=[9] * 6 + [7] * 4)]   # 非顶张的 A（不兑现）
+    res = mk_result(Card("♣", "Q"), cands)
+    res["full_output"]["finesse_probe"] = {
+        "♣": {"对象": "K", "Δ": 0.5, "引牌": "♣Q", "方向": "东", "押桶成": 0.9,
+              "全": [{"对象": "K", "Δ": 0.5, "引牌": "♣Q", "方向": "东",
+                      "押桶成": 0.9}]}}
+    out = ps_new()._finesse_lead(st, res, 0.75)
+    ok = (str(out["card"]) == "♣Q" and st.finesse_flow.get("♣") == 13)
+    return ok, (f"榜首非A不探分布：card={out['card']}, flow={st.finesse_flow}"
+                f"（期望 ♣Q + flow ♣=13）")
+
+
 CASES = [
     t08_respond_defender_lead,
     t10_exit_after_cash,
@@ -658,6 +697,8 @@ CASES = [
     t39_full_hit_bucket_passes_to_finalize,
     t40_combo_big_lead_on_saturated,
     t41_follow_double_finesse_press_discard,
+    t42_safe_cash_probe_defer,
+    t43_safe_cash_requires_top,
 ]
 
 

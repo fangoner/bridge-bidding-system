@@ -2088,8 +2088,9 @@ class PlayService:
             if prefer:
                 pick, why = prefer
                 org_str = cur_str
+                verb = "维持" if pick == org_str else "改出"
                 hint4 = (f"[窗口期启动飞牌] 探针识别出飞牌结构，"
-                         f"改出{pick}启动（{why}）")
+                         f"{verb}{pick}启动（{why}）")
                 print(hint4)
                 reasoning = result.get("reasoning", "")
                 result["card"] = Card(pick[0], pick[1:])
@@ -2420,21 +2421,68 @@ class PlayService:
             if not worth:
                 print(f"[启动退让] {s} {pick}（{gate_why}）顺延")
                 continue
+            # 一般情形门控已过（动作/榜首 ≥ FINESSE_NEC_RATIO）——先查其他
+            # 花色安全兑现顶张（探分布，2026-09-26 用户定调）：引擎候选里非
+            # 飞牌花色有 A（稳拿不丢权）或 K 且队友持同花色 A（同花色 A 唯一，
+            # 队友持 A ⇒ 敌方无 A ⇒ 出 K 无人能压，NT 无将吃 ⇒ 稳赢保权）
+            # → 先出 A/K 兑现，**不登记飞牌流程**（未启动），
+            # 下墩自然重新探测验证——飞牌结构还在，机会不会丢；兑现若敲下
+            # 关键张，下墩局面已变，重新验证自然走新线。
+            cash = self._safe_cash_action(state, candidates, s)
+            if cash:
+                print(f"[探分布] {s} 门控已过但先兑现{cash[0]}（{cash[1]}），推迟飞牌")
+                return cash[0], f"先兑现{cash[0]}探分布（{cash[1]}），未启动飞牌（下墩重新验证）"
             obj = info.get("对象")
             obj_name = self._finesse_obj_name(obj) if obj is not None else "?"
             self._register_finesse_flow(state, s, obj, info)
             a_mk = info.get("押桶成")
-            mk_txt = f"押桶成{a_mk:.0%}" if a_mk is not None else "引擎值"
             combo = "双飞组合" if info.get("组合飞") else "单飞"
-            rank_note = f"（第{ordered.index((pick, info, s)) + 1}候选）" if len(ordered) > 1 else ""
+            rank_note = f"第{ordered.index((pick, info, s)) + 1}候选" if len(ordered) > 1 else ""
             if info.get("侧") == "伙伴侧":
                 why = (f"飞{obj_name}({combo})过手{pick}给队友引飞"
-                       f"（引牌{info.get('引牌', '?')}，{mk_txt}）{rank_note}")
+                       f"（引牌{info.get('引牌', '?')}）")
             else:
-                why = f"飞{obj_name}({combo}){mk_txt}直出{pick}{rank_note}"
-            src_note = "终选·押桶成排序" + (rank_note or "榜首")
-            return pick, f"{src_note}（{why}）"
+                why = f"飞{obj_name}({combo})直出{pick}"
+            if a_mk is not None:
+                why = why.replace("直出", f"押{a_mk:.0%}直出").replace(
+                    "过手", f"押{a_mk:.0%}过手")
+            print(f"[窗口期启动] {why}" + (f"（押桶成排序{rank_note}）" if rank_note else ""))
+            return pick, why
         print("[启动退让] 全部动作被门控否决，尊重引擎")
+        return None
+
+    def _safe_cash_action(self, state: PlayState,
+                          candidates: List[Dict[str, Any]],
+                          flyer_suit: str) -> Optional[Tuple[str, str]]:
+        """其他花色安全兑现顶张（探分布动作，2026-09-26 用户定调）。
+
+        飞牌一般情形门控已过（比值≥0.85）后，检查**引擎顶张（榜首候选）**：
+        仅当引擎自己也认为出它最优时才先兑现（不违背引擎判断）——
+          · 榜首是**非飞牌花色**的 A：顶张稳拿一墩，不丢牌权（NT 无将吃）；
+          · 榜首是**非飞牌花色**的 K 且队友（对家）持同花色 A：同花色 A 唯一，
+            队友持 A ⇒ 敌方无 A ⇒ 出 K 无人能压（NT 无将吃）⇒ 稳赢保权。
+        命中则先出 A/K 兑现（**不登记飞牌流程**，推迟飞牌一墩）——下墩自然
+        重新探测验证：飞牌结构仍在，门控仍会过，机会不丢；兑现若敲下关键张，
+        下墩局面已变，重新验证自然改走新线。返回 (兑现牌, 说明) 或 None。
+        """
+        if not candidates:
+            return None
+        top = candidates[0]  # 引擎顶张（榜首）——非顶张的 A/K 不得用于探分布
+        cs = str(top.get("card") or "")
+        if len(cs) < 2:
+            return None
+        suit, rank = cs[0], cs[1:]
+        if suit == flyer_suit:
+            return None  # 飞牌花色不动，避免破坏飞牌结构
+        if rank == "A":
+            return cs, "A稳拿不丢权"
+        my_pos = state.current_player
+        partner = (state.dummy if my_pos == state.contract.declarer
+                   else state.contract.declarer)
+        partner_cards = state.hands.get(partner, [])
+        if rank == "K" and any(cc.suit == suit and cc.rank == "A"
+                               for cc in partner_cards):
+            return cs, "K+队友A保权"
         return None
 
     def _subset_select_all(self, state: PlayState,

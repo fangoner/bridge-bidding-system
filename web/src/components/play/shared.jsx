@@ -163,6 +163,9 @@ export function FinesseStamps({ fullOutput }) {
     if (val == null || val === '') return ''
     if (typeof val === 'string') return val
     if (typeof val === 'object') {
+      // 窗口期启动的说明已是自描述的一句话（如"飞K(单飞)押100%直出♣Q"），
+      // 直接展示，避免与花色/对象/改选字段重复
+      if (label === '窗口期启动' && val['说明']) return val['说明']
       // 从飞牌描述对象提取关键字段拼成一行
       const parts = []
       if (val['花色']) parts.push(`花色${val['花色']}`)
@@ -171,8 +174,9 @@ export function FinesseStamps({ fullOutput }) {
         parts.push(`对象${rankName || val['对象']}`)
       }
       if (val['Δ'] != null && val['Δ'] !== '') parts.push(`Δ${val['Δ']}`)
-      if (val['改选']) parts.push(`改出${val['改选']}`)
-      if (val['原选']) parts.push(`原选${val['原选']}`)
+      if (val['改选'] && val['原选'] && val['改选'] !== val['原选']) parts.push(`改出${val['改选']}`)
+      else if (val['改选']) parts.push(`直出${val['改选']}`)
+      if (val['原选'] && val['原选'] !== val['改选']) parts.push(`原选${val['原选']}`)
       if (val['领出']) parts.push(`领出${val['领出']}`)
       if (val['票数'] != null && val['票数'] !== '') parts.push(`${val['票数']}票`)
       if (val['结果']) parts.push(`结果${val['结果']}`)
