@@ -556,7 +556,7 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 | `MAIN_PROMPT_MAX_RETRIES` | 2 | 主提示词合规性重试次数（定义于 `bridge/bidding_service.py`，**不在 config.py**） |
 | `FALLBACK_PROMPT_MAX_RETRIES` | 1 | 备用提示词重试次数（同上，定义于 `bridge/bidding_service.py`） |
 | `DEFAULT_PLAY_ENGINE` | `dd` | 默认打牌引擎（可选 `llm`/`dd`/`perfect`/`alphamu`） |
-| `DD_NUM_SAMPLES` | 200 | DD采样数 |
+| `DD_NUM_SAMPLES` | 1000 | DD采样数（2026-09-23 由 200 提升：探针 Δ 门槛稳定化实测） |
 | `DD_TIME_LIMIT` | 30.0 | DD时间限制（秒） |
 | `DD_SCORING_MODE` | `make_rate` | DD 决策计分制（make_rate/imp/avg_tricks；2026-09-20 由 imp 改为 make_rate，与飞牌规则层统一到做成率口径） |
 | `DD_MAJORITY_VOTES` | 1 | DD 多数投票票数（1 = 关闭） |
@@ -572,8 +572,7 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 | `ALPHA_MU_WORLDS_MAX` | 100 | αμ world 数上限 |
 | `FINESSE_PROBE_DELTA` | 0.10 | 飞牌探针 Δ 阈值（**做成率差**口径，非赢墩均值差） |
 | `FINESSE_RATIO` | 0.75 | 飞牌干预统一比值 |
-| `FINESSE_COMMIT_DIE_PCT` | 0.05 | 三层接应判据下界（不飞即死 → 强制接应） |
-| `FINESSE_COMMIT_ALIVE_PCT` | 0.40 | 三层接应判据上界（定约不依赖飞牌 → 退让引擎） |
+| `FINESSE_COMMIT_ALIVE_PCT` | 0.50 | 接应退让判据（b_押注≥此值 且 ≥非押注桶 → 退让引擎） |
 | `SIGNAL_MIN_RANK` | 8 | 防守高牌信号最低 rank |
 
 ### 端口约定
@@ -594,6 +593,42 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 > **过程性内容（背景/动机/教训/测试明细/修改文件清单）以 [`CHANGELOG.md`](CHANGELOG.md) 为唯一权威**，本段不重复展开。
 > 改动代码时：CHANGELOG 记全过程；本段只在需要更新"当前状态"认知时补一条摘要。
 > 2026-09-20 之前的版本历史曾与本文件重复约 76KB，治理记录见 `docs/开发文档整理_发现清单_20260920.md`。
+
+### v2.16（2026-09-25）接应退让判据重构 + 首攻约束剩余口径递减
+- **接应退让判据**（`_finesse_commit_ratio_ok`）改为两步结构：① `b_押注 ≥ 0.50 且 ≥ 非押注桶` → 退让引擎；② 不满足 → 比值兜底 `flyer/top_alt ≥ 0.75`。删除 DIE 强制分支与同花色 ①/② 分流；数据必然齐全（top_alt 从候选直接算，删缺数据退化）
+- **废弃对象参与接应威胁**（bug 修复）：保 Q 废 T 时 T 是敌方实牌，威胁计算不再剔除废弃对象，南 ♠AJ983 对 ♠4 接应正确选 ♠J
+- **首攻约束剩余口径递减**：`lead_shape` 首攻牌一出即剔（KQ小≥N → Q小≥N），`match_suit_shape` 按形态是否仍含首攻牌自动区分完整/剩余口径；初始约束整手口径不变，采样每决策点重新生成世界并用剩余口径过滤
+- 常量：`FINESSE_COMMIT_ALIVE_PCT` 0.40→0.50；删除 `FINESSE_COMMIT_DIE_PCT`
+
+### v2.15（2026-09-24）首攻牌张形态白名单：NT 顶张/短套 + 有将 3/5 首攻
+- **背景**：v2.14 `specific_cards` 硬承诺（攻K必持Q）把新睿表12-1 明确允许的 Kx/K、Ax+、Qx 等无连张形态滤掉，采样过度收敛；且只覆盖 K/Q 两档、漏 A/J/10，未覆盖有将
+- **口径**（用户）：排除法白名单——首攻牌已知 ⇒ 该花色完整形态必须命中新睿指定牌型，表外（如 AK 攻K）排除；NT 按表12-1、有将按表12-3
+- **改动**：`BidConstraint.lead_shape`（顶张白名单：完整大牌集精确匹配）+ `lead_small_shapes`（小牌白名单：总张数/>首攻牌张数/大牌数三维区间）；`_LEAD_SHAPE_NT`（攻A=6种、K=4、Q=4、J=5、T=6）+ `_LEAD_SHAPE_TRUMP`（A 无 AK、K 含 AK、Q=QJ10+）+ `_build_trump_small_shapes`（有将 3/5 首攻 11 档）；`_build_opening_lead_constraint` NT/有将分流；`DD_LEAD_TRUMP_ENABLE` 开关
+- **关键差异**：NT 攻 K 保留 Kx/K（v2.14 误滤）、排除 AK/KQT（v2.14 拦不住）；NT 攻小牌四类（长四/三张带大牌攻最小/三张小牌攻中间/双张攻大）取代 v2.10 单一长四；有将小牌走 3/5 首攻
+- **验证**：`tests/test_lead_shape.py` 68/68 + pipeline 30/30 + probe 12/12 + doc-sync ✓；端到端 3NT/4♥ 分支表全对；未提交 git
+
+### v2.14（2026-09-24）顶张连张首攻约束 + specific_cards pin
+- **背景**：3NT 西首攻 ♠K（KQ 连张承诺）；延续长四首攻思路把顶张连张纳入首攻约束
+- **口径**（用户）：攻 K ⇒ 必持 Q、攻 Q ⇒ 必持 J；攻 A 的"带 K"推论弱，不做
+- **改动**：`DD_LEAD_HONOR_CHAIN_NEXT={"K":"Q","Q":"J"}` 映射 + `_build_opening_lead_constraint` 连张分支（specific_cards）；**sampler pin 修复**——`_sample_uniform` 先从未知池把必持牌放进对应位置，所有采样层初态即满足（修 specific_cards 落放宽链被丢的 7/300 漏）
+- **验证**：300/300 西恒持 ♠Q；分支表 K/Q/A/小牌全对；pipeline 30/30 + probe 12/12 + doc-sync；未提交 git
+
+### v2.13（2026-09-24）启动门控分子改全样本做成率
+- **背景**：3NT 牌局 ♠4 飞 Q 押桶成 100%（对象 Q 在押注半桶）过闸改出，但全样本仅 67.9% vs 引擎 ♣A 95.7%——门控（飞 vs 不飞）拿"押对方向半桶"作分子剔除了反侧崩盘世界、高估飞牌线；用户定调"要不要飞"应看全局期望，"启动后非押注方向世界无意义"只在启动之后成立
+- **改动**：`_finesse_launch_worthwhile` 分子=**动作牌全样本做成率**（分母同秤）；`FINESSE_NEC_RATIO` 0.70→0.85；`_subset_select_all` 押桶成排序全列表 + 榜首被拒顺延试下一候选（单调性前提失效）；押桶成保留给启动后路线排序与接应判据
+- **口径定调（用户）**：「启动后决胜（终选+接应）以押注桶成为据；启动门控以全样本为据」
+- **验证**：pipeline 30/30 + probe 12/12 + doc-sync ✓；图解 §五/§九、CLAUDE.md、CHANGELOG 同步；未提交 git
+
+### v2.12（2026-09-24）飞牌确认·对侧单张排除
+- **背景**：3NT 北过手给南引 ♦ 飞 A（南♦Q32、北♦J单张）——伙伴侧检出「♦Q押5% / ♦3押100% / ♦2押100%」全✓，但对侧 ♦ 只有 J 单张，引小牌后机械跟出、无飞张选择，押100% 是单张被逼出的假信号
+- **改动**：`_probe_finesse_ok` 对侧该花色 <2 张时对侧牌不入 G 候选；引牌本身作飞张（出 Q/K 逼对象）始终保留，不依赖对侧张数
+- **验证**：实况牌面伙伴侧 ♦3/2/Q 全 False；probe 12/12（新增 4 用例）+ doc-sync + pipeline 30/30；图解/CHANGELOG 同步；未提交 git
+
+### v2.11（2026-09-23）飞牌确认层"引牌<对象"硬门槛 + DD 采样 200→1000
+- **假飞标签修复**：`_probe_finesse_ok` 判结构级存在（G 候选=对侧牌∪引牌本身），引牌本身不满足 `obj > G > max_enemy` 也被整条确认（实测「♥K,Δ0.32,♥A押95%✓」——A 引 K 只是兑取顶张）。新增硬门槛 `lead_rv >= obj → False`：引牌必须严格小于对象才是飞牌启动；保留"引牌本身作飞张（南引Q逼K）"路径
+- **探针 Δ 门槛稳定化**：同决策点"撤销→继续"重跑检出时有时无——190 次实测本侧♥T 强信号 190/190、伙伴侧 Q 引牌贴 0.10 门槛 1/190 失检（Δ 是两个 ≈0.95 大数之差，桶内组成噪声整体摆动 0.10↔0.55）。`DD_NUM_SAMPLES` 200→1000（实测 924 样本×2 搜索 ≈0.5s/手）：Δ 收窄（本侧 0.188–0.411、伙伴 0.126–0.312），检出 25/25，终选 23/25 直出♥T
+- **撤销还原核查**：`undo_last_card` 不还原 `finesse_flow/extra`，但 `_intervene` 段1 前无条件 clear（L1591）——残留不污染探针，摇摆系采样噪声
+- 验证：doc-sync ✓ / probe 8/8 ✓ / pipeline 30/30 ✓；图解与 CLAUDE.md、DEVELOPMENT.md 同步；**未提交 git**（用户要求"记录，不提交"）
 
 ### v2.10（2026-09-23）首攻长四约束：DD 采样注入防家首攻协议
 - **背景**：BM 2-C20（3NT 南庄，西♠AJ987 长四攻8 + ♣A）——均匀先验下 ♠T 做成率最高，但攻8 长四协议把分布推向 东2-西5 后小牌反超（82% vs 69%），"按总做成率打不安全"

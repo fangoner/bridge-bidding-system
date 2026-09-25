@@ -21,7 +21,7 @@ from config import (
     FINESSE_DEFER_ENABLE,
     FINESSE_RATIO, FINESSE_NEC_MAKE, FINESSE_NEC_MAKE_HIGH,
     FINESSE_NEC_MIN_RATIO, FINESSE_NEC_RATIO,
-    FINESSE_COMMIT_DIE_PCT, FINESSE_COMMIT_ALIVE_PCT,
+    FINESSE_COMMIT_ALIVE_PCT,
     FINESSE_PROBE_DELTA,
     DD_MAJORITY_VOTES,
 )
@@ -583,6 +583,16 @@ class PlayService:
             merged.min_keycards = max(c1.min_keycards or 0, c2.min_keycards or 0)
         merged.specific_cards = c1.specific_cards.union(c2.specific_cards)
         merged.suit_controls = c1.suit_controls.union(c2.suit_controls)
+        # 首攻牌张白名单形态：两约束有任一持有就保留（首攻形态与叫牌约束不冲突，
+        # 同一位置极少同时出现两条首攻形态；出现时取一只，避免形态叠加误杀）。
+        if c1.lead_shape is not None:
+            merged.lead_shape = c1.lead_shape
+        elif c2.lead_shape is not None:
+            merged.lead_shape = c2.lead_shape
+        if c1.lead_small_shapes is not None:
+            merged.lead_small_shapes = c1.lead_small_shapes
+        elif c2.lead_small_shapes is not None:
+            merged.lead_small_shapes = c2.lead_small_shapes
         # 首攻长四：同花色取值更大的张数（单调收紧），不同花色合入
         for suit in set(list(c1.length_above.keys()) + list(c2.length_above.keys())):
             e1 = c1.length_above.get(suit)
@@ -595,8 +605,14 @@ class PlayService:
                 merged.length_above[suit] = e1 if e1 is not None else e2
         return merged
 
-    def _format_constraints_for_display(self, constraints: Dict[str, BidConstraint]) -> str:
-        """将约束格式化为前端展示用的可读文本。"""
+    def _format_constraints_for_display(self, constraints: Dict[str, BidConstraint],
+                                        for_latest: bool = False) -> str:
+        """将约束格式化为前端展示用的可读文本。
+
+        for_latest=True：展示"最新约束"列——首攻小牌白名单按**剩余未出牌**口径，
+        张数 = 条目下限 - 1（条目含首攻牌那张，剩余不含），标注"剩余"。
+        for_latest=False：初始约束列，按整手口径（含首攻牌）展示。
+        """
         if not constraints:
             return "无约束（随机采样）"
         lines = []
@@ -643,9 +659,50 @@ class PlayService:
             if c.length_above:
                 for s, (base_r, n) in c.length_above.items():
                     parts.append(f"{s}>{base_r}≥{n}")
+            # 首攻牌张白名单形态（v2.15）
+            if c.lead_shape is not None:
+                ls_suit, ls_rank, ls_entries = c.lead_shape
+                # 从白名单条目反推语义：完整大牌集 + 小牌区间
+                shapes_desc = []
+                for (bigs, smin, smax) in ls_entries:
+                    big_s = "".join(sorted(bigs, key=lambda r: "AKQJT98765432".index(r)))
+                    if smax >= 99 and smin == 0:
+                        shapes_desc.append(f"大牌{big_s}+")
+                    elif smax >= 99:
+                        shapes_desc.append(f"大牌{big_s}小≥{smin}")
+                    elif smin == 0 and smax == 0:
+                        shapes_desc.append(f"大牌{big_s}无小牌")
+                    elif smin == smax:
+                        shapes_desc.append(f"大牌{big_s}小{smin}张")
+                    else:
+                        shapes_desc.append(f"大牌{big_s}小{smin}-{smax}张")
+                parts.append(f"首攻{ls_suit}{ls_rank}:{'; '.join(shapes_desc)}")
+            if c.lead_small_shapes is not None:
+                ls_suit, ls_rank, ls_entries = c.lead_small_shapes
+                # 语义化：完整花色张数 + >首攻牌张数（长四=≥4张恰3张>X；递减后
+                # 为"≥N张 恰M张>X"）。条目为整手口径（含首攻牌），
+                # for_latest=True 时转剩余口径（-1）并标注"剩余"。
+                descs = []
+                for ent in ls_entries:
+                    tmin, tmax, amin, amax = ent[0], ent[1], ent[2], ent[3]
+                    if for_latest:
+                        t_s = f"{tmin-1}张" if tmin - 1 == tmax - 1 else (f"≥{tmin-1}张" if tmax >= 13 else f"{tmin-1}-{tmax-1}张")
+                    else:
+                        t_s = f"{tmin}张" if tmin == tmax else (f"≥{tmin}张" if tmax >= 13 else f"{tmin}-{tmax}张")
+                    if amin == amax:
+                        a_s = f"恰{amin}张>X"
+                    elif amin == 0 and amax == 3:
+                        a_s = "≤3张>X"
+                    else:
+                        a_s = f"{amin}-{amax}张>X"
+                    descs.append(f"{t_s} {a_s}")
+                prefix = "剩余" if for_latest else ""
+                parts.append(f"首攻{ls_suit}{ls_rank}:{prefix}{'; '.join(descs)} (X={ls_rank})")
             # 来源
             src = c.inference_source or ""
-            if "convention" in src:
+            if "opening_lead" in src:
+                parts.append("[首攻]")
+            elif "convention" in src:
                 parts.append("[约定]")
             elif "negative" in src:
                 parts.append("[否定推断]")
@@ -772,19 +829,29 @@ class PlayService:
             return "无约束（随机采样）"
         played_stats = compute_played_stats(state)
         remaining_counts = compute_remaining_counts(state)
+        # 按位置收集已出牌面（首攻白名单递减判断 >X 张数用，与采样器同源）
+        played_by_pos: Dict[str, List[Card]] = {}
+        for _t in state.tricks:
+            for _p, _c in _t.cards:
+                played_by_pos.setdefault(_p, []).append(_c)
+        for _p, _c in state.current_trick.cards:
+            played_by_pos.setdefault(_p, []).append(_c)
         reduced: Dict[str, BidConstraint] = {}
         for pos, c in constraints.items():
             played = played_stats.get(pos, {})
             if not any((played.get("suit") or {}).values()):
                 reduced[pos] = c
                 continue
-            rc = _reduce_constraint_for_played(c, played, remaining_counts.get(pos, 0))
+            rc = _reduce_constraint_for_played(
+                c, played, remaining_counts.get(pos, 0),
+                played_cards=played_by_pos.get(pos, []),
+            )
             if rc is not None:
                 rc.suit_min = {s: n for s, n in rc.suit_min.items() if n > 0}
                 reduced[pos] = rc
         if not reduced:
             return "约束已随出牌全部满足"
-        return self._format_constraints_for_display(reduced)
+        return self._format_constraints_for_display(reduced, for_latest=True)
 
     def _inject_played_stats(self, output: dict, state: PlayState) -> None:
         """注入各家已出统计进 full_output（HCP + 四门花色张数，含当前墩），
@@ -1096,18 +1163,19 @@ class PlayService:
         return self.bid_constraints
 
     def _build_opening_lead_constraint(self, state: PlayState) -> Optional[BidConstraint]:
-        """NT 防家首攻小牌 → 长四协议约束（仅首攻方）。
+        """防家首攻 → 首攻协议约束（仅首攻方，NT/有将分表）。
 
-        攻小牌意味着该花色第 4 大是此牌：花色长度 ≥4，且至少 3 张
-        同花色大于首攻牌。返回针对首攻方的约束，与叫牌约束单调合并
-        （_merge_constraints 只缩不放）。首攻牌已打出，剩余部分的
-        扣减由现有 _reduce_constraint_for_played 统一承接，后续演化
-        与普通叫牌约束完全一致。
+        与叫牌约束单调合并 _merge_constraints 只缩不放，首攻牌已打出的后继
+        扣减由 _reduce_constraint_for_played 统一承接。按定约类型分流：
+          · NT（表12-1/表12-2）：顶张白名单 _LEAD_SHAPE_NT；小牌长四/三张/双张
+          · 有将（表12-3/表12-4）：顶张白名单 _LEAD_SHAPE_TRUMP；小牌 3/5 首攻
         """
         import config as _cfg
-        if not _cfg.DD_USE_CONSTRAINTS or not _cfg.DD_LEAD_LONG_FOUR_ENABLE:
+        if not _cfg.DD_USE_CONSTRAINTS:
             return None
-        if state.contract.suit != "NT":
+        is_nt = state.contract.suit == "NT"
+        if not (_cfg.DD_LEAD_LONG_FOUR_ENABLE or _cfg.DD_LEAD_HONOR_CHAIN_ENABLE
+                or (not is_nt and _cfg.DD_LEAD_TRUMP_ENABLE)):
             return None
         lead_card_info = None
         for trick in state.tricks:
@@ -1120,19 +1188,133 @@ class PlayService:
             return None
         leader, lead_card = lead_card_info
         if leader in (state.contract.declarer, state.dummy):
-            return None  # 仅防家首攻；庄/明手领出不符合长四协议
+            return None  # 仅防家首攻；庄/明手领出不符合首攻协议
+        if is_nt:
+            return self._build_nt_lead_constraint(leader, lead_card, _cfg, state)
+        return self._build_trump_lead_constraint(leader, lead_card, _cfg)
+
+    @staticmethod
+    def _build_nt_lead_constraint(leader: str, lead_card: Card, _cfg, state=None) -> Optional[BidConstraint]:
+        """NT 首攻协议（表12-1/表12-2）：顶张白名单或 小牌白名单。
+
+        小牌分支区分助攻（新睿正文）：攻三张以下短套多为**助攻**——即同伴
+        叫过该花色（视为长套）才按短套形态采样；若叫牌中队友未叫过该花色，
+        首攻必须按长套（长四）解释，短套形态（三张/双张）不参与采样。
+        """
+        # ── 分支1：顶张连张（攻 K/Q/J/10/A → 表12-1 形态白名单）──
+        if _cfg.DD_LEAD_HONOR_CHAIN_ENABLE:
+            from bridge.mcts.constraints import (_LEAD_SHAPE_NT, parse_lead_shape_patterns,
+                                                 filter_lead_shape_long)
+            patterns_raw = _LEAD_SHAPE_NT.get(lead_card.rank)
+            if patterns_raw:
+                entries = parse_lead_shape_patterns(patterns_raw)
+                # 助攻信号分流（与大牌首攻对称）：队友未叫过该花色 → 大牌来自
+                # 首攻人自己的长套（花色 ≥4 张），白名单限定长套形态（短套 Kx/K
+                # 等被剔除）；队友叫过 → 大牌首攻是支持同伴长套，短套形态合法。
+                partner = PARTNERS.get(leader, "北")
+                if state is not None and not PlayService._player_called_suit(
+                        state, partner, lead_card.suit):
+                    entries = filter_lead_shape_long(entries)
+                return BidConstraint(
+                    position=leader,
+                    lead_shape=(lead_card.suit, lead_card.rank, entries),
+                    inference_source="opening_lead_honor_chain",
+                )
+        # ── 分支2：小牌首攻（长四 + 助攻短套）──
+        if not _cfg.DD_LEAD_LONG_FOUR_ENABLE:
+            return None
         if lead_card.rank not in _cfg.DD_LEAD_SMALL_RANKS:
-            return None  # 顶张/大牌领出非长四
+            return None  # 顶张/大牌领出非小牌首攻
+        # 区分助攻（新睿正文）：攻三张以下短套多为助攻（同伴叫过该花色=同伴长套）。
+        #   · 队友未叫该花色 → 首攻=自己长套，仅按长四
+        #   · 队友叫过 但 首攻人自己未支持（未叫过该花色）→ 纯助攻短套，排除长四
+        #   · 队友叫过 且 首攻人自己叫过（支持过）→ 自己有配合，长四/短套均合法
+        partner = PARTNERS.get(leader, "北")
+        partner_called = PlayService._player_called_suit(state, partner, lead_card.suit) \
+            if state is not None else False
+        leader_called = PlayService._player_called_suit(state, leader, lead_card.suit) \
+            if state is not None else False
+        # 新睿表12-1 X 行 + 表12-2：
+        #   长四 (≥4张攻第4大)：恰3张>X（HHxX+/HxxX+/xxxX+）
+        #   短套：三张带大牌攻最小 (1074→4)、三张小牌攻中间 (987→8)、双张攻大 (Xx)
+        # 白名单条目：(完整总张数min,max, >X张数min,max, 大牌>X数min,max)
+        _LONG4 = [(4, 13, 3, 3, 0, 99)]
+        _SHORT = [
+            (3, 3, 2, 2, 1, 99),   # 三张带大牌攻最小
+            (3, 3, 1, 1, 0, 0),    # 三张小牌攻中间（唯一>X的是小牌）
+            (2, 2, 0, 0, 0, 99),   # 双张攻大
+        ]
+        if not partner_called:
+            entries = _LONG4
+            source = "opening_lead_long4"
+        elif not leader_called:
+            entries = _SHORT  # 助攻：首攻人短套帮队友，排除长四
+            source = "opening_lead_long4_assist_short"
+        else:
+            entries = _LONG4 + _SHORT  # 首攻人有支持，长四/短套均可能
+            source = "opening_lead_long4_assist"
         return BidConstraint(
             position=leader,
-            suit_min={lead_card.suit: 4},
-            length_above={lead_card.suit: (lead_card.rank, 3)},
-            inference_source="opening_lead_long4",
+            lead_small_shapes=(lead_card.suit, lead_card.rank, entries),
+            inference_source=source,
+        )
+
+    @staticmethod
+    def _player_called_suit(state, position: str, suit: str) -> bool:
+        """判断某家是否在叫牌中叫过该花色（花色叫品，排除 pass/无将/加倍）。"""
+        try:
+            from bridge.bidding import parse_bidding_sequence_with_positions
+            seq = parse_bidding_sequence_with_positions(
+                getattr(state, "bidding_sequence", "") or "")
+            for pos, bid in seq:
+                if pos != position:
+                    continue
+                bid_u = bid.upper()
+                # 排除 pass / 无将 / 加倍 / 再加倍
+                if bid_u in ("PASS", "P", "NT", "X", "XX", "D", "R",
+                             "REDOUBLE", "DOUBLE", "1NT", "2NT", "3NT",
+                             "4NT", "5NT", "6NT", "7NT"):
+                    continue
+                # 花色名匹配：1S/2♠/3♣ 等（末字符是花色标识）
+                bid_suit = bid_u[-1]
+                suit_map = {"S": "♠", "H": "♥", "D": "♦", "C": "♣",
+                            "♠": "♠", "♥": "♥", "♦": "♦", "♣": "♣"}
+                if bid_suit in suit_map and suit_map[bid_suit] == suit:
+                    return True
+        except Exception:
+            return False
+        return False
+
+    @staticmethod
+    def _build_trump_lead_constraint(leader: str, lead_card: Card, _cfg) -> Optional[BidConstraint]:
+        """有将首攻协议（表12-3/表12-4）：顶张白名单或 3/5 首攻小牌白名单。"""
+        # ── 分支1：顶张连张（攻 A/K/Q/J/10 → 表12-3 形态白名单）──
+        if _cfg.DD_LEAD_HONOR_CHAIN_ENABLE or _cfg.DD_LEAD_TRUMP_ENABLE:
+            from bridge.mcts.constraints import _LEAD_SHAPE_TRUMP, parse_lead_shape_patterns
+            patterns_raw = _LEAD_SHAPE_TRUMP.get(lead_card.rank)
+            if patterns_raw:
+                entries = parse_lead_shape_patterns(patterns_raw)
+                return BidConstraint(
+                    position=leader,
+                    lead_shape=(lead_card.suit, lead_card.rank, entries),
+                    inference_source="opening_lead_honor_chain",
+                )
+        # ── 分支2：3/5 首攻（攻小牌 → 表12-3 X 行白名单）──
+        if not _cfg.DD_LEAD_TRUMP_ENABLE:
+            return None
+        if lead_card.rank not in _cfg.DD_LEAD_SMALL_RANKS:
+            return None  # 顶张/大牌领出非小牌首攻
+        from bridge.mcts.constraints import _build_trump_small_shapes
+        entries = _build_trump_small_shapes(lead_card.rank)
+        return BidConstraint(
+            position=leader,
+            lead_small_shapes=(lead_card.suit, lead_card.rank, entries),
+            inference_source="opening_lead_trump35",
         )
 
     def _merge_opening_lead_constraint(self, state: PlayState,
                                        constraints: Dict[str, BidConstraint]) -> Dict[str, BidConstraint]:
-        """把首攻长四约束并入现有约束集（新 dict，不回写缓存）。"""
+        """把首攻协议约束（长四 / 顶张连张）并入现有约束集（新 dict，不回写缓存）。"""
         lead_con = self._build_opening_lead_constraint(state)
         if lead_con is None:
             return constraints
@@ -1447,6 +1629,10 @@ class PlayService:
             _finesse_commit_check 的"同伙引牌 > 威胁 → 引牌一方可赢"判据一致。
             此处是"引牌本身"而非引牌侧整手：本侧引小牌 2 时，南手 Q 不该
             构成飞（用例：本侧引2/A → 废弃）。
+        引牌 < 对象 是硬门槛（2026-09-23 用户质疑"引牌比对象大算什么飞牌"）：
+        引牌 ≥ 对象（如 ♥A 引 ♥K）只是兑取顶张，不是飞牌启动——即使结构上
+        对侧有间张可作为飞张（如南持 ♥T），该条目也不确认（不携带"引A飞K"
+        标签进池竞争榜首）。飞牌启动必须由一张严格更小的引牌承当。
         存在 ⇒ 真飞结构（保留探针）；不存在 ⇒ 不能飞（废弃探针）。
         """
         obj = info.get("对象")
@@ -1462,17 +1648,24 @@ class PlayService:
             lead_side = state.current_player
         if lead_side not in (decl, dummy):
             return False
-        # 对侧 = 引牌侧的另一半（庄/明手中的另一家）：G 候选 = 对侧全部牌 ∪ 引牌本身
+        # 对侧 = 引牌侧的另一半（庄/明手中的另一家）：G 候选 = 对侧全部牌 ∪ 引牌本身。
+        # 对侧该花色仅 1 张（单张）时无飞张选择——引牌后对侧只能机械跟出，起不到
+        # 飞牌作用（2026-09-24 用户定调：伙伴侧对侧 ♦J 单张被逼出的假 100% 押桶成），
+        # 故对侧牌不入 G 候选；引牌本身作飞张（出 Q/K 逼对象）始终保留，不依赖对侧张数。
         peer = dummy if lead_side == decl else decl
+        peer_suit_cards = [c for c in state.hands.get(peer, []) if c.suit == suit]
         g_ranks = set()
-        for c in state.hands.get(peer, []):
-            if c.suit == suit:
+        if len(peer_suit_cards) >= 2:
+            for c in peer_suit_cards:
                 rv = r2v.get(c.rank, 0)
                 if rv:
                     g_ranks.add(rv)
         lead_rv = r2v.get(lead[1:], 0)
-        if lead_rv:
-            g_ranks.add(lead_rv)
+        if not lead_rv:
+            return False
+        if lead_rv >= obj:
+            return False  # 引牌 ≥ 对象：只是兑取顶张（♥A 引 ♥K），不是飞牌
+        g_ranks.add(lead_rv)  # 引牌本身也可作飞张（南引 Q 逼 K：出 Q 逼出 K 或 Q 赢）
         # 防家除 obj 外该花色剩余牌 = 全部该花色 − 我方持有 − 已出 − obj
         mine = set()
         for pos in (decl, dummy):
@@ -2072,18 +2265,18 @@ class PlayService:
 
     def _finesse_launch_worthwhile(self, state: PlayState, action_card: str,
                                    candidates: List[Dict[str, Any]],
-                                   action_make: Optional[float] = None
                                    ) -> Tuple[bool, str]:
         """逐动作启动退让门控（v1.89：稳成已由 _finesse_lead 入口短路）。
 
-        分子 = 动作牌价值，分母 = 引擎榜首（v1.94 两侧同秤）：
-          · 引牌在押注方向半桶的做成率（探针"押桶成"）——启动飞牌后
-            非押注方向的世界已无意义，飞牌线价值按押注桶的条件做成率计；
-            混合值（本侧引擎值/伙伴侧过手牌独立值）掺入非押注世界的死值，
-            会系统性低估飞牌线。
+        分子 = 动作牌**全样本做成率**（引擎同秤），分母 = 引擎榜首全样本。
+        v2.13（2026-09-24 用户定调）：决定"要不要飞"应看飞牌线的全局期望，
+        不能拿"押对方向半桶"（押桶成）作分子——那是**启动之后**选引牌/过手
+        路线才用的口径；用它走门控会剔除反侧崩盘世界、系统性高估飞牌线
+        （例：♠4 飞 Q 押桶成 100% 但全样本仅 67.9%，仍被放行覆盖引擎更高
+        的 ♣A 95.7%）。契约必要保持：
           · 契约必要（榜首做成率 < FINESSE_NEC_MAKE=0.50）且动作/榜首
             比值 ≥ FINESSE_NEC_MIN_RATIO=0.50 → 必飞；
-          · 否则动作/榜首 ≥ FINESSE_NEC_RATIO=0.70 → 启动；
+          · 否则动作/榜首 ≥ FINESSE_NEC_RATIO=0.85 → 启动；
           · 否则退让（尊重引擎）。
         无候选数据时不拦截。返回 (是否启动, 说明)。
         """
@@ -2097,34 +2290,26 @@ class PlayService:
         top_val = (top.get("scoring_val")
                    if top.get("scoring_val") is not None
                    else top.get("avg_tricks", 0.0))
-        if action_make is not None:
-            action_val = float(action_make)
-        else:
-            action_val = next((c.get("scoring_val")
-                               if c.get("scoring_val") is not None
-                               else c.get("avg_tricks", 0.0)
-                               for c in candidates if str(c.get("card")) == action_card),
-                              None)
+        action_val = next((c.get("scoring_val")
+                           if c.get("scoring_val") is not None
+                           else c.get("avg_tricks", 0.0)
+                           for c in candidates if str(c.get("card")) == action_card),
+                          None)
         if action_val is None:
             return True, ""
         if top_make < FINESSE_NEC_MAKE:
             if self._finesse_ratio_ok(state, candidates, action_card,
                                       FINESSE_NEC_MIN_RATIO,
-                                      b_card=str(top.get("card")),
-                                      a_make_override=action_make):
+                                      b_card=str(top.get("card"))):
                 return True, f"契约必要（榜首做成{top_make:.0%}，不飞没机会）"
             # 飞牌相对榜首差距过大（<下限）→ 不强制起飞，落 D 闸裁决
         if (top_val > 0
                 and self._finesse_ratio_ok(state, candidates, action_card,
                                            FINESSE_NEC_RATIO,
-                                           b_card=str(top.get("card")),
-                                           a_make_override=action_make)):
+                                           b_card=str(top.get("card")))):
             return True, f"比值尚可（≥{FINESSE_NEC_RATIO}）"
         slack = top.get("avg_tricks", 0.0) - need
-        if action_make is not None:
-            ratio_txt = f"{action_val / top_make:.2f}" if top_make > 0 else "—"
-        else:
-            ratio_txt = f"{action_val / top_val:.2f}" if top_val > 0 else "—"
+        ratio_txt = f"{action_val / top_make:.2f}" if top_make > 0 else "—"
         return False, f"退让（榜首做成{top_make:.0%}·盈余{slack:+.1f}已够，比值{ratio_txt}<{FINESSE_NEC_RATIO}）"
 
     def _register_finesse_flow(self, state: PlayState, s: str, obj: int,
@@ -2182,15 +2367,17 @@ class PlayService:
     def _probe_lead_finesse_prefer(self, state: PlayState, struct_stack: Dict[str, List[Dict[str, Any]]],
                                    candidates: List[Dict[str, Any]], ratio: float,
                                    result: Dict[str, Any]) -> Optional[Tuple[str, str]]:
-        """窗口期主动启动飞牌（v2.00 简化：过手预检 → 押桶成榜首 → 榜首单独门控）。
+        """窗口期主动启动飞牌（v2.13 门控改全样本 + 顺延过闸）。
 
         输入为以花色为键、Δ 降序的条目栈（探测已全部通过引牌测试，组合飞
         字段透传）。过手预检：伙伴侧条目逐个求安全过手牌，失败只删该条目
         （不再整花色出局）；动作统一为真实出牌（本侧=引牌 / 伙伴侧=过手牌）。
-        全局押桶成排序保留榜首（_subset_select）：同花色方向对决与逐动作
-        门控的集合语义，可由"门控比值单调于押桶成 → 榜首即唯一候选"替代，
-        故只对榜首单独过门控（_finesse_launch_worthwhile，判据不变），
-        通过即登记终选；被否 / 无动作可出 → None（尊重引擎）。
+        动作按押桶成排序（_subset_select_all，**启动后**路线排序口径），
+        逐动作过门控（_finesse_launch_worthwhile，**分子=动作牌全样本做成率**，
+        v2.13 用户定调：决定"要不要飞"看全局期望，不能拿押对方向的半桶
+        高估飞牌线）——榜首被拒时顺延试下一候选（旧版"榜首即唯一候选"依赖
+        门控比值单调于押桶成，分子改全样本后不再成立）。首个过闸者登记终选；
+        全部被否 / 无动作可出 → None（尊重引擎）。
         """
         if not FINESSE_DEFER_ENABLE:
             return None
@@ -2224,56 +2411,56 @@ class PlayService:
                     actions.append((act, info, s))
         if not actions:
             return None
-        # 全局押桶成排序，保留榜首（v2.00 用户定调：路线对决的"同花色单方向"
-        # 与逐动作门控的集合语义，皆因"门控比值单调于押桶成"而被榜首取代）
-        best = self._subset_select(state, candidates, actions)
-        if best is None:
-            return None
-        pick, info, s = best
-        # 榜首单独过门控（同一判据）：通过即终选登记；被否 → 尊重引擎
-        a_make = info.get("押桶成")
-        worth, gate_why = self._finesse_launch_worthwhile(state, pick, candidates,
-                                                         action_make=a_make)
-        if not worth:
-            print(f"[启动退让] {s} 榜首{pick}：{gate_why}")
-            return None
-        obj = info.get("对象")
-        obj_name = self._finesse_obj_name(obj) if obj is not None else "?"
-        self._register_finesse_flow(state, s, obj, info)
-        a_mk = info.get("押桶成")
-        mk_txt = f"押桶成{a_mk:.0%}" if a_mk is not None else "引擎值"
-        combo = "双飞组合" if info.get("组合飞") else "单飞"
-        if info.get("侧") == "伙伴侧":
-            why = (f"飞{obj_name}({combo})过手{pick}给队友引飞"
-                   f"（引牌{info.get('引牌', '?')}，{mk_txt}）")
-        else:
-            why = f"飞{obj_name}({combo}){mk_txt}直出{pick}"
-        return pick, f"终选·押桶成榜首（{why}）"
+        # 动作按押桶成排序（启动后路线口径），逐动作过全样本门控，取首个过闸
+        # （v2.13：门控分子=全样本做成率，与排序键押桶成不再单调，"榜首即唯一
+        #  候选"不成立 → 榜首被拒须顺延试下一候选，避免误杀良配）。
+        ordered = self._subset_select_all(state, candidates, actions)
+        for pick, info, s in ordered:
+            worth, gate_why = self._finesse_launch_worthwhile(state, pick, candidates)
+            if not worth:
+                print(f"[启动退让] {s} {pick}（{gate_why}）顺延")
+                continue
+            obj = info.get("对象")
+            obj_name = self._finesse_obj_name(obj) if obj is not None else "?"
+            self._register_finesse_flow(state, s, obj, info)
+            a_mk = info.get("押桶成")
+            mk_txt = f"押桶成{a_mk:.0%}" if a_mk is not None else "引擎值"
+            combo = "双飞组合" if info.get("组合飞") else "单飞"
+            rank_note = f"（第{ordered.index((pick, info, s)) + 1}候选）" if len(ordered) > 1 else ""
+            if info.get("侧") == "伙伴侧":
+                why = (f"飞{obj_name}({combo})过手{pick}给队友引飞"
+                       f"（引牌{info.get('引牌', '?')}，{mk_txt}）{rank_note}")
+            else:
+                why = f"飞{obj_name}({combo}){mk_txt}直出{pick}{rank_note}"
+            src_note = "终选·押桶成排序" + (rank_note or "榜首")
+            return pick, f"{src_note}（{why}）"
+        print("[启动退让] 全部动作被门控否决，尊重引擎")
+        return None
 
-    def _subset_select(self, state: PlayState,
-                       candidates: List[Dict[str, Any]],
-                       passed: List[Tuple[str, Dict[str, Any], str]],
-                       ) -> Optional[Tuple[str, Dict[str, Any], str]]:
-        """押桶成榜首选择：全部动作按押桶成主排序，平票用较大领出牌决胜。
+    def _subset_select_all(self, state: PlayState,
+                           candidates: List[Dict[str, Any]],
+                           passed: List[Tuple[str, Dict[str, Any], str]],
+                           ) -> List[Tuple[str, Dict[str, Any], str]]:
+        """押桶成排序的完整动作列表（v2.13：供门控逐动作顺延过闸）。
 
-        主键 = 条目"押桶成"（与门控分子同口径：启动飞牌后非押注方向世界
-        无意义，引牌价值按押注方向半桶做成率计）。押桶成缺失（模板法条目
-        无探针数据）回退引擎全样本做成率。平票决胜（v2.03 用户定调，押桶成
-        平局之后）：偏好"领出牌 牌点 > 较小飞牌对象"（min(对象, *废弃对象)）
-        的较大牌——不区分单双飞：单飞仅一对象=min对象，领出牌必小于对象
-        → 大牌判据失效；双飞 K/9 → min=9，♦J/♦Q 牌点>9 即判大牌优先。
-        再平票降级到引擎决策值（make_rate 下 blended=做成率×10000+平均
-        赢墩），最后 rankpos（同为大牌时的最大牌）。启动方必为庄家方，统一取高。
+        排序键沿用原《押桶成榜首选择》：主键 = 条目"押桶成"（**启动后**选
+        引牌/过手路线仍以押对方向半桶区分——v2.13 用户定调门控改全样本后，
+        押桶成保留给"已决定飞之后"的路线排序）。押桶成缺失（模板法条目无
+        探针数据）回退引擎全样本做成率。平票决胜（v2.03）：偏好"领出牌
+        牌点 > min(对象, *废弃对象)"的较大牌（双飞 K/9 → min=9，♦J/♦Q
+        牌点>9 判大牌优先；单飞仅一对象=min，领出牌必小于对象 → 判据失效）。
+        再平票降级到引擎决策值（make_rate 下 blended=做成率×10000+平均赢墩），
+        最后 rankpos（同为大牌时的最大牌）。启动方必为庄家方，统一取高。
+        返回按排序键降序的全列表（榜首在前）。
         """
         from bridge.mcts import dd_search as _ds
         if not passed:
-            return None
+            return []
         _dds = getattr(self, "dd_search", None)
         mode = (_dds.scoring_mode if _dds is not None else None) or "make_rate"
         need = state.contract.tricks_needed
         cand_map = {str(c.get("card")): c for c in candidates}
-        best = None
-        best_key = None
+        ranked = []
         for act, info, s in passed:
             cc = cand_map.get(act) or {}
             scores = cc.get("scores") or []
@@ -2281,6 +2468,7 @@ class PlayService:
                 mk = _ds._make_rate_value(scores, need)
                 blended = mk * 10000.0 + (cc.get("avg_tricks") or 0.0)
             else:
+                mk = None
                 v = cc.get("scoring_val")
                 blended = v if v is not None else (cc.get("avg_tricks") or 0.0)
             a_make = info.get("押桶成")
@@ -2310,9 +2498,17 @@ class PlayService:
                   f"min对象{min_obj} 引擎blended={round(blended, 2)} "
                   f"(做成率{mk if mode=='make_rate' and scores else '—'}"
                   f" avg={cc.get('avg_tricks')})")
-            if best is None or key > best_key:
-                best, best_key = (act, info, s), key
-        return best
+            ranked.append((key, (act, info, s)))
+        ranked.sort(key=lambda kv: kv[0], reverse=True)
+        return [t for _, t in ranked]
+
+    def _subset_select(self, state: PlayState,
+                       candidates: List[Dict[str, Any]],
+                       passed: List[Tuple[str, Dict[str, Any], str]],
+                       ) -> Optional[Tuple[str, Dict[str, Any], str]]:
+        """押桶成榜首选择（兼容包装）：取 _subset_select_all 排序后的首个。"""
+        ranked = self._subset_select_all(state, candidates, passed)
+        return ranked[0] if ranked else None
 
     def _finesse_commit_check(self, state: PlayState,
                               finesse_struct: Dict[str, Any]) -> Optional[Tuple[str, str]]:
@@ -2384,6 +2580,9 @@ class PlayService:
             return None
         # 敌方剩余牌（该花色未现者 = 全部牌面 − 我方庄/明现手 − 本墩已出 −
         # 已完成墩已出），即敌方两家手中还可能打出的牌。威胁 = 其中除对象外最大者。
+        # 废弃对象（如保 Q 废 T 的 T）是敌方**实牌**，双飞必须压过它才能完成
+        # 飞牌——参与威胁计算（2026-09-25 修正：此前剔除导致保 Q 废 T 场景
+        # 威胁算低、接应选了 9/8/3 而非 J，被敌方 T 吃墩破坏飞牌）。
         r2v = self._FINESSE_R2V
         present = set()
         for p in (declarer, dummy):
@@ -2397,25 +2596,19 @@ class PlayService:
         for _, c in trick.cards:
             if c and c.suit == suit:
                 present.add(r2v.get(c.rank, 0))
-        # 组合飞：该花色被废弃对象（如保 K 废 Q）不是"应压威胁"，从敌方剩余
-        # 牌剔除——否则威胁被抬高，本家会选不出（或错误地不敢）接应牌。
-        info_disc = finesse_struct.get(suit, {}) or {}
-        disc = {r2v.get(d) for d in (info_disc.get("废弃对象") or [])
-                if r2v.get(d) is not None}
-        extra = getattr(state, "finesse_flow_extra", None) or {}
-        if isinstance(extra.get(suit), dict):
-            disc |= {r2v.get(d) for d in (extra[suit].get("废弃对象") or [])
-                     if r2v.get(d) is not None}
         guarded = [r for r in range(14, 1, -1)
-                   if r not in present and r != obj and r not in disc]
+                   if r not in present and r != obj]
         threat = max(guarded) if guarded else 0
+        # 本墩敌方已出大牌（含废弃对象，如敌方出 T）同样是必压威胁
+        must_gt = max(threat, enemy_top) if enemy_top >= 0 else threat
         # 第三家接应判定（不再用 10 分界，2026-09-08）：
-        #   同伙引牌已大过敌方全部非对象剩余 → 引牌一方可赢，本家出最小牌保留结构；
-        #   否则须出大过敌方最大威胁的最小牌（第三家打大牌，保住本墩）。
-        if partner_rv > threat:
+        #   同伙引牌已大过敌方全部非对象剩余（含废弃与本墩已出）→ 引牌一方可赢，
+        #   本家出最小牌保留结构；否则须出大过敌方最大威胁的最小牌（第三家打大牌，
+        #   保住本墩）。
+        if partner_rv > must_gt:
             pick = min(suit_cards, key=lambda c: r2v[c.rank])
             return str(pick), f"引牌已胜，最小跟"
-        above_threat = [c for c in suit_cards if r2v[c.rank] > threat]
+        above_threat = [c for c in suit_cards if r2v[c.rank] > must_gt]
         if not above_threat:
             return None  # 本家无牌可压威胁 → 尊重引擎
         # BUG-6（v1.84）：第二元素统一为说明文案（此前返回牌名，与其他返回点
@@ -2423,7 +2616,7 @@ class PlayService:
         pick = min(above_threat, key=lambda c: r2v[c.rank])
         block = max((c for c in suit_cards if r2v[c.rank] > obj),
                     key=lambda c: r2v[c.rank], default=None)
-        t_name = {14: "A", 13: "K", 12: "Q", 11: "J", 10: "T"}.get(threat, str(threat))
+        t_name = {14: "A", 13: "K", 12: "Q", 11: "J", 10: "T"}.get(must_gt, str(must_gt))
         why = f"第三家压威胁{t_name}"
         if block:
             why += f"（不拔{block}烧顶张）"
@@ -2479,14 +2672,15 @@ class PlayService:
                                  forced_card: str, ratio: float,
                                  finesse_struct: Optional[Dict[str, Dict[str, Any]]] = None
                                  ) -> bool:
-        """强制接应退让判据（v1.96 三层判据前插 + v1.93 口径兜底）：
-        ⓪ 三层判据（押对世界桶内，引擎最优替代牌的桶内做成率 b_bucket，
+        """强制接应退让判据（2026-09-25 用户定调：两步结构，删 DIE 强制分支与
+        同花色①② 分流）：
+        ⓪ 第一步·退让判据（押对世界桶内，引擎最优替代牌的桶内做成率 b_bucket，
         语义=定约对这墩飞牌的依赖度；榜首=非强制牌的引擎最优候选）：
-           b_bucket ≤ FINESSE_COMMIT_DIE_PCT 且强制牌桶内成率 > 0
-             → 不飞即死，强制接应（6NT 型：西桶 ♦A=0、♦J=0.353）；
-           b_bucket ≥ FINESSE_COMMIT_ALIVE_PCT
-             → 定约不依赖飞牌，退让引擎（B26 型：西桶 ♦A=0.542、♦Q=1.0）；
-           灰色区 / 桶数据缺失 / 双零死局 → 维持 v1.93 口径。
+           b_bucket ≥ FINESSE_COMMIT_ALIVE_PCT 且 b_bucket ≥ 非押注桶
+             → 定约不依赖飞牌，退让引擎（B26 型：西桶 ♦A=0.542）；
+        ① 第二步·比值兜底：第一步不满足 → 参照=引擎最优替代 top_alt 做
+           0.75 比值退让（_finesse_ratio_ok）——比值 ≥0.75 维持强制 flyer，
+           <0.75 退让引擎。
         v1.98 修正一 → v2.02 全中子桶（"严峻"名废弃）：双飞登记有废弃
         对象（Q）时桶键细化为"{direction}·全中"（Q 与登记对象 K 同侧，
         即两对象都在押注方向=接应上家的世界），优先读取——出A后双威胁
@@ -2495,18 +2689,24 @@ class PlayService:
         v1.98 修正二（top_alt 排除等价组）：与强制牌逐世界 scores 全等
         的候选是同一动作（接应小牌组），拿它算 b_bucket 是评估"接应
         自己"（6NT 双飞案误判根因），跳过取真正的大牌替代（♠A）。
-        ① 引擎榜首与强制牌同花色、且榜首也是飞张（rank < 对象）→ 采信
-           引擎 top1（飞牌意图与引擎一致，强制改选会破坏引擎规划——
-           BM2000 Level 2 B26 丢墩根因）；
-        ② 同花色但榜首是顶张/盖张（rank ≥ 对象，如对象 Q 榜首 ♦A）→
-           引擎在兑现不是在飞，采信会打断已启动的飞牌流程（启动侧押方向
-           飞、接应侧砸顶张漏飞），落比值退让裁决（v1.93 用户定调）；
-        ③ 否则委托统一两段式 _finesse_ratio_ok 做比值退让。
         返回 True=差距可接受（维持强制动作）；False=退让、尊重引擎。
         """
         cands = ((result.get("full_output") or {}).get("mcts_stats") or {}).get("candidates") or []
         if not cands:
             return True
+        # 引擎最优替代 top_alt：跳过强制牌与逐世界等价组（v1.98 修正二），
+        # 从候选直接计算，不依赖 follow 数据是否存在
+        forced_scores = next((c.get("scores") for c in cands
+                              if str(c.get("card")) == forced_card), None)
+        top_alt = None
+        for c in cands:
+            cs = str(c.get("card"))
+            if cs == forced_card:
+                continue
+            if forced_scores and c.get("scores") == forced_scores:
+                continue
+            top_alt = cs
+            break
         follow = (((result.get("full_output") or {}).get("finesse_probe_follow") or {})
                   .get(forced_card[0]))
         if follow:
@@ -2517,46 +2717,25 @@ class PlayService:
                 full_hit = follow.get(f"{direction}·全中")
                 bucket = full_hit or follow.get(direction) or {}
                 b_name = f"{direction}·全中" if full_hit else direction
-                forced_scores = next((c.get("scores") for c in cands
-                                      if str(c.get("card")) == forced_card), None)
-                top_alt = None
-                for c in cands:
-                    cs = str(c.get("card"))
-                    if cs == forced_card:
-                        continue
-                    if forced_scores and c.get("scores") == forced_scores:
-                        continue
-                    top_alt = cs
-                    break
+                opp = "西" if direction == "东" else "东"
+                non_full = follow.get(f"{opp}·全中")
+                non_bucket = non_full or follow.get(opp) or {}
                 if top_alt and top_alt in bucket:
                     b_bucket = bucket.get(top_alt)
-                    a_bucket = bucket.get(forced_card)
-                    if b_bucket <= FINESSE_COMMIT_DIE_PCT:
-                        if a_bucket and a_bucket > 0:
-                            print(f"[接应三层] {forced_card[0]}押{b_name}桶内"
-                                  f"引擎最优{top_alt}成{b_bucket:.3f}"
-                                  f"≤{FINESSE_COMMIT_DIE_PCT}（不飞即死）→ "
-                                  f"强制接应{forced_card}")
-                            return True
-                    elif b_bucket >= FINESSE_COMMIT_ALIVE_PCT:
-                        print(f"[接应三层] {forced_card[0]}押{b_name}桶内"
+                    b_non = non_bucket.get(top_alt)
+                    if (b_bucket is not None
+                            and b_non is not None
+                            and b_bucket >= FINESSE_COMMIT_ALIVE_PCT
+                            and b_bucket >= b_non):
+                        print(f"[接应判据] {forced_card[0]}押{b_name}桶内"
                               f"引擎最优{top_alt}成{b_bucket:.3f}"
-                              f"≥{FINESSE_COMMIT_ALIVE_PCT}（定约不依赖飞牌）→ "
-                              f"退让引擎{top_alt}")
+                              f"≥{FINESSE_COMMIT_ALIVE_PCT} 且"
+                              f"≥非押注桶{b_non:.3f}"
+                              f"（定约不依赖飞牌）→ 退让引擎{top_alt}")
                         return False
-        top_str = str(cands[0].get("card") or "")
-        if top_str and top_str[0] == forced_card[0]:
-            obj_v = ((finesse_struct or {}).get(forced_card[0]) or {}).get("对象")
-            top_rv = self._FINESSE_R2V.get(top_str[1:])
-            if (obj_v is not None and top_rv is not None
-                    and top_rv >= obj_v):
-                print(f"[飞牌接应] 引擎榜首{top_str}为顶张"
-                      f"（≥对象{self._finesse_obj_name(obj_v)}）非飞牌意图，"
-                      f"落比值退让裁决强制{forced_card}")
-            else:
-                print(f"[飞牌接应] 引擎榜首{top_str}与强制{forced_card}同花色，采信引擎 top1")
-                return False
-        return self._finesse_ratio_ok(state, cands, forced_card, ratio)
+        # 第二步·比值：参照=引擎最优替代 top_alt（候选仅含强制牌时退回榜首）
+        b_ref = top_alt if top_alt is not None else str(cands[0].get("card") or "")
+        return self._finesse_ratio_ok(state, cands, forced_card, ratio, b_card=b_ref)
 
     def _finesse_ratio_ok(self, state: PlayState, candidates: List[Dict[str, Any]],
                           a_card: str, ratio: float,

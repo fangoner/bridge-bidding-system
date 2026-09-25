@@ -212,13 +212,13 @@ Build/packaging scripts (`build.bat`, `build.spec`, `update_release.bat`, `insta
 ### Play Engine Configuration
 
 - `DEFAULT_PLAY_ENGINE = "dd"` — options `"llm" | "dd" | "perfect" | "alphamu"`. **No** `mcts` / `tiered` / `dd_alphamu_llm`.
-- DD: `DD_NUM_SAMPLES` 200, `DD_MIN_SAMPLES` 15, `DD_TIME_LIMIT` 30.0, `DD_SCORING_MODE = "make_rate"` (default since 2026-09-20; `"imp"` / `"avg_tricks"` still selectable), `DD_KEEP_SURE_WIN/CRITICAL/SURE_LOSE`, `DD_MAJORITY_VOTES = 1`, `DD_USE_CONSTRAINTS = True`, `DD_ENDGAME_CARD_THRESHOLD` 4.
+- DD: `DD_NUM_SAMPLES` 1000 (2026-09-23 由 200 提升：探针 Δ 门槛稳定化), `DD_MIN_SAMPLES` 15, `DD_TIME_LIMIT` 30.0, `DD_SCORING_MODE = "make_rate"` (default since 2026-09-20; `"imp"` / `"avg_tricks"` still selectable), `DD_KEEP_SURE_WIN/CRITICAL/SURE_LOSE`, `DD_MAJORITY_VOTES = 1`, `DD_USE_CONSTRAINTS = True`, `DD_ENDGAME_CARD_THRESHOLD` 4.
 - αμ: `ALPHA_MU_ENABLE` True, `ALPHA_MU_ENDGAME_CARDS` 8, `ALPHA_MU_NUM_WORLDS` 20, `ALPHA_MU_M` 2 (panel-adjustable 1–3, **not** reduced by card count), `ALPHA_MU_TIME_LIMIT` 60.0.
 - API validation bounds: `DD_PARTICLES_MIN/MAX` 100/2000, `ALPHA_MU_WORLDS_MIN/MAX` **10/100**.
-- Finesse: `FINESSE_DEFER_ENABLE`, `DD_INTERVENE_ENABLE` (DD 介入总开关：稳成→无损清将→飞牌探针→多数投票), `FINESSE_RATIO` 0.75, `FINESSE_PROBE_DELTA` 0.10, `FINESSE_COMMIT_DIE_PCT` 0.05, `FINESSE_COMMIT_ALIVE_PCT` 0.40.
-- Launch gate / 稳成线: `FINESSE_NEC_MAKE` 0.50, `FINESSE_NEC_MIN_RATIO` 0.50, `FINESSE_NEC_RATIO` 0.70, and **`FINESSE_NEC_MAKE_HIGH` 1.00** — the 稳成线 is evaluated by `_top1_make()`, i.e. the **engine top-1 candidate's** make rate (changed 2026-09-20 from "max over all candidates" at 0.95; 2026-09-22 0.85→1.00, only a guaranteed make shuts the intervention down). At/above it the whole intervention layer (无损清将/飞牌) defers to the engine.
+- Finesse: `FINESSE_DEFER_ENABLE`, `DD_INTERVENE_ENABLE` (DD 介入总开关：稳成→无损清将→飞牌探针→多数投票), `FINESSE_RATIO` 0.75, `FINESSE_PROBE_DELTA` 0.10, `FINESSE_COMMIT_ALIVE_PCT` 0.50 (2026-09-25: 接应退让判据改两步——第一步"≥0.50 且 ≥非押注桶"→退让；不满足→第二步 flyer/top_alt 0.75 比值，≥0.75 强制。删 `FINESSE_COMMIT_DIE_PCT` 0.05 强制分支).
+- Launch gate / 稳成线: `FINESSE_NEC_MAKE` 0.50, `FINESSE_NEC_MIN_RATIO` 0.50, `FINESSE_NEC_RATIO` 0.85 (v2.13: 门控分子改**动作牌全样本做成率**，阈值由 0.70 同步收紧——"要不要飞"看全局期望，押桶成只用于启动后的路线排序/接应), and **`FINESSE_NEC_MAKE_HIGH` 1.00** — the 稳成线 is evaluated by `_top1_make()`, i.e. the **engine top-1 candidate's** make rate (changed 2026-09-20 from "max over all candidates" at 0.95; 2026-09-22 0.85→1.00, only a guaranteed make shuts the intervention down). At/above it the whole intervention layer (无损清将/飞牌) defers to the engine.
 - `LEAD_SIGNAL_SCHEME = "standard"` — consumed only by the un-wired `play_strategies.py`.
-- **Removed constants** (do not reference): `MCTS_ITERATIONS`, `MCTS_TIME_LIMIT`, `MCTS_EXPLORATION_CONSTANT`, `MCTS_SEARCH_MODE`, `MCTS_PARTICLES_MIN/MAX`, `ROLLOUT_GREEDY_PROB`, `DD_MAXIMIN_ENABLE`, `TIERED_*`.
+- **Removed constants** (do not reference): `MCTS_ITERATIONS`, `MCTS_TIME_LIMIT`, `MCTS_EXPLORATION_CONSTANT`, `MCTS_SEARCH_MODE`, `MCTS_PARTICLES_MIN/MAX`, `ROLLOUT_GREEDY_PROB`, `DD_MAXIMIN_ENABLE`, `TIERED_*`, `FINESSE_COMMIT_DIE_PCT` (2026-09-25 删).
 
 ### Double Dummy Analysis
 

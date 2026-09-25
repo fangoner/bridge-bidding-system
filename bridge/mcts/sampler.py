@@ -84,6 +84,14 @@ def _extract_known_info(state: "PlayState", perspective: str) -> dict:
     for _, card in state.current_trick.cards:
         known_cards.add(card)
 
+    # 按位置收集已出牌面（首攻白名单递减用：判断已出该花色中 >首攻牌 的张数）
+    played_by_pos: Dict[str, List[Card]] = {}
+    for trick in state.tricks:
+        for _pos, _c in trick.cards:
+            played_by_pos.setdefault(_pos, []).append(_c)
+    for _pos, _c in state.current_trick.cards:
+        played_by_pos.setdefault(_pos, []).append(_c)
+
     # 2. 计算每家剩余张数
     remaining_counts = compute_remaining_counts(state)
 
@@ -145,6 +153,7 @@ def _extract_known_info(state: "PlayState", perspective: str) -> dict:
         "dummy_hand": cleaned_hands.get(dummy, []) if dummy else [],
         "result": result,
         "played": played_stats,
+        "played_by_pos": played_by_pos,
     }
 
 
@@ -186,7 +195,8 @@ def compute_played_stats(state: "PlayState") -> Dict[str, dict]:
     return played_stats
 
 
-def _sample_uniform(known_info: dict) -> Dict[str, List[Card]]:
+def _sample_uniform(known_info: dict,
+                    active_constraints: Dict[str, "BidConstraint"] = None) -> Dict[str, List[Card]]:
     """均匀随机分配未知牌：打乱 pool → 把每张牌分配到所需位置，尽量跳过 void 花色。
 
     保证世界永远完整（池中每张牌都被分配，绝不丢牌）：void 花色只在对应位置
@@ -194,9 +204,59 @@ def _sample_uniform(known_info: dict) -> Dict[str, List[Card]]:
     则退回其他位置补齐张数，由上层验证链（Level0/兜底）剔除无效世界。
 
     这就是论文的 "random generation followed by verification of the constraints"。
+
+    active_constraints 非空时先做 **specific_cards 预分配（pin）**：把"必持牌"
+    （如首攻顶张连张 `必持♠Q`）从未知牌池取出直接放进对应未知位置，使硬承诺在
+    每层采样初态即满足、不依赖修复迭代（v2.14：修 _sample_mh_repair 对
+    specific_cards 缺失偶发修复失败落入放宽链丢约束的问题）。
     """
     result = {pos: list(cards) for pos, cards in known_info["result"].items()}
     pool = list(known_info["unknown_pool"])
+    if active_constraints:
+        for pos, con in active_constraints.items():
+            if pos in known_info.get("result", {}):
+                continue  # 已知手牌位置不参与采样/必持牌
+            for _suit, _rank in con.specific_cards:
+                if any(c.suit == _suit and c.rank == _rank for c in result.get(pos, [])):
+                    continue
+                idx = next((k for k, c in enumerate(pool)
+                            if c.suit == _suit and c.rank == _rank), None)
+                if idx is None:
+                    continue  # 目标牌在已知手牌/已出 → 可行预检会发现约束不可满足
+                result.setdefault(pos, []).append(pool.pop(idx))
+            # 首攻小牌白名单预分配（v2.15）：把该花色 >首攻牌 的牌优先塞给该位置，
+            # 使"≥3 张 >X"的长四条件在采样初态即满足，不依赖 MH 定向修复
+            # （否则"恰3张>X"靠兜底对称交换很难在 300 步内凑出，落入放宽链丢约束）。
+            if con.lead_small_shapes is not None:
+                _ls_suit, _ls_rank, _ls_entries = con.lead_small_shapes
+                _lead_rv = _rank_value_of(_ls_rank)
+                # 从白名单条目读总长下限与 >X 上下限（长四=恰3；递减后=0~3）
+                _t_min = max((e[0] for e in _ls_entries), default=4)
+                _a_min = min((e[2] for e in _ls_entries), default=0)
+                _a_max = max((e[3] for e in _ls_entries), default=3)
+                _have = [c for c in result.get(pos, []) if c.suit == _ls_suit]
+                _have_above = sum(1 for c in _have
+                                  if _rank_value_of(c.rank) > _lead_rv)
+                # 预分配该花色 >X 牌：
+                #   · "恰3"条目（长四初态，amin==amax==3）：取到 3 张即可
+                #   · "≤3"条目（递减后，amin==0 amax==3）：**取走全部 >X**
+                #     使后续随机分配不可能再塞 >X 牌回该位置，above 恒 ≤3
+                #     （否则 Tier1 可能把池中剩余 >8 的牌给西，above 超限违约）
+                _target = _a_max if _a_min == _a_max else 13
+                for _ in range(max(0, _target - _have_above)):
+                    idx = next((k for k, c in enumerate(pool)
+                                if c.suit == _ls_suit
+                                and _rank_value_of(c.rank) > _lead_rv), None)
+                    if idx is None:
+                        break
+                    result.setdefault(pos, []).append(pool.pop(idx))
+                # 补足该花色总长至条目下限
+                _have2 = [c for c in result.get(pos, []) if c.suit == _ls_suit]
+                if len(_have2) < _t_min:
+                    idx = next((k for k, c in enumerate(pool)
+                                if c.suit == _ls_suit), None)
+                    if idx is not None:
+                        result.setdefault(pos, []).append(pool.pop(idx))
     random.shuffle(pool)
     remaining_counts = dict(known_info["remaining_counts"])
     known_voids = known_info["known_voids"]
@@ -301,7 +361,31 @@ def _propose_swap(
             return None
         j = max(range(len(dhand)), key=lambda k: HCP_MAP.get(dhand[k].rank, 0))
         return vpos, dpos, i, j
-    # 3) 花色缺长：需补该花色（suit_min 不足或 exact_suit 低于精确值）
+    # 3) 必持牌缺失（specific_cards，v2.14 首攻顶张连张）：精确目标牌，
+    #    从持有它的位置定向换入；换出 vpos 最低 HCP 的非保护牌抵消点力。
+    for _suit, _rank in vcon.specific_cards:
+        if any(c.suit == _suit and c.rank == _rank for c in vhand):
+            continue
+        with_card = [
+            p for p in donors
+            if any(c.suit == _suit and c.rank == _rank for c in world.get(p, []))
+        ]
+        if not with_card:
+            continue  # 目标牌在已知手牌中（不可交换）→ 交 INFEASIBLE 兜底
+        dpos = with_card[0]
+        dhand = world.get(dpos, [])
+        j = next(k for k, c in enumerate(dhand)
+                 if c.suit == _suit and c.rank == _rank)
+        protected = {
+            s for s, n in vcon.suit_min.items()
+            if vdist.get(s, 0) <= n
+        }
+        movable = [k for k in range(len(vhand))
+                   if vhand[k].suit not in protected]
+        if not movable:
+            movable = list(range(len(vhand)))
+        i = min(movable, key=lambda k: HCP_MAP.get(vhand[k].rank, 0))
+        return vpos, dpos, i, j
     suit_deficit = {
         s: n for s, n in vcon.suit_min.items()
         if n - vdist.get(s, 0) > 0
@@ -423,7 +507,7 @@ def _sample_mh_repair(
     False 的 validate_hard，纯浪费）；连续 stall_limit 步无改进即提前退出，
     避免不可行局面烧光 max_swaps 预算（不等价收敛仍在预算内完成，语义不变）。
     """
-    world = _sample_uniform(known_info)
+    world = _sample_uniform(known_info, active_constraints)
     if not active_constraints:
         return world, True
     known_positions = set(known_info.get("result", {}).keys())
@@ -536,6 +620,10 @@ def _constraint_trivially_satisfied(c: "BidConstraint", remaining_count: int) ->
     if c.specific_cards:
         return False
     if c.length_above:
+        return False
+    if c.lead_shape is not None:
+        return False
+    if c.lead_small_shapes is not None:
         return False
     if c.balanced is not None:
         return False
@@ -707,6 +795,14 @@ def _constraint_violation_score(cards: List[Card], con: "BidConstraint") -> int:
                     and c.rank_value > _rank_value_of(base_rank))
         if above < need_n:
             score += need_n - above
+    if con.lead_shape is not None:
+        from bridge.mcts.constraints import match_suit_shape
+        if not match_suit_shape(cards, con.lead_shape):
+            score += 1
+    if con.lead_small_shapes is not None:
+        from bridge.mcts.constraints import match_suit_small_shapes
+        if not match_suit_small_shapes(cards, con.lead_small_shapes):
+            score += 1
     return score
 
 
@@ -723,7 +819,7 @@ def _pick_least_violating(
     best_world = None
     best_score = None
     for _ in range(k):
-        world = _sample_uniform(known_info)
+        world = _sample_uniform(known_info, active_constraints)
         total = 0
         for pos, con in active_constraints.items():
             cards = world.get(pos, [])
@@ -741,6 +837,7 @@ def _reduce_constraint_for_played(
     c: "BidConstraint",
     played: dict,
     remaining_count: int,
+    played_cards: Optional[List[Card]] = None,
 ) -> Optional["BidConstraint"]:
     """中局扣减：把整手约束按已出牌折算为剩余部分约束。
 
@@ -768,8 +865,85 @@ def _reduce_constraint_for_played(
         reduced.exact_suit[s] = max(0, min(reduced.exact_suit[s] - played_suit.get(s, 0), remaining_count))
     for s in list(reduced.suit_max.keys()):
         reduced.suit_max[s] = max(0, reduced.suit_max[s] - played_suit.get(s, 0))
+    # length_above：> 基准牌 的张数随已出中 > 基准 的张数递减（用户原则：
+    # 所有带长度/点力的约束都随出牌递减）
+    if reduced.length_above:
+        played_above: Dict[str, int] = {}
+        for _c in (played_cards or []):
+            for _s, (_base_r, _n) in reduced.length_above.items():
+                if (_c.suit == _s
+                        and _rank_value_of(_c.rank) > _rank_value_of(_base_r)):
+                    played_above[_s] = played_above.get(_s, 0) + 1
+        for _s in list(reduced.length_above.keys()):
+            _base_r, _n = reduced.length_above[_s]
+            new_n = max(0, _n - played_above.get(_s, 0))
+            if new_n == 0:
+                del reduced.length_above[_s]
+            else:
+                reduced.length_above[_s] = (_base_r, new_n)
     # 均型是整手 13 张属性，剩余碎片无法判断 → 转为不约束
     reduced.balanced = None
+    # 首攻牌张白名单随出牌**递减**（针对剩余未出牌）：
+    #   · lead_small_shapes（长四小牌首攻）——整手该花色 ≥4 张、>X 恰3 张。
+    #     match 口径 total = 1(首攻) + 剩余，故出 1 张(首攻)后剩余≥3 → 条目下限 4；
+    #     再出第2张 → 剩余≥2 → 条目下限 3；每多出1张下限-1。
+    #     >X 张数：初始恰3，已出该花色中 >X 的张数扣减（出<X 不变，出>X 递减）。
+    #   · lead_shape（顶张大牌白名单）——同随出牌递减（见下）。
+    if reduced.lead_small_shapes is not None:
+        _ls_suit, _ls_rank, _ls_entries = reduced.lead_small_shapes
+        n_played_suit = played_suit.get(_ls_suit, 0)
+        if n_played_suit > 1:
+            _lead_rv = _rank_value_of(_ls_rank)
+            _above_played = sum(
+                1 for _c in (played_cards or [])
+                if _c.suit == _ls_suit and _rank_value_of(_c.rank) > _lead_rv
+            )
+            # 条目下限：整手≥4 → match(total=1+剩余) ≥ 4 - 已出 + 1
+            new_min = 4 - n_played_suit + 1
+            # >X 剩余张数：恰3 - 已出>X
+            new_above = max(0, 3 - _above_played)
+            if new_min <= 1 or new_above == 0:
+                # 该花色已基本出尽或 >X 大牌已全部打出 → 首攻推断信息用尽 → 释放
+                reduced.lead_small_shapes = None
+            else:
+                reduced.lead_small_shapes = (
+                    _ls_suit, _ls_rank,
+                    [(new_min, 13, new_above, new_above, 0, 99)],
+                )
+        # 已出 1 张（仅首攻）→ 原样保留，约束仍为"≥4 恰3张>X"
+    #   · lead_shape（顶张大牌白名单）——随出牌**递减**（用户原则）：首攻牌一
+    #     出即从各形态大牌集剔除（剩余口径，如 KQ小≥N → Q小≥N），后续已出大牌
+    #     同样剔除、已出小牌从张数区间扣减；所有形态失效则释放。
+    #     match_suit_shape 按"形态是否仍含首攻牌"自动区分完整/剩余口径。
+    for _attr in ("lead_shape",):
+        _ls = getattr(reduced, _attr)
+        if _ls is not None:
+            _ls_suit, _ls_lead, _ls_entries = _ls
+            if played_suit.get(_ls_suit, 0) >= 1:
+                lead_rv = _rank_value_of(_ls_lead)
+                extra_bigs = set()
+                played_small = 0
+                for _c in (played_cards or []):
+                    if _c.suit != _ls_suit:
+                        continue
+                    if _rank_value_of(_c.rank) == lead_rv:
+                        extra_bigs.add(_c.rank)  # 首攻牌已出 → 从形态剔除
+                    elif _c.rank in ("A", "K", "Q", "J", "T"):
+                        extra_bigs.add(_c.rank)
+                    else:
+                        played_small += 1
+                new_entries = []
+                for (_bigs, _smin, _smax) in _ls_entries:
+                    nb = _bigs - extra_bigs
+                    ns_min = max(0, _smin - played_small)
+                    ns_max = _smax - played_small
+                    if ns_max >= ns_min:
+                        # nb 允许为空：形态大牌全出后 = 剩余无大牌 + 张数区间
+                        new_entries.append((nb, ns_min, ns_max))
+                if new_entries:
+                    setattr(reduced, _attr, (_ls_suit, _ls_lead, new_entries))
+                else:
+                    setattr(reduced, _attr, None)
     if _constraint_trivially_satisfied(reduced, remaining_count):
         return None
     return reduced
@@ -844,11 +1018,13 @@ class DealSampler:
         remaining_counts = known_info.get("remaining_counts", {})
         # 中局扣减：把整手约束按已出牌折算为剩余部分约束，再用于验证
         active_constraints = {}
+        played_by_pos = known_info.get("played_by_pos", {})
         for pos, c in constraints_in.items():
             if pos in known_positions:
                 continue
             reduced = _reduce_constraint_for_played(
-                c, played_stats.get(pos), remaining_counts.get(pos, 0)
+                c, played_stats.get(pos), remaining_counts.get(pos, 0),
+                played_cards=played_by_pos.get(pos, []),
             )
             if reduced is None:
                 continue
@@ -877,13 +1053,13 @@ class DealSampler:
         # Level 2: 放宽约束
         _warn_fallback("L2_relaxed", known_info, self.constraints)
         for _attempt in range(50):
-            world = _sample_uniform(known_info)
+            world = _sample_uniform(known_info, active_constraints)
             if validate_relaxed(world, active_constraints):
                 return world
         # Level 3: 仅 void
         _warn_fallback("L3_voids", known_info, self.constraints)
         for _attempt in range(20):
-            world = _sample_uniform(known_info)
+            world = _sample_uniform(known_info, active_constraints)
             if validate_voids_only(world, known_info["known_voids"]):
                 return world
         # 兜底：选违反约束最少的候选世界（兜底降级保护）

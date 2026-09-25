@@ -6,8 +6,9 @@ DD 做成率口径的段2 无损清将 + 段4 飞牌介入已覆盖抓 Q/顶张�
 9砸 属受限式修正被卸除（项目铁律；9砸 曾为"差距大也照砸"的静态规则）。
 剩余用例覆盖：
   · 段4 飞牌介入：启动/过手/终选/比值退让/稳成退让
-  · 三层接应判据（v1.96）：b_bucket ≤0.05 强制接应（6NT 型）/ ≥0.40
-    退让引擎（B26 型）/ 灰色区与数据缺失走 v1.93 兜底
+  · 接应退让判据（2026-09-25 两步，删 0.05 强制分支与同花色①②分流）：
+    第一步 b_押注 ≥0.50 且 ≥非押注桶 → 退让引擎（B26 型）；
+    不满足 → 第二步 flyer/top_alt 比值 0.75（≥0.75 强制）
   · 多数投票默认关；_top1_make 只取引擎 top1 做成率
 运行: python tests/test_finesse_pipeline.py
 """
@@ -110,22 +111,31 @@ def t11_top1_make_semantics():
     return ok, (f"只取 top1 做成率（got {got}, 期望 0.3；旧口径会返回 1.0）")
 
 
-def t14_commit_top1_same_suit():
+def t14_commit_ratio_keeps_flyer_not_in_cands():
     st = mk_state({"♠": "AQ86", "♥": "Q32"}, {"♠": "42", "♥": "J54"})
+    ps_new()._register_finesse_flow(st, "♠", 13, {"方向": "西"})
     cands = [cand("♠3", 0.1), cand("♥Q", 2.0)]
     res = mk_result(Card("♠", "3"), cands)
+    res["full_output"]["finesse_probe_follow"] = {
+        "♠": {"对象": 13, "西": {"♠3": 0.10, "♠8": 0.30},
+              "东": {"♠3": 0.20, "♠8": 0.40}}}
     got = ps_new()._finesse_commit_ratio_ok(st, res, "♠8", 0.75,
                                             finesse_struct={"♠": {"对象": 13}})
-    return not got, f"榜首♠3间张（<对象K）同花色 → 采信 top1（got {got}, 期望 False）"
+    return got is True, f"第一步 b_押注=0.10<0.50 不触发 → 第二步比值，flyer♠8 不在候选 → 维持强制（got {got}, 期望 True）"
 
 
-def t15_commit_top1_diff_suit():
+def t15_commit_ratio_diff_suit_keeps():
     st = mk_state({"♠": "AQ86", "♥": "Q32"}, {"♠": "42", "♥": "J54"})
+    ps_new()._register_finesse_flow(st, "♠", 13, {"方向": "西"})
     cands = [cand("♥Q", 2.0), cand("♠3", 0.1)]
     res = mk_result(Card("♥", "Q"), cands)
-    # 强制 ♠8 不在候选 → _finesse_ratio_ok 返回 True（动作不在榜，维持强制）
-    got = ps_new()._finesse_commit_ratio_ok(st, res, "♠8", 0.75)
-    return got is True, f"榜首异花色 → 走比值判定（got {got}, 期望 True）"
+    res["full_output"]["finesse_probe_follow"] = {
+        "♠": {"对象": 13, "西": {"♥Q": 0.20, "♠3": 0.10},
+              "东": {"♥Q": 0.30, "♠3": 0.20}}}
+    # 强制 ♠8 不在候选 → 比值无法评估动作 → 维持强制
+    got = ps_new()._finesse_commit_ratio_ok(st, res, "♠8", 0.75,
+                                            finesse_struct={"♠": {"对象": 13}})
+    return got is True, f"榜首异花色走第二步比值，flyer♠8 不在候选 → 维持强制（got {got}, 期望 True）"
 
 
 def _probe_entry(suit, obj, lead, delta, side="本侧", direction=None, bucket=None):
@@ -222,29 +232,37 @@ def t22_vote_switch_off():
 
 def t23_commit_topcard_top1_falls_to_ratio():
     st = mk_state({"♠": "AQJ6", "♥": "Q32"}, {"♠": "42", "♥": "K54"})
+    ps_new()._register_finesse_flow(st, "♠", 12, {"方向": "西"})
     fs = {"♠": {"对象": 12}}
     cands_keep = [cand("♠A", 2.0, scores=[8] * 10),
                   cand("♠J", 1.0, scores=[8, 8, 8, 8, 8, 8, 8, 8, 2, 2]),
                   cand("♥Q", 1.5)]
     res_keep = mk_result(Card("♠", "A"), cands_keep)
+    res_keep["full_output"]["finesse_probe_follow"] = {
+        "♠": {"对象": 12, "西": {"♠A": 0.30, "♠J": 0.25},
+              "东": {"♠A": 0.45, "♠J": 0.40}}}
     got_keep = ps_new()._finesse_commit_ratio_ok(st, res_keep, "♠J", 0.75,
                                                  finesse_struct=fs)
     cands_drop = [cand("♠A", 2.0, scores=[8] * 10),
                   cand("♠J", 1.0, scores=[8, 8, 8, 8, 8, 2, 2, 2, 2, 2]),
                   cand("♥Q", 1.5)]
     res_drop = mk_result(Card("♠", "A"), cands_drop)
+    res_drop["full_output"]["finesse_probe_follow"] = {
+        "♠": {"对象": 12, "西": {"♠A": 0.30, "♠J": 0.25},
+              "东": {"♠A": 0.45, "♠J": 0.40}}}
     got_drop = ps_new()._finesse_commit_ratio_ok(st, res_drop, "♠J", 0.75,
                                                  finesse_struct=fs)
     ok = got_keep is True and got_drop is False
-    return ok, (f"榜首♠A顶张（≥对象Q）落比值退让：0.8≥0.75 维持强制"
-                f"（got {got_keep}），0.5<0.75 退让（got {got_drop}）")
+    return ok, (f"榜首♠A顶张（≥对象Q）：第一步 b_押注=0.30<0.50 不触发 → "
+                f"第二步比值 vs top_alt♠A：0.8≥0.75 维持强制（got {got_keep}），"
+                f"0.5<0.75 退让（got {got_drop}）")
 
 
 def t24_reverse_route_duel():
     st = mk_state({"♦": "T42", "♠": "A2", "♥": "Q"}, {"♦": "AJ", "♠": "K5"})
     cands = [cand("♥Q", 0.49, scores=[8] * 5 + [6] * 5),
              cand("♠2", 0.45, scores=[6] * 10),
-             cand("♦4", 0.20, scores=[6] * 10)]
+             cand("♦4", 0.45, scores=[8] * 5 + [6] * 5)]
     base = {"♦": [_probe_entry("♦", 12, "♦4", 0.30, direction="西", bucket=0.553),
                   _probe_entry("♦", 12, "♦J", 0.20, side="伙伴侧",
                                direction="东", bucket=0.405)]}
@@ -252,21 +270,33 @@ def t24_reverse_route_duel():
     got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
     ok = (got is not None and got[0] == "♦4"
           and st.finesse_flow.get("♦") == 12)
-    return ok, (f"反向路线对决：押西0.553>押东0.405 → 淘汰押东派（过手♠2），"
-                f"南直飞♦4（got {got}, flow={st.finesse_flow}）")
+    return ok, (f"反向路线对决（v2.13 全样本分子）：押西0.553>押东0.405 "
+                f"→ 淘汰押东派（过手♠2）；♦4 全样本0.5 ≥ 0.85×榜首0.5 过闸"
+                f"，南直飞♦4（got {got}, flow={st.finesse_flow}）")
 
 
 def t25_local_bucket_molecule():
+    """v2.13 门控分子改全样本做成率（用户定调）：能否启动视**全样本**比值，
+    押桶成只用于启动后的路线排序。高分动作（全样本0.9=榜首1.0 的0.9倍）过闸；
+    对照：全样本 low（0）但押桶成假高0.8 的动作被拒。"""
     st = mk_state({"♣": "A2", "♥": "Q"}, {"♣": "43"})
     cands = [cand("♥Q", 1.0, scores=[8] * 10),
-             cand("♣2", 0.5, scores=[6] * 10)]
+             cand("♣2", 0.9, scores=[8] * 9 + [6])]
     base = {"♣": [_probe_entry("♣", 13, "♣2", 0.3, direction="西", bucket=0.8)]}
     res = mk_result(Card("♥", "Q"), cands)
     got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
     ok = (got is not None and got[0] == "♣2"
           and st.finesse_flow.get("♣") == 13)
-    return ok, (f"本侧分子=押桶成0.8：0.8≥0.70 过闸启动（旧口径引擎值0.5"
-                f"会退让；got {got}）")
+    # 对照：全样本 low（0）但押桶成仍 0.8 → 退让尊重引擎（独立 state）
+    st_bad = mk_state({"♣": "A2", "♥": "Q"}, {"♣": "43"})
+    cands_bad = [cand("♥Q", 1.0, scores=[8] * 10),
+                 cand("♣2", 0.5, scores=[6] * 10)]
+    res_bad = mk_result(Card("♥", "Q"), cands_bad)
+    got_bad = ps_new()._probe_lead_finesse_prefer(st_bad, base, cands_bad, 0.75, res_bad)
+    ok = ok and got_bad is None and not st_bad.finesse_flow
+    return ok, (f"门控分子=全样本：♣2 全样本0.9≥0.85×榜首1.0 过闸启动；"
+                f"对照全样本0（押桶成假高0.8）被拒（got高分={got}, "
+                f"got对照={got_bad}）")
 
 
 def _mk_follow_state(direction="西"):
@@ -283,45 +313,49 @@ def _mk_follow_result(cands, west_bucket, east_bucket=None, card=Card("♦", "A"
     return res
 
 
-def t26_follow_tier_force_6nt():
+def t26_follow_6nt_dead_ratio_keeps():
     st = mk_state({"♦": "AJ2", "♠": "Q32"}, {"♦": "43"})
     ps_new()._register_finesse_flow(st, "♦", 12, {"方向": "西"})
     reg_ok = (st.finesse_flow.get("♦") == 12
               and (getattr(st, "finesse_flow_extra", {}).get("♦") or {}).get("方向") == "西")
-    cands = [cand("♦A", 0.254, scores=[6] * 10), cand("♦J", 0.167, scores=[5] * 10),
+    cands = [cand("♦A", 0.40, scores=[7] * 10), cand("♦J", 0.32, scores=[6] * 10),
             cand("♠Q", 0.2, scores=[4] * 10)]
-    res = _mk_follow_result(cands, {"♦A": 0.0, "♦J": 0.353})
+    res = _mk_follow_result(cands, {"♦A": 0.0, "♦J": 0.353}, east_bucket={"♦A": 0.7, "♦J": 0.6})
     got = ps_new()._finesse_commit_ratio_ok(st, res, "♦J", 0.75,
                                             finesse_struct={"♦": {"对象": 12}})
     ok = reg_ok and got is True
-    return ok, (f"6NT型：押西桶榜首♦A成0（不飞即死）→ 强制♦J"
+    return ok, (f"6NT型（押西桶拔A成0不飞即死）：b_押注=0<0.50 → 退让判据"
+                f"不触发，落比值兜底 0.32/0.40=0.80≥0.75 保留强制♦J"
                 f"（登记方向={reg_ok}, got {got}, 期望 True）")
 
 
 def t27_follow_tier_defer_b26():
     st = _mk_follow_state()
     cands = [cand("♦A", 0.542, scores=[6] * 10), cand("♦Q", 1.0, scores=[5] * 10)]
-    res = _mk_follow_result(cands, {"♦A": 0.542, "♦Q": 1.0})
+    res = _mk_follow_result(cands, {"♦A": 0.542, "♦Q": 1.0}, east_bucket={"♦A": 0.45, "♦Q": 0.9})
     got = ps_new()._finesse_commit_ratio_ok(st, res, "♦Q", 0.75,
                                             finesse_struct={"♦": {"对象": 12}})
-    return got is False, (f"B26型：押西桶榜首♦A成0.542≥0.40（定约不依赖"
-                          f"飞牌）→ 退让引擎♦A（got {got}, 期望 False）")
+    return got is False, (f"B26型：押西桶榜首♦A成0.542≥0.50 且≥非押注桶0.45"
+                          f"（定约不依赖飞牌）→ 退让引擎♦A（got {got}, 期望 False）")
 
 
 def t28_follow_gray_zone_v193():
     st = _mk_follow_state()
     fs = {"♦": {"对象": 12}}
     cands_keep = [cand("♦A", 0.35), cand("♦J", 0.30)]
-    res_keep = _mk_follow_result(cands_keep, {"♦A": 0.2, "♦J": 0.25})
+    res_keep = _mk_follow_result(cands_keep, {"♦A": 0.2, "♦J": 0.25},
+                                 east_bucket={"♦A": 0.45, "♦J": 0.40})
     got_keep = ps_new()._finesse_commit_ratio_ok(st, res_keep, "♦J", 0.75,
                                                  finesse_struct=fs)
     cands_drop = [cand("♦A", 0.35), cand("♦J", 0.23)]
-    res_drop = _mk_follow_result(cands_drop, {"♦A": 0.2, "♦J": 0.25})
+    res_drop = _mk_follow_result(cands_drop, {"♦A": 0.2, "♦J": 0.25},
+                                 east_bucket={"♦A": 0.45, "♦J": 0.40})
     got_drop = ps_new()._finesse_commit_ratio_ok(st, res_drop, "♦J", 0.75,
                                                  finesse_struct=fs)
     ok = got_keep is True and got_drop is False
-    return ok, (f"灰色区（b=0.2）走 v1.93 比值：0.857≥0.75 维持强制"
-                f"（got {got_keep}），0.657<0.75 退让（got {got_drop}）")
+    return ok, (f"灰色区（b=0.2<0.50 退让判据不触发）走 v1.93 比值："
+                f"0.857≥0.75 维持强制（got {got_keep}），"
+                f"0.657<0.75 退让（got {got_drop}）")
 
 
 def t29_follow_data_missing_fallback():
@@ -386,7 +420,7 @@ def t31_combo_confirm_and_continuation():
                 f"K出后续飞Q自动确认（got {ok_cont}）")
 
 
-def t32_follow_severe_bucket_force():
+def t32_follow_severe_bucket_top1_is_forced():
     st = mk_state({"♠": "AT98", "♥": "Q32"}, {"♠": "43", "♥": "J54"})
     ps_new()._register_finesse_flow(st, "♠", 13, {"方向": "东", "废弃对象": ["Q"]})
     eq = [6] * 10
@@ -396,12 +430,14 @@ def t32_follow_severe_bucket_force():
     res["full_output"]["finesse_probe_follow"] = {
         "♠": {"对象": 13,
               "东": {"♠A": 0.745, "♠8": 0.91, "♠T": 0.91},
-              "东·全中": {"♠A": 0.0, "♠8": 0.353}}}
+              "东·全中": {"♠A": 0.0, "♠8": 0.353},
+              "西·全中": {"♠A": 0.6, "♠8": 0.7}}}
     got = ps_new()._finesse_commit_ratio_ok(st, res, "♠8", 0.75,
                                             finesse_struct={"♠": {"对象": 13}})
-    return got is True, (f"双飞KQ同东：全中桶引擎最优♠A成0（Q干扰剔除）"
-                         f"→ 强制接应♠8（旧口径普通桶top_alt=♠T成0.91"
-                         f"误判退让；got {got}, 期望 True）")
+    return got is True, (f"双飞KQ同东：全中桶♠A成0（Q干扰剔除）b_押注<0.50 → "
+                         f"退让判据不触发，比值兜底 ♠8/♠T=1.0≥0.75 → 强制♠8"
+                         f"（榜首即强制牌，实际仍出♠8；旧口径普通桶top_alt=♠T"
+                         f"成0.91误判退让（got {got}, 期望 True））")
 
 
 def t33_follow_severe_missing_falls_back():
@@ -411,11 +447,13 @@ def t33_follow_severe_missing_falls_back():
     cands = [cand("♠8", 0.6, scores=eq), cand("♠A", 0.542, scores=[7] * 10)]
     res = mk_result(Card("♠", "A"), cands)
     res["full_output"]["finesse_probe_follow"] = {
-        "♠": {"对象": 13, "东": {"♠A": 0.542, "♠8": 1.0}}}
+        "♠": {"对象": 13, "东": {"♠A": 0.542, "♠8": 1.0},
+              "西": {"♠A": 0.45, "♠8": 0.9}}}
     got = ps_new()._finesse_commit_ratio_ok(st, res, "♠8", 0.75,
                                             finesse_struct={"♠": {"对象": 13}})
     return got is False, (f"Q异侧（K东Q西）：全中桶空落回普通东桶，"
-                          f"♠A成0.542≥0.40 → 退让引擎（got {got}, 期望 False）")
+                          f"♠A成0.542≥0.50 且≥非押注西桶0.45 → 退让引擎"
+                          f"（got {got}, 期望 False）")
 
 
 def t34_accumulate_follow_severe_key():
@@ -449,15 +487,17 @@ def t34_accumulate_follow_severe_key():
 def t35_final_select_bucket_rank():
     st = mk_state({"♣": "A2", "♦": "QJ2", "♥": "Q"}, {"♣": "43"})
     cands = [cand("♥Q", 0.5, scores=[8] * 10),
-             cand("♦2", 0.48), cand("♦J", 0.473)]
+             cand("♦2", 0.85, scores=[8] * 8 + [6] * 2),
+             cand("♦J", 0.95, scores=[8] * 9 + [6])]
     base = {"♦": [_probe_entry("♦", 13, "♦2", 0.9, direction="西", bucket=0.75),
                   _probe_entry("♦", 13, "♦J", 0.9, direction="西", bucket=0.85)]}
     res = mk_result(Card("♥", "Q"), cands)
     got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
     ok = (got is not None and got[0] == "♦J"
           and st.finesse_flow.get("♦") == 13)
-    return ok, (f"终选押桶成主排序：♦J押桶0.85>♦2的0.75 胜出（引擎混合值"
-                f"♦2 0.48>♦J 0.473，旧口径选♦2；got {got}, flow={st.finesse_flow}）")
+    return ok, (f"终选押桶成排序（v2.13 全样本门控）：♦J 押桶0.85>♦2 的0.75 胜出，"
+                f"且 ♦J 全样本0.9≥0.85×榜首1.0 过闸（♦2 全样本0.8<0.85 顺延被拒；"
+                f"got {got}, flow={st.finesse_flow}）")
 
 
 def t36_engine_already_leading_finesse_register():
@@ -483,19 +523,20 @@ def t36_engine_already_leading_finesse_register():
 
 
 def t37_global_top_bucket_wins():
-    """v2.00 简化：全局押桶成排序取榜首，榜首单独过门控。两花色各有结构，
-    押桶成高的花色（♦）胜出并登记，Δ 只当门票不参与裁决。"""
+    """v2.13 简化（全样本门控）：动作按押桶成排序逐动作过全样本门控。
+    两花色各有结构，榜首 ♦J（押桶0.85，全样本0.9≥0.85×榜首1.0）过闸登记，
+    ♣2（押桶0.80）顺延未及，Δ 只当门票不参与裁决。"""
     st = mk_state({"♣": "A2", "♦": "QJ2", "♥": "Q"}, {"♣": "43", "♦": "75"})
     cands = [cand("♥Q", 0.5, scores=[8] * 10),
-             cand("♦J", 0.48), cand("♣2", 0.47)]
+             cand("♦J", 0.95, scores=[8] * 9 + [6]), cand("♣2", 0.90, scores=[8] * 9 + [6])]
     base = {"♦": [_probe_entry("♦", 13, "♦J", 0.2, direction="西", bucket=0.85)],
             "♣": [_probe_entry("♣", 13, "♣2", 0.9, direction="西", bucket=0.80)]}
     res = mk_result(Card("♥", "Q"), cands)
     got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
     ok = (got is not None and got[0] == "♦J"
           and st.finesse_flow.get("♦") == 13 and "♣" not in st.finesse_flow)
-    return ok, (f"全局押桶成榜首：♦J押桶0.85胜过Δ0.9的♣2（押桶0.80）"
-                f"→ 选♦J登记♦（got {got}, flow={st.finesse_flow}）")
+    return ok, (f"全局押桶成排序（v2.13 全样本门控）：♦J押桶0.85胜过Δ0.9的♣2"
+                f"（押桶0.80）→ ♦J 全样本0.9 过闸登记♦（got {got}, flow={st.finesse_flow}）")
 
 
 def t38_lead_full_hit_bucket():
@@ -548,13 +589,16 @@ def t40_combo_big_lead_on_saturated():
     """双飞组合·本侧·较大被飞对象（K）未现 → 较大领出牌优先（♦J）。
 
     复现实局：双飞 K/9 对象、三候选引牌 ♦3/♦J/♦2 的全中桶押桶成全部饱和 1.0，
-    blended 亦无法分层。按 v2.03 用户定调：押桶成平局之后，偏好"领出牌 牌点
+    blended 亦无法分层。v2.03 定调：押桶成平局之后，偏好"领出牌 牌点
     > 较小飞牌对象"（min(对象K=13, 废弃9) = 9；♦J=11 > 9）的较大牌，即 ♦J。
+    v2.13：三引牌全样本均 0.9 ≥ 0.85×榜首0.6，全过闸后仍按押桶排序取 ♦J。
     """
     st = mk_state({"♠": "A", "♥": "Q", "♦": "J32", "♣": "K"},
                   {"♠": "2", "♣": "A"})
     cands = [cand("♥Q", 0.5, scores=[8] * 6 + [2] * 4),
-             cand("♦J", 1.0), cand("♦3", 1.0), cand("♦2", 1.0)]
+             cand("♦J", 0.9, scores=[8] * 9 + [6]),
+             cand("♦3", 0.9, scores=[8] * 9 + [6]),
+             cand("♦2", 0.9, scores=[8] * 9 + [6])]
     def combo(lead):
         e = _probe_entry("♦", 13, lead, 0.5, side="本侧", direction="西",
                          bucket=1.0)
@@ -570,12 +614,24 @@ def t40_combo_big_lead_on_saturated():
                 f"（got {str(got[0]) if got else None}, flow={st.finesse_flow}）")
 
 
+def t41_follow_double_finesse_press_discard():
+    """保Q废T双飞：废弃对象 T(10) 是敌方实牌，接应必须压过它 → 选♠J。
+    回归：2026-09-25 前废弃对象被剔除出威胁，威胁算低导致错选 ♠9/♠8/♠3，
+    被敌方 T 吃墩破坏飞 Q。K 已现身（北手牌），敌方剩余威胁=T。"""
+    st = mk_state({"♠": "AJ983", "♥": "Q32"}, {"♠": "K4", "♥": "J54"},
+                  current="南", trick_cards=[("北", Card("♠", "4"))])
+    fs = {"♠": {"对象": 12, "废弃对象": ["T"]}}
+    got = ps_new()._finesse_commit_check(st, fs)
+    return got is not None and got[0] == "♠J", (
+        f"保Q废T双飞：威胁=T(10) → 接应选♠J 压T（got {got}, 期望 ('♠J', ...)）")
+
+
 CASES = [
     t08_respond_defender_lead,
     t10_exit_after_cash,
     t11_top1_make_semantics,
-    t14_commit_top1_same_suit,
-    t15_commit_top1_diff_suit,
+    t14_commit_ratio_keeps_flyer_not_in_cands,
+    t15_commit_ratio_diff_suit_keeps,
     t16_partner_overhand_fail_back_to_local,
     t17_all_rejected,
     t18_multi_action_final_select,
@@ -586,13 +642,13 @@ CASES = [
     t23_commit_topcard_top1_falls_to_ratio,
     t24_reverse_route_duel,
     t25_local_bucket_molecule,
-    t26_follow_tier_force_6nt,
+    t26_follow_6nt_dead_ratio_keeps,
     t27_follow_tier_defer_b26,
     t28_follow_gray_zone_v193,
     t29_follow_data_missing_fallback,
     t30_combo_merge_strong_signal,
     t31_combo_confirm_and_continuation,
-    t32_follow_severe_bucket_force,
+    t32_follow_severe_bucket_top1_is_forced,
     t33_follow_severe_missing_falls_back,
     t34_accumulate_follow_severe_key,
     t35_final_select_bucket_rank,
@@ -601,6 +657,7 @@ CASES = [
     t38_lead_full_hit_bucket,
     t39_full_hit_bucket_passes_to_finalize,
     t40_combo_big_lead_on_saturated,
+    t41_follow_double_finesse_press_discard,
 ]
 
 

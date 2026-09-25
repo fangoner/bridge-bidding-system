@@ -627,7 +627,7 @@ def _finalize_finesse_probe_follow(probe_follow, tricks_needed):
     可选 "东·全中"/"西·全中": {牌: 成率}}}；两侧均无数据的花色剔除
     （对象已现身/登记被清的世界集）。全中子键（v2.02，原"严峻"名废弃）
     = 双飞废弃对象与登记对象同在押注方向（接应上家）的世界子集，
-    消费端三层判据优先读取。
+    消费端退让判据优先读取。
     """
     out = {}
     for suit, entry in probe_follow.items():
@@ -1175,7 +1175,7 @@ class DDSearch:
         finesse_probe = {} if (_probe_ok and _dd_config.DD_INTERVENE_ENABLE) else None
         # 跟牌接应探针（v1.96）：本墩我方领出且已登记飞牌流程（领出方启动
         # 飞牌）时，按登记对象在东/西的位置分桶累计全部候选的桶内做成率，
-        # 供接应端三层判据读取"引擎榜首替代牌在押注方向桶的成率"。
+        # 供接应端退让判据读取"引擎榜首替代牌在押注方向桶的成率"。
         _flow = getattr(state, "finesse_flow", None) or {}
         _lead_suits = {c.suit for _, c in trick_cards if c}
         _follow_ok = (bool(trick_cards) and bool(_flow)

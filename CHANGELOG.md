@@ -12,6 +12,124 @@
 > - **已修复的结构问题**（2026-09-20）：两处日期倒序（`2026-06-15/06-17`、`2026-05-03/05-05`）已按降序重排；v1.92 / v1.93 / v1.94 / v1.94b·v1.95 由 v1.96 条目内的 bullet 提升为独立条目；补记了 MCTS / Tiered / DD-αμ-LLM 三个引擎的下线（此前有引入无移除）。
 > - 完整审计与治理记录见 `docs/开发文档整理_发现清单_20260920.md`。
 
+## 2026-09-25（接应退让判据重构 v2.16 + 首攻约束剩余口径递减）
+
+**背景**: 接应三层判据（≤0.05 强制 / ≥0.40 退让 / 灰色比值）的 0.05/0.40 是 v1.96 从 6NT（b_押注=0）与 B26（b_押注=0.542）两个案例划的缓冲线。用户 09-24 把上界 0.40→0.50 后进一步指出：**这两个案例本身数据不全，不应为个别案例设计判据**；要求判据改为**相对比较**（押注桶 vs 非押注桶），而非单侧绝对阈值。
+
+**口径（用户定调 2026-09-25）**:
+1. **两步结构** `_finesse_commit_ratio_ok`：① 第一步·退让判据 `b_押注 ≥ FINESSE_COMMIT_ALIVE_PCT(0.50) 且 b_押注 ≥ 非押注桶` → 定约不依赖飞牌，退让引擎；② 第一步不满足 → 第二步·比值兜底 `flyer/top_alt ≥ 0.75` 维持强制 flyer，否则退让。**删除 DIE 强制分支**（b_押注≤0.05 即强制）与**同花色 ①/② 分流**（并入比值兜底）。
+2. **数据必然齐全**：接应探针触发时 follow 必有数据，不再有"缺数据退化"分支；`top_alt`（引擎最优替代）从候选直接计算（跳过 flyer 与逐世界等价组，v1.98 修正二），不依赖 follow 存在。
+3. **废弃对象参与接应威胁**（bug 修复）：保 Q 废 T 时 T 是敌方**实牌**，双飞必须压过它——此前威胁计算剔除废弃对象导致威胁算低、接应错选 9/8/3 等价组而非 J（被敌方 T 吃墩破坏飞牌）。修复后威胁 = 敌方剩余最大牌（含废弃对象与本墩已出大牌），南 ♠AJ983 对 ♠4 接应选 **♠J**。
+4. **首攻约束剩余口径递减**（用户原则：所有带长度/点力的约束都随出牌递减）：`lead_shape` 首攻牌**一出即剔**（KQ小≥N → Q小≥N，此前"出第二张才失效"），已出大牌/小牌同步扣减，允许空 bigs 形态（剩余无大牌+张数区间）；`match_suit_shape` 按"形态是否仍含首攻牌"自动区分完整/剩余口径。初始约束整手口径不变；**采样每决策点重新生成世界**、用当前已出牌折算的剩余口径过滤（非固定样本递减）。
+
+**改进**:
+- `play_service._finesse_commit_ratio_ok`：两步结构；`_finesse_commit_check`：废弃对象参与威胁、本墩敌方已出大牌纳入必压（must_gt）
+- `config.py`：`FINESSE_COMMIT_ALIVE_PCT` 0.40→0.50；**删除 `FINESSE_COMMIT_DIE_PCT`**（进入 Removed constants）
+- `sampler._reduce_constraint_for_played`：lead_shape 首攻即剔递减（≥1 张即减，首攻牌进 extra_bigs）
+- `constraints.match_suit_shape`：加回首攻牌改为条件式（形态仍含首攻牌才加回）
+
+**验证**: pipeline **31/31**（新增 t41 废弃对象威胁 ♠J 用例；t26-t29/t32/t33 重写为双侧桶齐全、删缺数据用例 t14/t15/t23）+ probe 12/12 + doc-sync ✓；test_lead_shape **76/76**（新增出 K 后剩余口径命中/♠A2 拒绝/Kx 分支用例）；后端已重启
+
+**修改文件**: config.py, bridge/play_service.py, bridge/mcts/constraints.py, bridge/mcts/sampler.py, bridge/mcts/dd_search.py, tests/test_finesse_pipeline.py, tests/test_lead_shape.py, docs/飞牌介入管线图解.md, docs/飞牌现行口径_接应判据与Δ门票_20260920.md, docs/README.md, DEVELOPMENT.md, CLAUDE.md, CHANGELOG.md
+
+## 2026-09-24（首攻牌张形态白名单 v2.15：NT 顶张/短套 + 有将 3/5 首攻）
+
+**背景**: v2.14 用 `specific_cards`（攻 K ⇒ 必持 Q）表达首攻顶张承诺——但新睿表12-1 每张首攻牌对应一组**或然牌型集**，其中 `Kx`/`K` 双张单张、`Ax+`、`Qx` 等**不含下一级大牌**的合法形态也被硬承诺滤掉了（采样过度收敛）。用户提出用**排除法**：出某牌 ⇒ 该花色完整构成必须 ∈ 表12-1 允许集合，表外形态（攻K 但花色含 A，如 AK）排除。同时补全 NT 攻 A（含 K）、攻 J（含 10）、攻 10（含 9），并新增**有将首攻**（表12-3/表12-4 3/5 首攻）。
+
+**口径（用户定调）**: 排除法白名单——首攻牌已知时，该花色完整形态必须命中新睿指定牌型之一，其余全部排除；NT 与有将分别按表12-1 与表12-3。
+
+**改进**:
+- `constraints.py`：
+  - `BidConstraint.lead_shape`（NT/有将顶张白名单）：`(花色, 首攻牌, [(完整大牌集合, 小牌min, 小牌max), ...])`——完整大牌集（A/K/Q/J/T）必须恰好等于某白名单集、小牌数落区间；`_LEAD_SHAPE_NT`（表12-1：攻A=AKQJ+/AKQ+/AKx/AK/Ax+/A 六种，K/Q/J/T 各含连张与无连张边界）+ `_LEAD_SHAPE_TRUMP`（表12-3：A 行无 AK、K 行含 AK、Q 行=QJ10+、J 无 AJ10+、T 无 A109+）
+  - `BidConstraint.lead_small_shapes`（小牌白名单）：`(花色, 首攻牌, [(总张数min,max, >X张数min,max, 大牌>X数min,max), ...]`
+  - `match_suit_shape` / `match_suit_small_shapes`：匹配实现（完整张数、>首攻牌张数、其中大牌数三维区间）
+  - `_build_trump_small_shapes`：有将 3/5 首攻白名单（2张攻大/3张带大牌攻最小/3张小牌攻中间/偶数攻第3大/奇数攻最小，2~13 张全覆盖）
+- `play_service._build_opening_lead_constraint`：去掉 NT-only，按定约分流 `_build_nt_lead_constraint`（顶张白名单 + 小牌长四/三张/双张）与 `_build_trump_lead_constraint`（顶张白名单 + 3/5 首攻小牌）；`_merge_constraints`/display 同步
+- `config.py`：新增 `DD_LEAD_TRUMP_ENABLE`（有将首攻约束总开关）
+- `sampler.py`：`_reduce_constraint_for_played` 中局扣减对 `lead_shape`/`lead_small_shapes` 统一处理（首攻花色再出第二张即失效）；`_constraint_trivially_satisfied` 识别
+
+**关键语义**（与 v2.14 差异）:
+- NT 攻 K：白名单 {KQJ+/KQ+/Kx/K}——保留 `Kx`/`K`（v2.14 误滤），排除 `AK`/`KQT`（v2.14 拦不住）
+- NT 攻 A：白名单 {AKQJ+/AKQ+/AKx/AK/Ax+/A}——补全"攻 A 含 K"及"Ax+ 无 K 也合法"
+- NT 攻小牌：白名单 {长四(恰3张>X), 三张带大牌攻最小, 三张小牌攻中间, 双张攻大}——取代 v2.10 单一 `length_above≥3`（会把三张/双张短套世界滤掉）
+- 有将小牌：3/5 首攻（奇数攻最小/偶数攻第3大），与 NT 长四不同
+
+**验证**: `tests/test_lead_shape.py` 68/68（NT 顶张 5 档 + NT 小牌 11 例 + 有将顶张差异 4 例含 NT 对照 + 有将 3/5 首攻 12 例）；pipeline 30/30 + probe 12/12 + doc-sync ✓；端到端 3NT/4♥ 分支表全对；未提交 git
+
+**修改文件**: config.py, bridge/mcts/constraints.py, bridge/mcts/sampler.py, bridge/play_service.py, tests/test_lead_shape.py, CHANGELOG.md, DEVELOPMENT.md
+
+## 2026-09-24（顶张连张首攻约束 v2.14）
+
+**背景**: 3NT 南庄，西首攻 ♠K（墩1 K-5-6-2 西赢）——无将攻 K=KQ 连张承诺（至少带 Q）。延续 v2.10 长四首攻的"首攻协议 → 采样约束"思路，把顶张连张也纳入首攻约束。
+
+**口径（用户定调）**: 攻 K ⇒ 该花色必持 Q（KQ 连张）；攻 Q ⇒ 必持 J（QJ 连张）。攻 A 的"带 K"推论在 NT 下较弱（部分打法攻 A 表示无 K），不做。
+
+**改进**:
+- `config.py`：`DD_LEAD_HONOR_CHAIN_ENABLE`（开关）+ `DD_LEAD_HONOR_CHAIN_NEXT = {"K":"Q","Q":"J"}`（映射表，扩展只需加键）
+- `play_service._build_opening_lead_constraint`：新增顶张连张分支（specific_cards），与长四分支并列，inference_source="opening_lead_honor_chain"；display 显示"西: 必持:♠Q [首攻]"
+- **sampler 修复 specific_cards 硬承诺不可靠**（pin 预分配）：实测 7/300 世界西手缺 ♠Q（specific_cards 在 L0 MH 修复失败后落放宽链被丢弃）。修两处：① `_propose_swap` 增"必持牌缺失"定向交换分支；② `_sample_uniform` 增 active_constraints 参数的 **specific_cards pin**——从未知池取出必持牌直接放进对应位置，所有采样层（L0 初态/L1/L2/L3/L4）初态即满足，不再依赖修复迭代
+
+**验证**: 300/300 世界西恒持 ♠Q（pin 前 293/300）；分支表——攻 K→必持Q / 攻 Q→必持J / 攻 A→None / 攻7→长四；pipeline 30/30 + probe 12/12 + doc-sync ✓；未提交 git
+
+**修改文件**: config.py, bridge/play_service.py, bridge/mcts/sampler.py, CHANGELOG.md, DEVELOPMENT.md
+
+## 2026-09-24（启动门控改全样本做成率 v2.13）
+
+**背景**: 实测 3NT 牌局检出「本侧 ♠Q,Δ0.65,♠4 押100%✓」——♠4 押桶成 100%（对象 Q 在押注方向那半桶）而过闸改出 ♠4，但该牌**全样本做成率只有 67.9%**，引擎榜首 ♣A 是 95.7%。用户指出口径矛盾：门控是"飞 vs 不飞"的决策点，用"押对方向半桶"作分子会剔除反侧崩盘世界、系统性高估飞牌线；"启动后非押注方向世界无意义"只应在**启动之后**成立。追史确认押桶成原为 6NT 双飞 ♦K/9 牌局引入（v1.94/v1.99/v2.02）——当时把"飞牌押对就赢"态度错带进了"要不要飞"的门控。
+
+**改进**:
+- `_finesse_launch_worthwhile`：门控分子由押桶成改为**动作牌全样本做成率**（与引擎榜首分母同秤）；契约必要（榜首<0.50 必飞）分支分子同步全样本
+- `FINESSE_NEC_RATIO` 0.70→0.85（config.py 注释记录 0.90→0.70→0.85 历史）
+- `_probe_lead_finesse_prefer`：`_subset_select` 拆为 `_subset_select_all`（返回押桶成排序全列表），榜首被门控拒时**顺延试下一候选**（v2.13 分子改全样本后"门控比值单调于押桶成"不再成立，"榜首即唯一候选"失效）
+- 押桶成去留：仍用于**启动后**的路线排序（`_subset_select_all` 主排序键）与接应判据（§六）；不再作门控分子
+
+**口径定调（用户，2026-09-24）**: 「启动后决胜（终选+接应）以押注桶成为据；启动门控以全样本为据」——同一轮决策中，两把秤各司其职：门控回答"要不要飞"（全局期望），启动后回答"怎么飞"（押对方向的半桶区分度）。
+
+**验证**: pipeline 30/30（t24/t25 改全样本语义、t25 增"假高押桶成被拒"对照、t35/t37/t40 候选做成率数据重排）；probe 12/12；doc-sync ✓；图解 §五/§九、CLAUDE.md、DEVELOPMENT 同步；未提交 git
+
+**修改文件**: config.py, bridge/play_service.py, tests/test_finesse_pipeline.py, docs/飞牌介入管线图解.md, CLAUDE.md, CHANGELOG.md, DEVELOPMENT.md
+
+## 2026-09-24（飞牌确认·对侧单张排除 v2.12）
+
+**背景**: 3NT 北领出 ♣2 过手给南引 ♦ 飞 A 的实测（南♦Q32、北♦J单张）检出对侧（伙伴）「♦A,Δ0.31,♦Q押5%✓ / ♦3押100%✓ / ♦2押100%✓」——但对侧（北）♦ 只有 J 单张：引 ♦3/2 后北只能机械跟出 J，没有任何飞张选择，押 100% 是单张被逼出的假信号，起不到飞牌作用。
+
+**改进**:
+- `_probe_finesse_ok`（play_service.py）：对侧（引牌侧另一半）该花色仅 1 张时，对侧牌不再进入飞张 G 候选（引牌后机械跟出、无选择）；引牌本身作飞张（出 Q/K 逼对象）始终保留，不依赖对侧张数——伙伴侧依赖对侧间张的假飞被剔除，自持飞张（K/Q 引）不受误伤
+- `docs/飞牌介入管线图解.md` 三、B 补记该排除规则
+
+**验证**: 实况牌面确定性验证——伙伴侧引 ♦3/♦2/♦Q 全部确认 False（对侧单张 + 防家 K 盖压）；test_probe_finesse 新增 4 用例（对侧单张伙伴引3/2 排除、对侧双张保留、本侧引K 自持保留）→ 12/12；doc-sync ✓ / pipeline 30/30 ✓
+
+**修改文件**: bridge/play_service.py, docs/飞牌介入管线图解.md, tests/test_probe_finesse.py
+
+## 2026-09-23（DD 采样数 200→1000：探针 Δ 门槛稳定化）
+
+**背景**: 用户在 4♥ 牌局同一决策点"撤销→继续"多次重跑，发现飞牌检出不稳定——有时本侧（♥T 引牌）、有时对侧（♥Q/6/A 引牌、对象 J↔K 随机切换）、有时完全"无飞牌结构"。190 次重跑实测（同牌同约束 ×4 档约束 + 300 样本档）：本侧♥T 引牌是强信号 190/190（Δ 0.105–0.549）从不掉线；伙伴侧 ♥Q 引牌整条贴着 0.10 门槛、1/190 失检。根因：Δ=|p东−p西| 是两个 ≈0.95 的大数之差，桶内 n≈90–100、SE(Δ)≈0.05–0.06，东西红桃 5 张的分家组成在批间波动，把 Δ 整体推到 0.10↔0.55 之间摆动——"均匀采样应该差不多"只在极限下成立。
+
+**改进**:
+- `config.py`：`DD_NUM_SAMPLES` 200→1000（默认采样数）；实际自适应样本 924（15+985×12/13），实测 924×2 次搜索 ≈0.5s/手（主搜索 0.2s + 伙伴探针 0.3s），对时延无感
+- 撤销还原核查（用户提出）：`undo_last_card` 不还原 `finesse_flow/finesse_flow_ends/finesse_flow_extra`，但下一手领出决策 `_intervene` 段1 前无条件 clear（play_service.py L1588-1594）——残留不污染探针，检出摇摆是采样噪声而非撤销残留
+
+**验证**:
+- 三档样本实测（同牌、南 HCP8-10 约束）：185 档本侧 Δ 0.105–0.549 / 伙伴 0.101–0.621（1 失检）；300 档 0.13–0.497 / 0.124–0.412；**1000 档收窄为 0.188–0.411 / 0.126–0.312，25/25 两侧全检出，终选卡片 23/25 直出♥T**（残差为押桶成平票排序抖动）
+- 1000 档配置验证：窗口期检出"飞K(双飞组合)押95%直出♥T"正常
+- 回归：doc-sync ✓ / probe 8/8 ✓ / pipeline 30/30 ✓；CLAUDE.md、DEVELOPMENT.md 的 `DD_NUM_SAMPLES` 引用已同步
+
+**修改文件**: config.py, CLAUDE.md, DEVELOPMENT.md
+
+**残余**: 伙伴侧最小 Δ（0.126@1000）仍贴 0.10 门槛——"绝不摇摆"需双半稳定性校验（用户暂缓启用）
+
+## 2026-09-23（飞牌确认层"引牌<对象"硬门槛 v2.11）
+
+**背景**: 4♥ 南庄牌局（北♥AQ6、南♥T5432，第一墩西♦J-北♦4-东♦5-南♦A，南再次领出）被确认识别出「♥K,Δ0.32,♥A押95%✓」——引牌♥A(14) 大于对象♥K(13)，桥牌语义上"出A飞K"只是兑取顶张不是飞牌。根因：`_probe_finesse_ok` 判的是**结构级存在**（G 候选=对侧全部牌∪引牌本身；南持♥T 满足 13>10>9 即整条确认），引牌本身不满足 `obj > G > max_enemy` 也标 ✓，并凭押桶成 95% 竞争榜首，终选做成"过手♣2给队友引飞（引牌♥A，押桶成95%）"。
+
+**改进**:
+- `_probe_finesse_ok`（play_service.py）新增硬门槛：`lead_rv >= obj → False`——引牌必须严格小于对象才是合法飞牌启动（♥A 引 ♥K 直接废弃，不再携带"引A飞K"标签进池）；保留"引牌本身可作飞张（南引 Q 逼 K）"路径（g_ranks 仍并入引牌本身）
+- `docs/飞牌介入管线图解.md` 三、B 建结构池段补记该硬门槛
+
+**验证**: doc-sync ✓ / probe 8/8 ✓ / pipeline 30/30 ✓；复现脚本确认 `伙伴探针|♥|K|♥A` 现判 false（引牌≥对象）
+
+**修改文件**: bridge/play_service.py, docs/飞牌介入管线图解.md
+
 ## 2026-09-23（首攻长四约束 v2.10）
 
 **背景**: BM 2-C20（3NT 南庄，西♠AJ987长四攻8 + ♣A）实测发现：DD 引擎按均匀先验全样本做成率选 ♠T（73%），但西攻 8 属长四协议——该花色第 4 大是 8，意味着西该花色≥4 张且**至少 3 张同花色大于 8**。按首攻信息把分布推向 东2-西5 后，小牌 ♠5（82%）反超 ♠T（69%），"按总做成率打并不安全"。且首攻只在整副牌第一张出牌那一刻发生一次，后续买入（第二墩西出7）进一步把分布收敛为唯一可行（东2-西5，西=3大+8+7）。
