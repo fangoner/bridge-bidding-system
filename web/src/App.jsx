@@ -3186,6 +3186,7 @@ const handleReviewCompletedPlay = async () => {
             return Math.min(totalCards, (c || 0) + 1)
           })}
           onRewindToTrick={handleRewindToTrick}
+          onReviewSeek={setReviewCursor}
           onReviewCompletedPlay={handleReviewCompletedPlay}
           playTotalTime={playTotalTime}
         />

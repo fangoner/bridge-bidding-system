@@ -1,10 +1,12 @@
-import { Box, Typography, ToggleButton, ToggleButtonGroup } from '@mui/material'
+import { Box, Typography, ToggleButton, ToggleButtonGroup, useMediaQuery, useTheme } from '@mui/material'
 import { useEffect, useState } from 'react'
 import { usePanelColors } from './utils'
 
 // 单个候选条
 function BarRow({ candidate, barVal, maxVal, color, showDdMode, ddScoringMode, isAlphaMu, inherited, ddTricks, ddImp, ddRate, ddMn, ddMx, vmin, vmax }) {
   const { isDark, colorMuted } = usePanelColors()
+  const theme = useTheme()
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   // IMP 模式：0 点不固定，随数据范围动态定位（负值少时 0 点靠左，避免左侧大片空白）
   const isImp = showDdMode && ddScoringMode === 'imp'
   const trackBg = isDark ? 'rgba(255,255,255,0.06)' : '#eee'
@@ -16,7 +18,7 @@ function BarRow({ candidate, barVal, maxVal, color, showDdMode, ddScoringMode, i
       <Typography variant="caption" sx={{ width: 28, flexShrink: 0, fontSize: '0.7rem', fontWeight: 600, color: isDark ? '#e0e0e0' : '#333' }}>
         {candidate.card}
       </Typography>
-      <Box sx={{ width: 360, flexShrink: 0, position: 'relative', height: 12, borderRadius: 0.5, overflow: 'hidden' }}>
+      <Box sx={{ width: isMobile ? '20%' : 360, minWidth: isMobile ? 48 : undefined, flexShrink: 0, position: 'relative', height: 12, borderRadius: 0.5, overflow: 'hidden' }}>
         {isImp ? (
           <>
             <Box sx={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${zP}%`, bgcolor: trackBg }} />
@@ -46,7 +48,7 @@ function BarRow({ candidate, barVal, maxVal, color, showDdMode, ddScoringMode, i
           </>
         )}
       </Box>
-      <Typography variant="caption" sx={{ flex: 1, minWidth: 0, fontSize: '0.65rem', color: colorMuted, textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      <Typography variant="caption" sx={{ flex: 1, minWidth: 0, fontSize: isMobile ? '0.6rem' : '0.65rem', color: colorMuted, textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {isAlphaMu
           ? `${((candidate.success_rate || 0) * 100).toFixed(0)}% · ${candidate.avg_tricks ?? '?'}墩 · ${candidate.success_count || 0}/${candidate.total_useful || '?'} · front${candidate.front_size || 1}${inherited ? ' · 继承' : ''}`
           : showDdMode

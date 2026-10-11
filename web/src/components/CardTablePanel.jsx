@@ -41,6 +41,8 @@ function CardTablePanel({
   onManualPlay,
   addBid,
   startBidding,
+  playPickerOpen,
+  onClosePlayPicker,
 }) {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
@@ -241,20 +243,6 @@ function CardTablePanel({
               )}
             </ToggleButtonGroup>
           )}
-          {showPlayPanel && toggleDDHints && allHandsComplete && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              {showDDHints && ddHintsLoading && (
-                <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary' }}>
-                  DD 分析中…
-                </Typography>
-              )}
-              <Tooltip title={showDDHints ? '隐藏DD提示' : '显示DD提示'} arrow>
-                <IconButton size="small" onClick={toggleDDHints} sx={{ p: 0.3 }}>
-                  {showDDHints ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-                </IconButton>
-              </Tooltip>
-            </Box>
-          )}
           {!showPlayPanel && isMobile && mode !== 'simulated' && (
           <Box sx={{ display: 'flex', gap: 0.5, ml: 'auto', borderLeft: '1px solid', borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)', pl: 1 }}>
             <Button
@@ -274,6 +262,15 @@ function CardTablePanel({
               sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5 }}
             >
               图片
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={onBmDeal}
+              disabled={loading}
+              sx={{ fontSize: '0.75rem', textTransform: 'none', height: 24, minWidth: 36, px: 0.5 }}
+            >
+              BM
             </Button>
           </Box>
           )}
@@ -354,6 +351,20 @@ function CardTablePanel({
                 />
               )}
             </>
+          )}
+          {showPlayPanel && toggleDDHints && allHandsComplete && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              {showDDHints && ddHintsLoading && (
+                <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.secondary' }}>
+                  DD 分析中…
+                </Typography>
+              )}
+              <Tooltip title={showDDHints ? '隐藏DD提示' : '显示DD提示'} arrow>
+                <IconButton size="small" onClick={toggleDDHints} sx={{ p: 0.3 }}>
+                  {showDDHints ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+                </IconButton>
+              </Tooltip>
+            </Box>
           )}
           {showPlayPanel && (
             <FormControlLabel
@@ -484,6 +495,8 @@ function CardTablePanel({
           fallbackModel={fallbackModel}
           playModel={playModel}
           playEngine={playEngine}
+          playPickerOpen={playPickerOpen}
+          onClosePlayPicker={onClosePlayPicker}
         />
       </Box>
     </Paper>

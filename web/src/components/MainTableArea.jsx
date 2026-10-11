@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react'
 import Box from '@mui/material/Box'
 import { PANEL_LAYOUT } from '../styles/constants'
 import CardTablePanel from './CardTablePanel'
@@ -61,10 +62,34 @@ export default function MainTableArea({
   onBackToBidding,
   onReviewPrev,
   onReviewNext,
+  onReviewSeek,
   onRewindToTrick,
   onReviewCompletedPlay,
   playTotalTime, // v1.61：打牌总耗时（秒，完成后计算）
 }) {
+  const { positionRoles } = useGame()
+  const { playState, showPlayPanel, playInitiated, isPlayPaused } = usePlay()
+
+  // 手动报牌选牌面板是否适用（人类回合、且该位置无手牌数据）
+  const manualPickerNeeded = useMemo(() => {
+    if (!showPlayPanel || !playState || !playInitiated) return false
+    if (playState.phase === 'complete') return false
+    const cp = playState.current_player
+    if (!cp) return false
+    const isHuman = positionRoles?.[cp] === 'human'
+      || (cp === playState.dummy && positionRoles?.[playState.contract?.declarer] === 'human')
+    if (!isHuman) return false
+    if (isPlayPaused && (playState.current_trick?.cards?.length || 0) === 0) return false
+    return (playState.hands?.[cp]?.length || 0) === 0
+  }, [showPlayPanel, playState, playInitiated, isPlayPaused, positionRoles])
+
+  // 手机端：选牌面板改为底部抽屉；桌面端：保留可拖拽浮动面板。每个决策点（轮到本家手动报牌）自动出现，可手动收起/重开
+  const pickerTurnKey = manualPickerNeeded
+    ? `${playState?.current_player}|${playState?.current_trick?.cards?.length || 0}`
+    : null
+  const [pickerDismissedKey, setPickerDismissedKey] = useState(null)
+  const playPickerOpen = manualPickerNeeded && pickerDismissedKey !== pickerTurnKey
+
   return (
     <Box sx={isMobile
       ? { display: 'flex', flexDirection: 'column', gap: 2 }
@@ -72,6 +97,8 @@ export default function MainTableArea({
     }>
       <CardTablePanel
         isMobile={isMobile}
+        playPickerOpen={playPickerOpen}
+        onClosePlayPicker={() => setPickerDismissedKey(pickerTurnKey)}
         declarer={declarer}
         finalContract={finalContract}
         directPlayContractInfo={directPlayContractInfo}
@@ -102,6 +129,9 @@ export default function MainTableArea({
 
       <RightPanelSwitcher
         isMobile={isMobile}
+        playPickerNeeded={manualPickerNeeded}
+        playPickerOpen={playPickerOpen}
+        onTogglePlayPicker={() => setPickerDismissedKey(playPickerOpen ? pickerTurnKey : null)}
         directPlayContractInfo={directPlayContractInfo}
         // 叫牌回调
         onStartPlay={onStartPlay}
@@ -125,6 +155,7 @@ export default function MainTableArea({
         onBackToBidding={onBackToBidding}
         onReviewPrev={onReviewPrev}
         onReviewNext={onReviewNext}
+        onReviewSeek={onReviewSeek}
         onRewindToTrick={onRewindToTrick}
         onReviewCompletedPlay={onReviewCompletedPlay}
         playTotalTime={playTotalTime}
@@ -136,6 +167,9 @@ export default function MainTableArea({
 // 右侧/下方面板切换：showPlayPanel 决定显示打牌面板还是叫牌面板
 function RightPanelSwitcher({
   isMobile,
+  playPickerNeeded,
+  playPickerOpen,
+  onTogglePlayPicker,
   directPlayContractInfo,
   // 叫牌回调
   onStartPlay,
@@ -158,6 +192,7 @@ function RightPanelSwitcher({
   onBackToBidding,
   onReviewPrev,
   onReviewNext,
+  onReviewSeek,
   onRewindToTrick,
   onReviewCompletedPlay,
   playTotalTime, // v1.61：打牌总耗时（秒，完成后计算）
@@ -230,12 +265,16 @@ function RightPanelSwitcher({
         reviewCursor={reviewCursor}
         onReviewPrev={onReviewPrev}
         onReviewNext={onReviewNext}
+        onReviewSeek={onReviewSeek}
         onBackToBidding={onBackToBidding}
         onRewindToTrick={onRewindToTrick}
         onReviewCompletedPlay={onReviewCompletedPlay}
         playTotalTime={playTotalTime}
         playEngine={playEngine}
         playStartTime={playStartTime}
+        playPickerNeeded={playPickerNeeded}
+        playPickerOpen={playPickerOpen}
+        onTogglePlayPicker={onTogglePlayPicker}
       />
     )
   }

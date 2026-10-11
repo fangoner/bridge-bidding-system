@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Box, Typography, Paper, Divider, Button, ToggleButtonGroup, ToggleButton, useTheme, Chip, Collapse, IconButton } from '@mui/material'
-import { KeyboardArrowDown, KeyboardArrowRight } from '@mui/icons-material'
+import { KeyboardArrowDown, KeyboardArrowRight, KeyboardDoubleArrowLeft, KeyboardDoubleArrowRight } from '@mui/icons-material'
 import { getSuitColor } from '../constants/suits'
 import { PANEL_LAYOUT } from '../styles/constants'
 import { formatTotalTime } from '../utils/format'
@@ -29,12 +29,16 @@ function PlayDetailPanel({
   reviewCursor,
   onReviewPrev,
   onReviewNext,
+  onReviewSeek,
   onRewindToTrick,
   onReviewCompletedPlay,
   onBackToBidding,
   playTotalTime, // v1.61：打牌总耗时（秒，打牌完成时计算）
   playEngine, // P1-10：当前打牌引擎（估算AI单张出牌预计耗时）
   playStartTime, // P1-10：打牌开始时间戳（打牌中实时显示本局已进行时长）
+  playPickerNeeded, // 手机端：是否需要手动报牌选牌面板
+  playPickerOpen, // 手机端：选牌抽屉是否展开
+  onTogglePlayPicker, // 手机端：切换选牌抽屉
 }) {
   const aiProgress = useAIProgress() // 任务化轮询实时进度文案（AI出牌阶段）
   const [selectedRecord, setSelectedRecord] = useState(null)
@@ -254,6 +258,10 @@ function PlayDetailPanel({
       accum += t.cards?.length || 0
     }
 
+    const trickSeekPoints = [...trickStartIndices, totalCards]
+    const prevTrickTarget = trickSeekPoints.reduce((acc, s) => (s < (reviewCursor || 0) ? s : acc), 0)
+    const nextTrickTarget = trickSeekPoints.find(s => s > (reviewCursor || 0)) ?? totalCards
+
     // 获取DD hint中某张牌的delta
     const getCardDelta = (ddHint, card) => {
       if (!ddHint) return null
@@ -304,10 +312,10 @@ function PlayDetailPanel({
             border: isCurrentTrick ? (isDark ? '1px dashed rgba(120, 144, 156, 0.5)' : '1px dashed #546e7a') : 'none',
           }}
         >
-          <Typography variant="caption" sx={{ fontWeight: 'bold', fontSize: '0.75rem', minWidth: 35 }}>
+          <Typography variant="caption" sx={{ fontWeight: 'bold', fontSize: '0.75rem', minWidth: 30 }}>
             {isCurrentTrick ? `${idx + 1}:...` : `${idx + 1}:${trick.winner || '?'}`}
           </Typography>
-          <Box sx={{ display: 'flex', gap: 0.25, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', gap: 0.2, flexWrap: 'wrap' }}>
             {trick.cards && trick.cards.map(([pos, card], cardIdx) => {
               const globalCardIdx = globalStartIdx + cardIdx
               const isAtCursor = reviewCursor != null && globalCardIdx === reviewCursor
@@ -346,7 +354,7 @@ function PlayDetailPanel({
                       ? (isDark ? 'rgba(255, 193, 7, 0.35)' : '#fff8e1')
                       : isSelected ? (isDark ? 'rgba(25, 118, 210, 0.3)' : '#bbdefb')
                       : (isDark ? 'rgba(255,255,255,0.08)' : 'white'),
-                    px: 0.25,
+                    px: 0.2,
                     borderRadius: 0.25,
                     border: isAtCursor
                       ? '2px solid #ffc107'
@@ -396,6 +404,9 @@ function PlayDetailPanel({
           </Box>
           {reviewCursor != null && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <IconButton size="small" title="后退一墩" onClick={() => onReviewSeek && onReviewSeek(prevTrickTarget)} disabled={!onReviewSeek || reviewCursor === 0} sx={{ p: 0 }}>
+                <KeyboardDoubleArrowLeft fontSize="small" />
+              </IconButton>
               <Button size="small" onClick={onReviewPrev} disabled={reviewCursor === 0}
                 sx={{ fontSize: '0.7rem', minWidth: 24, py: 0 }}>◀</Button>
               <Typography variant="caption" sx={{ fontSize: '0.75rem', fontWeight: 600, minWidth: 60, textAlign: 'center' }}>
@@ -404,6 +415,9 @@ function PlayDetailPanel({
               <Button size="small" onClick={onReviewNext}
                 disabled={reviewCursor >= totalCards}
                 sx={{ fontSize: '0.7rem', minWidth: 24, py: 0 }}>▶</Button>
+              <IconButton size="small" title="前进一墩" onClick={() => onReviewSeek && onReviewSeek(nextTrickTarget)} disabled={!onReviewSeek || reviewCursor >= totalCards} sx={{ p: 0 }}>
+                <KeyboardDoubleArrowRight fontSize="small" />
+              </IconButton>
               {onRewindToTrick && (
                 <Button size="small" color="warning" variant="outlined"
                   onClick={() => onRewindToTrick(reviewCursor)}
@@ -415,18 +429,28 @@ function PlayDetailPanel({
           )}
         </Box>
         <Collapse in={!collapsed}>
-          <Box sx={{ display: 'flex', gap: 1 }}>
+          <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 0.25 : 1 }}>
             <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
-              {allTricks.slice(0, 7).map((trick, idx) => renderTrickRow(trick, idx))}
+              {allTricks.slice(0, isMobile ? 13 : 7).map((trick, idx) => renderTrickRow(trick, idx))}
             </Box>
-            <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
-              {allTricks.slice(7).map((trick, idx) => renderTrickRow(trick, idx + 7))}
-            </Box>
+            {!isMobile && (
+              <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                {allTricks.slice(7).map((trick, idx) => renderTrickRow(trick, idx + 7))}
+              </Box>
+            )}
           </Box>
         </Collapse>
       </Box>
     )
   }
+
+  const timeInfoChip = (!isComplete && playStartTime != null && playInitiated) ? (
+    <Chip size="small" color="info" variant="outlined"
+      label={`⏱ 本局已进行：${formatTotalTime(elapsedSeconds)}${aiExpectedRange ? ` · AI单张预计 ${aiExpectedRange[0]}~${aiExpectedRange[1]}s` : ''}`}
+      sx={{ fontSize: '0.6rem', height: 22, whiteSpace: 'nowrap' }} />
+  ) : (isComplete && playTotalTime != null) ? (
+    <Chip size="small" color="success" variant="outlined" label={`⏱ 打牌总耗时：${formatTotalTime(playTotalTime)}`} sx={{ fontSize: '0.7rem', height: 22 }} />
+  ) : null
 
   return (
     <Paper elevation={0} sx={{
@@ -451,48 +475,51 @@ function PlayDetailPanel({
       overflow: 'hidden',
       boxSizing: 'border-box'
     }}>
-      {/* 标题栏：打牌详情 + 操作按钮 */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5, flexShrink: 0, height: 44, flexWrap: 'nowrap', gap: 0.5, overflow: 'hidden' }}>
-        <Typography variant="h6" sx={{ fontSize: '0.95rem', color: isDark ? '#e2e8f0' : undefined, flexShrink: 0 }}>打牌详情</Typography>
-        <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', flexShrink: 0 }}>
-          {!isComplete && playStartTime != null && playInitiated && (
-            <Chip size="small" color="info" variant="outlined"
-              label={`⏱ 本局已进行：${formatTotalTime(elapsedSeconds)}${aiExpectedRange ? ` · AI单张预计 ${aiExpectedRange[0]}~${aiExpectedRange[1]}s` : ''}`}
-              sx={{ fontSize: '0.6rem', height: 22, whiteSpace: 'nowrap', maxWidth: 240 }} />
-          )}
-          {!isComplete && !playInitiated && (
-            <Button variant="outlined" color="success" onClick={onBeginPlay} disabled={aiLoading} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.2 }}>开始打牌</Button>
-          )}
-          {!isComplete && playInitiated && isPaused && (isHistoryRecord || !isHumanTurn || isStartOfTrick) && (
-            <Button variant="outlined" color="primary" onClick={onResume} disabled={aiLoading} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.2 }}>继续</Button>
-          )}
-          {!isComplete && playInitiated && !isPaused && !isHumanTurn && (
-            <Button variant="outlined" color="warning" onClick={onPausePlay} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.2 }}>暂停</Button>
-          )}
-          {((!isComplete && playStarted) || (isComplete && !isHistoryRecord)) && onUndoPlay && (
-            <Button variant="outlined" color="secondary" onClick={onUndoPlay} disabled={aiLoading} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.2 }}>撤销</Button>
-          )}
-          {isComplete && !isHistoryRecord && onReviewCompletedPlay && (
-            <Button variant="contained" color="primary" onClick={onReviewCompletedPlay} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 48, py: 0.2 }}>复盘</Button>
-          )}
-          {onSave && (
-            <Button variant="outlined" color="info" size="small" onClick={onSave} disabled={!canSave} sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 40, py: 0.2 }}>保存</Button>
-          )}
-          {onResetPlay && (
-            <Button variant="outlined" color="error" size="small" onClick={onResetPlay} disabled={aiLoading} sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 56, py: 0.2 }}>重新打牌</Button>
-          )}
-          {onBackToBidding && (
-            <Button variant="outlined" size="small" onClick={onBackToBidding} disabled={aiLoading} sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: 56, py: 0.2, color: isDark ? '#94a3b8' : '#666', borderColor: isDark ? '#475569' : '#ccc' }}>返回叫牌</Button>
-          )}
+      {/* 标题栏：手机端标题与操作按钮同排、时间信息第二排居中；桌面端标题+时间一排、按钮一排 */}
+      <Box sx={{ display: 'flex', flexDirection: 'column', mb: 0.5, flexShrink: 0, gap: 0.5 }}>
+        <Box sx={{
+          display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap', minHeight: 24,
+          justifyContent: isMobile ? 'flex-start' : 'space-between',
+        }}>
+          <Typography variant="h6" sx={{ fontSize: '0.95rem', color: isDark ? '#e2e8f0' : undefined, flexShrink: 0 }}>打牌详情</Typography>
+          {!isMobile && timeInfoChip}
+          <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', flexWrap: 'wrap', '& .MuiButton-root': { px: isMobile ? 0.5 : undefined } }}>
+            {playPickerNeeded && onTogglePlayPicker && (
+              <Button variant={playPickerOpen ? 'contained' : 'outlined'} color="primary" onClick={onTogglePlayPicker} size="small"
+                sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: isMobile ? 42 : 56, py: 0.2 }}>
+                选牌
+              </Button>
+            )}
+            {!isComplete && !playInitiated && (
+              <Button variant="outlined" color="success" onClick={onBeginPlay} disabled={aiLoading} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: isMobile ? 42 : 40, py: 0.2 }}>开始</Button>
+            )}
+            {!isComplete && playInitiated && isPaused && (isHistoryRecord || !isHumanTurn || isStartOfTrick) && (
+              <Button variant="outlined" color="primary" onClick={onResume} disabled={aiLoading} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: isMobile ? 42 : 40, py: 0.2 }}>继续</Button>
+            )}
+            {!isComplete && playInitiated && !isPaused && !isHumanTurn && (
+              <Button variant="outlined" color="warning" onClick={onPausePlay} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: isMobile ? 42 : 40, py: 0.2 }}>暂停</Button>
+            )}
+            {((!isComplete && playStarted) || (isComplete && !isHistoryRecord)) && onUndoPlay && (
+              <Button variant="outlined" color="secondary" onClick={onUndoPlay} disabled={aiLoading} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: isMobile ? 42 : 40, py: 0.2 }}>撤销</Button>
+            )}
+            {isComplete && !isHistoryRecord && onReviewCompletedPlay && (
+              <Button variant="contained" color="primary" onClick={onReviewCompletedPlay} size="small" sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: isMobile ? 42 : 48, py: 0.2 }}>复盘</Button>
+            )}
+            {onSave && (
+              <Button variant="outlined" color="info" size="small" onClick={onSave} disabled={!canSave} sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: isMobile ? 42 : 40, py: 0.2 }}>保存</Button>
+            )}
+            {onResetPlay && (
+              <Button variant="outlined" color="error" size="small" onClick={onResetPlay} disabled={aiLoading} sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: isMobile ? 42 : 56, py: 0.2 }}>重打</Button>
+            )}
+            {onBackToBidding && (
+              <Button variant="outlined" size="small" onClick={onBackToBidding} disabled={aiLoading} sx={{ fontSize: '0.7rem', textTransform: 'none', minWidth: isMobile ? 42 : 56, py: 0.2, color: isDark ? '#94a3b8' : '#666', borderColor: isDark ? '#475569' : '#ccc' }}>返回</Button>
+            )}
+          </Box>
         </Box>
+        {isMobile && (
+          <Box sx={{ display: 'flex', justifyContent: 'center' }}>{timeInfoChip}</Box>
+        )}
       </Box>
-
-      {/* v1.61：打牌结束后显示打牌总耗时 */}
-      {isComplete && playTotalTime != null && (
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5, flexShrink: 0 }}>
-          <Chip size="small" color="success" variant="outlined" label={`⏱ 打牌总耗时：${formatTotalTime(playTotalTime)}`} sx={{ fontSize: '0.7rem', height: 22 }} />
-        </Box>
-      )}
 
       <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: isDark ? 'rgba(255,255,255,0.04)' : '#fafafa', borderRadius: 2, border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid #ddd', minHeight: 0, p: 1 }}>
 

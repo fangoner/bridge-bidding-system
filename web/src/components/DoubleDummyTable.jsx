@@ -29,15 +29,16 @@ function DoubleDummyTable({ tableData }) {
       width: '100%',
       fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", Roboto, sans-serif',
       fontWeight: 600,
-      fontSize: isMobile ? '0.9rem' : '0.9rem',
+      fontSize: isMobile ? '0.8rem' : '0.9rem',
+      lineHeight: isMobile ? 1.2 : undefined,
     }}>
       <Box className="bidding-header" sx={{
         display: 'flex',
         justifyContent: 'center',
-        gap: isMobile ? 1 : 0,
+        gap: isMobile ? 0.25 : 0,
         borderBottom: `2px solid ${theme.palette.text.primary}`,
-        paddingBottom: isMobile ? 1 : 1,
-        marginBottom: isMobile ? 0.5 : 1,
+        paddingBottom: isMobile ? 0.25 : 1,
+        marginBottom: isMobile ? 0.25 : 1,
         fontWeight: 'bold',
         color: theme.palette.text.primary,
         position: 'sticky',
@@ -51,7 +52,7 @@ function DoubleDummyTable({ tableData }) {
             sx={{
               flex: 1,
               textAlign: 'center',
-              minWidth: isMobile ? 30 : 50,
+              minWidth: isMobile ? 22 : 50,
             }}
           >
             {pos}
@@ -66,8 +67,8 @@ function DoubleDummyTable({ tableData }) {
           sx={{
             display: 'flex',
             justifyContent: 'center',
-            gap: isMobile ? 1 : 0,
-            padding: '4px 0',
+            gap: isMobile ? 0.25 : 0,
+            padding: isMobile ? '2px 0' : '4px 0',
             borderBottom: `1px solid ${theme.palette.divider}`,
             '&:last-child': {
               borderBottom: 'none',
@@ -82,7 +83,7 @@ function DoubleDummyTable({ tableData }) {
               sx={{
                 flex: 1,
                 textAlign: 'center',
-                minWidth: isMobile ? 30 : 50,
+                minWidth: isMobile ? 22 : 50,
                 fontWeight: 500,
                 color: theme.palette.text.primary,
                 backgroundColor: alpha(theme.palette.primary.main, 0.08),

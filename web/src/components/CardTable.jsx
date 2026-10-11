@@ -1,13 +1,14 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom';
-import { Box, Button, Chip, CircularProgress, ToggleButton, ToggleButtonGroup, Typography, IconButton, Tooltip, useTheme, useMediaQuery, alpha, Select, MenuItem, FormControl } from '@mui/material';
+import { Box, Button, Chip, CircularProgress, ToggleButton, ToggleButtonGroup, Typography, IconButton, Tooltip, useTheme, useMediaQuery, alpha, Select, MenuItem, FormControl, Drawer } from '@mui/material';
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
 import BorderColorIcon from '@mui/icons-material/BorderColor'
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted'
 
 import GridOnIcon from '@mui/icons-material/GridOn'
 import CameraAltIcon from '@mui/icons-material/CameraAlt'
-import HandDisplay from './HandDisplay';
+import HandDisplay, { PlayingCard } from './HandDisplay';
+import { CARD_ASPECT, MOBILE_CARD_WIDTH } from '../constants/cardLayout';
 import { getCardSuitColor } from '../constants/suits';
 import DoubleDummyTable from './DoubleDummyTable';
 import { isHumanPosition, hasAnyHuman, getHumanPositions, BRIDGE_POSITIONS } from '../utils/position';
@@ -93,6 +94,8 @@ function CardTable({
   fallbackModel,
   playModel,
   playEngine,
+  playPickerOpen = false,
+  onClosePlayPicker,
 }) {
   /** 手牌信息框中显示的角色/引擎标签 */
   const engineLabel = useCallback((isPlayPanel) => {
@@ -156,11 +159,11 @@ function CardTable({
   }
   const [selectedBidLevel, setSelectedBidLevel] = useState(null)
   const [bidBoxPos, setBidBoxPos] = useState({ left: 0, top: 0, ready: false }) // Portal fixed位置
-  const [mobileSelectedCard, setMobileSelectedCard] = useState(null) // 手机端双击出牌
+  const [mobileExpandedSuit, setMobileExpandedSuit] = useState(null)
   // 手动出牌输入已迁移为花色+牌点选择面板，无需 state
-  // 出牌人变化时清除手机端选中
+  // 出牌人变化时收起手机端展开的花色
   useEffect(() => {
-    setMobileSelectedCard(null)
+    setMobileExpandedSuit(null)
     setPlayPanelPos(null)
   }, [playState?.current_player])
 
@@ -226,8 +229,10 @@ function CardTable({
   // 旋转前：横向布局，宽=totalFanLength, 高=cardHeight
   // 旋转后：视觉宽=cardHeight≈62px, 视觉高=totalFanLength≈460px
   const infoBarHeight = 24 // 信息条估计高度（旋转后视觉宽度）
-  const centerBoxWidth = isMobile ? 152 : 220
-  const centerBoxHeight = isMobile ? 240 : 220
+  // 手机端中心面板收窄到 128：内部"当前墩"3 列网格仅需 122px（32+5+48+5+32），
+  // 小房子/叫牌表在 App.css 手机断点被固定为 4×26px；收窄后为东西手牌与信息条让出间距
+  const centerBoxWidth = isMobile ? 128 : 220
+  const centerBoxHeight = isMobile ? 172 : 220
   const centerBoxSize = 220 // 桌面版中心面板宽高（包含 HAND_GAP 布局）
 
   // 叫牌面板初始定位
@@ -580,19 +585,20 @@ function CardTable({
     }
 
     return (
-      <Box sx={{
+      <Box className="bidding-table" sx={{
         width: '100%',
         fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", Roboto, sans-serif',
-        fontSize: '0.9rem',
+        fontSize: isMobile ? '0.8rem' : '0.9rem',
+        lineHeight: isMobile ? 1.2 : undefined,
         fontWeight: 600,
       }}>
-        <Box sx={{
+        <Box className="bidding-header" sx={{
           display: 'flex',
           justifyContent: 'center',
-          gap: isMobile ? 1 : 0,
+          gap: isMobile ? 0.25 : 0,
           borderBottom: `2px solid ${theme.palette.text.primary}`,
-          paddingBottom: isMobile ? 1 : 1,
-          marginBottom: isMobile ? 0.5 : 1,
+          paddingBottom: isMobile ? 0.25 : 1,
+          marginBottom: isMobile ? 0.25 : 1,
           fontWeight: 'bold',
           color: textPrimary,
           position: 'sticky',
@@ -600,17 +606,17 @@ function CardTable({
           zIndex: 2,
         }}>
           {positions.map(pos => (
-            <Box key={pos} component="span" sx={{ flex: 1, textAlign: 'center', minWidth: isMobile ? 30 : 50, color: pos === dealer ? theme.palette.error.main : 'inherit' }}>
+            <Box key={pos} component="span" sx={{ flex: 1, textAlign: 'center', minWidth: isMobile ? 22 : 50, color: pos === dealer ? theme.palette.error.main : 'inherit' }}>
               {pos}
             </Box>
           ))}
         </Box>
         {rows.map((row, rowIndex) => (
-          <Box key={rowIndex} sx={{
+          <Box key={rowIndex} className="bidding-row" sx={{
             display: 'flex',
             justifyContent: 'center',
-            gap: isMobile ? 1 : 0,
-            padding: '4px 0',
+            gap: isMobile ? 0.25 : 0,
+            padding: isMobile ? '2px 0' : '4px 0',
             borderBottom: `1px solid ${theme.palette.divider}`,
             '&:last-child': { borderBottom: 'none' },
           }}>
@@ -626,7 +632,7 @@ function CardTable({
                   sx={{
                     flex: 1,
                     textAlign: 'center',
-                    minWidth: isMobile ? 30 : 50,
+                    minWidth: isMobile ? 22 : 50,
                     fontWeight: 500,
                     color: textPrimary,
                     backgroundColor: bid ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
@@ -805,6 +811,13 @@ function CardTable({
       return null
     }
     
+    const cardW = isMobile ? 32 : 44
+    const cardH = isMobile ? 44 : 60
+    const cardSuitFontSize = isMobile ? '8.6px' : '1.1rem'
+    const cardRankFontSize = isMobile ? '11.4px' : '1.1rem'
+    const centerCircleSize = isMobile ? 48 : 64
+    const trickInnerGap = isMobile ? '5px' : '10px'
+
     const renderCard = (position) => {
       const card = getCardAtPosition(position)
       const positionLabels = { '北': 'N', '东': 'E', '南': 'S', '西': 'W' }
@@ -815,8 +828,8 @@ function CardTable({
       if (!card || afterCursor) {
         return (
           <Box sx={{
-            width: 44,
-            height: 60,
+            width: cardW,
+            height: cardH,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -824,7 +837,7 @@ function CardTable({
             border: '1px dashed rgba(255,255,255,0.18)',
             borderRadius: '6px',
           }}>
-            <Typography sx={{ color: 'rgba(255,255,255,0.35)', fontSize: '0.7rem', fontWeight: 600 }}>
+            <Typography sx={{ color: 'rgba(255,255,255,0.35)', fontSize: isMobile ? '0.62rem' : '0.7rem', fontWeight: 600 }}>
               {positionLabels[position]}
             </Typography>
           </Box>
@@ -837,8 +850,8 @@ function CardTable({
         <Box
           onClick={() => canClick && onPlayCardClick(position, card)}
           sx={{
-            width: 44,
-            height: 60,
+            width: cardW,
+            height: cardH,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -855,9 +868,20 @@ function CardTable({
             '&:hover': canClick ? { transform: 'scale(1.05) translateY(-2px)', boxShadow: '0 4px 10px rgba(0,0,0,0.28)' } : {},
           }}
         >
-          <Typography sx={{ color, fontWeight: 'bold', fontSize: '1.1rem' }}>
-            {card.suit}{card.rank}
-          </Typography>
+          {isMobile ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: '1px' }}>
+              <Typography sx={{ color, fontWeight: 'bold', fontSize: cardSuitFontSize, lineHeight: 1 }}>
+                {card.suit}
+              </Typography>
+              <Typography sx={{ color, fontWeight: 'bold', fontSize: cardRankFontSize, lineHeight: 1 }}>
+                {card.rank}
+              </Typography>
+            </Box>
+          ) : (
+            <Typography sx={{ color, fontWeight: 'bold', fontSize: cardSuitFontSize }}>
+              {card.suit}{card.rank}
+            </Typography>
+          )}
         </Box>
       )
     }
@@ -870,22 +894,22 @@ function CardTable({
         justifyContent: 'center',
         height: '100%',
         width: '100%',
-        gap: '6px',
+        gap: isMobile ? '4px' : '6px',
       }}>
         <Box sx={{ display: 'flex', justifyContent: 'center' }}>
           {renderCard('北')}
         </Box>
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: trickInnerGap }}>
           {renderCard('西')}
-          <Box sx={{ width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', borderRadius: '50%', bgcolor: 'rgba(0,0,0,0.2)' }}>
+          <Box sx={{ width: centerCircleSize, height: centerCircleSize, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', borderRadius: '50%', bgcolor: 'rgba(0,0,0,0.2)' }}>
             {playInitiated && (aiLoading || (!isReview && !isComplete && !!current_player)) ? (
               <>
-                <CircularProgress size={58} sx={{ color: 'rgba(255,255,255,0.8)', position: 'absolute' }} />
+                <CircularProgress size={centerCircleSize - 6} sx={{ color: 'rgba(255,255,255,0.8)', position: 'absolute' }} />
                 <Box sx={{ position: 'absolute', textAlign: 'center', lineHeight: 1.1 }}>
-                  <Typography sx={{ fontSize: '0.8rem', fontWeight: 700, color: 'rgba(255,255,255,0.95)' }}>
+                  <Typography sx={{ fontSize: isMobile ? '0.68rem' : '0.8rem', fontWeight: 700, color: 'rgba(255,255,255,0.95)' }}>
                     {current_player || ''}
                   </Typography>
-                  <Typography sx={{ fontSize: '0.6rem', fontWeight: 600, color: 'rgba(255,255,255,0.75)' }}>
+                  <Typography sx={{ fontSize: isMobile ? '0.52rem' : '0.6rem', fontWeight: 600, color: 'rgba(255,255,255,0.75)' }}>
                     {aiThinkingSeconds.toFixed(1)}s
                   </Typography>
                 </Box>
@@ -893,20 +917,20 @@ function CardTable({
             ) : isReview ? (
               displayTrickIdx < 0 ? (
                 // 首攻（游标在第1墩开头）：显示首攻位置
-                <Typography sx={{ fontSize: '0.7rem', fontWeight: 600, color: 'rgba(255,255,255,0.75)', textAlign: 'center' }}>
+                <Typography sx={{ fontSize: isMobile ? '0.6rem' : '0.7rem', fontWeight: 600, color: 'rgba(255,255,255,0.75)', textAlign: 'center' }}>
                   {reviewCurrentPlayer || allPlayedFirstPos || '首攻'}<br/>出牌
                 </Typography>
               ) : (
-                <Typography sx={{ fontSize: '0.7rem', fontWeight: 'bold', color: '#ffc107', textAlign: 'center', lineHeight: 1.2 }}>
+                <Typography sx={{ fontSize: isMobile ? '0.6rem' : '0.7rem', fontWeight: 'bold', color: '#ffc107', textAlign: 'center', lineHeight: 1.2 }}>
                   第{reviewTrickNum}墩<br/>第{reviewCardInTrick}张
                 </Typography>
               )
             ) : (displayTrick?.cards?.length === 4 && getLastTrickWinner()) ? (
-              <Typography sx={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#ffeb3b' }}>
+              <Typography sx={{ fontSize: isMobile ? '0.68rem' : '0.8rem', fontWeight: 'bold', color: '#ffeb3b' }}>
                 {getLastTrickWinner()}赢
               </Typography>
             ) : !isComplete && current_player ? (
-              <Typography sx={{ fontSize: '0.7rem', fontWeight: 600, color: 'rgba(255,255,255,0.75)', textAlign: 'center' }}>
+              <Typography sx={{ fontSize: isMobile ? '0.6rem' : '0.7rem', fontWeight: 600, color: 'rgba(255,255,255,0.75)', textAlign: 'center' }}>
                 {current_player}<br/>出牌
               </Typography>
             ) : null}
@@ -1231,6 +1255,17 @@ function CardTable({
       && position === playState.dummy
       && playState.current_player !== playState.dummy
       && playState.phase !== 'complete'
+    // 手机端展开某花色时，本家整手牌暂时隐藏（其他花色消失），在原手牌位置展开该花色
+    const mobileExpandHand = playState?.hands?.[position] || []
+    const hideForMobileExpand = isMobile && showPlayPanel && !!mobileExpandedSuit
+      && playState?.current_player === position
+      && mobileExpandHand.some(c => c.suit === mobileExpandedSuit)
+    const mobileExpandRanks = hideForMobileExpand
+      ? mobileExpandHand.filter(c => c.suit === mobileExpandedSuit)
+        .map(c => c.rank).sort((a, b) => 'AKQJT98765432'.indexOf(a) - 'AKQJT98765432'.indexOf(b))
+      : []
+    const expandVertical = orientation === 'vertical'
+    const expandRotateDeg = expandVertical ? (popDirection === 'left' ? -90 : 90) : 0
     
     // 使用预计算的手牌（稳定引用，避免 HandDisplay 无效重渲染）
     const displayHand = displayHands[position] || hand
@@ -1292,6 +1327,8 @@ function CardTable({
           
           {/* 无手牌时显示牌背+选牌按钮，有手牌时显示正面 */}
           <Box sx={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Box onClick={hideForMobileExpand ? () => setMobileExpandedSuit(null) : undefined}
+              sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: hideForMobileExpand ? 0 : 1 }}>
             <HandDisplay
               hand={displayHand}
               position={position}
@@ -1302,20 +1339,10 @@ function CardTable({
               showContent={shouldShowHandContent(position)}
               hideTitle={true}
               playedCards={playedCardsSet}
-              clickable={showPlayPanel && isHuman && playState?.current_player === position && onHandCardClick}
-              onCardClick={isMobile ? (suit, rank) => {
-                const key = suit + rank
-                if (mobileSelectedCard === key) {
-                  // 第二次点击：出牌
-                  onHandCardClick(suit, rank)
-                  setMobileSelectedCard(null)
-                } else {
-                  // 第一次点击：选中
-                  setMobileSelectedCard(key)
-                }
-              } : onHandCardClick}
+              clickable={showPlayPanel && isHuman && playState?.current_player === position && onHandCardClick && !hideForMobileExpand}
+              onCardClick={isMobile ? (suit) => setMobileExpandedSuit(suit) : onHandCardClick}
               playableSet={playableCardSet}
-              selectedCardKey={isMobile ? mobileSelectedCard : null}
+              selectedCardKey={null}
               cardHints={cardHints}
               orientation={orientation}
               popDirection={popDirection}
@@ -1324,6 +1351,40 @@ function CardTable({
                 : playState?.current_player === position && !!onHandCardClick)}
               dimmed={isDummyDimmed}
             />
+            </Box>
+            {hideForMobileExpand && (
+              <Box sx={{
+                position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)', zIndex: 300,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5,
+                px: 0.5, pointerEvents: 'none',
+              }}>
+                <Box sx={{
+                  display: 'flex', flexDirection: expandVertical ? 'column' : 'row',
+                  gap: '2px', alignItems: 'center', pointerEvents: 'auto',
+                  width: 'fit-content',
+                }}>
+                  {mobileExpandRanks.map((rank) => (
+                    <Box key={rank} sx={{
+                      width: expandVertical ? MOBILE_CARD_WIDTH * CARD_ASPECT : MOBILE_CARD_WIDTH,
+                      height: expandVertical ? MOBILE_CARD_WIDTH : MOBILE_CARD_WIDTH * CARD_ASPECT,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                    }}>
+                      <Box sx={{ transform: `rotate(${expandRotateDeg}deg)` }}>
+                        <PlayingCard
+                          suit={mobileExpandedSuit}
+                          rank={rank}
+                          color={getCardSuitColor(mobileExpandedSuit)}
+                          size={MOBILE_CARD_WIDTH}
+                          isPlayable
+                          hint={cardHints?.[mobileExpandedSuit + rank]}
+                          onClick={() => { onHandCardClick(mobileExpandedSuit, rank); setMobileExpandedSuit(null) }}
+                        />
+                      </Box>
+                    </Box>
+                  ))}
+                </Box>
+              </Box>
+            )}
             {(showInput || showPlayHandInput) && (
               <Box sx={{
                 position: 'absolute',
@@ -1434,17 +1495,18 @@ function CardTable({
         : '100%',
       maxWidth: '100%',
       position: 'relative',
-      overflow: isMobile ? 'hidden' : 'visible',
+      overflow: 'visible',
       boxSizing: 'border-box',
       }}>
-      {/* 左上角工具栏：叫牌完成后的操作按钮（分两排） */}
+      {/* 左上角工具栏：叫牌完成后的操作按钮（桌面分两排，手机压成一排避免压住北家手牌） */}
       <Box sx={{
         position: 'absolute',
         top: 8,
         left: 8,
         zIndex: 10,
         display: 'flex',
-        flexDirection: 'column',
+        flexDirection: isMobile ? 'row' : 'column',
+        alignItems: isMobile ? 'center' : 'stretch',
         gap: 0.5,
       }}>
         {(() => {
@@ -1583,22 +1645,26 @@ function CardTable({
         right: 8,
         zIndex: 10,
         display: 'flex',
-        flexDirection: 'column',
-        gap: 0.3,
-        alignItems: 'stretch',
-        width: 100,
+        flexDirection: isMobile ? 'row' : 'column',
+        gap: isMobile ? 0.4 : 0.3,
+        alignItems: isMobile ? 'center' : 'stretch',
+        width: isMobile ? 'auto' : 100,
       }}>
-        <FormControl size="small" sx={{ width: '100%', bgcolor: isDark ? 'rgba(30,41,59,0.85)' : 'rgba(255,255,255,0.92)', borderRadius: 1 }}>
+        <FormControl size="small" sx={{ width: isMobile ? 58 : '100%', bgcolor: isDark ? 'rgba(30,41,59,0.85)' : 'rgba(255,255,255,0.92)', borderRadius: 1 }}>
           <Select
             value={vulnerability || 'NV'}
             onChange={(e) => setVulnerability && setVulnerability(e.target.value)}
-            sx={{ fontSize: '0.65rem', height: 20, color: isDark ? '#e2e8f0' : '#1a1a2e', '& .MuiSelect-select': { py: 0, px: 0.5 } }}
+            sx={{
+              fontSize: '0.68rem', height: 20, color: isDark ? '#e2e8f0' : '#1a1a2e',
+              '&& .MuiSelect-select': { py: '0 !important', pl: '4px !important', pr: '16px !important', minHeight: '0 !important', fontSize: '0.68rem !important', lineHeight: 1.2 },
+              '&& .MuiSelect-icon': { right: 2, fontSize: '0.8rem' },
+            }}
             disableUnderline
           >
-            <MenuItem value="NV" sx={{ fontSize: '0.65rem' }}>双无局</MenuItem>
-            <MenuItem value="NS" sx={{ fontSize: '0.65rem' }}>NS有局</MenuItem>
-            <MenuItem value="EW" sx={{ fontSize: '0.65rem' }}>EW有局</MenuItem>
-            <MenuItem value="All" sx={{ fontSize: '0.65rem' }}>双有局</MenuItem>
+            <MenuItem value="NV" sx={{ fontSize: '0.68rem' }}>双无局</MenuItem>
+            <MenuItem value="NS" sx={{ fontSize: '0.68rem' }}>NS有局</MenuItem>
+            <MenuItem value="EW" sx={{ fontSize: '0.68rem' }}>EW有局</MenuItem>
+            <MenuItem value="All" sx={{ fontSize: '0.68rem' }}>双有局</MenuItem>
           </Select>
         </FormControl>
         {(() => {
@@ -1611,28 +1677,44 @@ function CardTable({
             ? { '♠': '#e2e8f0', '♥': '#f87171', '♦': '#c4b5fd', '♣': '#e2e8f0', 'NT': '#e2e8f0' }[suit] || '#e2e8f0'
             : { '♠': '#1a1a2e', '♥': '#d32f2f', '♦': '#7c3aed', '♣': '#1a1a2e', 'NT': '#1a1a2e' }[suit] || '#1a1a2e'
           const doubledSuffix = contract.redoubled ? 'XX' : contract.doubled ? 'X' : contract.isRedouble ? 'XX' : contract.isDouble ? 'X' : ''
+          const contractChip = (
+            <Chip
+              label={`${contract.level || '?'}${suit}${doubledSuffix}`}
+              size="small"
+              sx={{ flex: isMobile ? 'none' : 1, height: 20, fontSize: '0.6rem', bgcolor: isDark ? 'rgba(30,41,59,0.85)' : 'rgba(255,255,255,0.92)', color: suitColor, fontWeight: 700, '& .MuiChip-label': { px: 0.3 } }}
+            />
+          )
+          const declarerChip = (
+            <Chip
+              label={`庄: ${contract.declarer || '?'}`}
+              variant="outlined"
+              size="small"
+              sx={{ flex: isMobile ? 'none' : 1, height: 20, fontSize: '0.6rem', bgcolor: isDark ? 'rgba(30,41,59,0.85)' : 'rgba(255,255,255,0.88)', color: isDark ? '#e2e8f0' : '#333', '& .MuiChip-label': { px: 0.3 } }}
+            />
+          )
+          const leadChip = showPlayPanel && imageOpeningLead ? (
+            <Chip
+              label={`首攻: ${imageOpeningLead}`}
+              size="small"
+              sx={{ width: isMobile ? 'auto' : '100%', height: 20, fontSize: '0.6rem', bgcolor: isDark ? 'rgba(69,26,3,0.55)' : 'rgba(255,243,205,0.92)', color: isDark ? '#fdba74' : '#e65100', fontWeight: 500, '& .MuiChip-label': { px: 0.3 } }}
+            />
+          ) : null
+          if (isMobile) {
+            return (
+              <Box sx={{ display: 'flex', gap: 0.4, alignItems: 'center' }}>
+                {contractChip}
+                {declarerChip}
+                {leadChip}
+              </Box>
+            )
+          }
           return (
             <>
               <Box sx={{ display: 'flex', gap: 0.5, width: '100%' }}>
-                <Chip
-                  label={`${contract.level || '?'}${suit}${doubledSuffix}`}
-                  size="small"
-                  sx={{ flex: 1, height: 20, fontSize: '0.6rem', bgcolor: isDark ? 'rgba(30,41,59,0.85)' : 'rgba(255,255,255,0.92)', color: suitColor, fontWeight: 700, '& .MuiChip-label': { px: 0.3 } }}
-                />
-                <Chip
-                  label={`庄: ${contract.declarer || '?'}`}
-                  variant="outlined"
-                  size="small"
-                  sx={{ flex: 1, height: 20, fontSize: '0.6rem', bgcolor: isDark ? 'rgba(30,41,59,0.85)' : 'rgba(255,255,255,0.88)', color: isDark ? '#e2e8f0' : '#333', '& .MuiChip-label': { px: 0.3 } }}
-                />
+                {contractChip}
+                {declarerChip}
               </Box>
-              {showPlayPanel && imageOpeningLead && (
-                <Chip
-                  label={`首攻: ${imageOpeningLead}`}
-                  size="small"
-                  sx={{ width: '100%', height: 20, fontSize: '0.6rem', bgcolor: isDark ? 'rgba(69,26,3,0.55)' : 'rgba(255,243,205,0.92)', color: isDark ? '#fdba74' : '#e65100', fontWeight: 500, '& .MuiChip-label': { px: 0.3 } }}
-                />
-              )}
+              {leadChip}
             </>
           )
         })()}
@@ -1708,10 +1790,10 @@ function CardTable({
             <InfoBar position="南" />
           </Box>
 
-          {/* 西家手牌：左溢出一半宽度，只显示靠中心的一半 */}
+          {/* 西家手牌：贴左边缘（整手牌与 DD hint 均保持在桌面内） */}
           <Box sx={{
             position: 'absolute',
-            left: '-37px', top: '50%',
+            left: 0, top: '50%',
             transform: 'translateY(-50%)',
             zIndex: 10,
           }}>
@@ -1730,10 +1812,10 @@ function CardTable({
             <InfoBar position="西" />
           </Box>
 
-          {/* 东家手牌：右溢出一半宽度，只显示靠中心的一半 */}
+          {/* 东家手牌：贴右边缘（整手牌与 DD hint 均保持在桌面内） */}
           <Box sx={{
             position: 'absolute',
-            right: '-37px', top: '50%',
+            right: 0, top: '50%',
             transform: 'translateY(-50%)',
             zIndex: 10,
           }}>
@@ -2113,10 +2195,10 @@ function CardTable({
             zIndex: 20,
             ...bottomStyle,
             display: 'flex',
-            flexDirection: 'column',
+            flexDirection: isMobile ? 'row' : 'column',
             gap: 0.5,
-            alignItems: 'stretch',
-            width: 100,
+            alignItems: isMobile ? 'center' : 'stretch',
+            width: isMobile ? 'auto' : 100,
           }}>
             <Box sx={{
               display: 'flex',
@@ -2152,7 +2234,7 @@ function CardTable({
                 label={`无${finalScores.nonVul >= 0 ? '+' : ''}${finalScores.nonVul} / 有${finalScores.vul >= 0 ? '+' : ''}${finalScores.vul}`}
                 size="small"
                 sx={{
-                  width: '100%',
+                  width: isMobile ? 'auto' : '100%',
                   height: 20,
                   fontSize: '0.6rem',
                   fontWeight: 600,
@@ -2165,6 +2247,11 @@ function CardTable({
           </Box>
         )
       })()}
+
+      {/* 手机端展开花色时的透明取消层：点桌面空白处返回（z-index 低于手牌层，不遮挡展开的牌） */}
+      {isMobile && mobileExpandedSuit && showPlayPanel && (
+        <Box onClick={() => setMobileExpandedSuit(null)} sx={{ position: 'absolute', inset: 0, zIndex: 5 }} />
+      )}
 
       {/* 人类无手牌时通过花色+牌点选择出牌（类似叫牌面板） */}
       {/* eslint-disable-next-line react-hooks/refs -- dragPanelRef 仅在事件处理器内读写 */}
@@ -2212,14 +2299,12 @@ function CardTable({
 
         const posStyle = playPanelPos
           ? { left: playPanelPos.x, top: playPanelPos.y }
-          : isMobile
-            ? { left: Math.max(8, window.innerWidth / 2 - 140), top: window.innerHeight - 170 }
-            : (() => {
-                const rect = tableRef.current?.getBoundingClientRect()
-                return rect
-                  ? { left: rect.right + 8, bottom: window.innerHeight - rect.bottom }
-                  : { right: 16, bottom: 100 }
-              })()
+          : (() => {
+              const rect = tableRef.current?.getBoundingClientRect()
+              return rect
+                ? { left: rect.right + 8, bottom: window.innerHeight - rect.bottom }
+                : { right: 16, bottom: 100 }
+            })()
 
         const onMouseDown = (e) => {
           if (e.button !== 0) return
@@ -2232,24 +2317,15 @@ function CardTable({
           setDragging(true)
         }
 
-        const panelContent = (
-          <Box sx={{
-            position: 'fixed', zIndex: 9999, ...posStyle,
-            bgcolor: isDark ? 'rgba(17,24,39,0.96)' : 'rgba(255,255,255,0.96)',
-            borderRadius: 3.56, p: isMobile ? 1 : 2.67,
-            border: '1px solid', borderColor: 'divider',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
-            display: 'flex', flexDirection: 'column', gap: 0.53,
-            cursor: dragging && dragTarget === 'play' ? 'grabbing' : 'auto',
-            maxWidth: isMobile ? '100vw' : 'none',
-          }}>
+        const pickerInner = (
+          <>
             <Box
               sx={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 0.5, gap: 1,
-                cursor: 'grab', userSelect: 'none',
-                '&:active': { cursor: 'grabbing' },
+                cursor: isMobile ? 'default' : 'grab', userSelect: 'none',
+                '&:active': { cursor: isMobile ? 'default' : 'grabbing' },
               }}
-              onMouseDown={onMouseDown}
+              onMouseDown={isMobile ? undefined : onMouseDown}
             >
               <Typography sx={{ fontSize: isMobile ? '0.9rem' : '1.51rem', fontWeight: 700, color: isDark ? '#e2e8f0' : '#333', flexShrink: 0 }}>
                 {cp}家 出牌{ledSuit ? ` (跟${ledSuit})` : ' (首攻)'}
@@ -2267,6 +2343,18 @@ function CardTable({
                 <Typography sx={{ fontSize: isMobile ? '0.75rem' : '1.05rem', color: isDark ? '#94a3b8' : '#888', userSelect: 'none' }}>
                   显示全部
                 </Typography>
+                {isMobile && (
+                  <Button size="small" onClick={onClosePlayPicker}
+                    sx={{ fontSize: '0.75rem', py: 0, px: 1, minWidth: 0, height: 24, textTransform: 'none' }}>
+                    收起
+                  </Button>
+                )}
+                {!isMobile && (
+                  <Button size="small" onClick={onClosePlayPicker}
+                    sx={{ fontSize: '0.95rem', py: 0, px: 1, minWidth: 0, height: 32, textTransform: 'none' }}>
+                    收起
+                  </Button>
+                )}
               </Box>
             </Box>
             {SUIT_ROWS.map(({ symbol, color }) => {
@@ -2320,6 +2408,45 @@ function CardTable({
                 </Box>
               )
             })}
+          </>
+        )
+
+        if (isMobile) {
+          return (
+            <Drawer
+              anchor="bottom"
+              open={!!playPickerOpen}
+              onClose={onClosePlayPicker}
+              hideBackdrop
+              ModalProps={{ keepMounted: true }}
+              PaperProps={{
+                sx: {
+                  bgcolor: isDark ? 'rgba(17,24,39,0.98)' : 'rgba(255,255,255,0.98)',
+                  borderRadius: '12px 12px 0 0',
+                  p: 1, pb: 1.5,
+                  display: 'flex', flexDirection: 'column', gap: 0.53,
+                  maxWidth: '100vw',
+                },
+              }}
+            >
+              {pickerInner}
+            </Drawer>
+          )
+        }
+
+        if (!playPickerOpen) return null
+
+        const panelContent = (
+          <Box sx={{
+            position: 'fixed', zIndex: 9999, ...posStyle,
+            bgcolor: isDark ? 'rgba(17,24,39,0.96)' : 'rgba(255,255,255,0.96)',
+            borderRadius: 3.56, p: 2.67,
+            border: '1px solid', borderColor: 'divider',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
+            display: 'flex', flexDirection: 'column', gap: 0.53,
+            cursor: dragging && dragTarget === 'play' ? 'grabbing' : 'auto',
+          }}>
+            {pickerInner}
           </Box>
         )
         return ReactDOM.createPortal(panelContent, document.body)

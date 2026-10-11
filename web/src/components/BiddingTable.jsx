@@ -22,11 +22,13 @@ function BiddingTable({ biddingSequence, dealer, onScreenshotBidding, screenshot
         color: theme.palette.text.secondary,
         fontStyle: 'italic',
         textAlign: 'center',
-        padding: 3,
+        padding: isMobile ? 1 : 3,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: 1.5,
+        gap: isMobile ? 1 : 1.5,
+        maxWidth: '100%',
+        boxSizing: 'border-box',
       }}>
         <Box>
           等待叫牌...<br />
@@ -47,7 +49,15 @@ function BiddingTable({ biddingSequence, dealer, onScreenshotBidding, screenshot
               }
             }}
             disabled={screenshotBiddingDisabled}
-            sx={{ textTransform: 'none', fontStyle: 'normal' }}
+            sx={{
+              textTransform: 'none',
+              fontStyle: 'normal',
+              fontSize: isMobile ? '0.62rem' : undefined,
+              px: isMobile ? 0.6 : undefined,
+              py: isMobile ? 0.2 : undefined,
+              minWidth: 0,
+              whiteSpace: 'nowrap',
+            }}
           >
             图片识别叫牌过程
           </Button>
@@ -92,15 +102,16 @@ function BiddingTable({ biddingSequence, dealer, onScreenshotBidding, screenshot
       width: '100%',
       fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", "Microsoft YaHei UI", Roboto, sans-serif',
       fontWeight: 600,
-      fontSize: isMobile ? '0.9rem' : '0.9rem',
+      fontSize: isMobile ? '0.8rem' : '0.9rem',
+      lineHeight: isMobile ? 1.2 : undefined,
     }}>
       <Box className="bidding-header" sx={{
         display: 'flex',
         justifyContent: 'center',
-        gap: isMobile ? 1 : 0,
+        gap: isMobile ? 0.25 : 0,
         borderBottom: `2px solid ${theme.palette.text.primary}`,
-        paddingBottom: isMobile ? 1 : 1,
-        marginBottom: isMobile ? 0.5 : 1,
+        paddingBottom: isMobile ? 0.25 : 1,
+        marginBottom: isMobile ? 0.25 : 1,
         fontWeight: 'bold',
         color: theme.palette.text.primary,
         position: 'sticky',
@@ -131,8 +142,8 @@ function BiddingTable({ biddingSequence, dealer, onScreenshotBidding, screenshot
           sx={{
             display: 'flex',
             justifyContent: 'center',
-            gap: isMobile ? 1 : 0,
-            padding: '4px 0',
+            gap: isMobile ? 0.25 : 0,
+            padding: isMobile ? '2px 0' : '4px 0',
             borderBottom: `1px solid ${theme.palette.divider}`,
             '&:last-child': {
               borderBottom: 'none',

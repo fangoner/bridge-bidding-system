@@ -2,6 +2,7 @@ import React, { useMemo } from 'react'
 import { Box, Typography, useTheme } from '@mui/material'
 import { styled } from '@mui/material/styles'
 import useMediaQuery from '@mui/material/useMediaQuery'
+import { FIXED_CARD_WIDTH, CARD_ASPECT, MOBILE_CARD_WIDTH } from '../constants/cardLayout'
 
 const HandTitle = styled(Typography)(({ theme }) => ({
   fontWeight: 700,
@@ -68,21 +69,26 @@ const SUIT_SYMBOLS = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '�
 const SUIT_ORDER = ['spades', 'hearts', 'diamonds', 'clubs']
 
 // ── 固定牌宽参数 ──
-const FIXED_CARD_WIDTH = 65  // 固定牌宽
-const CARD_ASPECT = 1.42   // 宽:高 ≈ 1:1.42 (桥牌比例)
 const FIXED_OVERLAP = 0.65  // 固定重叠比例
+const MOBILE_PEEK = 20
+const MOBILE_PEEK_NARROW = 17
+const MOBILE_SUIT_FONT = 8.6
+const MOBILE_RANK_FONT = 11.4
 
 /** 单张扑克牌面 */
-function PlayingCard({
+export function PlayingCard({
   suit, rank, color, size, isSelected, isPlayable, isPlayed, onClick, hint, style,
 }) {
+  const theme = useTheme()
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   // 统一比例：牌宽=size，牌高=size*1.42（正常竖向扑克牌）
   const cardW = size
   const cardH = size * CARD_ASPECT
   // 小牌（手机<65px）时缩小中央花色占比，加大角落字占比
   const isSmall = cardW < 50
   const fontSize = Math.max(5, cardW * (isSmall ? 0.15 : 0.20))
-  const smallFont = Math.max(5, cardW * (isSmall ? 0.28 : 0.22))
+  const smallFont = isMobile ? MOBILE_RANK_FONT : Math.max(5, cardW * (isSmall ? 0.28 : 0.22))
+  const smallSuitFont = isMobile ? MOBILE_SUIT_FONT : Math.max(4, smallFont * 0.75)
 
   return (
     <Box
@@ -118,7 +124,7 @@ function PlayingCard({
         display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1,
       }}>
         <Typography sx={{ fontSize: smallFont, fontWeight: 700, color, lineHeight: 1 }}>{rank}</Typography>
-        <Typography sx={{ fontSize: Math.max(4, smallFont * 0.75), color, lineHeight: 1 }}>{suit}</Typography>
+        <Typography sx={{ fontSize: smallSuitFont, color, lineHeight: 1 }}>{suit}</Typography>
       </Box>
 
       {/* 中央大号花色 */}
@@ -136,7 +142,7 @@ function PlayingCard({
         transform: 'rotate(180deg)',
       }}>
         <Typography sx={{ fontSize: smallFont, fontWeight: 700, color, lineHeight: 1 }}>{rank}</Typography>
-        <Typography sx={{ fontSize: Math.max(4, smallFont * 0.75), color, lineHeight: 1 }}>{suit}</Typography>
+        <Typography sx={{ fontSize: smallSuitFont, color, lineHeight: 1 }}>{suit}</Typography>
       </Box>
 
       {/* DD hint 小标签：统一放牌面本地左下角（rank+suit 在左上角，对侧边缘；四家旋转后均落在可见 peek 内） */}
@@ -206,9 +212,13 @@ function HandDisplay({
 
   // 固定牌宽和重叠比例
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
+  const isNarrowScreen = useMediaQuery('(max-width: 350px)')
   const { cardWidth, overlapRatio } = useMemo(() => {
-    return { cardWidth: isMobile ? Math.round(FIXED_CARD_WIDTH * 0.8) : FIXED_CARD_WIDTH, overlapRatio: FIXED_OVERLAP }
-  }, [isMobile])
+    if (!isMobile) return { cardWidth: FIXED_CARD_WIDTH, overlapRatio: FIXED_OVERLAP }
+    const width = MOBILE_CARD_WIDTH
+    const peek = isNarrowScreen ? MOBILE_PEEK_NARROW : MOBILE_PEEK
+    return { cardWidth: width, overlapRatio: 1 - peek / width }
+  }, [isMobile, isNarrowScreen])
 
   // 总牌面长度（含重叠）- 沿主轴方向
   const totalFanLength = useMemo(() => {
@@ -271,12 +281,14 @@ function HandDisplay({
                   zIndex: zIdx,
                   opacity: dimmed ? 0.4 : 1,
                   transition: 'opacity 0.2s ease',
+                  pointerEvents: 'none',
                 }}
               >
                 <Box
                   sx={{
                     transform: isVertical ? `rotate(${rotateDeg}deg)` : 'none',
                     transition: 'transform 0.15s ease',
+                    pointerEvents: 'auto',
                     '&:hover': canHover ? {
                       transform: isVertical
                         ? `translateX(${hoverDx}px) rotate(${rotateDeg}deg)`
