@@ -9,6 +9,33 @@ PURE = re.compile(r"^[A-Z]\d+$")
 RK = "AKQJT98765432"
 SUIT_CN = {"S": "♠", "H": "♥", "D": "♦", "C": "♣"}
 POS_CN = {"S": "南", "W": "西", "N": "北", "E": "东"}
+SINGLE_BID = re.compile(r"(?i)^(?:\d(?:nt|[cdhsn])|[prd]|db|rd|dbl|rdbl|pass)$")
+MULTI_BID = {"pass", "dbl", "rdbl", "db", "rd"}
+
+def split_bids(s):
+    out = []
+    i = 0
+    n = len(s)
+    while i < n:
+        ch = s[i]
+        if ch.isdigit():
+            if i + 1 < n and s[i + 1].isalpha():
+                out.append(s[i:i + 2])
+                i += 2
+            else:
+                out.append(ch)
+                i += 1
+        else:
+            j = i
+            while j < n and not s[j].isdigit():
+                j += 1
+            run = s[i:j]
+            if run.lower() in MULTI_BID:
+                out.append(run)
+            else:
+                out.extend(run)
+            i = j
+    return out
 
 def normalize_bid(b):
     if b in ("p", "P", "pass", "pass "):
@@ -54,30 +81,34 @@ def contract_and_declarer(mbs):
     return final
 
 DATS = {lvl: open(os.path.join(BASE, str(lvl), "Data"), "rb").read() for lvl in range(1, 6)}
+REC_MD = re.compile(rb"md\|([1234w])")
 
-def all_markers(lvl):
+def record_starts(lvl):
+    return [m.start() for m in REC_MD.finditer(DATS[lvl])]
+
+MARKERS = {lvl: record_starts(lvl) for lvl in range(1, 6)}
+
+def record_body(lvl, mpos):
     d = DATS[lvl]
-    out = []
-    i = 0
-    while True:
-        j = d.find(MARK, i)
-        if j < 0:
+    spos = mpos + 3
+    end = len(d)
+    for m2 in MARKERS[lvl]:
+        if m2 > mpos:
+            end = m2
             break
-        out.append(j)
-        i = j + 1
-    return out
-
-MARKERS = {lvl: all_markers(lvl) for lvl in range(1, 6)}
+    seg = d[spos:end]
+    hp, _, af = seg.partition(b"|")
+    return hp, af
 
 def valid_marker(lvl, mpos):
-    d = DATS[lvl]
-    spos = mpos + len(MARK)
-    hpart, _, after = d[spos:spos + 2500].partition(b"|")
-    h = hpart.decode("latin1", "replace")
+    b = record_body(lvl, mpos)
+    if b is None:
+        return False
+    h = b[0].decode("latin1", "replace")
     if len(h) < 1 or h[0] not in "1234w":
         return False
-    mbs = re.findall(rb"mb\|([^|]+)\|", after[:2000])
-    return len(mbs) >= 3
+    mbs = re.findall(rb"mb\|([^|]+)\|", b[1][:2000])
+    return len(mbs) >= 1
 
 def valid_markers(lvl):
     return [m for m in MARKERS[lvl] if valid_marker(lvl, m)]
@@ -193,7 +224,13 @@ def extract_explanation(after_md):
 def bids_from_after(after_md):
     cut = after_md.find(b"ha|")
     seg = after_md[:cut] if cut >= 0 else after_md
-    mbs = [m.decode("latin1") for m in re.findall(rb"mb\|([^|]+)\|", seg)]
+    mbs = []
+    for m in re.findall(rb"mb\|([^|]+)\|", seg):
+        v = m.decode("latin1")
+        if SINGLE_BID.match(v):
+            mbs.append(v)
+        else:
+            mbs.extend(split_bids(v))
     end = len(mbs)
     seen = False
     for j, b in enumerate(mbs):
@@ -205,16 +242,11 @@ def bids_from_after(after_md):
     return mbs[:end]
 
 def render_from_marker(level, lvl, mpos):
-    d = DATS[lvl]
-    spos = mpos + len(MARK)
-    end = len(d)
-    for m in MARKERS[lvl]:
-        if m > mpos:
-            end = m
-            break
-    seg = d[spos:end]
-    hpart, _, after_md = seg.partition(b"|")
-    md_str = hpart.decode("latin1")
+    b = record_body(lvl, mpos)
+    if b is None:
+        return None
+    md_str = b[0].decode("latin1")
+    after_md = b[1]
     hands = decode_hands_full(md_str)
     if hands is None:
         return None

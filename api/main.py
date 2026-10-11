@@ -1472,7 +1472,12 @@ async def bm_deal(deck_id: str = Query(..., description="牌局id，如 2-89 / 2
             return ImageDealResponse(hands={}, dealer="南", success=False, message="未找到 bm_deals.json，请先运行 tools/bm_import.py")
         with open(lib_path, "r", encoding="utf-8") as f:
             lib = json.load(f)
-        deal = lib.get("deals", {}).get(deck_id)
+        deals = lib.get("deals", {})
+        deal = deals.get(deck_id)
+        if not deal:
+            norm = re.sub(r"([A-Za-z])0+(\d+)$", r"\1\2", deck_id.strip())
+            if norm != deck_id:
+                deal = deals.get(norm)
         if not deal:
             return ImageDealResponse(hands={}, dealer="南", success=False, message=f"未找到牌局 {deck_id}")
         decl = deal.get("declarer")

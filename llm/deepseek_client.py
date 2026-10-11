@@ -223,7 +223,7 @@ class DeepSeekClient:
                     ok_msg = f"[DeepSeek] OK in {elapsed:.1f}s response_chars={len(content)} finish_reason={response.choices[0].finish_reason} (no usage)"
                 print(ok_msg)
                 _logger.info(ok_msg)
-                parsed = json.loads(content)
+                parsed = json.loads(content, strict=False)
                 # schema.required 字段校验：缺失则重试（最后一次尝试仍缺失时返回，交由上层规则库兜底）
                 missing_fields = []
                 if schema and schema.get("required"):
@@ -237,11 +237,12 @@ class DeepSeekClient:
                     _logger.warning(warn_msg)
                     continue
                 return parsed
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
                 # LLM 输出不合规 JSON：重试大概率同样失败，直接返回错误（含原文便于诊断）
-                fail_msg = f"[DeepSeek] JSON 解析失败 response_chars={len(content)}"
+                fail_msg = f"[DeepSeek] JSON 解析失败 response_chars={len(content)} error={e}"
                 print(fail_msg)
                 _logger.error(fail_msg)
+                _logger.error(f"[DeepSeek] JSON 解析失败原始输出:\n{(content or '')[:4000]}")
                 return {"raw_response": content, "error": "JSON解析失败"}
             except KeyError:
                 fail_msg = "[DeepSeek] 响应结构异常（缺 choices/message/content）"

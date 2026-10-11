@@ -373,7 +373,7 @@ class BiddingService:
             self._last_prompt = prompt
 
             try:
-                result = self.llm_client.chat_bidding(prompt, temperature=MAIN_PROMPT_TEMPERATURE, thinking=self._use_reasoning)
+                result = self.llm_client.chat_bidding(prompt, temperature=MAIN_PROMPT_TEMPERATURE, thinking=self._use_reasoning, max_tokens=8192)
                 # P0-5 修复：chat_json 失败返回 error dict（不再静默回落 chat()），
                 # 此处转为异常走统一错误路径（前端 502 提示重试，而非把空结果当正常叫品）
                 if result.get("error"):
@@ -494,7 +494,7 @@ class BiddingService:
         verbose: bool = False,
         progress_cb=None,
         prompt_template=None,
-        max_tokens: int = None,
+        max_tokens: int = 8192,
     ) -> Dict:
         actual_jf_content = jf_content
         actual_subsequent_bids = subsequent_bids_str
