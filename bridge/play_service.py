@@ -31,6 +31,17 @@ from config import (
 _CLEAR_TRUMP_EPS = 0.03
 
 
+def _make_rate(c: Dict[str, Any], need: int) -> Optional[float]:
+    """候选牌做成率（全样本）：优先 success_rate，否则 scores 中达成所需墩的世界占比。"""
+    sr = c.get("success_rate")
+    if sr is not None:
+        return float(sr)
+    scores = c.get("scores")
+    if not scores:
+        return None
+    return sum(1 for s in scores if s >= need) / len(scores)
+
+
 class PlayService:
 
     def __init__(self, llm_client):
@@ -1786,7 +1797,7 @@ class PlayService:
             # 段3 飞牌介入
             if not FINESSE_DEFER_ENABLE:
                 return result
-            return self._finesse_lead(state, result, ratio)
+            return self._finesse_lead(state, result)
         # 跟牌：接应链。无损清将仅领出侧适用（跟牌是回应已领之花色，无
         # "选择先清将"余地）。结构识别以当墩探针为准，但探针门控只在领出侧
         # 生效（跟牌时 trick_cards 非空 → 探针必然判空），故并入本墩登记
@@ -1795,9 +1806,7 @@ class PlayService:
             return result
         fs = self._detect_finesse_struct(state, result)
         fs = self._registry_finesse_struct(state, fs)
-        forced = self._finesse_commit_check(state, fs)
-        if forced:
-            result, _committed = self._apply_finesse_commit(state, result, fs, ratio)
+        result, _committed = self._apply_finesse_commit(state, result, fs, ratio)
         return result
 
     def _clear_trump_lead(self, state: PlayState,
@@ -1934,22 +1943,21 @@ class PlayService:
         need = state.contract.tricks_needed
         if not candidates:
             return 1.0
-        scores = candidates[0].get("scores") or []
-        if not scores:
-            return 1.0
-        return sum(1 for x in scores if x >= need) / len(scores)
+        r = _make_rate(candidates[0], need)
+        return r if r is not None else 1.0
 
-    def _finesse_lead(self, state: PlayState, result: Dict[str, Any],
-                      ratio: float) -> Dict[str, Any]:
-        """飞牌介入分支·领出侧（v2.03 顺序定调：结构探测确认 → 稳成检测 → 押桶成榜首）。
+    def _finesse_lead(self, state: PlayState, result: Dict[str, Any]) -> Dict[str, Any]:
+        """飞牌介入分支·领出侧（v2.03 顺序定调：结构探测确认 → 押桶成榜首）。
 
-                执行顺序（2026-09-21 用户定调"先确认后稳成"）：
+        前置条件（2026-10-15 明确）：**调用方必须已过段1 稳成门**——本函数
+        不再自带稳成检测，稳成判定统一由 `_intervene` 段1 承担（_top1_make
+        ≥ FINESSE_NEC_MAKE_HIGH 时在总入口即 return，本函数收不到全达标候选）。
+        此前内置的复制块产线不可达，其配套用例还断言了产线不会发生的印章与
+        登记（误导性规格），故删除；改由 docstring 显式声明契约。
+
+        执行顺序：
           ① 结构探测（本侧+伙伴侧）→ _probe_finesse_ok 逐条确认 → 确认结构池
-          ② 稳成检测：引擎 top1 做成率 ≥100% → 用**已确认**池判断引擎领出
-             是否在飞牌花色（在则仅登记本墩接应，不在则提前退让）
-          ③ 未稳成 → _probe_lead_finesse_prefer 全局押桶成榜首 + 榜首门控
-        稳成检测必须后置于结构确认：未确认探针（如防家仍有更大牌的对象）
-        不能作为"引擎 top1 是否在飞牌花色"的判断依据。
+          ② _probe_lead_finesse_prefer 全局押桶成榜首 + 榜首门控
         """
         full_output = result.get("full_output", {})
         # 结构探测（2026-09-10）：本侧 + 队友侧（仅领出方为庄/明手时探测）全部
@@ -2026,33 +2034,6 @@ class PlayService:
             full_output["伙伴探针"] = partner
         if confirm:
             full_output["_probe_confirm"] = confirm
-        # 稳成检测（v2.03 定调·后置于结构确认）：引擎 top1 做成率 ≥100% 直接
-        # 退让，不做榜单改出。与**已确认**结构池对比（结构探测+_probe_finesse_ok
-        # 已先行完成）——仅当引擎领出牌花色在该确认池中才登记本墩接应，杜绝
-        # 未确认探针（如防家仍有更大牌的对象）被借用于登记（2026-09-21 用户
-        # 指出：未确认探针不能作为"top1 是否在飞牌花色"的判断依据）。
-        if candidates and self._top1_make(state, candidates) >= FINESSE_NEC_MAKE_HIGH:
-            cur_str = str(result.get("card") or "")
-            if cur_str and cur_str[0] in struct_stack:
-                suit = cur_str[0]
-                info = struct_stack[suit][0]
-                obj = info.get("对象")
-                if obj is not None and not self._finesse_obj_played(state, suit, obj):
-                    self._register_finesse_flow(state, suit, obj, info)
-                    full_output["领出飞牌"] = {"引发": True, "花色": suit,
-                                               "对象": obj, "Δ": info.get("Δ"),
-                                               "领出": cur_str,
-                                               "说明": "稳成且引擎已在飞牌花色（结构已确认），登记供本墩接应"}
-                else:
-                    full_output["领出飞牌"] = {"引发": True, "花色": suit,
-                                               "对象": obj, "Δ": info.get("Δ"),
-                                               "领出": cur_str,
-                                               "说明": "稳成，引擎领出飞牌花色（结构已确认），尊重引擎"}
-                result["full_output"] = full_output
-                return result
-            full_output["领出飞牌"] = {"引发": False, "说明": "稳成（引擎top1成约≥100%），提前退让"}
-            result["full_output"] = full_output
-            return result
         # 全部引牌候选明细（2026-09-21 用户要求：打牌结果显示所有候选引牌的
         # 押桶成，不只胜出的榜首）：{花色: [{引牌, 对象, 押桶成, 方向, Δ,
         # 组合飞, 过手牌, 侧}]}，依探测通过顺序原样记录。
@@ -2084,7 +2065,7 @@ class PlayService:
         # 榜首 + 榜首单独过门控（比值单调性论证），改出榜首并登记。
         if candidates:
             prefer = self._probe_lead_finesse_prefer(
-                state, struct_stack, candidates, ratio, result)
+                state, struct_stack, candidates, result)
             if prefer:
                 pick, why = prefer
                 org_str = cur_str
@@ -2366,7 +2347,7 @@ class PlayService:
         return reentry[0], f"{gate_why}；动作：过手给队友引飞（引牌{partner_lead}）"
 
     def _probe_lead_finesse_prefer(self, state: PlayState, struct_stack: Dict[str, List[Dict[str, Any]]],
-                                   candidates: List[Dict[str, Any]], ratio: float,
+                                   candidates: List[Dict[str, Any]],
                                    result: Dict[str, Any]) -> Optional[Tuple[str, str]]:
         """窗口期主动启动飞牌（v2.13 门控改全样本 + 顺延过闸）。
 
@@ -2549,14 +2530,6 @@ class PlayService:
             ranked.append((key, (act, info, s)))
         ranked.sort(key=lambda kv: kv[0], reverse=True)
         return [t for _, t in ranked]
-
-    def _subset_select(self, state: PlayState,
-                       candidates: List[Dict[str, Any]],
-                       passed: List[Tuple[str, Dict[str, Any], str]],
-                       ) -> Optional[Tuple[str, Dict[str, Any], str]]:
-        """押桶成榜首选择（兼容包装）：取 _subset_select_all 排序后的首个。"""
-        ranked = self._subset_select_all(state, candidates, passed)
-        return ranked[0] if ranked else None
 
     def _finesse_commit_check(self, state: PlayState,
                               finesse_struct: Dict[str, Any]) -> Optional[Tuple[str, str]]:
@@ -2787,28 +2760,20 @@ class PlayService:
 
     def _finesse_ratio_ok(self, state: PlayState, candidates: List[Dict[str, Any]],
                           a_card: str, ratio: float,
-                          b_card: Optional[str] = None,
-                          a_make_override: Optional[float] = None) -> bool:
+                          b_card: Optional[str] = None) -> bool:
         """比值退让统一判据：做成率优先、决策值兜底（三处飞牌干预共用）。
 
         段1 做成率（success_rate / scores 相对所需墩达成占比，双方可算且参照>0）：
             比值 = 动作牌达成率 / 参照达成率，< ratio 退让（尊重引擎）；
             参照制成率≤0（双方都无法成约）时进入段2，避免二值失真。
         段2 决策值（scoring_val → avg_tricks）：比值 < ratio 退让。
-        a_make_override：外部口径的动作做成率（v1.93 伙伴侧门控传引牌押注
-        方向半桶做成率），非 None 时段1 用它替代动作牌引擎评估值。
         无数据 / 参照≤0 / 动作≥参照 → 不干预（维持动作）。
         返回 True=差距可接受（维持动作）；False=退让、尊重引擎。
         """
+        need = state.contract.tricks_needed
+
         def _make(c: Dict[str, Any]) -> Optional[float]:
-            sr = c.get("success_rate")
-            if sr is not None:
-                return float(sr)
-            scores = c.get("scores")
-            if not scores:
-                return None
-            need = state.contract.tricks_needed
-            return sum(1 for s in scores if s >= need) / len(scores)
+            return _make_rate(c, need)
 
         def _val(c: Dict[str, Any]) -> float:
             v = c.get("scoring_val")
@@ -2826,7 +2791,7 @@ class PlayService:
         if a is None:
             return True
         # 段1：做成率优先
-        am = a_make_override if a_make_override is not None else _make(a)
+        am = _make(a)
         if am is not None:
             ref_m = None
             if b_card is not None:

@@ -5,7 +5,10 @@ _garrison_target、nine_cash_bank、FINESSE_EIGHT_NINE_ENABLE 全部删除——
 DD 做成率口径的段2 无损清将 + 段4 飞牌介入已覆盖抓 Q/顶张兑现，规则式
 9砸 属受限式修正被卸除（项目铁律；9砸 曾为"差距大也照砸"的静态规则）。
 剩余用例覆盖：
-  · 段4 飞牌介入：启动/过手/终选/比值退让/稳成退让
+  · 段4 飞牌介入：启动/过手/终选/比值退让
+  · 段1 稳成闭嘴（2026-10-15 迁移）：t19/t20 直调 _intervene，断言稳成时
+    原样返回/不登记/无印章（旧用例直调 _finesse_lead，断言的是产线不会
+    发生的印章与登记，属误导性规格）
   · 接应退让判据（2026-09-25 两步，删 0.05 强制分支与同花色①②分流）：
     第一步 b_押注 ≥0.50 且 ≥非押注桶 → 退让引擎（B26 型）；
     不满足 → 第二步 flyer/top_alt 比值 0.75（≥0.75 强制）
@@ -88,7 +91,7 @@ def t10_exit_after_cash():
                   tricks=[hist])
     res = mk_result(Card("♥", "3"), [cand("♥3", 11.0)])
     res["full_output"]["finesse_probe"] = {}
-    out = ps_new()._finesse_lead(st, res, 0.6)
+    out = ps_new()._finesse_lead(st, res)
     fo = out.get("full_output") or {}
     ok = (str(out["card"]) == "♥3"
           and fo.get("领出飞牌", {}).get("说明") == "无飞牌结构"
@@ -151,7 +154,7 @@ def t16_partner_overhand_fail_back_to_local():
     base = {"♣": [_probe_entry("♣", 13, "♣2", 0.5),
                   _probe_entry("♣", 13, "♣9", 0.9, side="伙伴侧")]}
     res = mk_result(Card("♥", "Q"), cands)
-    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
+    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, res)
     ok = (got is not None and got[0] == "♣2"
           and st.finesse_flow.get("♣") == 13)
     return ok, (f"过手失败弹栈→回退本侧直飞♣2+登记（got {got}, flow={st.finesse_flow}）")
@@ -162,7 +165,7 @@ def t17_all_rejected():
     cands = [cand("♥A", 0.9), cand("♣2", 0.4)]
     base = {"♣": [_probe_entry("♣", 13, "♣2", 0.5)]}
     res = mk_result(Card("♥", "A"), cands)
-    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
+    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, res)
     return got is None, f"全被否（0.44<0.70）→ 尊重引擎（got {got}）"
 
 
@@ -172,43 +175,57 @@ def t18_multi_action_final_select():
     base = {"♣": [_probe_entry("♣", 13, "♣2", 0.4)],
             "♦": [_probe_entry("♦", 11, "♦2", 0.2)]}
     res = mk_result(Card("♥", "Q"), cands)
-    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
+    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, res)
     ok = (got is not None and got[0] == "♣2"
           and st.finesse_flow.get("♣") == 13)
     return ok, f"两花色均过闸→终选引擎判据选♣2 登记♣（got {got}, flow={st.finesse_flow}）"
 
 
-def t19_stable_exit_no_touch():
+def t19_intervene_stable_win_shuts_down():
+    """稳成 → 介入层完全闭嘴（2026-10-15 从直调 _finesse_lead 迁移到 _intervene）。
+
+    旧用例直调 _finesse_lead，断言产线**永不出现**的「提前退让」印章（稳成时
+    _intervene 直接 return，不写 full_output["领出飞牌"]）——属误导性规格。本用例
+    改走真实产线入口 _intervene，断言真实语义：result 原样返回、不登记
+    finesse_flow、full_output 无「领出飞牌」印章。
+    """
     st = mk_state({"♣": "A2", "♥": "Q3"}, {"♣": "43", "♥": "J4"})
     cands = [cand("♥3", 1.0, scores=[8] * 10), cand("♣2", 0.9, scores=[8] * 10)]
     res = mk_result(Card("♥", "3"), cands)
     res["full_output"]["finesse_probe"] = {
         "♣": {"对象": "K", "Δ": 0.5, "引牌": "♣2",
               "全": [{"对象": "K", "Δ": 0.5, "引牌": "♣2"}]}}
-    out = ps_new()._finesse_lead(st, res, 0.75)
+    out = ps_new()._intervene(st, res, 0.75)
     fo = out.get("full_output") or {}
     ok = (str(out["card"]) == "♥3"
           and not getattr(st, "finesse_flow", {})
-          and "提前退让" in (fo.get("领出飞牌", {}).get("说明") or ""))
-    return ok, (f"稳成≥95%→提前退让不登记（card={out['card']}, "
-                f"flow={getattr(st, 'finesse_flow', None)}, 说明={fo.get('领出飞牌', {}).get('说明')}）")
+          and "领出飞牌" not in fo)
+    return ok, (f"稳成→完全闭嘴（card={out['card']}, "
+                f"flow={getattr(st, 'finesse_flow', None)}, "
+                f"印章={fo.get('领出飞牌')}）")
 
 
-def t20_stable_but_engine_leading_finesse():
-    # 真飞结构：南♣A3 / 北♣Q2，防家 ♣K(对象)+J，对侧 G=北 Q=12
-    # 满足 K(13) > Q(12) > max_enemy J(11) — 过 _probe_finesse_ok 确认
+def t20_intervene_stable_win_registers_nothing():
+    """稳成且引擎领出**已确认飞牌花色** → 同样不登记（修正旧规格，2026-10-15）。
+
+    旧用例（直调 _finesse_lead）断言此时会登记 finesse_flow 且打「引发」印章，
+    与产线相抵触（段1 稳成即 return）。本用例锁定真实行为：不登记、无印章。
+    真飞结构：南♣A3 / 北♣Q2，防家 ♣K(对象)+J，对侧 G=北 Q=12 →
+    K(13) > Q(12) > max_enemy J(11)，可过 _probe_finesse_ok。
+    """
     st = mk_state({"♣": "A3", "♥": "Q3"}, {"♣": "Q2", "♥": "J4"})
     cands = [cand("♣3", 0.9, scores=[8] * 10), cand("♥3", 1.0, scores=[8] * 10)]
     res = mk_result(Card("♣", "3"), cands)
     res["full_output"]["finesse_probe"] = {
         "♣": {"对象": "K", "Δ": 0.5, "引牌": "♣3",
               "全": [{"对象": "K", "Δ": 0.5, "引牌": "♣3"}]}}
-    out = ps_new()._finesse_lead(st, res, 0.75)
+    out = ps_new()._intervene(st, res, 0.75)
     fo = out.get("full_output") or {}
     ok = (str(out["card"]) == "♣3"
-          and st.finesse_flow.get("♣") == 13
-          and fo.get("领出飞牌", {}).get("引发") is True)
-    return ok, f"稳成且引擎在已确认飞牌花色→登记接应（flow={st.finesse_flow}）"
+          and not getattr(st, "finesse_flow", {})
+          and "领出飞牌" not in fo)
+    return ok, (f"稳成且引擎在飞牌花色→不登记（flow={getattr(st, 'finesse_flow', None)}, "
+                f"印章={fo.get('领出飞牌')}）")
 
 
 def t21_delta_not_in_select():
@@ -217,7 +234,7 @@ def t21_delta_not_in_select():
     base = {"♣": [_probe_entry("♣", 13, "♣2", 0.3),
                   _probe_entry("♣", 12, "♣5", 0.9)]}
     res = mk_result(Card("♥", "Q"), cands)
-    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
+    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, res)
     ok = (got is not None and got[0] == "♣2")
     return ok, f"Δ只当门票：Δ0.9 的♣5 未胜出，引擎判据选价值高的♣2（got {got}）"
 
@@ -267,7 +284,7 @@ def t24_reverse_route_duel():
                   _probe_entry("♦", 12, "♦J", 0.20, side="伙伴侧",
                                direction="东", bucket=0.405)]}
     res = mk_result(Card("♥", "Q"), cands)
-    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
+    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, res)
     ok = (got is not None and got[0] == "♦4"
           and st.finesse_flow.get("♦") == 12)
     return ok, (f"反向路线对决（v2.13 全样本分子）：押西0.553>押东0.405 "
@@ -284,7 +301,7 @@ def t25_local_bucket_molecule():
              cand("♣2", 0.9, scores=[8] * 9 + [6])]
     base = {"♣": [_probe_entry("♣", 13, "♣2", 0.3, direction="西", bucket=0.8)]}
     res = mk_result(Card("♥", "Q"), cands)
-    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
+    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, res)
     ok = (got is not None and got[0] == "♣2"
           and st.finesse_flow.get("♣") == 13)
     # 对照：全样本 low（0）但押桶成仍 0.8 → 退让尊重引擎（独立 state）
@@ -292,7 +309,7 @@ def t25_local_bucket_molecule():
     cands_bad = [cand("♥Q", 1.0, scores=[8] * 10),
                  cand("♣2", 0.5, scores=[6] * 10)]
     res_bad = mk_result(Card("♥", "Q"), cands_bad)
-    got_bad = ps_new()._probe_lead_finesse_prefer(st_bad, base, cands_bad, 0.75, res_bad)
+    got_bad = ps_new()._probe_lead_finesse_prefer(st_bad, base, cands_bad, res_bad)
     ok = ok and got_bad is None and not st_bad.finesse_flow
     return ok, (f"门控分子=全样本：♣2 全样本0.9≥0.85×榜首1.0 过闸启动；"
                 f"对照全样本0（押桶成假高0.8）被拒（got高分={got}, "
@@ -492,7 +509,7 @@ def t35_final_select_bucket_rank():
     base = {"♦": [_probe_entry("♦", 13, "♦2", 0.9, direction="西", bucket=0.75),
                   _probe_entry("♦", 13, "♦J", 0.9, direction="西", bucket=0.85)]}
     res = mk_result(Card("♥", "Q"), cands)
-    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
+    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, res)
     ok = (got is not None and got[0] == "♦J"
           and st.finesse_flow.get("♦") == 13)
     return ok, (f"终选押桶成排序（v2.13 全样本门控）：♦J 押桶0.85>♦2 的0.75 胜出，"
@@ -510,7 +527,7 @@ def t36_engine_already_leading_finesse_register():
         "♦": {"对象": "K", "Δ": 0.5, "引牌": "♦Q", "方向": "东", "押桶成": 0.9,
               "全": [{"对象": "K", "Δ": 0.5, "引牌": "♦Q", "方向": "东",
                       "押桶成": 0.9}]}}
-    out = ps_new()._finesse_lead(st, res, 0.75)
+    out = ps_new()._finesse_lead(st, res)
     fo = out.get("full_output") or {}
     ws = fo.get("窗口期启动") or {}
     ok = (str(out["card"]) == "♦Q"
@@ -532,7 +549,7 @@ def t37_global_top_bucket_wins():
     base = {"♦": [_probe_entry("♦", 13, "♦J", 0.2, direction="西", bucket=0.85)],
             "♣": [_probe_entry("♣", 13, "♣2", 0.9, direction="西", bucket=0.80)]}
     res = mk_result(Card("♥", "Q"), cands)
-    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
+    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, res)
     ok = (got is not None and got[0] == "♦J"
           and st.finesse_flow.get("♦") == 13 and "♣" not in st.finesse_flow)
     return ok, (f"全局押桶成排序（v2.13 全样本门控）：♦J押桶0.85胜过Δ0.9的♣2"
@@ -607,7 +624,7 @@ def t40_combo_big_lead_on_saturated():
         return e
     base = {"♦": [combo("♦3"), combo("♦J"), combo("♦2")]}
     res = mk_result(Card("♥", "Q"), cands)
-    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, 0.75, res)
+    got = ps_new()._probe_lead_finesse_prefer(st, base, cands, res)
     ok = (got is not None and got[0] == "♦J"
           and st.finesse_flow.get("♦") == 13)
     return ok, (f"组合双飞全中饱和：三引牌押桶成均1.0平票 → 较大领出♦J"
@@ -638,7 +655,7 @@ def t42_safe_cash_probe_defer():
         "♣": {"对象": "K", "Δ": 0.5, "引牌": "♣Q", "方向": "东", "押桶成": 0.9,
               "全": [{"对象": "K", "Δ": 0.5, "引牌": "♣Q", "方向": "东",
                       "押桶成": 0.9}]}}
-    out = ps_new()._finesse_lead(st, res, 0.75)
+    out = ps_new()._finesse_lead(st, res)
     fo = out.get("full_output") or {}
     ws = fo.get("窗口期启动") or {}
     ok = (str(out["card"]) == "♦A"
@@ -659,7 +676,7 @@ def t43_safe_cash_requires_top():
         "♣": {"对象": "K", "Δ": 0.5, "引牌": "♣Q", "方向": "东", "押桶成": 0.9,
               "全": [{"对象": "K", "Δ": 0.5, "引牌": "♣Q", "方向": "东",
                       "押桶成": 0.9}]}}
-    out = ps_new()._finesse_lead(st, res, 0.75)
+    out = ps_new()._finesse_lead(st, res)
     ok = (str(out["card"]) == "♣Q" and st.finesse_flow.get("♣") == 13)
     return ok, (f"榜首非A不探分布：card={out['card']}, flow={st.finesse_flow}"
                 f"（期望 ♣Q + flow ♣=13）")
@@ -674,8 +691,8 @@ CASES = [
     t16_partner_overhand_fail_back_to_local,
     t17_all_rejected,
     t18_multi_action_final_select,
-    t19_stable_exit_no_touch,
-    t20_stable_but_engine_leading_finesse,
+    t19_intervene_stable_win_shuts_down,
+    t20_intervene_stable_win_registers_nothing,
     t21_delta_not_in_select,
     t22_vote_switch_off,
     t23_commit_topcard_top1_falls_to_ratio,

@@ -594,6 +594,16 @@ DOUBAO_SEED_2_1_TURBO_REASONING_ENDPOINT=your_seed_turbo_reasoning_endpoint
 > 改动代码时：CHANGELOG 记全过程；本段只在需要更新"当前状态"认知时补一条摘要。
 > 2026-09-20 之前的版本历史曾与本文件重复约 76KB，治理记录见 `docs/开发文档整理_发现清单_20260920.md`。
 
+### v2.18（2026-10-15）介入层死代码清理 + 段1 稳成覆盖迁移
+- **删死代码**：`_finesse_ratio_ok` 的 `a_make_override` 形参（恒走 else 分支）、领出侧死 `ratio` 形参链（`_finesse_lead` / `_probe_lead_finesse_prefer` 函数体从不引用）、`PlayState.finesse_flow_ends`（零写零读）、前端 `FINESSE_KEYS` 五个死印章键（9→4）、`_subset_select`（无产线调用方的兼容包装，活函数 `_subset_select_all`）
+- **抽 `_make_rate()` helper**：消除 `_top1_make` / `_finesse_ratio_ok._make` 两处同式实现
+- **删 `_finesse_lead` 内置稳成块**（产线不可达：`_intervene` 段1 已用同一 `_top1_make` 与同一 `candidates` 判过，中间 `_clear_trump_lead` 未命中路径不回写）→ 改 docstring 显式声明前置条件"须已过段1 稳成门"
+- **t19/t20 迁移到 `_intervene` 层**：旧用例直调 `_finesse_lead`，断言的是产线不会发生的印章与登记（**误导性规格**）；新版改调真实入口，断言稳成时 result 原样返回 / `finesse_flow` 空 / 无「领出飞牌」印章，**补上段1 稳成门此前零直接覆盖的缺口**
+- **合并跟牌侧重复 `_finesse_commit_check`**：`_intervene` 的预判 + `_apply_finesse_commit` 内部重判（纯函数，结果必然相同）→ 改为无条件调用
+- 保留不动：`FINESSE_DEFER_ENABLE` 4 处防御性检查；`FINESSE_COMMIT_ALIVE_PCT`(0.50) 与 `FINESSE_NEC_MAKE`(0.50) 数值同语义异，不合并
+- 教训：**不可达分支上的测试保护不了产线**，且错规格比无覆盖更危险——处置应是"块与测试一起动"，而非留死代码保测试
+- 回归：doc-sync ✓ + pipeline 33/33 + probe 12/12 + lead_shape 76/76
+
 ### v2.17（2026-09-27）探分布先兑现 + 采样交集预分配 + 窗口期显示文案
 - **探分布先兑现**（`_safe_cash_action`）：一般情形门控（比值≥0.85）通过后，若**引擎榜首**是非飞牌花色 A（或 K 且队友持同花色 A——A 唯一⇒敌方无 A⇒K 稳赢），先兑现、不登记飞牌流程，下墩重新验证；仅看榜首（顶张限制），非顶张 A 不触发
 - **采样交集预分配**（`_sample_uniform`）：lead_shape 剔首攻牌后各形态大牌集交集（长套攻K→{Q}）定向放入 + 小牌垫底至 max(smin)；交集为空不预分配保 Kx/K 多样性。修复 L0 放宽丢约束（此前 6% 无 Q、20% 长度<3）→ 100% 生效

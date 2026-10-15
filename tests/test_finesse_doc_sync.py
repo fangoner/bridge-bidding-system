@@ -39,7 +39,7 @@ EXPECTED_SYMBOLS = {
     "_partner_overhand_action": PLAY_SERVICE,
     "_cash_reentry": PLAY_SERVICE,
     "_finesse_launch_worthwhile": PLAY_SERVICE,
-    "_subset_select": PLAY_SERVICE,
+    "_subset_select_all": PLAY_SERVICE,
     "_finesse_commit_check": PLAY_SERVICE,
     "_apply_finesse_commit": PLAY_SERVICE,
     "_finesse_commit_ratio_ok": PLAY_SERVICE,

@@ -12,6 +12,31 @@
 > - **已修复的结构问题**（2026-09-20）：两处日期倒序（`2026-06-15/06-17`、`2026-05-03/05-05`）已按降序重排；v1.92 / v1.93 / v1.94 / v1.94b·v1.95 由 v1.96 条目内的 bullet 提升为独立条目；补记了 MCTS / Tiered / DD-αμ-LLM 三个引擎的下线（此前有引入无移除）。
 > - 完整审计与治理记录见 `docs/开发文档整理_发现清单_20260920.md`。
 
+## 2026-10-15（介入层死代码清理 + 段1 稳成覆盖迁移）
+
+**背景**: 用户要求审查整个介入流程，"是否存在可以取消或者和别的变量或者代码"。逐项核实后分两类：一类是**纯死代码**（无调用方 / 恒不产出），另一类是**产线不可达但被测试断言**的复制块——后者在审查中还暴露出一个更严重的问题：那对用例断言的是**产线不会发生的行为**（误导性规格）。
+
+**清理（用户批准"按这个顺序动手"：1 → 5 → 3 → 2 → 8，随后追加 6/7/4）**:
+1. **删 `_finesse_ratio_ok` 死参数 `a_make_override`**（签名 6→5 参）：全仓库无调用方传值，`am = a_make_override if ... else _make(a)` 恒走 else 分支（v1.93 遗留的外部口径做成率，v2.13 门控分子改全样本后失去用途）
+2. **删领出侧死 `ratio` 形参链**（`_finesse_lead` / `_probe_lead_finesse_prefer`）：两函数体从不引用该参数；`_intervene` 签名保留 `ratio`——接应侧是它唯一真正生效处（仍传 `_apply_finesse_commit`）
+3. **删 `PlayState.finesse_flow_ends`**：字段零写零读（v1.77 删跨墩 flow 状态机后仅剩声明）、前端零引用、API 恒 `{}`；同时删 `to_dict()` 序列化项
+4. **删前端 `FINESSE_KEYS` 五个死印章键**（9→4）：`继续飞牌`/`飞牌续`/`9砸回手`/`八九原则`/`飞牌迁移` 后端已不再产出，全仓仅测试断言其不存在
+5. **抽 `_make_rate()` 模块级 helper**：消除 `_top1_make` 与 `_finesse_ratio_ok._make` 两处"`scores ≥ need 占比`"同式实现
+6. **删 `_finesse_lead` 内置稳成块**（约 25 行）——**产线不可达**（`_intervene` 段1 已用同一 `_top1_make`、同一 `candidates` 引用判过 `≥ FINESSE_NEC_MAKE_HIGH → return`；中间唯一可能改状态的 `_clear_trump_lead` 在未命中路径不碰 `result`/`candidates`），并在函数 docstring 显式声明前置条件"调用方须已过段1 稳成门"，替代靠复制块兜底
+7. **t19/t20 迁移到 `_intervene` 层**（`t19_intervene_stable_win_shuts_down` / `t20_intervene_stable_win_registers_nothing`）：改调真实产线入口 `_intervene(st, res, 0.75)`，断言真实语义——稳成时 **result 原样返回、`finesse_flow` 为空、`full_output` 无「领出飞牌」印章**。补上段1 稳成门此前**零直接覆盖**的缺口（旧用例直调 `_finesse_lead`、绕过总入口，测的是产线上收不到的输入）
+8. **合并跟牌侧重复 `_finesse_commit_check` 调用**：`_intervene` 原先预判 `forced` 再据此决定是否调 `_apply_finesse_commit`，而后者内部对同一 `fs` 再判一次——该函数**纯读**（不写 state/result、无副作用），两次结果必然相同；改为无条件调用 `_apply_finesse_commit`（其内部非强制时即 `return (result, False)`）
+9. **删 `_subset_select`**：无产线调用方的兼容包装（活函数是 `_subset_select_all`，产线唯一调用点在终选）；同步 doc-sync 符号清单与图解 §三 F/§八 改名
+
+**已确认保留（不动）**:
+- `FINESSE_DEFER_ENABLE` 的 4 处检查 —— 防御性开关，保留
+- `FINESSE_COMMIT_ALIVE_PCT`(0.50) 与 `FINESSE_NEC_MAKE`(0.50) 数值相同但语义不同（接应退让线 vs 契约必要线），合并会耦合调参
+
+**教训**: **不可达分支上的测试保护不了产线**——更糟的是，t20 旧断言（"稳成且引擎已在飞牌花色 → 登记接应"）与产线语义（稳成即完全闭嘴、不登记、无印章）**相抵触**，即它固化的是一条错规格，会让后来人误以为稳成后仍会登记。正确处置不是"为保住测试而留死代码"，而是**块与测试一起处置**：删块 + 把断言迁到真实入口层，既消除误导性规格，又补上原本缺失的段1 覆盖。
+
+**验证**: `py_compile` ✓；doc-sync 三项全 OK（符号/阈值/开关）；pipeline **33/33**（含迁移后的 t19/t20）；probe **12/12**；lead_shape **76/76**
+
+**修改文件**: bridge/play_service.py, bridge/play_types.py, web/src/components/play/utils.js, tests/test_finesse_pipeline.py, tests/test_finesse_doc_sync.py, docs/飞牌介入管线图解.md, CLAUDE.md, CHANGELOG.md, DEVELOPMENT.md
+
 ## 2026-09-27（探分布先兑现 v2.17 + 采样交集预分配 + 窗口期显示文案）
 
 **背景**: 3NT 牌局（南 ♠A2♥AK32♦A32♣QJ32 / 北 ♠43♥4♦QT876♣AT987）墩2 引擎 ♣Q 与 ♦A **并列 54.7%**，飞牌介入因 ♣ 有直接飞 K 结构启动 ♣Q——但"先拔 ♦A 探分布：敲下单张 ♦K 则转 ♦ 线、没敲下再飞 ♣ 不迟"的机会被错过。介入层只识别"本墩**直接飞**"结构，不产生"先兑现探分布、结果驱动转线"的延迟动作。

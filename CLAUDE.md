@@ -154,7 +154,7 @@ Build/packaging scripts (`build.bat`, `build.spec`, `update_release.bat`, `insta
 - `Card`: suit + rank, with `rank_value` / `suit_order`.
 - `Contract`: level, suit, declarer, doubled / redoubled, `tricks_needed`.
 - `Trick`: cards, leader, trump, `winner()`, AI metadata, **`dd_hints`**.
-- `PlayState`: hands, contract, tricks, `current_player`, phase, declarer / defender trick counts, **`finesse_flow`**, **`finesse_flow_ends`**. Finesse also uses dynamically attached attributes (`finesse_flow_extra`, `finesse_windows`) which are **not** declared fields.
+- `PlayState`: hands, contract, tricks, `current_player`, phase, declarer / defender trick counts, **`finesse_flow`**. Finesse also uses dynamically attached attributes (`finesse_flow_extra`, `finesse_windows`) which are **not** declared fields.
 - `PlayPhase`: Enum (lead / dummy_reveal / playing / complete).
 
 ### Bidding Flow
